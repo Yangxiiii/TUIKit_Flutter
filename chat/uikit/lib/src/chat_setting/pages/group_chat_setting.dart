@@ -1,6 +1,8 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
+import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
 import 'package:flutter/material.dart' hide AlertDialog;
 import 'package:flutter_svg/svg.dart';
 
@@ -51,7 +53,7 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
   late GroupMemberStore _memberStore;
   late ConversationListStore _conversationListStore;
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
   late String conversationID;
 
   GroupInfo? _groupInfo;
@@ -80,20 +82,22 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
     conversationID = groupConversationIDPrefix + widget.groupID;
     _memberStore = GroupMemberStore.create(groupID: widget.groupID);
     _conversationListStore = ConversationListStore.create();
-    GroupStore.shared.state.joinedGroupList.addListener(_onJoinedGroupListChanged);
+    GroupStore.shared.state.joinedGroupList
+        .addListener(_onJoinedGroupListChanged);
     _loadData();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    colorsTheme = BaseThemeProvider.colorsOf(context);
-    atomicLocale = AtomicLocalizations.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
+    atomicLocale = AppLocalization.of(context);
   }
 
   @override
   void dispose() {
-    GroupStore.shared.state.joinedGroupList.removeListener(_onJoinedGroupListChanged);
+    GroupStore.shared.state.joinedGroupList
+        .removeListener(_onJoinedGroupListChanged);
     super.dispose();
   }
 
@@ -141,7 +145,8 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
   }
 
   Future<void> _loadGroupInfo() async {
-    final result = await GroupStore.shared.getGroupInfo(groupID: widget.groupID);
+    final result =
+        await GroupStore.shared.getGroupInfo(groupID: widget.groupID);
     if (result.isSuccess && result.groupInfo != null && mounted) {
       setState(() {
         _groupInfo = result.groupInfo;
@@ -167,7 +172,8 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
   }
 
   Future<void> _loadConversationInfo() async {
-    final result = await _conversationListStore.getConversationInfo(conversationID: conversationID);
+    final result = await _conversationListStore.getConversationInfo(
+        conversationID: conversationID);
     if (result.isSuccess && result.conversationInfo != null && mounted) {
       final conv = result.conversationInfo!;
       setState(() {
@@ -186,7 +192,9 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
         title: atomicLocale.groupDetail,
       ),
       body: _groupInfo == null
-          ? Center(child: CircularProgressIndicator(color: colorsTheme.textColorSecondary))
+          ? Center(
+              child: CircularProgressIndicator(
+                  color: colorsTheme.textColorSecondary))
           : SingleChildScrollView(
               child: Column(
                 children: [
@@ -216,10 +224,13 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
     return Column(
       children: [
         GestureDetector(
-          onTap: _hasPermission(GroupPermission.setGroupAvatar) ? _onAvatarTap : null,
+          onTap: _hasPermission(GroupPermission.setGroupAvatar)
+              ? _onAvatarTap
+              : null,
           child: Avatar(
             content: AvatarImageContent(
-                url: groupInfo.avatarURL ?? '', name: groupInfo.groupName ?? ''),
+                url: groupInfo.avatarURL ?? '',
+                name: groupInfo.groupName ?? ''),
             size: AvatarSize.xl,
           ),
         ),
@@ -242,7 +253,8 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
                   softWrap: true,
                 ),
               ),
-              if (_hasPermission(GroupPermission.setGroupName)) const SizedBox(width: 8),
+              if (_hasPermission(GroupPermission.setGroupName))
+                const SizedBox(width: 8),
               if (_hasPermission(GroupPermission.setGroupName))
                 GestureDetector(
                   onTap: _showGroupNameEditDialog,
@@ -310,12 +322,14 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
                 color: colorsTheme.bgColorOperate,
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Icon(icon, color: colorsTheme.buttonColorPrimaryDefault, size: 20),
+              child: Icon(icon,
+                  color: colorsTheme.buttonColorPrimaryDefault, size: 20),
             ),
             const SizedBox(height: 8),
             Text(
               label,
-              style: FontScheme.caption1Regular.copyWith(color: colorsTheme.textColorPrimary),
+              style: FontScheme.caption1Regular
+                  .copyWith(color: colorsTheme.textColorPrimary),
             ),
           ],
         ),
@@ -334,25 +348,33 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
         onChanged: (value) async {
           final result = await _conversationListStore.setReceiveMessageOpt(
             conversationID: conversationID,
-            opt: value ? ReceiveMessageOption.notNotify : ReceiveMessageOption.receive,
+            opt: value
+                ? ReceiveMessageOption.notNotify
+                : ReceiveMessageOption.receive,
           );
           if (result.errorCode == 0) {
-            setState(() { _isNotDisturb = value; });
+            setState(() {
+              _isNotDisturb = value;
+            });
           }
         },
       ));
     }
 
     if (_hasPermission(GroupPermission.pinGroup)) {
-      if (settings.isNotEmpty) settings.add(SettingWidgets.buildDivider(context));
+      if (settings.isNotEmpty)
+        settings.add(SettingWidgets.buildDivider(context));
       settings.add(SettingWidgets.buildSettingRow(
         context: context,
         title: atomicLocale.pin,
         value: _isPinned,
         onChanged: (value) async {
-          final result = await _conversationListStore.pinConversation(conversationID: conversationID, pin: value);
+          final result = await _conversationListStore.pinConversation(
+              conversationID: conversationID, pin: value);
           if (result.errorCode == 0) {
-            setState(() { _isPinned = value; });
+            setState(() {
+              _isPinned = value;
+            });
           }
         },
       ));
@@ -360,7 +382,8 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
 
     if (settings.isEmpty) return const SizedBox.shrink();
 
-    return SettingWidgets.buildSettingGroup(context: context, children: settings);
+    return SettingWidgets.buildSettingGroup(
+        context: context, children: settings);
   }
 
   Widget _buildGroupSettings() {
@@ -390,7 +413,8 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
       settings.add(SettingWidgets.buildInfoRow(
         context: context,
         title: atomicLocale.groupType,
-        value: GroupPermissionManager.getGroupTypeDescription(groupInfo.groupType ?? GroupType.work, context),
+        value: GroupPermissionManager.getGroupTypeDescription(
+            groupInfo.groupType ?? GroupType.work, context),
       ));
     }
 
@@ -399,18 +423,24 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
       context: context,
       title: atomicLocale.addGroupWay,
       value: _getJoinOptionText(groupInfo.joinOption ?? GroupJoinOption.forbid),
-      onTap: _hasPermission(GroupPermission.setJoinGroupApprovalType) ? () => _onJoinGroupMethod() : null,
+      onTap: _hasPermission(GroupPermission.setJoinGroupApprovalType)
+          ? () => _onJoinGroupMethod()
+          : null,
     ));
 
     settings.add(SettingWidgets.buildDivider(context));
     settings.add(SettingWidgets.buildNavigationRow(
       context: context,
       title: atomicLocale.inviteGroupType,
-      value: _getInviteOptionText(groupInfo.inviteOption ?? GroupInviteOption.forbid),
-      onTap: _hasPermission(GroupPermission.setInviteToGroupApprovalType) ? () => _onInviteMethod() : null,
+      value: _getInviteOptionText(
+          groupInfo.inviteOption ?? GroupInviteOption.forbid),
+      onTap: _hasPermission(GroupPermission.setInviteToGroupApprovalType)
+          ? () => _onInviteMethod()
+          : null,
     ));
 
-    return SettingWidgets.buildSettingGroup(context: context, children: settings);
+    return SettingWidgets.buildSettingGroup(
+        context: context, children: settings);
   }
 
   Widget _buildGroupRemark() {
@@ -438,11 +468,14 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
     memberWidgets.add(SettingWidgets.buildNavigationRow(
       context: context,
       title: '${atomicLocale.groupMember} (${groupInfo.memberCount ?? 0})',
-      onTap: _hasPermission(GroupPermission.getGroupMemberList) ? () => _onGroupMemberList() : null,
+      onTap: _hasPermission(GroupPermission.getGroupMemberList)
+          ? () => _onGroupMemberList()
+          : null,
     ));
 
     if (_hasPermission(GroupPermission.addGroupMember) &&
-        (groupInfo.inviteOption ?? GroupInviteOption.forbid) != GroupInviteOption.forbid) {
+        (groupInfo.inviteOption ?? GroupInviteOption.forbid) !=
+            GroupInviteOption.forbid) {
       memberWidgets.add(SettingWidgets.buildDivider(context));
       memberWidgets.add(SettingWidgets.buildActionRow(
         context: context,
@@ -463,7 +496,8 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
           allWidgets.add(_buildMemberRow(displayMembers[i]));
         }
 
-        return SettingWidgets.buildSettingGroup(context: context, children: allWidgets);
+        return SettingWidgets.buildSettingGroup(
+            context: context, children: allWidgets);
       },
     );
   }
@@ -508,12 +542,15 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
 
     if (actions.isEmpty) return const SizedBox.shrink();
 
-    return SettingWidgets.buildSettingGroup(context: context, children: actions);
+    return SettingWidgets.buildSettingGroup(
+        context: context, children: actions);
   }
 
   Widget _buildMemberRow(GroupMember member) {
     return GestureDetector(
-      onTap: _hasPermission(GroupPermission.getGroupMemberInfo) ? () => _onMemberInfo(member) : null,
+      onTap: _hasPermission(GroupPermission.getGroupMemberInfo)
+          ? () => _onMemberInfo(member)
+          : null,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
@@ -527,22 +564,27 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
             Expanded(
               child: Text(
                 UIKitUtil.memberDisplayName(member),
-                style: FontScheme.caption1Regular.copyWith(color: colorsTheme.textColorPrimary),
+                style: FontScheme.caption1Regular
+                    .copyWith(color: colorsTheme.textColorPrimary),
               ),
             ),
             if (member.role != GroupMemberRole.member)
               Text(
-                GroupPermissionManager.getMemberRoleDescription(member.role, context),
-                style: FontScheme.caption1Regular.copyWith(color: colorsTheme.textColorSecondary),
+                GroupPermissionManager.getMemberRoleDescription(
+                    member.role, context),
+                style: FontScheme.caption1Regular
+                    .copyWith(color: colorsTheme.textColorSecondary),
               ),
-            if (_hasPermission(GroupPermission.getGroupMemberInfo)) const SizedBox(width: 8),
+            if (_hasPermission(GroupPermission.getGroupMemberInfo))
+              const SizedBox(width: 8),
             if (_hasPermission(GroupPermission.getGroupMemberInfo))
               SvgPicture.asset(
                 'chat_assets/icon/chevron_right.svg',
                 package: 'tencent_chat_uikit',
                 width: 12,
                 height: 24,
-                colorFilter: ColorFilter.mode(colorsTheme.textColorPrimary, BlendMode.srcIn),
+                colorFilter: ColorFilter.mode(
+                    colorsTheme.textColorPrimary, BlendMode.srcIn),
               ),
           ],
         ),
@@ -559,15 +601,16 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
   }
 
   void _onAvatarTap() async {
-    final result = await Navigator.push<String>(
-        context,
-        MaterialPageRoute<String>(
-            builder: (context) => ChooseGroupAvatar(
-                groupID: widget.groupID,
-                groupType: (_groupInfo?.groupType ?? GroupType.work).toString(),
-                selectedAvatarURL: _groupInfo?.avatarURL ?? '')));
+    final result = await context.pushChatUIKitPage<String>(
+      ChooseGroupAvatar(
+        groupID: widget.groupID,
+        groupType: (_groupInfo?.groupType ?? GroupType.work).toString(),
+        selectedAvatarURL: _groupInfo?.avatarURL ?? '',
+      ),
+    );
     if (result != null && result.isNotEmpty) {
-      final updatedGroupInfo = GroupInfo(groupID: widget.groupID, avatarURL: result);
+      final updatedGroupInfo =
+          GroupInfo(groupID: widget.groupID, avatarURL: result);
       // UI refresh is driven by GroupStore.joinedGroupList listener
       // (see _onJoinedGroupListChanged); no manual reload needed here.
       await GroupStore.shared.updateProfile(groupInfo: updatedGroupInfo);
@@ -575,24 +618,20 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
   }
 
   void _onGroupNotice() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => GroupNotice(
-          groupID: widget.groupID,
-          groupInfo: _groupInfo!,
-          currentUserRole: _currentUserRole,
-        ),
+    context.pushChatUIKitPage<void>(
+      GroupNotice(
+        groupID: widget.groupID,
+        groupInfo: _groupInfo!,
+        currentUserRole: _currentUserRole,
       ),
     );
   }
 
   void _onGroupManagement() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => GroupManagement(
-          groupID: widget.groupID,
-          memberStore: _memberStore,
-        ),
+    context.pushChatUIKitPage<void>(
+      GroupManagement(
+        groupID: widget.groupID,
+        memberStore: _memberStore,
       ),
     );
   }
@@ -602,7 +641,8 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
       type: GroupMethodType.join,
       onSelected: (option) async {
         // UI refresh is driven by GroupStore.joinedGroupList listener.
-        await GroupStore.shared.setJoinOption(groupID: widget.groupID, option: option);
+        await GroupStore.shared
+            .setJoinOption(groupID: widget.groupID, option: option);
       },
     );
   }
@@ -650,7 +690,9 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
     if (result != null) {
       final updateResult = await _memberStore.setSelfNameCard(nameCard: result);
       if (updateResult.errorCode == 0) {
-        setState(() { _selfNameCard = result; });
+        setState(() {
+          _selfNameCard = result;
+        });
       }
     }
   }
@@ -664,9 +706,15 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
     ActionSheet.show(
       context,
       actions: [
-        ActionSheetItem(title: config.forbidText, onTap: () => onSelected(GroupJoinOption.forbid)),
-        ActionSheetItem(title: config.authText, onTap: () => onSelected(GroupJoinOption.auth)),
-        ActionSheetItem(title: config.anyText, onTap: () => onSelected(GroupJoinOption.any)),
+        ActionSheetItem(
+            title: config.forbidText,
+            onTap: () => onSelected(GroupJoinOption.forbid)),
+        ActionSheetItem(
+            title: config.authText,
+            onTap: () => onSelected(GroupJoinOption.auth)),
+        ActionSheetItem(
+            title: config.anyText,
+            onTap: () => onSelected(GroupJoinOption.any)),
       ],
     );
   }
@@ -689,37 +737,31 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
   }
 
   void _onGroupMemberList() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => GroupMemberList(
-          groupID: widget.groupID,
-          memberStore: _memberStore,
-          groupInfo: _groupInfo!,
-          currentUserRole: _currentUserRole,
-          onSendMessageClick: widget.onSendMessageClick,
-        ),
+    context.pushChatUIKitPage<void>(
+      GroupMemberList(
+        groupID: widget.groupID,
+        memberStore: _memberStore,
+        groupInfo: _groupInfo!,
+        currentUserRole: _currentUserRole,
+        onSendMessageClick: widget.onSendMessageClick,
       ),
     );
   }
 
   void _onAddMembers() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => GroupAddMember(
-          groupID: widget.groupID,
-          memberStore: _memberStore,
-        ),
+    context.pushChatUIKitPage<void>(
+      GroupAddMember(
+        groupID: widget.groupID,
+        memberStore: _memberStore,
       ),
     );
   }
 
   void _onMemberInfo(GroupMember member) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => C2CChatSetting(
-          userID: member.userID,
-          onSendMessageClick: widget.onSendMessageClick,
-        ),
+    context.pushChatUIKitPage<void>(
+      C2CChatSetting(
+        userID: member.userID,
+        onSendMessageClick: widget.onSendMessageClick,
       ),
     );
   }
@@ -729,7 +771,8 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
       title: atomicLocale.clearMessage,
       content: atomicLocale.clearMsgTip,
       onConfirm: () async {
-        await _conversationListStore.clearConversationMessages(conversationID: conversationID);
+        await _conversationListStore.clearConversationMessages(
+            conversationID: conversationID);
       },
     );
   }
@@ -740,9 +783,11 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
       content: atomicLocale.quitGroupTip,
       onConfirm: () async {
         _isHandlingPopExplicitly = true;
-        final result = await GroupStore.shared.quitGroup(groupID: widget.groupID);
+        final result =
+            await GroupStore.shared.quitGroup(groupID: widget.groupID);
         if (result.errorCode == 0) {
-          _conversationListStore.deleteConversation(conversationID: conversationID);
+          _conversationListStore.deleteConversation(
+              conversationID: conversationID);
           if (mounted) Navigator.of(context).pop();
           widget.onGroupDelete?.call();
         } else {
@@ -753,12 +798,10 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
   }
 
   void _onTransferOwner() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => GroupTransferOwner(
-          groupID: widget.groupID,
-          memberStore: _memberStore,
-        ),
+    context.pushChatUIKitPage<void>(
+      GroupTransferOwner(
+        groupID: widget.groupID,
+        memberStore: _memberStore,
       ),
     );
   }
@@ -769,9 +812,11 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
       content: atomicLocale.dismissGroupTip,
       onConfirm: () async {
         _isHandlingPopExplicitly = true;
-        final result = await GroupStore.shared.dismissGroup(groupID: widget.groupID);
+        final result =
+            await GroupStore.shared.dismissGroup(groupID: widget.groupID);
         if (result.errorCode == 0) {
-          _conversationListStore.deleteConversation(conversationID: conversationID);
+          _conversationListStore.deleteConversation(
+              conversationID: conversationID);
           if (mounted) Navigator.of(context).pop();
           widget.onGroupDelete?.call();
         } else {
@@ -786,7 +831,7 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
     required String content,
     required VoidCallback onConfirm,
   }) {
-    final locale = AtomicLocalizations.of(context);
+    final locale = AppLocalization.of(context);
     AtomicAlertDialog.showWithConfig(
       context,
       config: AlertDialogConfig(
@@ -811,7 +856,8 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
     );
 
     if (result != null) {
-      final updatedGroupInfo = GroupInfo(groupID: widget.groupID, groupName: result);
+      final updatedGroupInfo =
+          GroupInfo(groupID: widget.groupID, groupName: result);
       // UI refresh is driven by GroupStore.joinedGroupList listener.
       await GroupStore.shared.updateProfile(groupInfo: updatedGroupInfo);
     }
@@ -823,17 +869,23 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
 
   String _getJoinOptionText(GroupJoinOption option) {
     switch (option) {
-      case GroupJoinOption.forbid: return atomicLocale.groupAddForbid;
-      case GroupJoinOption.auth: return atomicLocale.groupAddAuth;
-      case GroupJoinOption.any: return atomicLocale.groupAddAny;
+      case GroupJoinOption.forbid:
+        return atomicLocale.groupAddForbid;
+      case GroupJoinOption.auth:
+        return atomicLocale.groupAddAuth;
+      case GroupJoinOption.any:
+        return atomicLocale.groupAddAny;
     }
   }
 
   String _getInviteOptionText(GroupInviteOption option) {
     switch (option) {
-      case GroupInviteOption.forbid: return atomicLocale.groupInviteForbid;
-      case GroupInviteOption.auth: return atomicLocale.groupAddAuth;
-      case GroupInviteOption.any: return atomicLocale.groupAddAny;
+      case GroupInviteOption.forbid:
+        return atomicLocale.groupInviteForbid;
+      case GroupInviteOption.auth:
+        return atomicLocale.groupAddAuth;
+      case GroupInviteOption.any:
+        return atomicLocale.groupAddAny;
     }
   }
 }

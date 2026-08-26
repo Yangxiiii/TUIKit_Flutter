@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'dart:async';
 import 'dart:math';
 
@@ -9,7 +10,6 @@ import 'package:tencent_chat_uikit/src/ai/ai_media_process_manager.dart';
 import 'package:tencent_chat_uikit/src/ai/tts/tts_playback_helper.dart';
 import 'package:tencent_chat_uikit/src/ai/tts/tts_text_sanitizer.dart';
 import 'package:tencent_chat_uikit/src/ai/tts/voice_message_config.dart';
-import 'package:tencent_chat_uikit/src/common/language/index.dart';
 
 /// State machine of [AudioRecordOverlay].
 ///
@@ -62,7 +62,7 @@ class AudioRecordOverlay extends StatefulWidget {
   /// Optional: provide these when the overlay lives inside an [OverlayEntry],
   /// where the normal InheritedWidget lookup would fail.
   final SemanticColorScheme? colorScheme;
-  final AtomicLocalizations? atomicLocalizations;
+  final AppLocalizedText? atomicLocalizations;
 
   const AudioRecordOverlay({
     super.key,
@@ -257,12 +257,18 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
       filePath: filePath,
       onComplete: (recordInfo) {
         if (recordInfo != null) {
-          if (recordInfo.errorCode == AudioRecordResultCode.errorLessThanMinDuration && mounted) {
-            final atomicLocalizations = widget.atomicLocalizations ?? AtomicLocalizations.of(context);
+          if (recordInfo.errorCode ==
+                  AudioRecordResultCode.errorLessThanMinDuration &&
+              mounted) {
+            final atomicLocalizations =
+                widget.atomicLocalizations ?? AppLocalization.of(context);
             Toast.warning(context, atomicLocalizations.sayTimeShort);
           }
-          if (recordInfo.errorCode == AudioRecordResultCode.successExceedMaxDuration && mounted) {
-            final atomicLocalizations = widget.atomicLocalizations ?? AtomicLocalizations.of(context);
+          if (recordInfo.errorCode ==
+                  AudioRecordResultCode.successExceedMaxDuration &&
+              mounted) {
+            final atomicLocalizations =
+                widget.atomicLocalizations ?? AppLocalization.of(context);
             Toast.warning(context, atomicLocalizations.recordLimitTips);
           }
           widget.onRecordFinish(recordInfo);
@@ -314,7 +320,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
       _isTranslating = false;
       _isPlayingTts = false;
       final controller = TextEditingController(text: result.text);
-      controller.selection = TextSelection.collapsed(offset: result.text.length);
+      controller.selection =
+          TextSelection.collapsed(offset: result.text.length);
       _editingController?.dispose();
       _editingController = controller;
       // FocusNode is initially NOT focused: editing state opens in
@@ -395,7 +402,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   }
 
   bool _isPointerOverButton(GlobalKey key, Offset globalPosition) {
-    final RenderBox? renderBox = key.currentContext?.findRenderObject() as RenderBox?;
+    final RenderBox? renderBox =
+        key.currentContext?.findRenderObject() as RenderBox?;
     if (renderBox == null) return false;
     final localPos = renderBox.globalToLocal(globalPosition);
     final size = renderBox.size;
@@ -431,7 +439,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
     return _maxDurationSec - elapsed;
   }
 
-  bool get _showCountdown => _remainingSeconds <= _countdownThresholdSec && _isRecording;
+  bool get _showCountdown =>
+      _remainingSeconds <= _countdownThresholdSec && _isRecording;
 
   // ---------------------------------------------------------------------------
   // Build
@@ -439,8 +448,9 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = widget.colorScheme ?? BaseThemeProvider.colorsOf(context);
-    final atomicLocale = widget.atomicLocalizations ?? AtomicLocalizations.of(context);
+    final colorScheme = widget.colorScheme ?? SemanticColorScheme.of(context);
+    final atomicLocale =
+        widget.atomicLocalizations ?? AppLocalization.of(context);
 
     return Stack(
       children: [
@@ -480,7 +490,7 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   }
 
   Widget _buildBottomPanel(
-      SemanticColorScheme colorScheme, AtomicLocalizations atomicLocale) {
+      SemanticColorScheme colorScheme, AppLocalizedText atomicLocale) {
     final mediaQuery = MediaQuery.of(context);
     final bottomPadding = mediaQuery.padding.bottom;
     // viewInsets.bottom > 0 means the soft keyboard is up. Lift the entire
@@ -526,7 +536,7 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   // ---------------------------------------------------------------------------
 
   Widget _buildRecording(
-      SemanticColorScheme colorScheme, AtomicLocalizations atomicLocale) {
+      SemanticColorScheme colorScheme, AppLocalizedText atomicLocale) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -542,7 +552,7 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   }
 
   Widget _buildRecordingButtonsRow(
-      SemanticColorScheme colorScheme, AtomicLocalizations atomicLocale) {
+      SemanticColorScheme colorScheme, AppLocalizedText atomicLocale) {
     final cancelBtn = _buildCancelButton(colorScheme, atomicLocale);
     if (!widget.enableVoiceToText) {
       // Single button centered (legacy behavior).
@@ -575,10 +585,22 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
           crossAxisAlignment: CrossAxisAlignment.center,
           children: List.generate(_waveHeights.length, (index) {
             // Varied base heights for visual rhythm
-            const baseHeights = [6.0, 8.0, 14.0, 10.0, 18.0, 8.0, 12.0, 6.0, 14.0, 18.0];
+            const baseHeights = [
+              6.0,
+              8.0,
+              14.0,
+              10.0,
+              18.0,
+              8.0,
+              12.0,
+              6.0,
+              14.0,
+              18.0
+            ];
             final baseHeight = baseHeights[index % baseHeights.length];
-            final animatedHeight =
-                _isRecording ? baseHeight * _waveHeights[index] : baseHeight * 0.3;
+            final animatedHeight = _isRecording
+                ? baseHeight * _waveHeights[index]
+                : baseHeight * 0.3;
 
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 2.5),
@@ -599,7 +621,7 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   }
 
   Widget _buildHintText(
-      SemanticColorScheme colorScheme, AtomicLocalizations atomicLocale) {
+      SemanticColorScheme colorScheme, AppLocalizedText atomicLocale) {
     String hintText;
 
     if (_showCountdown) {
@@ -625,10 +647,11 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   /// Normal: light gray bg + dark text, no border.
   /// Cancel hover: red bg + white text.
   Widget _buildCancelButton(
-      SemanticColorScheme colorScheme, AtomicLocalizations atomicLocale) {
+      SemanticColorScheme colorScheme, AppLocalizedText atomicLocale) {
     final isHover = _isFingerOverCancel;
-    final bgColor =
-        isHover ? colorScheme.textColorError : colorScheme.buttonColorSecondaryDefault;
+    final bgColor = isHover
+        ? colorScheme.textColorError
+        : colorScheme.buttonColorSecondaryDefault;
     final textColor =
         isHover ? colorScheme.textColorButton : colorScheme.textColorPrimary;
 
@@ -658,7 +681,7 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   /// Normal: light gray bg + dark text.
   /// Hover: primary bg + white text.
   Widget _buildConvertButton(
-      SemanticColorScheme colorScheme, AtomicLocalizations atomicLocale) {
+      SemanticColorScheme colorScheme, AppLocalizedText atomicLocale) {
     final isHover = _isFingerOverConvert;
     final bgColor = isHover
         ? colorScheme.buttonColorPrimaryDefault
@@ -694,7 +717,7 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   // ---------------------------------------------------------------------------
 
   Widget _buildConverting(
-      SemanticColorScheme colorScheme, AtomicLocalizations atomicLocale) {
+      SemanticColorScheme colorScheme, AppLocalizedText atomicLocale) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -735,7 +758,7 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   // ---------------------------------------------------------------------------
 
   Widget _buildEditing(
-      SemanticColorScheme colorScheme, AtomicLocalizations atomicLocale) {
+      SemanticColorScheme colorScheme, AppLocalizedText atomicLocale) {
     final controller = _editingController!;
     final focusNode = _editingFocusNode!;
     // Per Figma: bubble is ALWAYS blue with white text (independent of focus
@@ -795,7 +818,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
                     // controls return SizedBox.shrink() for collapsed so
                     // only the white caret line stays. Long-press text
                     // selection still draws normal left/right handles.
-                    selectionControls: _NoCollapsedHandleSelectionControls.instance,
+                    selectionControls:
+                        _NoCollapsedHandleSelectionControls.instance,
                     // Disable the iOS-style magnifier (floating lens that
                     // appears under the finger while tapping/dragging the
                     // caret). It also looks like a "water-drop" on the
@@ -875,7 +899,7 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   /// Before translation: a single "Translate" chip. After translation:
   /// "Undo Translation" / "Switch Language" / "Read Aloud" (or "Stop").
   Widget _buildTranslateChipRow(SemanticColorScheme colorScheme) {
-    final chatLocale = ChatLocalizations.of(context)!;
+    final chatLocale = AppLocalization.of(context);
     final List<Widget> children;
     if (_translatedText == null) {
       children = [
@@ -982,7 +1006,7 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
       _setControllerText(result.text!);
       setState(() {});
     } else {
-      Toast.error(context, ChatLocalizations.of(context)!.voiceTranslateFailed);
+      Toast.error(context, AppLocalization.of(context).voiceTranslateFailed);
     }
   }
 
@@ -1021,7 +1045,7 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
       onError: (e) {
         if (mounted) {
           setState(() => _isPlayingTts = false);
-          Toast.error(context, ChatLocalizations.of(context)!.voiceTtsFailed);
+          Toast.error(context, AppLocalization.of(context).voiceTtsFailed);
         }
       },
     );
@@ -1033,9 +1057,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   /// Returns the selected language code, or null when dismissed.
   Future<String?> _showLanguageSelector() async {
     final overlay = Overlay.of(context);
-    final colorScheme =
-        widget.colorScheme ?? BaseThemeProvider.colorsOf(context);
-    final chatLocale = ChatLocalizations.of(context)!;
+    final colorScheme = widget.colorScheme ?? SemanticColorScheme.of(context);
+    final chatLocale = AppLocalization.of(context);
     final currentLang =
         VoiceMessageConfig.instance.recordTranslateTargetLanguage;
 
@@ -1132,7 +1155,7 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
 
   Widget _buildEditingButtonsRow(
     SemanticColorScheme colorScheme,
-    AtomicLocalizations atomicLocale, {
+    AppLocalizedText atomicLocale, {
     required bool disabled,
   }) {
     // Layout:
@@ -1172,7 +1195,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
               key: const Key('vtt_btn_send_text'),
               label: atomicLocale.send,
               colorScheme: colorScheme,
-              enabled: !disabled && (_editingController?.text.trim().isNotEmpty ?? false),
+              enabled: !disabled &&
+                  (_editingController?.text.trim().isNotEmpty ?? false),
               onTap: _onSendTextTapped,
             ),
           ),
@@ -1209,7 +1233,7 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   // ---------------------------------------------------------------------------
 
   Widget _buildError(
-      SemanticColorScheme colorScheme, AtomicLocalizations atomicLocale) {
+      SemanticColorScheme colorScheme, AppLocalizedText atomicLocale) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1412,9 +1436,8 @@ class _SmallActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final disabled = onTap == null;
-    final iconColor = disabled
-        ? colorScheme.textColorDisable
-        : colorScheme.textColorPrimary;
+    final iconColor =
+        disabled ? colorScheme.textColorDisable : colorScheme.textColorPrimary;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
@@ -1515,7 +1538,8 @@ class _SendTextButton extends StatelessWidget {
 ///   that visually reads as a diamond / water-drop too.
 /// Both look distracting on top of the editing bubble's blue background,
 /// so we suppress them while keeping long-press selection fully usable.
-class _NoCollapsedHandleSelectionControls extends MaterialTextSelectionControls {
+class _NoCollapsedHandleSelectionControls
+    extends MaterialTextSelectionControls {
   _NoCollapsedHandleSelectionControls._();
 
   static final _NoCollapsedHandleSelectionControls instance =

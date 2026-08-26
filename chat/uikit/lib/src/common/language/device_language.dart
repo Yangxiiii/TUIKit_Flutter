@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'gen/chat_localizations.dart';
-
 /// Helper for resolving the current device language code for ChatKit.
 class ChatDeviceLanguage {
   static String getCurrentLanguageCode(BuildContext context) {
@@ -17,10 +15,7 @@ class ChatDeviceLanguage {
   }
 
   static bool checkLocale(BuildContext context) {
-    final Locale locale = Localizations.localeOf(context);
-    final bool isSupportedLocale =
-        ChatLocalizations.delegate.isSupported(locale);
-    final ChatLocalizations? localizations = ChatLocalizations.of(context);
-    return isSupportedLocale && localizations != null;
+    final languageCode = Localizations.localeOf(context).languageCode;
+    return languageCode == 'zh' || languageCode == 'en';
   }
 }

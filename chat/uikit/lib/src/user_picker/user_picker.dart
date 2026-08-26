@@ -1,10 +1,10 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/svg.dart';
 import 'package:tuikit_atomic_x/base_component/basic_controls/avatar.dart';
-import 'package:tuikit_atomic_x/base_component/basic_controls/button.dart' as atomicx;
-import 'package:tuikit_atomic_x/base_component/localizations/atomic_localizations.dart';
+import 'package:tuikit_atomic_x/base_component/basic_controls/button.dart'
+    as atomicx;
 import 'package:tuikit_atomic_x/base_component/theme/color_scheme.dart';
-import 'package:tuikit_atomic_x/base_component/theme/theme_state.dart';
 import 'package:tencent_chat_uikit/src/third_party/azlistview/azlistview.dart';
 import 'package:tencent_chat_uikit/src/third_party/lpinyin/lpinyin.dart';
 import 'package:tencent_chat_uikit/src/third_party/scrollable_positioned_list/scrollable_positioned_list.dart';
@@ -82,7 +82,7 @@ class _UserPickerState extends State<UserPicker> {
   bool _isLoadingMore = false;
 
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
 
   @override
   void initState() {
@@ -104,8 +104,8 @@ class _UserPickerState extends State<UserPicker> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    atomicLocale = AtomicLocalizations.of(context);
-    colorsTheme = BaseThemeProvider.colorsOf(context);
+    atomicLocale = AppLocalization.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
   }
 
   @override
@@ -163,7 +163,8 @@ class _UserPickerState extends State<UserPicker> {
       }
 
       // Restore previously selected items that exist in new dataSource
-      if (previousSelectedKeys.contains(item.key) && !_selectedItems.any((selected) => selected.key == item.key)) {
+      if (previousSelectedKeys.contains(item.key) &&
+          !_selectedItems.any((selected) => selected.key == item.key)) {
         _selectedItems.add(item);
       }
     }
@@ -206,10 +207,12 @@ class _UserPickerState extends State<UserPicker> {
 
     setState(() {
       if (widget.maxCount == 1) {
-        _selectedItems.removeWhere((selected) => !selected.isPreSelected && !lockedKeys.contains(selected.key));
+        _selectedItems.removeWhere((selected) =>
+            !selected.isPreSelected && !lockedKeys.contains(selected.key));
         _selectedItems.add(item);
       } else {
-        final isSelected = _selectedItems.any((selected) => selected.key == item.key);
+        final isSelected =
+            _selectedItems.any((selected) => selected.key == item.key);
         if (isSelected) {
           _selectedItems.removeWhere((selected) => selected.key == item.key);
         } else {
@@ -231,16 +234,20 @@ class _UserPickerState extends State<UserPicker> {
   }
 
   void _positionListener() {
-    if (_itemPositionsListener == null || _isLoadingMore || widget.onReachEnd == null) {
+    if (_itemPositionsListener == null ||
+        _isLoadingMore ||
+        widget.onReachEnd == null) {
       return;
     }
 
     final positions = _itemPositionsListener!.itemPositions.value;
     if (positions.isEmpty) return;
 
-    final lastVisibleItem = positions.reduce((a, b) => a.index > b.index ? a : b);
+    final lastVisibleItem =
+        positions.reduce((a, b) => a.index > b.index ? a : b);
 
-    if (lastVisibleItem.itemTrailingEdge > 0.8 && lastVisibleItem.index >= _itemList.length - 3) {
+    if (lastVisibleItem.itemTrailingEdge > 0.8 &&
+        lastVisibleItem.index >= _itemList.length - 3) {
       _isLoadingMore = true;
       widget.onReachEnd!();
 
@@ -280,7 +287,8 @@ class _UserPickerState extends State<UserPicker> {
       return !item.isPreSelected && !lockedKeys.contains(item.key);
     }).length;
 
-    final hasSelection = widget.maxCount == 1 ? _selectedItems.isNotEmpty : newSelectedCount > 0;
+    final hasSelection =
+        widget.maxCount == 1 ? _selectedItems.isNotEmpty : newSelectedCount > 0;
 
     return Scaffold(
       backgroundColor: colorsTheme.bgColorOperate,
@@ -288,7 +296,8 @@ class _UserPickerState extends State<UserPicker> {
         backgroundColor: colorsTheme.bgColorOperate,
         scrolledUnderElevation: 0,
         leading: atomicx.IconButton.buttonContent(
-          content: atomicx.IconOnlyContent(Icon(Icons.arrow_back_ios, color: colorsTheme.buttonColorPrimaryDefault)),
+          content: atomicx.IconOnlyContent(Icon(Icons.arrow_back_ios,
+              color: colorsTheme.buttonColorPrimaryDefault)),
           type: atomicx.ButtonType.noBorder,
           size: atomicx.ButtonSize.l,
           onClick: () => Navigator.of(context).pop(),
@@ -310,7 +319,9 @@ class _UserPickerState extends State<UserPicker> {
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
-                color: hasSelection ? colorsTheme.buttonColorPrimaryActive : colorsTheme.buttonColorPrimaryDisabled,
+                color: hasSelection
+                    ? colorsTheme.buttonColorPrimaryActive
+                    : colorsTheme.buttonColorPrimaryDisabled,
               ),
             ),
           ),
@@ -341,13 +352,17 @@ class _UserPickerState extends State<UserPicker> {
                     physics: const BouncingScrollPhysics(),
                     susItemBuilder: (context, index) {
                       final itemModel = _itemList[index];
-                      return _buildSuspensionWidget(itemModel.getSuspensionTag());
+                      return _buildSuspensionWidget(
+                          itemModel.getSuspensionTag());
                     },
-                    indexBarData: SuspensionUtil.getTagIndexList(_itemList).where((element) => element != "#").toList(),
+                    indexBarData: SuspensionUtil.getTagIndexList(_itemList)
+                        .where((element) => element != "#")
+                        .toList(),
                     indexBarOptions: IndexBarOptions(
                       needRebuild: true,
                       ignoreDragCancel: true,
-                      downTextStyle: TextStyle(fontSize: 12, color: colorsTheme.textColorButton),
+                      downTextStyle: TextStyle(
+                          fontSize: 12, color: colorsTheme.textColorButton),
                       downItemDecoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: colorsTheme.buttonColorPrimaryDefault,
@@ -377,8 +392,9 @@ class _UserPickerState extends State<UserPicker> {
   Widget _buildSelectedListWidget() {
     final lockedKeys = widget.lockedItems ?? [];
 
-    final selectedByUser =
-        _selectedItems.where((item) => !item.isPreSelected && !lockedKeys.contains(item.key)).toList();
+    final selectedByUser = _selectedItems
+        .where((item) => !item.isPreSelected && !lockedKeys.contains(item.key))
+        .toList();
 
     if (selectedByUser.isEmpty) {
       return const SizedBox.shrink();
@@ -417,7 +433,8 @@ class _UserPickerState extends State<UserPicker> {
                       child: GestureDetector(
                         onTap: () {
                           setState(() {
-                            _selectedItems.removeWhere((selected) => selected.key == item.key);
+                            _selectedItems.removeWhere(
+                                (selected) => selected.key == item.key);
                           });
                           _notifySelectionChanged();
                         },
@@ -456,7 +473,8 @@ class _UserPickerState extends State<UserPicker> {
     final item = itemModel.item;
     final lockedKeys = widget.lockedItems ?? [];
 
-    final isSelected = _selectedItems.any((selected) => selected.key == item.key);
+    final isSelected =
+        _selectedItems.any((selected) => selected.key == item.key);
     final isDisabled = item.isPreSelected || lockedKeys.contains(item.key);
 
     return InkWell(
@@ -488,7 +506,9 @@ class _UserPickerState extends State<UserPicker> {
                     Text(
                       item.label,
                       style: TextStyle(
-                        color: isDisabled ? colorsTheme.textColorDisable : colorsTheme.textColorPrimary,
+                        color: isDisabled
+                            ? colorsTheme.textColorDisable
+                            : colorsTheme.textColorPrimary,
                         fontSize: 14,
                       ),
                     ),

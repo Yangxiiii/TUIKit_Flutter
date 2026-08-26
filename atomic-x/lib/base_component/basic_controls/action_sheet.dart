@@ -1,7 +1,6 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
-import '../localizations/atomic_localizations.dart';
 import '../theme/color_scheme.dart';
-import '../theme/theme_state.dart';
 
 const double _defaultScrollControlDisabledMaxHeightRatio = 9.0 / 16.0;
 
@@ -33,8 +32,7 @@ class ActionSheet {
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (BuildContext buildContext) {
-        return _createWidget(
-            buildContext,
+        return _createWidget(buildContext,
             title: title,
             message: message,
             actions: actions,
@@ -45,20 +43,19 @@ class ActionSheet {
   }
 
   static ModalBottomSheetRoute showWithRoute(
-      BuildContext context, {
-        String? title,
-        String? message,
-        required List<ActionSheetItem> actions,
-        String? cancelText,
-        bool showCancel = true,
-      }) {
+    BuildContext context, {
+    String? title,
+    String? message,
+    required List<ActionSheetItem> actions,
+    String? cancelText,
+    bool showCancel = true,
+  }) {
     return showModalBottomSheetBySystem<void>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (BuildContext buildContext) {
-        return _createWidget(
-            buildContext,
+        return _createWidget(buildContext,
             title: title,
             message: message,
             actions: actions,
@@ -68,7 +65,8 @@ class ActionSheet {
     );
   }
 
-  static Widget _createWidget(BuildContext context, {
+  static Widget _createWidget(
+    BuildContext context, {
     String? title,
     String? message,
     required List<ActionSheetItem> actions,
@@ -77,8 +75,8 @@ class ActionSheet {
   }) {
     // Calculate max height: 60% of screen height
     final maxHeight = MediaQuery.of(context).size.height * 0.6;
-    final colors = BaseThemeProvider.colorsOf(context);
-    final appLocale = AtomicLocalizations.of(context);
+    final colors = SemanticColorScheme.of(context);
+    final appLocale = AppLocalization.of(context);
 
     return Container(
       padding: const EdgeInsets.all(8),
@@ -96,7 +94,8 @@ class ActionSheet {
               children: [
                 if (title != null || message != null)
                   Container(
-                    padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 16, horizontal: 16),
                     child: Column(
                       children: [
                         if (title != null)
@@ -123,10 +122,7 @@ class ActionSheet {
                       ],
                     ),
                   ),
-
-                if (title != null || message != null)
-                  _buildDivider(colors),
-
+                if (title != null || message != null) _buildDivider(colors),
                 Flexible(
                   child: SingleChildScrollView(
                     child: Column(
@@ -134,7 +130,8 @@ class ActionSheet {
                       children: actions.asMap().entries.map((entry) {
                         final index = entry.key;
                         final action = entry.value;
-                        final isFirst = index == 0 && title == null && message == null;
+                        final isFirst =
+                            index == 0 && title == null && message == null;
                         final isLast = index == actions.length - 1;
 
                         return Column(
@@ -156,7 +153,6 @@ class ActionSheet {
               ],
             ),
           ),
-
           if (showCancel) ...[
             const SizedBox(height: 12),
             Container(
@@ -172,7 +168,6 @@ class ActionSheet {
               ),
             ),
           ],
-
           SizedBox(height: MediaQuery.of(context).padding.bottom),
         ],
       ),
@@ -198,10 +193,12 @@ class ActionSheet {
     return SizedBox(
       width: double.infinity,
       child: TextButton(
-        onPressed: item.isDisabled ? null : () {
-          Navigator.of(context).pop();
-          item.onTap();
-        },
+        onPressed: item.isDisabled
+            ? null
+            : () {
+                Navigator.of(context).pop();
+                item.onTap();
+              },
         style: TextButton.styleFrom(
           padding: const EdgeInsets.symmetric(vertical: 16),
           backgroundColor: Colors.transparent,
@@ -271,7 +268,8 @@ class ActionSheet {
     BoxConstraints? constraints,
     Color? barrierColor,
     bool isScrollControlled = false,
-    double scrollControlDisabledMaxHeightRatio = _defaultScrollControlDisabledMaxHeightRatio,
+    double scrollControlDisabledMaxHeightRatio =
+        _defaultScrollControlDisabledMaxHeightRatio,
     bool useRootNavigator = false,
     bool isDismissible = true,
     bool enableDrag = true,
@@ -286,23 +284,28 @@ class ActionSheet {
     assert(debugCheckHasMediaQuery(context));
     assert(debugCheckHasMaterialLocalizations(context));
 
-    final NavigatorState navigator = Navigator.of(context, rootNavigator: useRootNavigator);
-    final MaterialLocalizations localizations = MaterialLocalizations.of(context);
+    final NavigatorState navigator =
+        Navigator.of(context, rootNavigator: useRootNavigator);
+    final MaterialLocalizations localizations =
+        MaterialLocalizations.of(context);
 
     final route = ModalBottomSheetRoute<T>(
       builder: builder,
-      capturedThemes: InheritedTheme.capture(from: context, to: navigator.context),
+      capturedThemes:
+          InheritedTheme.capture(from: context, to: navigator.context),
       isScrollControlled: isScrollControlled,
       scrollControlDisabledMaxHeightRatio: scrollControlDisabledMaxHeightRatio,
       barrierLabel: barrierLabel ?? localizations.scrimLabel,
-      barrierOnTapHint: localizations.scrimOnTapHint(localizations.bottomSheetLabel),
+      barrierOnTapHint:
+          localizations.scrimOnTapHint(localizations.bottomSheetLabel),
       backgroundColor: backgroundColor,
       elevation: elevation,
       shape: shape,
       clipBehavior: clipBehavior,
       constraints: constraints,
       isDismissible: isDismissible,
-      modalBarrierColor: barrierColor ?? Theme.of(context).bottomSheetTheme.modalBarrierColor,
+      modalBarrierColor:
+          barrierColor ?? Theme.of(context).bottomSheetTheme.modalBarrierColor,
       enableDrag: enableDrag,
       showDragHandle: showDragHandle,
       settings: routeSettings,
@@ -329,8 +332,8 @@ class BottomInputSheet {
     int? maxLength,
     TextInputType? keyboardType,
   }) {
-    final colors = BaseThemeProvider.colorsOf(context);
-    final atomicLocale = AtomicLocalizations.of(context);
+    final colors = SemanticColorScheme.of(context);
+    final atomicLocale = AppLocalization.of(context);
     final controller = TextEditingController(text: initialText ?? '');
 
     return showModalBottomSheet<String>(
@@ -378,7 +381,8 @@ class BottomInputSheet {
                     decoration: InputDecoration(
                       hintText: hintText,
                       border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
                       counterText: '',
                     ),
                     autofocus: true,
@@ -439,4 +443,4 @@ class BottomInputSheet {
       },
     );
   }
-} 
+}

@@ -1,6 +1,7 @@
 name: tuikit_atomic_x
 description: "tuikit_atomic_x is a public UI library for Tencent components."
 version: 5.0.0
+publish_to: none
 homepage: https://trtc.io
 
 environment:
@@ -8,15 +9,13 @@ environment:
   flutter: '>=3.3.0'
 
 dependencies:
+  app_ui:
+    path: ../../../packages/app_ui
   flutter:
     sdk: flutter
 
-  flutter_localizations:
-    sdk: flutter
-  intl: any
   cupertino_icons: ^1.0.8
   path_provider: ^2.1.4
-  provider: ^6.0.5
   cached_network_image: ^3.3.1
   flutter_svg: ^2.0.10+1
   url_launcher: ^6.3.1

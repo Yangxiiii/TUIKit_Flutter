@@ -1,8 +1,10 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/contact_list/pages/group_application_list.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:atomic_x_core/api/group/group_store.dart' as group_api;
 import 'package:flutter/material.dart';
+import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
 
 import 'pages/blacklist.dart';
 import 'pages/friend_application_list.dart';
@@ -29,7 +31,7 @@ class ContactList extends StatefulWidget {
 class _ContactListState extends State<ContactList> {
   final ContactStore _contactStore = ContactStore.shared;
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
 
   @override
   void initState() {
@@ -40,8 +42,8 @@ class _ContactListState extends State<ContactList> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    colorsTheme = BaseThemeProvider.colorsOf(context);
-    atomicLocale = AtomicLocalizations.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
+    atomicLocale = AppLocalization.of(context);
   }
 
   final group_api.GroupStore _groupStore = group_api.GroupStore.shared;
@@ -95,7 +97,7 @@ class _ContactListState extends State<ContactList> {
   }
 
   static Widget buildDivider(BuildContext context) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     return Container(
       height: 1,
@@ -117,7 +119,9 @@ class _ContactListState extends State<ContactList> {
                 final dataSource = friendList
                     .map((contact) => AZOrderedListItem(
                           key: contact.userID,
-                          label: (contact.nickname?.isNotEmpty == true ? contact.nickname! : contact.userID),
+                          label: (contact.nickname?.isNotEmpty == true
+                              ? contact.nickname!
+                              : contact.userID),
                           avatarURL: contact.avatarURL,
                         ))
                     .toList();
@@ -126,26 +130,23 @@ class _ContactListState extends State<ContactList> {
                   children: [
                     _buildMenuTile(
                       title: atomicLocale.newFriend,
-                      badge: friendAppUnread > 0 ? friendAppUnread.toString() : null,
+                      badge: friendAppUnread > 0
+                          ? friendAppUnread.toString()
+                          : null,
                       onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const FriendApplicationList(),
-                          ),
+                        context.pushChatUIKitPage(
+                          const FriendApplicationList(),
                         );
                       },
                     ),
                     buildDivider(context),
                     _buildMenuTile(
                       title: atomicLocale.groupChatNotifications,
-                      badge: groupAppUnread > 0 ? groupAppUnread.toString() : null,
+                      badge:
+                          groupAppUnread > 0 ? groupAppUnread.toString() : null,
                       onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const GroupApplicationList(),
-                          ),
+                        context.pushChatUIKitPage(
+                          const GroupApplicationList(),
                         );
                       },
                     ),
@@ -153,12 +154,9 @@ class _ContactListState extends State<ContactList> {
                     _buildMenuTile(
                       title: atomicLocale.myGroups,
                       onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => GroupList(
-                              onGroupClick: widget.onGroupClick,
-                            ),
+                        context.pushChatUIKitPage(
+                          GroupList(
+                            onGroupClick: widget.onGroupClick,
                           ),
                         );
                       },
@@ -167,12 +165,9 @@ class _ContactListState extends State<ContactList> {
                     _buildMenuTile(
                       title: atomicLocale.blackList,
                       onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => Blacklist(
-                              onContactClick: widget.onContactClick,
-                            ),
+                        context.pushChatUIKitPage(
+                          Blacklist(
+                            onContactClick: widget.onContactClick,
                           ),
                         );
                       },

@@ -40,29 +40,28 @@ class _CallViewState extends State<CallView> {
         width: double.infinity,
         height: double.infinity,
         child: ValueListenableBuilder(
-            valueListenable: CallStore.shared.state.activeCall,
-            builder: (context, activeCall, child) {
-              if (widget.isPipMode) {
-                controller.setLayoutTemplate(CallLayoutTemplate.pip);
-                return CallPipWidget(
-                  controller: controller,
-                );
-              }
+          valueListenable: CallStore.shared.state.activeCall,
+          builder: (context, activeCall, child) {
+            if (widget.isPipMode) {
+              controller.setLayoutTemplate(CallLayoutTemplate.pip);
+              return CallPipWidget(controller: controller);
+            }
 
-              if (activeCall.chatGroupId.isNotEmpty || activeCall.inviteeIds.length > 1) {
-                controller.setLayoutTemplate(CallLayoutTemplate.grid);
-                return CallGridWidget(
-                  controller: controller,
-                  enableAITranscriber: widget.enableAITranscriber,
-                );
-              }
-
-              controller.setLayoutTemplate(CallLayoutTemplate.float);
-              return CallFloatWidget(
+            if (activeCall.chatGroupId.isNotEmpty ||
+                activeCall.inviteeIds.length > 1) {
+              controller.setLayoutTemplate(CallLayoutTemplate.grid);
+              return CallGridWidget(
                 controller: controller,
                 enableAITranscriber: widget.enableAITranscriber,
               );
             }
+
+            controller.setLayoutTemplate(CallLayoutTemplate.float);
+            return CallFloatWidget(
+              controller: controller,
+              enableAITranscriber: widget.enableAITranscriber,
+            );
+          },
         ),
       ),
     );

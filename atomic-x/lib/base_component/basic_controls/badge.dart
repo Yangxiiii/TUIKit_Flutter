@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../theme/theme_state.dart';
+import '../theme/color_scheme.dart';
 
 enum BadgeType {
   text,
@@ -18,7 +18,7 @@ class Badge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
 
     if (text?.isEmpty != false || type == BadgeType.dot) {
       return Container(
@@ -52,4 +52,4 @@ class Badge extends StatelessWidget {
       );
     }
   }
-} 
+}

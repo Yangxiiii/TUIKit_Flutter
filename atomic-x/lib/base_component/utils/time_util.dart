@@ -1,6 +1,5 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:flutter/cupertino.dart';
-
-import '../localizations/atomic_localizations.dart';
 
 class TimeUtil {
   static String convertToFormatTime(int timestamp, BuildContext context) {
@@ -15,7 +14,7 @@ class TimeUtil {
       return '';
     }
 
-    AtomicLocalizations localizations = AtomicLocalizations.of(context);
+    AppLocalizedText localizations = AppLocalization.of(context);
 
     final now = DateTime.now();
 
@@ -30,10 +29,12 @@ class TimeUtil {
     final dateWeek = (date.weekday + 6) % 7;
 
     final weekStartDay = now.subtract(Duration(days: nowWeek));
-    final weekStartDayComponents = DateTime(weekStartDay.year, weekStartDay.month, weekStartDay.day);
+    final weekStartDayComponents =
+        DateTime(weekStartDay.year, weekStartDay.month, weekStartDay.day);
 
     final dateWeekStartDay = date.subtract(Duration(days: dateWeek));
-    final dateWeekStartDayComponents = DateTime(dateWeekStartDay.year, dateWeekStartDay.month, dateWeekStartDay.day);
+    final dateWeekStartDayComponents = DateTime(
+        dateWeekStartDay.year, dateWeekStartDay.month, dateWeekStartDay.day);
 
     if (nowYear == dateYear) {
       if (nowMonth == dateMonth) {

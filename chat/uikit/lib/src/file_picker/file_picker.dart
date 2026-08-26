@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'dart:io';
 
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart' hide AlertDialog;
@@ -70,7 +71,7 @@ class FilePicker {
 
         if (results.length > maxCount) {
           if (context.mounted) {
-            AtomicLocalizations atomicLocal = AtomicLocalizations.of(context);
+            AppLocalizedText atomicLocal = AppLocalization.of(context);
             _showErrorDialog(context, atomicLocal.maxCountFile(maxCount));
           }
           return results.take(maxCount).toList();
@@ -143,7 +144,7 @@ class FilePicker {
   }
 
   static void _showErrorDialog(BuildContext context, String message) {
-    AtomicLocalizations atomicLocal = AtomicLocalizations.of(context);
+    AppLocalizedText atomicLocal = AppLocalization.of(context);
     showDialog(
       context: context,
       builder: (BuildContext context) {

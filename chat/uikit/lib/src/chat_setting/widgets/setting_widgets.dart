@@ -9,7 +9,7 @@ class SettingWidgets {
     required bool value,
     required ValueChanged<bool> onChanged,
   }) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -36,7 +36,8 @@ class SettingWidgets {
               }
               return colorsTheme.switchColorOff;
             }),
-            trackOutlineColor: WidgetStateProperty.resolveWith<Color?>((states) {
+            trackOutlineColor:
+                WidgetStateProperty.resolveWith<Color?>((states) {
               return colorsTheme.clearColor;
             }),
           ),
@@ -52,7 +53,7 @@ class SettingWidgets {
     String? value,
     VoidCallback? onTap,
   }) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     return GestureDetector(
       onTap: onTap,
@@ -96,7 +97,8 @@ class SettingWidgets {
                 package: 'tencent_chat_uikit',
                 width: 12,
                 height: 24,
-                colorFilter: ColorFilter.mode(colorsTheme.textColorPrimary, BlendMode.srcIn),
+                colorFilter: ColorFilter.mode(
+                    colorsTheme.textColorPrimary, BlendMode.srcIn),
               ),
           ],
         ),
@@ -109,7 +111,7 @@ class SettingWidgets {
     required String title,
     required String value,
   }) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -140,7 +142,7 @@ class SettingWidgets {
     required String title,
     required VoidCallback onTap,
   }) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     return GestureDetector(
       onTap: onTap,
@@ -174,7 +176,7 @@ class SettingWidgets {
     required VoidCallback onTap,
     Color? titleColor,
   }) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     return GestureDetector(
       onTap: onTap,
@@ -201,7 +203,7 @@ class SettingWidgets {
     required String title,
     required VoidCallback onTap,
   }) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     return GestureDetector(
       onTap: onTap,
@@ -224,7 +226,7 @@ class SettingWidgets {
   }
 
   static Widget buildDivider(BuildContext context) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     return Container(
       height: 1,
@@ -238,7 +240,7 @@ class SettingWidgets {
     required String label,
     required VoidCallback onTap,
   }) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     return GestureDetector(
       onTap: onTap,
@@ -282,13 +284,14 @@ class SettingWidgets {
     required String title,
     VoidCallback? onBackPressed,
   }) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     return AppBar(
       backgroundColor: colorsTheme.bgColorOperate,
       scrolledUnderElevation: 0,
       leading: IconButton.buttonContent(
-        content: IconOnlyContent(Icon(Icons.arrow_back_ios, color: colorsTheme.buttonColorPrimaryDefault)),
+        content: IconOnlyContent(Icon(Icons.arrow_back_ios,
+            color: colorsTheme.buttonColorPrimaryDefault)),
         type: ButtonType.noBorder,
         size: ButtonSize.l,
         onClick: onBackPressed ?? () => Navigator.of(context).pop(),
@@ -314,7 +317,7 @@ class SettingWidgets {
     required BuildContext context,
     required List<Widget> children,
   }) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     return Container(
       decoration: BoxDecoration(

@@ -1,11 +1,11 @@
+import 'package:app_ui/app_ui.dart';
 import 'dart:core';
 
 import 'package:flutter/widgets.dart';
-import 'package:tuikit_atomic_x/base_component/base_component.dart';
 
 class EmojiManager {
   static Map<String, String> getEmojiMap(BuildContext context) {
-    final atomicLocale = AtomicLocalizations.of(context);
+    final atomicLocale = AppLocalization.of(context);
     return {
       '[TUIEmoji_Smile]': atomicLocale.tuiEmojiSmile,
       '[TUIEmoji_Expect]': atomicLocale.tuiEmojiExpect,
@@ -74,7 +74,8 @@ class EmojiManager {
 
   /// Convert emoji codes in text to localized names
   /// e.g., "abc[TUIEmoji_Smile]def" -> "abc[微笑]def" (Chinese) or "abc[Smile]def" (English)
-  static String createLocalizedStringFromEmojiCodes(BuildContext context, String text) {
+  static String createLocalizedStringFromEmojiCodes(
+      BuildContext context, String text) {
     if (text.isEmpty) {
       return text;
     }
@@ -83,7 +84,8 @@ class EmojiManager {
     String result = text;
 
     // Sort by key length descending to handle longer keys first
-    final sortedKeys = emojiMap.keys.toList()..sort((a, b) => b.length.compareTo(a.length));
+    final sortedKeys = emojiMap.keys.toList()
+      ..sort((a, b) => b.length.compareTo(a.length));
 
     for (final key in sortedKeys) {
       if (result.contains(key)) {
@@ -103,7 +105,8 @@ class EmojiManager {
     // TUIKit custom emoji.
     String regexOfCustomEmoji = "\\[(\\S+?)\\]";
     Pattern patternOfCustomEmoji = RegExp(regexOfCustomEmoji);
-    Iterable<Match> matcherOfCustomEmoji = patternOfCustomEmoji.allMatches(text);
+    Iterable<Match> matcherOfCustomEmoji =
+        patternOfCustomEmoji.allMatches(text);
 
     for (Match match in matcherOfCustomEmoji) {
       String? emojiName = match.group(0);
@@ -114,7 +117,8 @@ class EmojiManager {
 
     // Universal standard emoji.
     RegExp patternOfUniversalEmoji = getUniversalEmojiRegex();
-    Iterable<Match> matcherOfUniversalEmoji = patternOfUniversalEmoji.allMatches(text);
+    Iterable<Match> matcherOfUniversalEmoji =
+        patternOfUniversalEmoji.allMatches(text);
 
     for (Match match in matcherOfUniversalEmoji) {
       String? emojiKey = match.group(0);
@@ -132,7 +136,8 @@ class EmojiManager {
     String ri = "[\\u{1F1E6}-\\u{1F1FF}]";
 
     // Standard emoji that can stand alone or with modifiers
-    String support = "\\u{A9}|\\u{AE}|\\u203C|\\u2049|\\u2122|\\u2139|[\\u2194-\\u2199]|[\\u21A9-\\u21AA]"
+    String support =
+        "\\u{A9}|\\u{AE}|\\u203C|\\u2049|\\u2122|\\u2139|[\\u2194-\\u2199]|[\\u21A9-\\u21AA]"
         "|[\\u231A-\\u231B]|\\u2328|\\u23CF|[\\u23E9-\\u23EF]|[\\u23F0-\\u23F3]|[\\u23F8-\\u23FA]|\\u24C2"
         "|[\\u25AA-\\u25AB]|\\u25B6|\\u25C0|[\\u25FB-\\u25FE]|[\\u2600-\\u2604]|\\u260E|\\u2611|[\\u2614-\\u2615]"
         "|\\u2618|\\u261D|\\u2620|[\\u2622-\\u2623]|\\u2626|\\u262A|[\\u262E-\\u262F]|[\\u2638-\\u263A]|\\u2640"
@@ -193,10 +198,12 @@ class EmojiManager {
     String keycapEmoji = "$keycapBase$variationSelector?$keycap";
 
     // Standard emoji element with optional modifiers
-    String element = "(?:$support)(?:$eMod|$variationSelector|$tags+$termTag?)?";
+    String element =
+        "(?:$support)(?:$eMod|$variationSelector|$tags+$termTag?)?";
 
     // Full regex: keycap emoji | RI sequence | standard emoji (with ZWJ sequences)
-    String regexEmoji = "$keycapEmoji|$risequence|$element(?:$zwj(?:$risequence|$element))*";
+    String regexEmoji =
+        "$keycapEmoji|$risequence|$element(?:$zwj(?:$risequence|$element))*";
 
     return regexEmoji;
   }

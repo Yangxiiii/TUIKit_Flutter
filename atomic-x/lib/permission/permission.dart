@@ -1,8 +1,10 @@
+import 'package:app_ui/app_ui.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:tuikit_atomic_x/base_component/base_component.dart' hide AlertDialog;
+import 'package:tuikit_atomic_x/base_component/base_component.dart'
+    hide AlertDialog;
 
 import 'permission_method_channel.dart';
 
@@ -139,7 +141,8 @@ class Permission {
     List<PermissionType> permissions,
   ) async {
     try {
-      final permissionStrings = permissions.map((p) => p.platformValue).toList();
+      final permissionStrings =
+          permissions.map((p) => p.platformValue).toList();
       final result = await _channel.invokeMethod<Map>(
         'requestPermissions',
         {'permissions': permissionStrings},
@@ -214,11 +217,13 @@ class Permission {
 
     // Step 2: Always request — this serves as either the normal permission
     // request or a probe to verify a real permanentlyDenied.
-    Map<PermissionType, PermissionStatus> statusMap = await Permission.request(permissionTypes);
+    Map<PermissionType, PermissionStatus> statusMap =
+        await Permission.request(permissionTypes);
 
     bool allGranted = permissionTypes.every((type) {
       final status = statusMap[type] ?? PermissionStatus.denied;
-      return status == PermissionStatus.granted || status == PermissionStatus.limited;
+      return status == PermissionStatus.granted ||
+          status == PermissionStatus.limited;
     });
 
     if (allGranted) {
@@ -244,10 +249,13 @@ class Permission {
       if (requestReturnedPermanentlyDenied && context.mounted) {
         // Find the first permanently denied permission type for the dialog message.
         final permanentlyDeniedType = permissionTypes.firstWhere(
-          (type) => (statusMap[type] ?? PermissionStatus.denied) == PermissionStatus.permanentlyDenied,
+          (type) =>
+              (statusMap[type] ?? PermissionStatus.denied) ==
+              PermissionStatus.permanentlyDenied,
           orElse: () => permissionTypes.first,
         );
-        final bool shouldOpenSettings = await showPermissionDialog(context, permanentlyDeniedType);
+        final bool shouldOpenSettings =
+            await showPermissionDialog(context, permanentlyDeniedType);
         if (shouldOpenSettings) {
           await Permission.openAppSettings();
         }
@@ -264,9 +272,10 @@ class Permission {
   /// a specific message for each permission (camera, microphone, etc.).
   ///
   /// Returns `true` if the user chooses to open settings, `false` otherwise.
-  static Future<bool> showPermissionDialog(BuildContext context, PermissionType permissionType) {
+  static Future<bool> showPermissionDialog(
+      BuildContext context, PermissionType permissionType) {
     final completer = Completer<bool>();
-    final atomicLocal = AtomicLocalizations.of(context);
+    final atomicLocal = AppLocalization.of(context);
 
     AtomicAlertDialog.show(
       context,
@@ -291,7 +300,8 @@ class Permission {
   }
 
   /// Returns the localized permission-denied text for the given [permissionType].
-  static String _getPermissionDeniedText(AtomicLocalizations l10n, PermissionType permissionType) {
+  static String _getPermissionDeniedText(
+      AppLocalizedText l10n, PermissionType permissionType) {
     switch (permissionType) {
       case PermissionType.camera:
         return l10n.permissionDeniedCamera;

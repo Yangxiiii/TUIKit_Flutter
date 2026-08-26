@@ -26,7 +26,8 @@ class ImageCosUploadManager {
     return await _uploadFileWithRetry(localPath, cosUploadURL, _maxRetryCount);
   }
 
-  Future<int> _uploadFileWithRetry(String localPath, String cosUploadURL, int maxRetryCount) async {
+  Future<int> _uploadFileWithRetry(
+      String localPath, String cosUploadURL, int maxRetryCount) async {
     int currentRetry = 0;
 
     while (currentRetry <= maxRetryCount) {
@@ -37,14 +38,16 @@ class ImageCosUploadManager {
           return statusCode;
         } else if (_shouldRetry(statusCode) && currentRetry < maxRetryCount) {
           currentRetry++;
-          await Future.delayed(Duration(milliseconds: _retryDelayMs * currentRetry));
+          await Future.delayed(
+              Duration(milliseconds: _retryDelayMs * currentRetry));
         } else {
           return statusCode;
         }
       } catch (e) {
         if (_shouldRetryOnError(e) && currentRetry < maxRetryCount) {
           currentRetry++;
-          await Future.delayed(Duration(milliseconds: _retryDelayMs * currentRetry));
+          await Future.delayed(
+              Duration(milliseconds: _retryDelayMs * currentRetry));
         } else {
           debugPrint('ImageCosUploadManager: Upload failed with error: $e');
           return -1;
@@ -63,7 +66,8 @@ class ImageCosUploadManager {
 
     final fileLength = await file.length();
     if (fileLength > _maxUploadSize) {
-      throw Exception('File size ${fileLength} exceeds maximum upload size $_maxUploadSize');
+      throw Exception(
+          'File size ${fileLength} exceeds maximum upload size $_maxUploadSize');
     }
     final uri = Uri.parse(cosUploadURL);
 
@@ -72,12 +76,13 @@ class ImageCosUploadManager {
     request.contentLength = fileLength;
 
     file.openRead().listen(
-      request.sink.add,
-      onDone: request.sink.close,
-      onError: request.sink.addError,
-    );
+          request.sink.add,
+          onDone: request.sink.close,
+          onError: request.sink.addError,
+        );
 
-    final streamedResponse = await request.send().timeout(const Duration(seconds: _timeoutSeconds));
+    final streamedResponse =
+        await request.send().timeout(const Duration(seconds: _timeoutSeconds));
     return streamedResponse.statusCode;
   }
 

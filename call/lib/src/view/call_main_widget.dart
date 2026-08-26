@@ -9,29 +9,28 @@ import 'package:tencent_calls_uikit/src/state/global_state.dart';
 import 'package:tencent_calls_uikit/src/manager/call_page_router.dart';
 import 'package:tencent_calls_uikit/src/view/callview/call_view.dart';
 
-
 class CallMainWidget extends StatefulWidget {
   final CallPageCallbacks? callbacks;
   final CallPageType? callPageType;
-  
-  const CallMainWidget({
-    Key? key,
-    this.callbacks,
-    this.callPageType,
-  }) : super(key: key);
+
+  const CallMainWidget({Key? key, this.callbacks, this.callPageType})
+    : super(key: key);
 
   @override
   State<CallMainWidget> createState() => _CallMainWidgetState();
 }
 
-class _CallMainWidgetState extends State<CallMainWidget> with WidgetsBindingObserver {
+class _CallMainWidgetState extends State<CallMainWidget>
+    with WidgetsBindingObserver {
   final GlobalKey _callViewKey = GlobalKey();
   bool isMultiPerson = false;
   CallPageType? _currentPageType;
   bool _isInitializing = true;
 
-  double get originWidth => widget.callbacks?.getOriginScreenSize?.call().width ?? 0;
-  double get originHeight => widget.callbacks?.getOriginScreenSize?.call().height ?? 0;
+  double get originWidth =>
+      widget.callbacks?.getOriginScreenSize?.call().width ?? 0;
+  double get originHeight =>
+      widget.callbacks?.getOriginScreenSize?.call().height ?? 0;
 
   @override
   void initState() {
@@ -61,7 +60,7 @@ class _CallMainWidgetState extends State<CallMainWidget> with WidgetsBindingObse
   @override
   void didUpdateWidget(CallMainWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    
+
     if (oldWidget.callPageType != widget.callPageType) {
       _currentPageType = widget.callPageType;
       _isInitializing = true;
@@ -100,7 +99,7 @@ class _CallMainWidgetState extends State<CallMainWidget> with WidgetsBindingObse
     widget.callbacks?.setOriginScreenSize?.call(Size(bestWidth, bestHeight));
 
     final pageType = _currentPageType ?? widget.callPageType;
-    
+
     switch (pageType) {
       case CallPageType.calling:
         return _buildCallingPageWidget();
@@ -112,7 +111,6 @@ class _CallMainWidgetState extends State<CallMainWidget> with WidgetsBindingObse
         return _buildCallingPageWidget();
     }
   }
-
 
   _buildPipWindowWidget() {
     final pipWidth = MediaQuery.of(context).size.width;
@@ -128,25 +126,29 @@ class _CallMainWidgetState extends State<CallMainWidget> with WidgetsBindingObse
           height: pipHeight,
           decoration: const BoxDecoration(color: Colors.transparent),
           child: MediaQuery(
-              data: MediaQuery.of(context).copyWith(
-                  size: Size(originWidth > 0 ? originWidth : pipWidth, originHeight > 0 ? originHeight : pipHeight)
+            data: MediaQuery.of(context).copyWith(
+              size: Size(
+                originWidth > 0 ? originWidth : pipWidth,
+                originHeight > 0 ? originHeight : pipHeight,
               ),
-              child: ClipRect(
-                child: Transform.scale(
-                  scale: scale,
+            ),
+            child: ClipRect(
+              child: Transform.scale(
+                scale: scale,
+                alignment: Alignment.center,
+                child: OverflowBox(
+                  maxWidth: originWidth,
+                  maxHeight: originHeight,
                   alignment: Alignment.center,
-                  child: OverflowBox(
-                    maxWidth: originWidth,
-                    maxHeight: originHeight,
-                    alignment: Alignment.center,
-                    child: CallView(
-                      key: _callViewKey,
-                      isPipMode: true,
-                      enableAITranscriber: GlobalState.instance.enableAITranscriber,
-                    ),
+                  child: CallView(
+                    key: _callViewKey,
+                    isPipMode: true,
+                    enableAITranscriber:
+                        GlobalState.instance.enableAITranscriber,
                   ),
                 ),
               ),
+            ),
           ),
         ),
       ),
@@ -156,7 +158,7 @@ class _CallMainWidgetState extends State<CallMainWidget> with WidgetsBindingObse
   Widget _buildFloatWindowWidget() {
     final screenWidth = MediaQuery.of(context).size.width;
     final scale = 120 / screenWidth;
-    
+
     return SizedBox(
       width: 121,
       height: 181,
@@ -222,49 +224,52 @@ class _CallMainWidgetState extends State<CallMainWidget> with WidgetsBindingObse
   }
 
   _buildFloatingWindowBtnWidget() {
-    return GlobalState.instance.enableFloatWindow ? Positioned(
-      left: 12,
-      top: 52,
-      width: 40,
-      height: 40,
-      child: InkWell(
-          onTap: () => _openFloatWindow(),
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: SizedBox(
-              width: 20,
-              height: 20,
-              child:
-              Image.asset(
-                'assets/images/floating_button.png',
-                package: 'tencent_calls_uikit',
+    return GlobalState.instance.enableFloatWindow
+        ? Positioned(
+            left: 12,
+            top: 52,
+            width: 40,
+            height: 40,
+            child: InkWell(
+              onTap: () => _openFloatWindow(),
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: Image.asset(
+                    'assets/images/floating_button.png',
+                    package: 'tencent_calls_uikit',
+                  ),
+                ),
               ),
             ),
-          )),
-    ) : const SizedBox();
+          )
+        : const SizedBox();
   }
 
   _buildInviterUserBtnWidget() {
     return CallStore.shared.state.activeCall.value.chatGroupId.isNotEmpty
         ? Positioned(
-      right: 12,
-      top: 52,
-      width: 40,
-      height: 40,
-      child: InkWell(
-          onTap: () => _openInviteUser(),
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: SizedBox(
-              width: 24,
-              height: 24,
-              child: Image.asset(
-                'assets/images/add_user.png',
-                package: 'tencent_calls_uikit',
+            right: 12,
+            top: 52,
+            width: 40,
+            height: 40,
+            child: InkWell(
+              onTap: () => _openInviteUser(),
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: Image.asset(
+                    'assets/images/add_user.png',
+                    package: 'tencent_calls_uikit',
+                  ),
+                ),
               ),
             ),
-          )),
-    )
+          )
         : const SizedBox();
   }
 

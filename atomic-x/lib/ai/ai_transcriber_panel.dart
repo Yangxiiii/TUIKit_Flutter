@@ -1,20 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 
-import '../base_component/base_component.dart';
 import 'ai_transcriber_manager.dart';
 import 'ai_transcriber_display_widget.dart';
 import 'ai_transcriber_settings_page.dart';
 
 class AITranscriberPanel extends StatefulWidget {
   final double bottomOffset;
-  
+
   final double leftOffset;
-  
+
   final double rightOffset;
-  
+
   final Duration animationDuration;
-  
+
   final Curve animationCurve;
 
   const AITranscriberPanel({
@@ -32,7 +31,8 @@ class AITranscriberPanel extends StatefulWidget {
 
 class _AITranscriberPanelState extends State<AITranscriberPanel> {
   OverlayEntry? _settingsOverlay;
-  final GlobalKey<AITranscriberDisplayWidgetState> _displayWidgetKey = GlobalKey();
+  final GlobalKey<AITranscriberDisplayWidgetState> _displayWidgetKey =
+      GlobalKey();
 
   @override
   void dispose() {
@@ -46,16 +46,9 @@ class _AITranscriberPanelState extends State<AITranscriberPanel> {
     if (selfId != inviterId) return;
     if (_settingsOverlay != null) return;
 
-    final locale = Localizations.localeOf(context);
     _settingsOverlay = OverlayEntry(
-      builder: (overlayContext) => Localizations(
-        locale: locale,
-        delegates: AtomicLocalizations.localizationsDelegates,
-        child: ComponentTheme(
-          child: AITranscriberSettingsPage(
-            onClose: _hideSettings,
-          ),
-        ),
+      builder: (overlayContext) => AITranscriberSettingsPage(
+        onClose: _hideSettings,
       ),
     );
     Overlay.of(context).insert(_settingsOverlay!);

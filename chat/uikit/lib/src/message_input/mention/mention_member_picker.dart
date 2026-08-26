@@ -1,11 +1,10 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
 import 'package:flutter/material.dart';
 import 'package:tuikit_atomic_x/base_component/basic_controls/avatar.dart';
-import 'package:tuikit_atomic_x/base_component/localizations/atomic_localizations.dart';
 import 'package:tuikit_atomic_x/base_component/theme/color_scheme.dart';
 import 'package:tuikit_atomic_x/base_component/theme/font.dart';
-import 'package:tuikit_atomic_x/base_component/theme/theme_state.dart';
 import 'package:tencent_chat_uikit/src/user_picker/user_picker.dart';
 
 import 'mention_info.dart';
@@ -28,10 +27,11 @@ class MentionMemberPicker extends StatefulWidget {
   State<MentionMemberPicker> createState() => _MentionMemberPickerState();
 }
 
-class _MentionMemberPickerState extends State<MentionMemberPicker> with WidgetsBindingObserver {
+class _MentionMemberPickerState extends State<MentionMemberPicker>
+    with WidgetsBindingObserver {
   late GroupMemberStore _memberStore;
   late SemanticColorScheme _colorsTheme;
-  late AtomicLocalizations _atomicLocale;
+  late AppLocalizedText _atomicLocale;
 
   bool _isLoading = false;
   List<UserPickerData> _memberDataSource = [];
@@ -62,8 +62,8 @@ class _MentionMemberPickerState extends State<MentionMemberPicker> with WidgetsB
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _colorsTheme = BaseThemeProvider.colorsOf(context);
-    _atomicLocale = AtomicLocalizations.of(context);
+    _colorsTheme = SemanticColorScheme.of(context);
+    _atomicLocale = AppLocalization.of(context);
   }
 
   void _onMemberListChanged() {
@@ -74,9 +74,8 @@ class _MentionMemberPickerState extends State<MentionMemberPicker> with WidgetsB
     final members = _memberStore.state.memberList.value;
     final currentUserID = LoginStore.shared.loginState.loginUserInfo?.userID;
 
-    final dataSource = members
-        .where((member) => member.userID != currentUserID)
-        .map((member) {
+    final dataSource =
+        members.where((member) => member.userID != currentUserID).map((member) {
       return UserPickerData(
         key: member.userID,
         label: UIKitUtil.memberDisplayName(member),
@@ -167,7 +166,8 @@ class _MentionMemberPickerState extends State<MentionMemberPicker> with WidgetsB
         backgroundColor: _colorsTheme.bgColorOperate,
         body: Center(
           child: CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation<Color>(_colorsTheme.buttonColorPrimaryDefault),
+            valueColor: AlwaysStoppedAnimation<Color>(
+                _colorsTheme.buttonColorPrimaryDefault),
           ),
         ),
       );

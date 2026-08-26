@@ -1,5 +1,7 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart' hide AlertDialog;
+import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_list/message_list.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/asr_display_manager.dart';
@@ -21,8 +23,10 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   final bool isHighlighted;
   final VoidCallback? onHighlightComplete;
   final OnUserClick? onUserClick;
+
   /// Callback when user long presses on avatar (for @ mention feature)
   final OnUserLongPress? onUserLongPress;
+
   /// Callback when call message is clicked in C2C conversation
   final OnCallMessageClick? onCallMessageClick;
   final List<MessageCustomAction> customActions;
@@ -40,12 +44,14 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   // ASR display manager for voice-to-text feature
   final AsrDisplayManager? asrDisplayManager;
   // Callback when ASR text bubble is long pressed, provides message and GlobalKey for positioning popup menu
-  final void Function(MessageInfo message, GlobalKey asrBubbleKey)? onAsrBubbleLongPress;
+  final void Function(MessageInfo message, GlobalKey asrBubbleKey)?
+      onAsrBubbleLongPress;
 
   // Translation display manager for text translation feature
   final TranslationDisplayManager? translationDisplayManager;
   // Callback when translation bubble is long pressed, provides message and GlobalKey for positioning popup menu
-  final void Function(MessageInfo message, GlobalKey translationBubbleKey)? onTranslationBubbleLongPress;
+  final void Function(MessageInfo message, GlobalKey translationBubbleKey)?
+      onTranslationBubbleLongPress;
 
   // Callback when quote preview is tapped (for navigation to quoted message)
   final void Function(MessageInfo message)? onQuotePreviewTap;
@@ -92,9 +98,11 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     bool isSelf = message.isSentBySelf;
     String? avatarURL = message.rawMessage?.faceUrl;
     String senderName = ChatUtil.getMessageSenderName(message);
-    CallingMessageDataProvider provider = CallingMessageDataProvider(message, context);
+    CallingMessageDataProvider provider =
+        CallingMessageDataProvider(message, context);
 
-    if (provider.isCallingSignal && provider.participantType == CallParticipantType.c2c) {
+    if (provider.isCallingSignal &&
+        provider.participantType == CallParticipantType.c2c) {
       if (provider.content.isEmpty) {
         return Container();
       }
@@ -138,22 +146,27 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
 
     // In merged detail view, always use left-aligned layout
     if (isInMergedDetailView) {
-      return _buildLeftAlignedLayout(context, messageBubble, isSelf, avatarURL, senderName);
+      return _buildLeftAlignedLayout(
+          context, messageBubble, isSelf, avatarURL, senderName);
     }
 
     Widget messageRow;
     switch (config.alignment) {
       case AppBuilder.MESSAGE_ALIGNMENT_TWO_SIDED:
-        messageRow = _buildTwoSidedLayout(context, messageBubble, isSelf, avatarURL, senderName);
+        messageRow = _buildTwoSidedLayout(
+            context, messageBubble, isSelf, avatarURL, senderName);
         break;
       case AppBuilder.MESSAGE_ALIGNMENT_LEFT:
-        messageRow = _buildLeftAlignedLayout(context, messageBubble, isSelf, avatarURL, senderName);
+        messageRow = _buildLeftAlignedLayout(
+            context, messageBubble, isSelf, avatarURL, senderName);
         break;
       case AppBuilder.MESSAGE_ALIGNMENT_RIGHT:
-        messageRow = _buildRightAlignedLayout(context, messageBubble, isSelf, avatarURL, senderName);
+        messageRow = _buildRightAlignedLayout(
+            context, messageBubble, isSelf, avatarURL, senderName);
         break;
       default:
-        messageRow = _buildTwoSidedLayout(context, messageBubble, isSelf, avatarURL, senderName);
+        messageRow = _buildTwoSidedLayout(
+            context, messageBubble, isSelf, avatarURL, senderName);
     }
 
     // Add checkbox in multi-select mode
@@ -204,7 +217,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
 
   /// Show resend confirmation dialog
   void _showResendConfirmDialog(BuildContext context) {
-    final locale = AtomicLocalizations.of(context);
+    final locale = AppLocalization.of(context);
     AtomicAlertDialog.showWithConfig(
       context,
       config: AlertDialogConfig(
@@ -234,18 +247,17 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   void _showReadReceiptDetail(BuildContext context) {
     final messageActionStore = MessageActionStore.create(message);
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => MessageReadReceiptView(
-          messageActionStore: messageActionStore,
-          messageListStore: messageListStore,
-          message: message,
-        ),
+    context.pushChatUIKitPage(
+      MessageReadReceiptView(
+        messageActionStore: messageActionStore,
+        messageListStore: messageListStore,
+        message: message,
       ),
     );
   }
 
-  Widget _buildWithConversationInfo(bool isSelf, String? defaultAvatarURL, String defaultSenderName) {
+  Widget _buildWithConversationInfo(
+      bool isSelf, String? defaultAvatarURL, String defaultSenderName) {
     return FutureBuilder<ConversationInfo?>(
       future: _fetchConversationInfo(),
       builder: (context, snapshot) {
@@ -265,8 +277,10 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
 
   Future<ConversationInfo?> _fetchConversationInfo() async {
     try {
-      ConversationListStore conversationListStore = ConversationListStore.create();
-      final result = await conversationListStore.getConversationInfo(conversationID: conversationID);
+      ConversationListStore conversationListStore =
+          ConversationListStore.create();
+      final result = await conversationListStore.getConversationInfo(
+          conversationID: conversationID);
       if (result.isSuccess && result.conversationInfo != null) {
         return result.conversationInfo;
       }
@@ -277,7 +291,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     }
   }
 
-  Widget _buildMessageLayout(bool isSelf, String? avatarUrl, String senderName, BuildContext context) {
+  Widget _buildMessageLayout(
+      bool isSelf, String? avatarUrl, String senderName, BuildContext context) {
     Widget messageBubble = MessageBubble(
       message: message,
       conversationID: conversationID,
@@ -310,13 +325,17 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
 
     switch (config.alignment) {
       case AppBuilder.MESSAGE_ALIGNMENT_TWO_SIDED:
-        return _buildTwoSidedLayout(context, messageBubble, isSelf, avatarUrl, senderName);
+        return _buildTwoSidedLayout(
+            context, messageBubble, isSelf, avatarUrl, senderName);
       case AppBuilder.MESSAGE_ALIGNMENT_LEFT:
-        return _buildLeftAlignedLayout(context, messageBubble, isSelf, avatarUrl, senderName);
+        return _buildLeftAlignedLayout(
+            context, messageBubble, isSelf, avatarUrl, senderName);
       case AppBuilder.MESSAGE_ALIGNMENT_RIGHT:
-        return _buildRightAlignedLayout(context, messageBubble, isSelf, avatarUrl, senderName);
+        return _buildRightAlignedLayout(
+            context, messageBubble, isSelf, avatarUrl, senderName);
       default:
-        return _buildTwoSidedLayout(context, messageBubble, isSelf, avatarUrl, senderName);
+        return _buildTwoSidedLayout(
+            context, messageBubble, isSelf, avatarUrl, senderName);
     }
   }
 
@@ -338,12 +357,14 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     );
   }
 
-  Widget _buildTwoSidedLayout(BuildContext context, Widget messageBubble, bool isSelf,
+  Widget _buildTwoSidedLayout(
+      BuildContext context, Widget messageBubble, bool isSelf,
       [String? avatarUrl, String? senderName]) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(
-        mainAxisAlignment: isSelf ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment:
+            isSelf ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: isSelf
             ? _buildSelfMessage(context, messageBubble, avatarUrl, senderName)
@@ -352,23 +373,28 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     );
   }
 
-  Widget _buildLeftAlignedLayout(BuildContext context, Widget messageBubble, bool isSelf,
+  Widget _buildLeftAlignedLayout(
+      BuildContext context, Widget messageBubble, bool isSelf,
       [String? avatarUrl, String? senderName]) {
     final displayAvatarUrl = avatarUrl ?? message.from.avatarURL;
-    final displaySenderName = senderName ?? ChatUtil.getMessageSenderName(message);
-    final colors = BaseThemeProvider.colorsOf(context);
-    final locale = AtomicLocalizations.of(context);
+    final displaySenderName =
+        senderName ?? ChatUtil.getMessageSenderName(message);
+    final colors = SemanticColorScheme.of(context);
+    final locale = AppLocalization.of(context);
 
     // In merged detail view: always show avatar, disable click, hide nickname
     final shouldShowAvatar = isInMergedDetailView || config.isShowLeftAvatar;
-    final shouldShowNickname = !isInMergedDetailView && config.isShowLeftNickname;
+    final shouldShowNickname =
+        !isInMergedDetailView && config.isShowLeftNickname;
 
     // Build status indicator if needed (only for self messages)
     final statusIndicator = isSelf
         ? buildOutsideBubbleStatusIndicator(
             message: message,
             colorsTheme: colors,
-            onResendTap: message.status == MessageStatus.sendFail ? () => _showResendConfirmDialog(context) : null,
+            onResendTap: message.status == MessageStatus.sendFail
+                ? () => _showResendConfirmDialog(context)
+                : null,
           )
         : null;
 
@@ -413,11 +439,13 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                       if (isMultiSelectMode) return;
                       // Trigger @ mention callback
                       if (onUserLongPress != null) {
-                        onUserLongPress!(message.from.userID, displaySenderName);
+                        onUserLongPress!(
+                            message.from.userID, displaySenderName);
                       }
                     },
               child: Avatar(
-                content: AvatarImageContent(url: displayAvatarUrl, name: displaySenderName),
+                content: AvatarImageContent(
+                    url: displayAvatarUrl, name: displaySenderName),
               ),
             ),
           if (shouldShowAvatar) SizedBox(width: config.avatarSpacing),
@@ -466,19 +494,23 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     );
   }
 
-  Widget _buildRightAlignedLayout(BuildContext context, Widget messageBubble, bool isSelf,
+  Widget _buildRightAlignedLayout(
+      BuildContext context, Widget messageBubble, bool isSelf,
       [String? avatarUrl, String? senderName]) {
     final displayAvatarUrl = avatarUrl ?? message.from.avatarURL;
-    final displaySenderName = senderName ?? ChatUtil.getMessageSenderName(message);
-    final colors = BaseThemeProvider.colorsOf(context);
-    final locale = AtomicLocalizations.of(context);
+    final displaySenderName =
+        senderName ?? ChatUtil.getMessageSenderName(message);
+    final colors = SemanticColorScheme.of(context);
+    final locale = AppLocalization.of(context);
 
     // Build status indicator if needed (only for self messages)
     final statusIndicator = isSelf
         ? buildOutsideBubbleStatusIndicator(
             message: message,
             colorsTheme: colors,
-            onResendTap: message.status == MessageStatus.sendFail ? () => _showResendConfirmDialog(context) : null,
+            onResendTap: message.status == MessageStatus.sendFail
+                ? () => _showResendConfirmDialog(context)
+                : null,
           )
         : null;
 
@@ -554,7 +586,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                 }
               },
               child: Avatar(
-                content: AvatarImageContent(url: displayAvatarUrl, name: displaySenderName),
+                content: AvatarImageContent(
+                    url: displayAvatarUrl, name: displaySenderName),
               ),
             ),
         ],
@@ -562,17 +595,21 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     );
   }
 
-  List<Widget> _buildSelfMessage(BuildContext context, Widget messageBubble, [String? avatarUrl, String? senderName]) {
+  List<Widget> _buildSelfMessage(BuildContext context, Widget messageBubble,
+      [String? avatarUrl, String? senderName]) {
     final displayAvatarUrl = avatarUrl ?? message.from.avatarURL;
-    final displaySenderName = senderName ?? ChatUtil.getMessageSenderName(message);
-    final colors = BaseThemeProvider.colorsOf(context);
-    final locale = AtomicLocalizations.of(context);
+    final displaySenderName =
+        senderName ?? ChatUtil.getMessageSenderName(message);
+    final colors = SemanticColorScheme.of(context);
+    final locale = AppLocalization.of(context);
 
     // Build status indicator if needed
     final statusIndicator = buildOutsideBubbleStatusIndicator(
       message: message,
       colorsTheme: colors,
-      onResendTap: message.status == MessageStatus.sendFail ? () => _showResendConfirmDialog(context) : null,
+      onResendTap: message.status == MessageStatus.sendFail
+          ? () => _showResendConfirmDialog(context)
+          : null,
     );
 
     // Build read receipt label (shown outside bubble on the left)
@@ -591,7 +628,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     // so the bubble's left edge aligns with other-message bubble's left edge
     // and doesn't overlap with the other side's avatar.
     final needLeftSpacer = config.isShowLeftAvatar;
-    final leftSpacerWidth = needLeftSpacer ? AvatarSize.m.value + config.avatarSpacing : 0.0;
+    final leftSpacerWidth =
+        needLeftSpacer ? AvatarSize.m.value + config.avatarSpacing : 0.0;
 
     return [
       if (needLeftSpacer) SizedBox(width: leftSpacerWidth),
@@ -628,21 +666,25 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
             // Violation hint text below the bubble
             _buildViolationHintText(context),
             // Reaction bar for self messages (right aligned)
-            if (config.isSupportReaction && message.reactionList.isNotEmpty) _buildReactionBar(context, isLeft: false),
+            if (config.isSupportReaction && message.reactionList.isNotEmpty)
+              _buildReactionBar(context, isLeft: false),
           ],
         ),
       ),
       if (config.isShowRightAvatar) SizedBox(width: config.avatarSpacing),
       if (config.isShowRightAvatar)
         Avatar(
-          content: AvatarImageContent(url: displayAvatarUrl, name: displaySenderName),
+          content: AvatarImageContent(
+              url: displayAvatarUrl, name: displaySenderName),
         ),
     ];
   }
 
-  List<Widget> _buildOtherMessage(BuildContext context, Widget messageBubble, [String? avatarUrl, String? senderName]) {
+  List<Widget> _buildOtherMessage(BuildContext context, Widget messageBubble,
+      [String? avatarUrl, String? senderName]) {
     final displayAvatarUrl = avatarUrl ?? message.from.avatarURL;
-    final displaySenderName = senderName ?? ChatUtil.getMessageSenderName(message);
+    final displaySenderName =
+        senderName ?? ChatUtil.getMessageSenderName(message);
     final attachment = _buildAttachmentIfAny(false);
 
     return [
@@ -667,7 +709,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
             }
           },
           child: Avatar(
-            content: AvatarImageContent(url: displayAvatarUrl, name: displaySenderName),
+            content: AvatarImageContent(
+                url: displayAvatarUrl, name: displaySenderName),
           ),
         ),
       if (config.isShowLeftAvatar) SizedBox(width: config.avatarSpacing),
@@ -688,14 +731,16 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
             // Violation hint text below the bubble
             _buildViolationHintText(context),
             // Reaction bar for other messages (left aligned)
-            if (config.isSupportReaction && message.reactionList.isNotEmpty) _buildReactionBar(context, isLeft: true),
+            if (config.isSupportReaction && message.reactionList.isNotEmpty)
+              _buildReactionBar(context, isLeft: true),
           ],
         ),
       ),
       // When self's right avatar is shown, add a right spacer for other messages
       // so the bubble's right edge aligns with self-message bubble's right edge
       // and doesn't overlap with self's avatar.
-      if (config.isShowRightAvatar) SizedBox(width: AvatarSize.m.value + config.avatarSpacing),
+      if (config.isShowRightAvatar)
+        SizedBox(width: AvatarSize.m.value + config.avatarSpacing),
     ];
   }
 
@@ -736,8 +781,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
       return const SizedBox.shrink();
     }
 
-    final colors = BaseThemeProvider.colorsOf(context);
-    final locale = AtomicLocalizations.of(context);
+    final colors = SemanticColorScheme.of(context);
+    final locale = AppLocalization.of(context);
 
     return Padding(
       padding: const EdgeInsets.only(top: 4),

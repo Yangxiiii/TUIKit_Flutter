@@ -1,7 +1,6 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/cupertino.dart';
-
-import 'package:tuikit_atomic_x/base_component/localizations/atomic_localizations.dart';
 
 enum GroupPermission {
   setGroupName,
@@ -29,7 +28,8 @@ enum GroupPermission {
 }
 
 class GroupPermissionManager {
-  static const Map<GroupType, Map<GroupMemberRole, Map<GroupPermission, bool>>> _permissionMatrix = {
+  static const Map<GroupType, Map<GroupMemberRole, Map<GroupPermission, bool>>>
+      _permissionMatrix = {
     GroupType.work: {
       GroupMemberRole.owner: {
         GroupPermission.setGroupName: true,
@@ -45,7 +45,8 @@ class GroupPermissionManager {
         GroupPermission.setGroupRemark: true,
         GroupPermission.setBackground: true,
         GroupPermission.getGroupMemberList: true,
-        GroupPermission.setGroupMemberRole: false, // no admin role in work group
+        GroupPermission.setGroupMemberRole:
+            false, // no admin role in work group
         GroupPermission.getGroupMemberInfo: true,
         GroupPermission.removeGroupMember: true,
         GroupPermission.addGroupMember: true,
@@ -124,7 +125,8 @@ class GroupPermissionManager {
         GroupPermission.removeGroupMember: true,
         GroupPermission.addGroupMember: true,
         GroupPermission.clearHistoryMessages: true,
-        GroupPermission.deleteAndQuit: false, // Owner cannot quit, must transfer ownership first
+        GroupPermission.deleteAndQuit:
+            false, // Owner cannot quit, must transfer ownership first
         GroupPermission.transferOwner: true,
         GroupPermission.dismissGroup: true,
         GroupPermission.reportGroup: true,
@@ -419,7 +421,10 @@ class GroupPermissionManager {
     final rolePermissions = _permissionMatrix[groupType]?[memberRole];
     if (rolePermissions == null) return [];
 
-    return rolePermissions.entries.where((entry) => entry.value).map((entry) => entry.key).toList();
+    return rolePermissions.entries
+        .where((entry) => entry.value)
+        .map((entry) => entry.key)
+        .toList();
   }
 
   static bool canPerformAction({
@@ -434,8 +439,9 @@ class GroupPermissionManager {
     );
   }
 
-  static String getGroupTypeDescription(GroupType groupType, BuildContext context) {
-    AtomicLocalizations atomicLocale = AtomicLocalizations.of(context);
+  static String getGroupTypeDescription(
+      GroupType groupType, BuildContext context) {
+    AppLocalizedText atomicLocale = AppLocalization.of(context);
     switch (groupType) {
       case GroupType.work:
         return atomicLocale.groupWork;
@@ -452,8 +458,9 @@ class GroupPermissionManager {
     }
   }
 
-  static String getMemberRoleDescription(GroupMemberRole role, BuildContext context) {
-    AtomicLocalizations atomicLocale = AtomicLocalizations.of(context);
+  static String getMemberRoleDescription(
+      GroupMemberRole role, BuildContext context) {
+    AppLocalizedText atomicLocale = AppLocalization.of(context);
     switch (role) {
       case GroupMemberRole.owner:
         return atomicLocale.groupOwner;

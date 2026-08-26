@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -19,8 +20,8 @@ class QuotePreviewBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
-    final locale = AtomicLocalizations.of(context);
+    final colors = SemanticColorScheme.of(context);
+    final locale = AppLocalization.of(context);
     final senderName = ChatUtil.getMessageSenderName(quotedMessage);
 
     return Container(
@@ -28,7 +29,9 @@ class QuotePreviewBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: colors.bgColorDefault,
         border: Border(
-          top: BorderSide(color: colors.strokeColorPrimary.withValues(alpha: 0.2), width: 0.5),
+          top: BorderSide(
+              color: colors.strokeColorPrimary.withValues(alpha: 0.2),
+              width: 0.5),
         ),
       ),
       child: Row(
@@ -55,7 +58,8 @@ class QuotePreviewBar extends StatelessWidget {
     );
   }
 
-  Widget _buildSingleLineContent(SemanticColorScheme colors, AtomicLocalizations locale, String senderName) {
+  Widget _buildSingleLineContent(
+      SemanticColorScheme colors, AppLocalizedText locale, String senderName) {
     final payload = quotedMessage.messagePayload;
     final textStyle = FontScheme.caption2Regular.copyWith(
       color: colors.textColorSecondary,
@@ -67,14 +71,21 @@ class QuotePreviewBar extends StatelessWidget {
       final duration = payload.audioDuration;
       final minutes = duration ~/ 60;
       final seconds = duration % 60;
-      final timeText = '${minutes > 0 ? "$minutes:" : ""}${seconds.toString().padLeft(2, '0')}"';
+      final timeText =
+          '${minutes > 0 ? "$minutes:" : ""}${seconds.toString().padLeft(2, '0')}"';
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (prefix.isNotEmpty) Text(prefix, style: textStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
+          if (prefix.isNotEmpty)
+            Text(prefix,
+                style: textStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
           Icon(Icons.volume_up, size: 14, color: colors.textColorSecondary),
           const SizedBox(width: 2),
-          Flexible(child: Text(timeText, style: textStyle, maxLines: 1, overflow: TextOverflow.ellipsis)),
+          Flexible(
+              child: Text(timeText,
+                  style: textStyle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis)),
         ],
       );
     }
@@ -82,10 +93,17 @@ class QuotePreviewBar extends StatelessWidget {
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (prefix.isNotEmpty) Text(prefix, style: textStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
-          Icon(Icons.insert_drive_file, size: 14, color: colors.textColorSecondary),
+          if (prefix.isNotEmpty)
+            Text(prefix,
+                style: textStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
+          Icon(Icons.insert_drive_file,
+              size: 14, color: colors.textColorSecondary),
           const SizedBox(width: 2),
-          Flexible(child: Text(payload.fileName ?? locale.messageTypeFile, style: textStyle, maxLines: 1, overflow: TextOverflow.ellipsis)),
+          Flexible(
+              child: Text(payload.fileName ?? locale.messageTypeFile,
+                  style: textStyle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis)),
         ],
       );
     }
@@ -107,7 +125,7 @@ class QuotePreviewBar extends StatelessWidget {
     );
   }
 
-  String _getContentSummary(AtomicLocalizations locale) {
+  String _getContentSummary(AppLocalizedText locale) {
     final payload = quotedMessage.messagePayload;
 
     switch (payload) {

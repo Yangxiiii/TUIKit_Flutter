@@ -1,8 +1,8 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../theme/color_scheme.dart';
 import '../theme/font.dart';
-import '../theme/theme_state.dart';
 import '../utils/app_builder.dart';
 
 enum AvatarType {
@@ -158,10 +158,10 @@ class Avatar extends StatelessWidget {
     if (shape != null) {
       return shape;
     }
-    
+
     final appBuilder = AppBuilder.getInstance();
     final avatarConfig = appBuilder.avatarConfig;
-    
+
     switch (avatarConfig.shape) {
       case AppBuilder.AVATAR_SHAPE_CIRCULAR:
         return AvatarShape.round;
@@ -174,86 +174,110 @@ class Avatar extends StatelessWidget {
     }
   }
 
-  Widget _buildAvatarContent(SemanticColorScheme colors) {
+  Widget _buildAvatarContent(
+    BuildContext context,
+    SemanticColorScheme colors,
+  ) {
     switch (content) {
       case AvatarImageContent imageContent:
-        return _buildImageAvatar(imageContent, colors);
+        return _buildImageAvatar(context, imageContent, colors);
       case AvatarTextContent textContent:
-        return _buildTextAvatar(textContent.name, colors);
+        return _buildTextAvatar(context, textContent.name, colors);
       case AvatarSymbolContent():
-        return _buildSymbolAvatar(colors);
+        return _buildSymbolAvatar(context, colors);
       case AvatarLocalContent localContent:
-        return _buildLocalAvatar(localContent.isGroup, colors);
+        return _buildLocalAvatar(context, localContent.isGroup, colors);
     }
   }
 
-  Widget _buildImageAvatar(AvatarImageContent imageContent, SemanticColorScheme colors) {
+  Widget _buildImageAvatar(
+    BuildContext context,
+    AvatarImageContent imageContent,
+    SemanticColorScheme colors,
+  ) {
     if (imageContent.url != null && imageContent.url!.isNotEmpty) {
       return CachedNetworkImage(
         imageUrl: imageContent.url!,
         width: size.value,
         height: size.value,
         fit: BoxFit.cover,
-        placeholder: (context, url) => _buildTextOrSymbolAvatar(imageContent.name, colors),
-        errorWidget: (context, url, error) => _buildTextOrSymbolAvatar(imageContent.name, colors),
+        placeholder: (context, url) =>
+            _buildTextOrSymbolAvatar(context, imageContent.name, colors),
+        errorWidget: (context, url, error) =>
+            _buildTextOrSymbolAvatar(context, imageContent.name, colors),
       );
     } else {
-      return _buildTextOrSymbolAvatar(imageContent.name, colors);
+      return _buildTextOrSymbolAvatar(context, imageContent.name, colors);
     }
   }
 
-  Widget _buildTextAvatar(String name, SemanticColorScheme colors) {
-    return _buildTextOrSymbolAvatar(name, colors);
+  Widget _buildTextAvatar(
+    BuildContext context,
+    String name,
+    SemanticColorScheme colors,
+  ) {
+    return _buildTextOrSymbolAvatar(context, name, colors);
   }
 
-  Widget _buildSymbolAvatar(SemanticColorScheme colors) {
+  Widget _buildSymbolAvatar(
+    BuildContext context,
+    SemanticColorScheme colors,
+  ) {
     final actualShape = _getAvatarShape(shape, size);
     return Container(
       width: size.value,
       height: size.value,
       decoration: BoxDecoration(
         color: colors.bgColorAvatar,
-        shape: actualShape == AvatarShape.round ? BoxShape.circle : BoxShape.rectangle,
+        shape: actualShape == AvatarShape.round
+            ? BoxShape.circle
+            : BoxShape.rectangle,
         borderRadius: actualShape == AvatarShape.roundedRectangle
             ? BorderRadius.circular(size.borderRadius)
             : null,
       ),
-      child: Icon(
-        Icons.person,
-        size: size.value * 0.6,
-        color: colors.textColorPrimary,
-      ),
+      child: _buildSkinAvatar(context, colors, isGroup: false) ??
+          _buildDefaultAvatarIcon(colors, isGroup: false),
     );
   }
 
-  Widget _buildLocalAvatar(bool isGroup, SemanticColorScheme colors) {
+  Widget _buildLocalAvatar(
+    BuildContext context,
+    bool isGroup,
+    SemanticColorScheme colors,
+  ) {
     final actualShape = _getAvatarShape(shape, size);
     return Container(
       width: size.value,
       height: size.value,
       decoration: BoxDecoration(
         color: colors.bgColorAvatar,
-        shape: actualShape == AvatarShape.round ? BoxShape.circle : BoxShape.rectangle,
+        shape: actualShape == AvatarShape.round
+            ? BoxShape.circle
+            : BoxShape.rectangle,
         borderRadius: actualShape == AvatarShape.roundedRectangle
             ? BorderRadius.circular(size.borderRadius)
             : null,
       ),
-      child: Icon(
-        isGroup ? Icons.group : Icons.person,
-        size: size.value * 0.6,
-        color: colors.textColorPrimary,
-      ),
+      child: _buildSkinAvatar(context, colors, isGroup: isGroup) ??
+          _buildDefaultAvatarIcon(colors, isGroup: isGroup),
     );
   }
 
-  Widget _buildTextOrSymbolAvatar(String? name, SemanticColorScheme colors) {
+  Widget _buildTextOrSymbolAvatar(
+    BuildContext context,
+    String? name,
+    SemanticColorScheme colors,
+  ) {
     final actualShape = _getAvatarShape(shape, size);
     return Container(
       width: size.value,
       height: size.value,
       decoration: BoxDecoration(
         color: colors.bgColorAvatar,
-        shape: actualShape == AvatarShape.round ? BoxShape.circle : BoxShape.rectangle,
+        shape: actualShape == AvatarShape.round
+            ? BoxShape.circle
+            : BoxShape.rectangle,
         borderRadius: actualShape == AvatarShape.roundedRectangle
             ? BorderRadius.circular(size.borderRadius)
             : null,
@@ -266,14 +290,41 @@ class Avatar extends StatelessWidget {
                   color: colors.textColorPrimary,
                 ),
               )
-            : Icon(
-                Icons.person,
-                size: size.value * 0.6,
-                color: colors.textColorPrimary,
-              ),
+            : _buildSkinAvatar(context, colors, isGroup: false) ??
+                _buildDefaultAvatarIcon(colors, isGroup: false),
       ),
     );
   }
+
+  Widget? _buildSkinAvatar(
+    BuildContext context,
+    SemanticColorScheme colors, {
+    required bool isGroup,
+  }) {
+    final key = isGroup
+        ? AppSkinIllustrations.chatGroupAvatar
+        : AppSkinIllustrations.chatUserAvatar;
+    final asset = AppSkinScope.maybeOf(context)?.illustration(key);
+    if (asset == null) return null;
+    return Image.asset(
+      asset,
+      width: size.value,
+      height: size.value,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) =>
+          _buildDefaultAvatarIcon(colors, isGroup: isGroup),
+    );
+  }
+
+  Widget _buildDefaultAvatarIcon(
+    SemanticColorScheme colors, {
+    required bool isGroup,
+  }) =>
+      Icon(
+        isGroup ? Icons.group : Icons.person,
+        size: size.value * 0.6,
+        color: colors.textColorPrimary,
+      );
 
   Widget _buildStatusDot(SemanticColorScheme colors) {
     if (status == AvatarStatus.none) return const SizedBox.shrink();
@@ -284,7 +335,7 @@ class Avatar extends StatelessWidget {
         dotColor = colors.textColorSuccess;
         break;
       case AvatarStatus.offline:
-        dotColor = Colors.grey.withOpacity(0.5);
+        dotColor = colors.textColorTertiary.withValues(alpha: 0.5);
         break;
       case AvatarStatus.none:
         dotColor = Colors.transparent;
@@ -317,8 +368,8 @@ class Avatar extends StatelessWidget {
           child: Container(
             width: 10,
             height: 10,
-            decoration: const BoxDecoration(
-              color: Colors.red,
+            decoration: BoxDecoration(
+              color: colors.textColorError,
               shape: BoxShape.circle,
             ),
           ),
@@ -329,14 +380,14 @@ class Avatar extends StatelessWidget {
           top: -5,
           child: Container(
             padding: const EdgeInsets.all(4),
-            decoration: const BoxDecoration(
-              color: Colors.red,
+            decoration: BoxDecoration(
+              color: colors.textColorError,
               shape: BoxShape.circle,
             ),
             child: Text(
               textBadge.text,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: colors.textColorButton,
                 fontSize: 10,
                 fontWeight: FontWeight.w600,
               ),
@@ -350,14 +401,14 @@ class Avatar extends StatelessWidget {
           top: -5,
           child: Container(
             padding: const EdgeInsets.all(4),
-            decoration: const BoxDecoration(
-              color: Colors.red,
+            decoration: BoxDecoration(
+              color: colors.textColorError,
               shape: BoxShape.circle,
             ),
             child: Text(
               text,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: colors.textColorButton,
                 fontSize: 10,
                 fontWeight: FontWeight.w600,
               ),
@@ -369,9 +420,9 @@ class Avatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
-    
-    Widget avatar = _buildAvatarContent(colorsTheme);
+    final colorsTheme = SemanticColorScheme.of(context);
+
+    Widget avatar = _buildAvatarContent(context, colorsTheme);
 
     final actualShape = _getAvatarShape(shape, size);
 
@@ -415,4 +466,4 @@ class Avatar extends StatelessWidget {
 
     return result;
   }
-} 
+}

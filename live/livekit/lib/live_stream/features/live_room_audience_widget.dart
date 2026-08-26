@@ -13,7 +13,6 @@ import 'package:tencent_live_uikit/live_stream/features/audience/living_widget/b
 import 'package:tencent_live_uikit/live_stream/manager/live_stream_manager.dart';
 import 'package:atomic_x_core/api/live/live_list_store.dart';
 
-import '../../common/resources/live_theme_manager.dart';
 import '../../common/widget/float_window/float_window_controller.dart';
 import '../../common/widget/float_window/float_window_mode.dart';
 import '../../component/beauty/live_beauty_store.dart';
@@ -28,12 +27,7 @@ class TUILiveRoomAudienceWidget extends StatefulWidget {
   final LiveInfo? liveInfo;
   final FloatWindowController? floatWindowController;
 
-  const TUILiveRoomAudienceWidget({
-    super.key,
-    required this.roomId,
-    this.liveInfo,
-    this.floatWindowController,
-  });
+  const TUILiveRoomAudienceWidget({super.key, required this.roomId, this.liveInfo, this.floatWindowController});
 
   @override
   State<TUILiveRoomAudienceWidget> createState() => _TUILiveRoomAudienceWidgetState();
@@ -48,8 +42,6 @@ class _TUILiveRoomAudienceWidgetState extends State<TUILiveRoomAudienceWidget> w
   final ValueNotifier<int> _currentPageIndex = ValueNotifier<int>(0);
 
   final Map<int, _PageResources> _pageResources = {};
-
-  bool _hasEnteredThemeScene = false;
 
   /// Tracks where PageView is currently heading during a scroll gesture.
   /// Updated by onPageChanged (page cross-threshold), but does NOT trigger
@@ -71,9 +63,7 @@ class _TUILiveRoomAudienceWidgetState extends State<TUILiveRoomAudienceWidget> w
     _changeStatusBar2LightMode();
     _pagerService = LiveListPagerService();
     _pageController = PageController(initialPage: 0);
-    _previewManager = LiveListPagerPreviewManager(
-      controllerFactory: LiveCorePreviewControllerFactory(),
-    );
+    _previewManager = LiveListPagerPreviewManager(controllerFactory: LiveCorePreviewControllerFactory());
     _scrollLockManager = LiveListPagerScrollLockManager();
     assert(
       widget.liveInfo == null || widget.liveInfo!.liveID == widget.roomId,
@@ -88,20 +78,8 @@ class _TUILiveRoomAudienceWidgetState extends State<TUILiveRoomAudienceWidget> w
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // Only switch theme on first entry
-    if (!_hasEnteredThemeScene) {
-      _hasEnteredThemeScene = true;
-      LiveThemeManager.instance.enterLiveKitScene(context);
-    }
-  }
-
-  @override
   void dispose() {
     LiveKitLogger.info('TUILiveRoomAudienceWidget dispose');
-    // Exit LiveKit scene and restore theme
-    LiveThemeManager.instance.exitLiveKitScene();
     _stopWakeLock();
     _pageController.dispose();
     _currentPageIndex.dispose();
@@ -146,7 +124,8 @@ class _TUILiveRoomAudienceWidgetState extends State<TUILiveRoomAudienceWidget> w
         final actual = _pageController.page?.round();
         if (actual != null && actual != committed) {
           LiveKitLogger.info(
-              'TUILiveRoomAudienceWidget post-resume reconcile: PageView at $actual, jump back to $committed');
+            'TUILiveRoomAudienceWidget post-resume reconcile: PageView at $actual, jump back to $committed',
+          );
           _pageController.jumpToPage(committed);
           _settlingPageIndex = committed;
           _isScrolling = false;
@@ -244,8 +223,9 @@ class _TUILiveRoomAudienceWidgetState extends State<TUILiveRoomAudienceWidget> w
     final previewController = _previewManager.getPreviewController(liveInfo.liveID);
     final coverUrl = liveInfo.coverURL.isNotEmpty ? liveInfo.coverURL : liveInfo.backgroundURL;
 
-    final liveCoreController =
-        (previewController is LiveCorePreviewController) ? previewController.coreController : null;
+    final liveCoreController = (previewController is LiveCorePreviewController)
+        ? previewController.coreController
+        : null;
 
     return Container(
       color: LiveColors.notStandardPureBlack,
@@ -258,11 +238,7 @@ class _TUILiveRoomAudienceWidgetState extends State<TUILiveRoomAudienceWidget> w
               key: ValueKey('preview_pager_${liveInfo.liveID}_${liveCoreController.hashCode}'),
               controller: liveCoreController,
             ),
-          const Center(
-            child: CircularProgressIndicator(
-              color: Colors.white,
-            ),
-          ),
+          const Center(child: CircularProgressIndicator(color: Colors.white)),
         ],
       ),
     );
@@ -272,10 +248,7 @@ class _TUILiveRoomAudienceWidgetState extends State<TUILiveRoomAudienceWidget> w
     if (_pageResources.containsKey(index)) {
       return _pageResources[index]!;
     }
-    final resources = _PageResources(
-      liveInfo.liveID,
-      showToast: (toast) => makeToast(context, toast),
-    );
+    final resources = _PageResources(liveInfo.liveID, showToast: (toast) => makeToast(context, toast));
     if (widget.floatWindowController != null) {
       resources.addFloatWindowObserver(widget.floatWindowController!);
     }
@@ -358,17 +331,15 @@ class _TUILiveRoomAudienceWidgetState extends State<TUILiveRoomAudienceWidget> w
     final adjacentRoomIds = <String>[];
     if (newIndex > 0) adjacentRoomIds.add(liveInfoList[newIndex - 1].liveID);
     if (newIndex < liveInfoList.length - 1) adjacentRoomIds.add(liveInfoList[newIndex + 1].liveID);
-    _previewManager.onPageChanged(
-      newCurrentRoomId: liveInfoList[newIndex].liveID,
-      adjacentRoomIds: adjacentRoomIds,
-    );
+    _previewManager.onPageChanged(newCurrentRoomId: liveInfoList[newIndex].liveID, adjacentRoomIds: adjacentRoomIds);
 
     // 5. Finally swap the widget tree: _buildPage will now return
     //    AudienceWidget for `newIndex` and a preview page for the rest.
     _currentPageIndex.value = newIndex;
 
     LiveKitLogger.info(
-        'TUILiveRoomAudienceWidget commitPageChange done, active resources: ${_pageResources.keys.toList()}');
+      'TUILiveRoomAudienceWidget commitPageChange done, active resources: ${_pageResources.keys.toList()}',
+    );
   }
 
   void _cleanupDistantPages(int currentIndex) {
@@ -449,8 +420,8 @@ class _PageResources {
   bool _isDisposed = false;
 
   _PageResources(this.roomId, {required this.showToast})
-      : liveCoreController = LiveCoreController.create(CoreViewType.playView),
-        liveStreamManager = LiveStreamManager() {
+    : liveCoreController = LiveCoreController.create(CoreViewType.playView),
+      liveStreamManager = LiveStreamManager() {
     _init();
   }
 
@@ -490,7 +461,8 @@ class _PageResources {
     final hasCameraPermission = await Permission.camera.status == PermissionStatus.granted;
     if (!hasCameraPermission) {
       LiveKitLogger.error(
-          '[ForegroundService] failed to start video foreground service. reason: without camera permission');
+        '[ForegroundService] failed to start video foreground service. reason: without camera permission',
+      );
       return;
     }
     TUILiveKitPlatform.instance.startForegroundService(ForegroundServiceType.video, "", description);
@@ -511,13 +483,11 @@ class _PageResources {
     bool isFullScreen = _floatWindowController!.isFullScreen.value;
     FloatWindowMode floatWindowMode = liveStreamManager.floatWindowState.floatWindowMode.value;
     if (isFullScreen) {
-      LiveThemeManager.instance.resumeTheme();
       if (floatWindowMode != FloatWindowMode.outOfApp) {
         liveStreamManager.setFloatWindowMode(FloatWindowMode.none);
       }
     } else {
       liveStreamManager.setFloatWindowMode(FloatWindowMode.inApp);
-      LiveThemeManager.instance.pauseTheme();
     }
   }
 }

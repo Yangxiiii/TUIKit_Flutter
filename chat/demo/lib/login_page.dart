@@ -34,7 +34,8 @@ class LoginInfoState extends ChangeNotifier {
 
   LoginInfoState._internal() {
     _loadTestEnvironmentConfig();
-    isLoggedIn = LoginStore.shared.loginState.loginStatus == LoginStatus.logined;
+    isLoggedIn =
+        LoginStore.shared.loginState.loginStatus == LoginStatus.logined;
     if (isLoggedIn && LoginStore.shared.loginState.loginUserInfo != null) {
       currentUserID = LoginStore.shared.loginState.loginUserInfo!.userID;
     }
@@ -54,10 +55,7 @@ class LoginInfoState extends ChangeNotifier {
     final userSig = GenerateDevUsersigForTest(
       sdkappid: SDKAPPID,
       key: SECRETKEY,
-    ).genSig(
-      userID: userID,
-      expireTime: EXPIRE_TIME,
-    );
+    ).genSig(userID: userID, expireTime: EXPIRE_TIME);
 
     if (!_isOhos) {
       TUICallKit.instance.login(SDKAPPID, userID, userSig);
@@ -89,7 +87,8 @@ class LoginInfoState extends ChangeNotifier {
 
   Future<bool> logout() async {
     if (!_isOhos) {
-      if (CallStore.shared.state.selfInfo.value.status == CallParticipantStatus.accept) {
+      if (CallStore.shared.state.selfInfo.value.status ==
+          CallParticipantStatus.accept) {
         await CallStore.shared.hangup();
       }
     }
@@ -138,8 +137,14 @@ class LoginInfoState extends ChangeNotifier {
     );
   }
 
-  void _onNotificationClicked({required String ext, String? userID, String? groupID}) {
-    debugPrint("_onNotificationClicked: $ext, userID: $userID, groupID: $groupID");
+  void _onNotificationClicked({
+    required String ext,
+    String? userID,
+    String? groupID,
+  }) {
+    debugPrint(
+      "_onNotificationClicked: $ext, userID: $userID, groupID: $groupID",
+    );
   }
 }
 
@@ -154,7 +159,9 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController _userIDController = TextEditingController(text: '');
+  final TextEditingController _userIDController = TextEditingController(
+    text: '',
+  );
 
   @override
   void initState() {
@@ -187,7 +194,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    AtomicLocalizations atomicLocale = AtomicLocalizations.of(context);
+    AppLocalizedText atomicLocale = AppLocalization.of(context);
     final loginState = Provider.of<LoginInfoState>(context);
 
     return Scaffold(
@@ -208,8 +215,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   Text(
                     "UIKit Next",
                     style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: 48),
                   TextField(
@@ -235,7 +242,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide: BorderSide(
-                          color: Theme.of(context).primaryColor.withOpacity(0.5),
+                          color: Theme.of(
+                            context,
+                          ).primaryColor.withOpacity(0.5),
                           width: 1.5,
                         ),
                       ),
@@ -254,7 +263,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     width: double.infinity,
                     height: 50,
                     child: ElevatedButton(
-                      onPressed: loginState.isLoggingIn ? null : () => _login(context),
+                      onPressed: loginState.isLoggingIn
+                          ? null
+                          : () => _login(context),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Theme.of(context).primaryColor,
                         foregroundColor: Colors.white,
@@ -273,13 +284,19 @@ class _LoginScreenState extends State<LoginScreen> {
                             )
                           : Text(
                               atomicLocale.login,
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                     ),
                   ),
                   const SizedBox(height: 16),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.grey.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(4),

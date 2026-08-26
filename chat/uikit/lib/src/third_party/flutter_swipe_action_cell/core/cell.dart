@@ -878,7 +878,9 @@ class SwipeActionCellState extends State<SwipeActionCell>
                   width = constraints.maxWidth;
                   // Action buttons
                   final bool shouldHideActionButtons =
-                      currentOffset.dx == 0.0 || editController.isAnimating || editing;
+                      currentOffset.dx == 0.0 ||
+                          editController.isAnimating ||
+                          editing;
                   final Widget trailing = shouldHideActionButtons
                       ? const SizedBox()
                       : _buildTrailingActionButtons();

@@ -9,10 +9,12 @@ class ImageViewer {
     required int initialIndex,
     required EventHandler onEventTriggered,
   }) async {
+    // 图片预览依赖透明 Route 叠加在当前页面之上，因此保留 Overlay 导航。
     Navigator.of(context).push(
       PageRouteBuilder(
         opaque: false,
-        pageBuilder: (context, animation, secondaryAnimation) => ImageViewerWidget(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            ImageViewerWidget(
           imageElements: imageElements,
           initialIndex: initialIndex,
           onEventTriggered: onEventTriggered,

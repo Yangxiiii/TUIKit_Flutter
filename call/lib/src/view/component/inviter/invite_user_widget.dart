@@ -6,7 +6,8 @@ import 'package:tencent_cloud_chat_sdk/enum/group_member_filter_enum.dart';
 import 'package:tencent_cloud_chat_sdk/tencent_im_sdk_plugin.dart';
 import 'package:rtc_room_engine/rtc_room_engine.dart';
 import 'package:tencent_calls_uikit/src/common/constants.dart';
-import 'package:tuikit_atomic_x/base_component/localizations/atomic_localizations.dart';
+import 'package:tuikit_atomic_x/base_component/base_component.dart'
+    show AppChatLocalizedText, AppLocalization, AppLocalizedText;
 import 'package:tencent_calls_uikit/src/common/utils/string_stream.dart';
 import 'package:tencent_calls_uikit/src/manager/call_page_router.dart';
 
@@ -31,91 +32,94 @@ class _InviteUserWidgetState extends State<InviteUserWidget> {
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AtomicLocalizations.of(context);
+    final l10n = AppLocalization.of(context);
     return Scaffold(
-        appBar: AppBar(
-          title: Center(
-            child: Text(
-              l10n.callInviteMembers,
-              textScaleFactor: 1.0,
-            ),
-          ),
-          leading: IconButton(
-              onPressed: _goBack,
-              icon: const Icon(
-                Icons.arrow_back,
-                color: Colors.black,
-              )),
-          actions: <Widget>[
-            IconButton(
-              icon: const Icon(Icons.control_point_sharp),
-              tooltip: 'Search',
-              onPressed: () => _inviteUser(),
-            ),
-          ],
+      appBar: AppBar(
+        title: Center(
+          child: Text(l10n.callInviteMembers, textScaleFactor: 1.0),
         ),
-        body: ListView.builder(
-            itemCount: _groupMemberList.length,
-            itemExtent: 60,
-            itemBuilder: (context, index) {
-              final isDefaultSelected = _defaultSelectList.contains(_groupMemberList[index].userId);
-              return InkWell(
-                onTap: isDefaultSelected ? null : () {
-                  _selectUser(index);
-                },
-                child: Row(
-                  children: [
-                    const Padding(padding: EdgeInsets.symmetric(horizontal: 10)),
-                    Image.asset(
-                      _groupMemberList[index].isSelected
-                          ? 'assets/images/check_box_group_selected.png'
-                          : 'assets/images/check_box_group_unselected.png',
-                      package: 'tencent_calls_uikit',
-                      width: 18,
-                      height: 18,
-                      color: isDefaultSelected ? Colors.grey : null,
-                    ),
-                    const Padding(padding: EdgeInsets.symmetric(horizontal: 10)),
-                    Container(
-                      width: 40,
-                      height: 40,
-                      clipBehavior: Clip.hardEdge,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(40),
-                      ),
-                      child: Image(
-                        image: NetworkImage(_groupMemberList[index].avatar),
-                        fit: BoxFit.cover,
-                        errorBuilder: (ctx, err, stackTrace) => Image.asset(
-                          'assets/images/user_icon.png',
-                          package: 'tencent_calls_uikit',
-                        ),
-                      ),
-                    ),
-                    const Padding(padding: EdgeInsets.symmetric(horizontal: 5)),
-                    Text(
-                      _getMemberDisPlayName(_groupMemberList[index]),
-                      textScaleFactor: 1.0,
-                      style: TextStyle(
-                        color: isDefaultSelected ? Colors.grey : Colors.black, 
-                        fontSize: 18
-                      ),
-                    )
-                  ],
+        leading: IconButton(
+          onPressed: _goBack,
+          icon: const Icon(Icons.arrow_back, color: Colors.black),
+        ),
+        actions: <Widget>[
+          IconButton(
+            icon: const Icon(Icons.control_point_sharp),
+            tooltip: 'Search',
+            onPressed: () => _inviteUser(),
+          ),
+        ],
+      ),
+      body: ListView.builder(
+        itemCount: _groupMemberList.length,
+        itemExtent: 60,
+        itemBuilder: (context, index) {
+          final isDefaultSelected = _defaultSelectList.contains(
+            _groupMemberList[index].userId,
+          );
+          return InkWell(
+            onTap: isDefaultSelected
+                ? null
+                : () {
+                    _selectUser(index);
+                  },
+            child: Row(
+              children: [
+                const Padding(padding: EdgeInsets.symmetric(horizontal: 10)),
+                Image.asset(
+                  _groupMemberList[index].isSelected
+                      ? 'assets/images/check_box_group_selected.png'
+                      : 'assets/images/check_box_group_unselected.png',
+                  package: 'tencent_calls_uikit',
+                  width: 18,
+                  height: 18,
+                  color: isDefaultSelected ? Colors.grey : null,
                 ),
-              );
-            }));
+                const Padding(padding: EdgeInsets.symmetric(horizontal: 10)),
+                Container(
+                  width: 40,
+                  height: 40,
+                  clipBehavior: Clip.hardEdge,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(40),
+                  ),
+                  child: Image(
+                    image: NetworkImage(_groupMemberList[index].avatar),
+                    fit: BoxFit.cover,
+                    errorBuilder: (ctx, err, stackTrace) => Image.asset(
+                      'assets/images/user_icon.png',
+                      package: 'tencent_calls_uikit',
+                    ),
+                  ),
+                ),
+                const Padding(padding: EdgeInsets.symmetric(horizontal: 5)),
+                Text(
+                  _getMemberDisPlayName(_groupMemberList[index]),
+                  textScaleFactor: 1.0,
+                  style: TextStyle(
+                    color: isDefaultSelected ? Colors.grey : Colors.black,
+                    fontSize: 18,
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 
   _getGroupMember() async {
     final memberInfoResult = await TencentImSDKPlugin.v2TIMManager
         .getGroupManager()
         .getGroupMemberList(
-        groupID: CallStore.shared.state.activeCall.value.chatGroupId,
-        filter: GroupMemberFilterTypeEnum.V2TIM_GROUP_MEMBER_FILTER_ALL,
-        nextSeq: '0');
+          groupID: CallStore.shared.state.activeCall.value.chatGroupId,
+          filter: GroupMemberFilterTypeEnum.V2TIM_GROUP_MEMBER_FILTER_ALL,
+          nextSeq: '0',
+        );
     _groupMemberList.clear();
-    if (memberInfoResult.data == null || memberInfoResult.data!.memberInfoList == null) {
+    if (memberInfoResult.data == null ||
+        memberInfoResult.data!.memberInfoList == null) {
       return;
     }
 
@@ -126,22 +130,27 @@ class _InviteUserWidgetState extends State<InviteUserWidget> {
     var memberInfo = GroupMemberInfo();
     memberInfo.userId = CallStore.shared.state.selfInfo.value.id;
     memberInfo.userName =
-    '${StringStream.makeNull(CallStore.shared.state.selfInfo.value.name,
-        CallStore.shared.state.selfInfo.value.id)} (${AtomicLocalizations.of(context).callYourself})';
-    memberInfo.avatar =
-        StringStream.makeNull(CallStore.shared.state.selfInfo.value.avatarURL, Constants.defaultAvatar);
+        '${StringStream.makeNull(CallStore.shared.state.selfInfo.value.name, CallStore.shared.state.selfInfo.value.id)} (${AppLocalization.of(context).callYourself})';
+    memberInfo.avatar = StringStream.makeNull(
+      CallStore.shared.state.selfInfo.value.avatarURL,
+      Constants.defaultAvatar,
+    );
     memberInfo.isSelected = true;
     _groupMemberList.add(memberInfo);
 
     for (var info in memberInfoResult.data!.memberInfoList!) {
-      if (info == null || info.userID == CallStore.shared.state.selfInfo.value.id) {
+      if (info == null ||
+          info.userID == CallStore.shared.state.selfInfo.value.id) {
         continue;
       }
       var memberInfo = GroupMemberInfo();
       memberInfo.userId = info.userID;
       memberInfo.userName = StringStream.makeNull(info.nickName, '');
       memberInfo.remark = StringStream.makeNull(info.friendRemark, '');
-      memberInfo.avatar = StringStream.makeNull(info.faceUrl, Constants.defaultAvatar);
+      memberInfo.avatar = StringStream.makeNull(
+        info.faceUrl,
+        Constants.defaultAvatar,
+      );
       memberInfo.isSelected = _defaultSelectList.contains(info.userID);
       _groupMemberList.add(memberInfo);
     }

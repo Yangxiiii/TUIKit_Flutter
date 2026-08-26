@@ -1,6 +1,8 @@
+import 'package:app_ui/app_ui.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
-import 'package:provider/provider.dart';
 import 'package:tencent_calls_uikit/tencent_calls_uikit.dart';
 import 'package:tencent_live_uikit/tencent_live_uikit.dart';
 import 'package:tencent_conference_uikit/tencent_conference_uikit.dart';
@@ -10,26 +12,38 @@ import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
 import 'src/login/index.dart';
 import 'src/utils/index.dart';
 
-void main() {
-  runApp(const MyApp());
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(statusBarColor: Colors.transparent));
-  SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await EasyLocalization.ensureInitialized();
+  runApp(
+    EasyLocalization(
+      supportedLocales: AppLocalization.supportedLocales,
+      fallbackLocale: AppLocalization.fallbackLocale,
+      path: AppLocalization.assetPath,
+      saveLocale: true,
+      child: const ProviderScope(child: MyApp()),
+    ),
+  );
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(statusBarColor: Colors.transparent),
+  );
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
 }
 
-class MyApp extends StatefulWidget {
+class MyApp extends ConsumerStatefulWidget {
   const MyApp({super.key});
 
   @override
-  State<MyApp> createState() => _MyAppState();
+  ConsumerState<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> {
-  late final ThemeState _themeState;
-
+class _MyAppState extends ConsumerState<MyApp> {
   @override
   void initState() {
     super.initState();
-    _themeState = ThemeState();
     _initializeApp();
   }
 
@@ -39,51 +53,50 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MultiProvider(
-      providers: [
-        ChangeNotifierProvider.value(value: LocaleProvider()),
+    final localization = EasyLocalization.of(context);
+    final themeMode = ref.watch(appThemeModeProvider);
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      navigatorObservers: [
+        AppNavigatorObserver.instance,
+        TUILiveKitNavigatorObserver.instance,
+        RoomNavigatorObserver.instance,
+        TUICallKit.navigatorObserver,
       ],
-      child: Builder(builder: (context) {
-        return ComponentTheme(
-          themeState: _themeState,
-          child: MaterialApp(
-            debugShowCheckedModeBanner: false,
-            navigatorObservers: [
-              AppNavigatorObserver.instance,
-              TUILiveKitNavigatorObserver.instance,
-              RoomNavigatorObserver.instance,
-              TUICallKit.navigatorObserver
-            ],
-            localizationsDelegates: const [
-              ...AppLocalizations.localizationsDelegates,
-              ...LiveKitLocalizations.localizationsDelegates,
-              ...BarrageLocalizations.localizationsDelegates,
-              ...GiftLocalizations.localizationsDelegates,
-              ...RoomLocalizations.localizationsDelegates,
-              // ...TEBeautyKitLocalizations.localizationsDelegates,
-              AtomicLocalizations.delegate,
-              ChatLocalizations.delegate,
-            ],
-            supportedLocales: const [
-              Locale('en'),
-              Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
-              Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hant'),
-              Locale('zh'),
-            ],
-            locale: Provider.of<LocaleProvider>(context).locale,
-            builder: (context, child) => Scaffold(
-              resizeToAvoidBottomInset: false,
-              body: GestureDetector(
-                onTap: () {
-                  hideKeyboard(context);
-                },
-                child: child,
-              ),
-            ),
-            home: const LoginWidget(),
-          ),
-        );
-      }),
+      localizationsDelegates: [
+        ...?localization?.delegates,
+        ...AppLocalizations.localizationsDelegates,
+        ...LiveKitLocalizations.localizationsDelegates,
+        ...BarrageLocalizations.localizationsDelegates,
+        ...GiftLocalizations.localizationsDelegates,
+        ...RoomLocalizations.localizationsDelegates,
+        // ...TEBeautyKitLocalizations.localizationsDelegates,
+      ],
+      supportedLocales: AppLocalization.supportedLocales,
+      locale: localization?.locale,
+      theme: AppThemeFactory.create(
+        const AppNormalColorScheme(),
+        Brightness.light,
+      ),
+      darkTheme: AppThemeFactory.create(
+        const AppDarkColorScheme(),
+        Brightness.dark,
+      ),
+      themeMode: switch (themeMode) {
+        AppThemeMode.system => ThemeMode.system,
+        AppThemeMode.light => ThemeMode.light,
+        AppThemeMode.dark => ThemeMode.dark,
+      },
+      builder: (context, child) => Scaffold(
+        resizeToAvoidBottomInset: false,
+        body: GestureDetector(
+          onTap: () {
+            hideKeyboard(context);
+          },
+          child: child,
+        ),
+      ),
+      home: const LoginWidget(),
     );
   }
 

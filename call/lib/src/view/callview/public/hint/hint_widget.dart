@@ -8,7 +8,7 @@ import '../../core/common/call_colors.dart';
 class _HintDisplayTracker {
   static String? _currentCallId;
   static bool _hadShowAcceptText = false;
-  
+
   static bool shouldShowAcceptText(String callId) {
     if (_currentCallId != callId) {
       _currentCallId = callId;
@@ -16,7 +16,7 @@ class _HintDisplayTracker {
     }
     return !_hadShowAcceptText;
   }
-  
+
   static void markAcceptTextShown(String callId) {
     if (_currentCallId == callId) {
       _hadShowAcceptText = true;
@@ -43,7 +43,7 @@ class _HintWidgetState extends State<HintWidget> {
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AtomicLocalizations.of(context);
+    final l10n = AppLocalization.of(context);
     return ValueListenableBuilder(
       valueListenable: CallStore.shared.state.selfInfo,
       builder: (context, selfInfo, child) {
@@ -55,11 +55,14 @@ class _HintWidgetState extends State<HintWidget> {
     );
   }
 
-  Widget? _buildConnectionHint(CallParticipantInfo selfInfo, AtomicLocalizations l10n) {
+  Widget? _buildConnectionHint(
+    CallParticipantInfo selfInfo,
+    AppLocalizedText l10n,
+  ) {
     final activeCall = CallStore.shared.state.activeCall.value;
     final callId = activeCall.callId;
-    
-    if (selfInfo.status != CallParticipantStatus.accept || 
+
+    if (selfInfo.status != CallParticipantStatus.accept ||
         !_HintDisplayTracker.shouldShowAcceptText(callId)) {
       return null;
     }
@@ -82,13 +85,16 @@ class _HintWidgetState extends State<HintWidget> {
     );
   }
 
-  Widget? _buildStatusHint(CallParticipantInfo selfInfo, AtomicLocalizations l10n) {
+  Widget? _buildStatusHint(
+    CallParticipantInfo selfInfo,
+    AppLocalizedText l10n,
+  ) {
     if (selfInfo.status != CallParticipantStatus.waiting) {
       return null;
     }
 
     final activeCall = CallStore.shared.state.activeCall.value;
-    
+
     if (selfInfo.id == activeCall.inviterId) {
       return Text(
         l10n.callWaitingForInvitationAcceptance,
@@ -114,30 +120,37 @@ class _HintWidgetState extends State<HintWidget> {
     }
   }
 
-  Widget? _buildNetworkQualityHint(CallParticipantInfo selfInfo, AtomicLocalizations l10n) {
+  Widget? _buildNetworkQualityHint(
+    CallParticipantInfo selfInfo,
+    AppLocalizedText l10n,
+  ) {
     return ValueListenableBuilder(
       valueListenable: CallStore.shared.state.networkQualities,
       builder: (context, networkQualities, child) {
-        final hintText = _getNetworkQualityHintText(selfInfo, networkQualities, l10n);
+        final hintText = _getNetworkQualityHintText(
+          selfInfo,
+          networkQualities,
+          l10n,
+        );
         return hintText.isNotEmpty
             ? Text(
-          hintText,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: _getHintTextColor(),
-          ),
-        )
+                hintText,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: _getHintTextColor(),
+                ),
+              )
             : const SizedBox();
       },
     );
   }
 
   String _getNetworkQualityHintText(
-      CallParticipantInfo selfInfo,
-      Map<String, NetworkQuality> networkQualities,
-      AtomicLocalizations l10n,
-      ) {
+    CallParticipantInfo selfInfo,
+    Map<String, NetworkQuality> networkQualities,
+    AppLocalizedText l10n,
+  ) {
     final selfNetwork = networkQualities[selfInfo.id];
     if (selfNetwork != null && _isBadNetwork(selfNetwork)) {
       return l10n.callSelfNetworkLowQuality;
@@ -159,7 +172,8 @@ class _HintWidgetState extends State<HintWidget> {
   }
 
   Color _getHintTextColor() {
-    if (CallStore.shared.state.activeCall.value.mediaType == CallMediaType.video) {
+    if (CallStore.shared.state.activeCall.value.mediaType ==
+        CallMediaType.video) {
       return CallColors.colorWhite;
     }
     return CallColors.colorG7;

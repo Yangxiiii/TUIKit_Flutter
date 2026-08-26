@@ -229,7 +229,7 @@ class _Label extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = BaseThemeProvider.colorsOf(context);
+    final colorScheme = SemanticColorScheme.of(context);
 
     return Text(
       text,

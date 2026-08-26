@@ -18,6 +18,7 @@ class SoundMessageWidget extends StatefulWidget {
   final GlobalKey? bubbleKey;
   final MessageListConfigProtocol config;
   final bool isInMergedDetailView;
+
   /// Optional override for bubble background color (used for highlight animation)
   final Color? bubbleColor;
 
@@ -39,7 +40,8 @@ class SoundMessageWidget extends StatefulWidget {
   State<SoundMessageWidget> createState() => _SoundMessageWidgetState();
 }
 
-class _SoundMessageWidgetState extends State<SoundMessageWidget> with MessageStatusMixin {
+class _SoundMessageWidgetState extends State<SoundMessageWidget>
+    with MessageStatusMixin {
   bool _isPlaying = false;
   bool _isDownloading = false;
 
@@ -50,7 +52,8 @@ class _SoundMessageWidgetState extends State<SoundMessageWidget> with MessageSta
   @override
   void initState() {
     super.initState();
-    _audioPlayer = AudioPlayer.createInstance().setListener(_AudioPlayerListenerImpl(
+    _audioPlayer =
+        AudioPlayer.createInstance().setListener(_AudioPlayerListenerImpl(
       onProgressUpdate: (currentPosition, duration) {
         if (mounted && _isPlaying) {
           setState(() {
@@ -85,7 +88,7 @@ class _SoundMessageWidgetState extends State<SoundMessageWidget> with MessageSta
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
 
     final statusAndTimeWidgets = buildStatusAndTimeWidgets(
       message: widget.message,
@@ -119,7 +122,8 @@ class _SoundMessageWidgetState extends State<SoundMessageWidget> with MessageSta
         ),
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
         child: Column(
-          crossAxisAlignment: widget.isSelf ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          crossAxisAlignment:
+              widget.isSelf ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
             _buildSoundContent(colors),
             if (statusAndTimeWidgets.isNotEmpty)
@@ -142,7 +146,10 @@ class _SoundMessageWidgetState extends State<SoundMessageWidget> with MessageSta
   }
 
   Widget _buildSoundContent(SemanticColorScheme colorsTheme) {
-    final int soundDuration = (widget.message.messagePayload as AudioMessagePayload?)?.audioDuration ?? 0;
+    final int soundDuration =
+        (widget.message.messagePayload as AudioMessagePayload?)
+                ?.audioDuration ??
+            0;
 
     return Container(
       width: 160,
@@ -150,7 +157,9 @@ class _SoundMessageWidgetState extends State<SoundMessageWidget> with MessageSta
         children: [
           Icon(
             widget.isSelf ? Icons.volume_up : Icons.volume_down,
-            color: widget.isSelf ? colorsTheme.textColorAntiPrimary : colorsTheme.textColorPrimary,
+            color: widget.isSelf
+                ? colorsTheme.textColorAntiPrimary
+                : colorsTheme.textColorPrimary,
             size: 20,
           ),
           const SizedBox(width: 8),
@@ -168,7 +177,9 @@ class _SoundMessageWidgetState extends State<SoundMessageWidget> with MessageSta
                     width: 2,
                     height: isActive ? height * 1.5 : height,
                     decoration: BoxDecoration(
-                      color: widget.isSelf ? colorsTheme.textColorAntiPrimary : colorsTheme.textColorPrimary,
+                      color: widget.isSelf
+                          ? colorsTheme.textColorAntiPrimary
+                          : colorsTheme.textColorPrimary,
                       borderRadius: BorderRadius.circular(1),
                     ),
                   );
@@ -178,9 +189,13 @@ class _SoundMessageWidgetState extends State<SoundMessageWidget> with MessageSta
           ),
           const SizedBox(width: 8),
           Text(
-            _isPlaying ? _formatDuration(_currentPosition.inSeconds) : _formatDuration(soundDuration),
+            _isPlaying
+                ? _formatDuration(_currentPosition.inSeconds)
+                : _formatDuration(soundDuration),
             style: FontScheme.caption3Medium.copyWith(
-              color: widget.isSelf ? colorsTheme.textColorAntiPrimary : colorsTheme.textColorPrimary,
+              color: widget.isSelf
+                  ? colorsTheme.textColorAntiPrimary
+                  : colorsTheme.textColorPrimary,
             ),
           ),
           if (_isDownloading)
@@ -192,7 +207,9 @@ class _SoundMessageWidgetState extends State<SoundMessageWidget> with MessageSta
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
                   valueColor: AlwaysStoppedAnimation<Color>(
-                    widget.isSelf ? colorsTheme.textColorAntiPrimary : colorsTheme.textColorPrimary,
+                    widget.isSelf
+                        ? colorsTheme.textColorAntiPrimary
+                        : colorsTheme.textColorPrimary,
                   ),
                 ),
               ),
@@ -203,10 +220,14 @@ class _SoundMessageWidgetState extends State<SoundMessageWidget> with MessageSta
   }
 
   Future<void> _playSoundMessage() async {
-    final soundPath = (widget.message.messagePayload as AudioMessagePayload?)?.audioPath;
+    final soundPath =
+        (widget.message.messagePayload as AudioMessagePayload?)?.audioPath;
 
-    if (soundPath == null || soundPath.isEmpty || !File(soundPath).existsSync()) {
-      if (widget.messageListStore != null && widget.message.rawMessage != null) {
+    if (soundPath == null ||
+        soundPath.isEmpty ||
+        !File(soundPath).existsSync()) {
+      if (widget.messageListStore != null &&
+          widget.message.rawMessage != null) {
         if (_audioPlayer.isPlaying) {
           await _audioPlayer.stop();
         }
@@ -217,8 +238,11 @@ class _SoundMessageWidgetState extends State<SoundMessageWidget> with MessageSta
 
         await MessageActionStore.create(widget.message).downloadMedia();
 
-        final newSoundPath = (widget.message.messagePayload as AudioMessagePayload?)?.audioPath;
-        if (newSoundPath != null && newSoundPath.isNotEmpty && File(newSoundPath).existsSync()) {
+        final newSoundPath =
+            (widget.message.messagePayload as AudioMessagePayload?)?.audioPath;
+        if (newSoundPath != null &&
+            newSoundPath.isNotEmpty &&
+            File(newSoundPath).existsSync()) {
           setState(() {
             _isDownloading = false;
           });
@@ -245,7 +269,10 @@ class _SoundMessageWidgetState extends State<SoundMessageWidget> with MessageSta
       return;
     }
 
-    if (_isPlaying && soundPath == (widget.message.messagePayload as AudioMessagePayload?)?.audioPath) {
+    if (_isPlaying &&
+        soundPath ==
+            (widget.message.messagePayload as AudioMessagePayload?)
+                ?.audioPath) {
       await _audioPlayer.stop();
       setState(() {
         _isPlaying = false;

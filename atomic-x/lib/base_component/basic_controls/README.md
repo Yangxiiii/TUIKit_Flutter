@@ -76,7 +76,7 @@ Avatar(
 头像内文字的字体会根据 `size` 自动适配，无需手动指定。
 
 ### 主题环境
-需要在应用根部包裹 `BaseThemeProvider` 来提供主题支持。
+宿主使用 `AppThemeFactory` 提供 app_ui 主题，AtomicX 会直接读取当前语义颜色。
 
 ---
 
@@ -648,7 +648,7 @@ ActionSheet.show(
 
 ### 使用方式
 ```dart
-final colors = BaseThemeProvider.colorsOf(context);
+final colors = SemanticColorScheme.of(context);
 final fonts = FontScheme.body1Medium;
 ```
 
@@ -708,16 +708,18 @@ final fonts = FontScheme.body1Medium;
 ### 主题环境配置
 ```dart
 MaterialApp(
-  home: BaseThemeProvider(
-    child: YourApp(),
+  theme: AppThemeFactory.create(
+    const AppNormalColorScheme(),
+    Brightness.light,
   ),
+  home: YourApp(),
 )
 ```
 
 ### 注意事项
-1. 所有组件都需要在 `BaseThemeProvider` 环境下使用
+1. 所有组件都直接读取宿主的 app_ui ThemeData
 2. 建议使用语义化的颜色和字体，而不是硬编码的颜色值
 3. 组件会自动适配深色/浅色主题
 4. 字体大小会根据组件尺寸自动适配
 
---- 
+---

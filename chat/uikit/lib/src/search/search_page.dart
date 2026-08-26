@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
@@ -28,7 +29,7 @@ class _SearchPageState extends State<SearchPage> {
   final FocusNode _focusNode = FocusNode();
   late SearchStore _searchStore;
   late SemanticColorScheme _colorScheme;
-  late AtomicLocalizations _atomicLocale;
+  late AppLocalizedText _atomicLocale;
   String _keyword = '';
   bool _isSearching = false;
 
@@ -41,8 +42,8 @@ class _SearchPageState extends State<SearchPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _colorScheme = BaseThemeProvider.colorsOf(context);
-    _atomicLocale = AtomicLocalizations.of(context);
+    _colorScheme = SemanticColorScheme.of(context);
+    _atomicLocale = AppLocalization.of(context);
   }
 
   @override
@@ -82,7 +83,8 @@ class _SearchPageState extends State<SearchPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.search_off, size: 64, color: _colorScheme.textColorSecondary),
+          Icon(Icons.search_off,
+              size: 64, color: _colorScheme.textColorSecondary),
           const SizedBox(height: 16),
         ],
       ),
@@ -110,7 +112,8 @@ class _SearchPageState extends State<SearchPage> {
                 child: Row(
                   children: [
                     const SizedBox(width: 8),
-                    Icon(Icons.search, size: 20, color: _colorScheme.textColorSecondary),
+                    Icon(Icons.search,
+                        size: 20, color: _colorScheme.textColorSecondary),
                     const SizedBox(width: 4),
                     Expanded(
                       child: TextField(
@@ -173,8 +176,9 @@ class _SearchPageState extends State<SearchPage> {
     }
 
     final state = _searchStore.state;
-    final hasResults =
-        state.friendList.value.isNotEmpty || state.groupList.value.isNotEmpty || state.messageResults.value.isNotEmpty;
+    final hasResults = state.friendList.value.isNotEmpty ||
+        state.groupList.value.isNotEmpty ||
+        state.messageResults.value.isNotEmpty;
 
     if (!hasResults && !_isSearching) {
       return _buildNoResults();

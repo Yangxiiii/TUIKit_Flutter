@@ -1,5 +1,8 @@
 library base_component;
 
+export 'package:app_ui/app_ui.dart'
+    show AppChatLocalizedText, AppLocalization, AppLocalizedText;
+
 export 'basic_controls/action_sheet.dart';
 export 'basic_controls/alert_dialog.dart';
 export 'basic_controls/avatar.dart';
@@ -9,14 +12,10 @@ export 'basic_controls/button.dart';
 export 'basic_controls/label.dart';
 export 'basic_controls/switch.dart';
 export 'basic_controls/toast.dart';
-export 'localizations/atomic_localizations.dart';
 export 'theme/color_scheme.dart';
-export 'theme/colors.dart';
 export 'theme/font.dart';
 export 'theme/radius.dart';
 export 'theme/spacing.dart';
-export 'theme/theme_state.dart';
 export 'utils/app_builder.dart';
 export 'utils/chat_utils.dart';
-export 'utils/locale_provider.dart';
 export 'utils/storage_util.dart';

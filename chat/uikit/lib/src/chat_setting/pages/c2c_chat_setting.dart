@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
 import 'package:flutter/material.dart' hide AlertDialog;
 
@@ -24,7 +25,7 @@ class _C2CChatSettingState extends State<C2CChatSetting> {
   final ContactStore _contactStore = ContactStore.shared;
   late ConversationListStore _conversationListStore;
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
   late String conversationID;
 
   ContactInfo? _contactInfo;
@@ -43,8 +44,8 @@ class _C2CChatSettingState extends State<C2CChatSetting> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    colorsTheme = BaseThemeProvider.colorsOf(context);
-    atomicLocale = AtomicLocalizations.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
+    atomicLocale = AppLocalization.of(context);
   }
 
   Future<void> _loadData() async {
@@ -56,7 +57,8 @@ class _C2CChatSettingState extends State<C2CChatSetting> {
   }
 
   Future<void> _loadContactInfo() async {
-    final handler = await _contactStore.getContactInfo(userIDList: [widget.userID]);
+    final handler =
+        await _contactStore.getContactInfo(userIDList: [widget.userID]);
     if (handler.isSuccess && handler.contactInfoList.isNotEmpty && mounted) {
       setState(() {
         _contactInfo = handler.contactInfoList.first;
@@ -65,7 +67,8 @@ class _C2CChatSettingState extends State<C2CChatSetting> {
   }
 
   Future<void> _loadConversationInfo() async {
-    final result = await _conversationListStore.getConversationInfo(conversationID: conversationID);
+    final result = await _conversationListStore.getConversationInfo(
+        conversationID: conversationID);
     if (result.isSuccess && result.conversationInfo != null && mounted) {
       final conv = result.conversationInfo!;
       setState(() {
@@ -94,7 +97,9 @@ class _C2CChatSettingState extends State<C2CChatSetting> {
         title: atomicLocale.contactInfo,
       ),
       body: _contactInfo == null
-          ? Center(child: CircularProgressIndicator(color: colorsTheme.textColorSecondary))
+          ? Center(
+              child: CircularProgressIndicator(
+                  color: colorsTheme.textColorSecondary))
           : SingleChildScrollView(
               child: Column(
                 children: [
@@ -164,10 +169,14 @@ class _C2CChatSettingState extends State<C2CChatSetting> {
           onChanged: (value) async {
             final result = await _conversationListStore.setReceiveMessageOpt(
               conversationID: conversationID,
-              opt: value ? ReceiveMessageOption.notNotify : ReceiveMessageOption.receive,
+              opt: value
+                  ? ReceiveMessageOption.notNotify
+                  : ReceiveMessageOption.receive,
             );
             if (result.errorCode == 0) {
-              setState(() { _isNotDisturb = value; });
+              setState(() {
+                _isNotDisturb = value;
+              });
             }
           },
         ),
@@ -177,9 +186,12 @@ class _C2CChatSettingState extends State<C2CChatSetting> {
           title: atomicLocale.pin,
           value: _isPinned,
           onChanged: (value) async {
-            final result = await _conversationListStore.pinConversation(conversationID: conversationID, pin: value);
+            final result = await _conversationListStore.pinConversation(
+                conversationID: conversationID, pin: value);
             if (result.errorCode == 0) {
-              setState(() { _isPinned = value; });
+              setState(() {
+                _isPinned = value;
+              });
             }
           },
         ),
@@ -191,12 +203,16 @@ class _C2CChatSettingState extends State<C2CChatSetting> {
           onChanged: (value) async {
             CompletionHandler result;
             if (value) {
-              result = await _contactStore.addToBlacklist(userID: widget.userID);
+              result =
+                  await _contactStore.addToBlacklist(userID: widget.userID);
             } else {
-              result = await _contactStore.removeFromBlacklist(userID: widget.userID);
+              result = await _contactStore.removeFromBlacklist(
+                  userID: widget.userID);
             }
             if (result.errorCode == 0) {
-              setState(() { _isInBlacklist = value; });
+              setState(() {
+                _isInBlacklist = value;
+              });
             }
           },
         ),
@@ -250,7 +266,8 @@ class _C2CChatSettingState extends State<C2CChatSetting> {
               title: atomicLocale.clearMessage,
               content: atomicLocale.clearMsgTip,
               onConfirm: () async {
-                await _conversationListStore.clearConversationMessages(conversationID: conversationID);
+                await _conversationListStore.clearConversationMessages(
+                    conversationID: conversationID);
               },
             );
           },
@@ -265,9 +282,11 @@ class _C2CChatSettingState extends State<C2CChatSetting> {
                 title: atomicLocale.deleteFriend,
                 content: atomicLocale.deleteFriendTip,
                 onConfirm: () async {
-                  final result = await _contactStore.deleteFriend(userID: widget.userID);
+                  final result =
+                      await _contactStore.deleteFriend(userID: widget.userID);
                   if (result.errorCode == 0) {
-                    _conversationListStore.deleteConversation(conversationID: conversationID);
+                    _conversationListStore.deleteConversation(
+                        conversationID: conversationID);
                     if (mounted) Navigator.of(context).pop();
                     widget.onContactDelete?.call();
                   }
@@ -280,7 +299,8 @@ class _C2CChatSettingState extends State<C2CChatSetting> {
   }
 
   void _showRemarkEditDialog() {
-    final TextEditingController controller = TextEditingController(text: _contactInfo?.friendRemark ?? '');
+    final TextEditingController controller =
+        TextEditingController(text: _contactInfo?.friendRemark ?? '');
 
     showModalBottomSheet<void>(
       context: context,
@@ -322,7 +342,8 @@ class _C2CChatSettingState extends State<C2CChatSetting> {
                     controller: controller,
                     decoration: const InputDecoration(
                       border: InputBorder.none,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     ),
                     autofocus: true,
                   ),
@@ -335,12 +356,15 @@ class _C2CChatSettingState extends State<C2CChatSetting> {
                         onPressed: () => Navigator.of(context).pop(),
                         style: TextButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 12),
-                          backgroundColor: colorsTheme.buttonColorSecondaryDefault,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          backgroundColor:
+                              colorsTheme.buttonColorSecondaryDefault,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
                         ),
                         child: Text(
                           atomicLocale.cancel,
-                          style: FontScheme.caption1Regular.copyWith(color: colorsTheme.textColorPrimary),
+                          style: FontScheme.caption1Regular
+                              .copyWith(color: colorsTheme.textColorPrimary),
                         ),
                       ),
                     ),
@@ -361,8 +385,10 @@ class _C2CChatSettingState extends State<C2CChatSetting> {
                         },
                         style: TextButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 12),
-                          backgroundColor: colorsTheme.buttonColorPrimaryDefault,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          backgroundColor:
+                              colorsTheme.buttonColorPrimaryDefault,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
                         ),
                         child: Text(
                           atomicLocale.confirm,
@@ -387,7 +413,7 @@ class _C2CChatSettingState extends State<C2CChatSetting> {
     required String content,
     required VoidCallback onConfirm,
   }) {
-    final locale = AtomicLocalizations.of(context);
+    final locale = AppLocalization.of(context);
     AtomicAlertDialog.showWithConfig(
       context,
       config: AlertDialogConfig(

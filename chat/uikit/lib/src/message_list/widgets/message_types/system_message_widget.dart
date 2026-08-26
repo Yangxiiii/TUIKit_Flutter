@@ -11,13 +11,13 @@ class SystemMessageWidget extends StatelessWidget {
     super.key,
     this.message,
     this.customContent,
-  }) : assert(message != null || customContent != null, 
-              'Either message or customContent must be provided');
+  }) : assert(message != null || customContent != null,
+            'Either message or customContent must be provided');
 
   @override
   Widget build(BuildContext context) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
-    
+    final colorsTheme = SemanticColorScheme.of(context);
+
     String systemContent;
     if (customContent != null) {
       systemContent = customContent!;
@@ -25,9 +25,8 @@ class SystemMessageWidget extends StatelessWidget {
       systemContent = MessageUtil.getRevokeDisplayString(message!, context);
     } else {
       systemContent = MessageUtil.getSystemInfoDisplayString(
-        (message?.messagePayload as TipsMessagePayload?)?.groupTips ?? [], 
-        context
-      );
+          (message?.messagePayload as TipsMessagePayload?)?.groupTips ?? [],
+          context);
     }
 
     return Padding(

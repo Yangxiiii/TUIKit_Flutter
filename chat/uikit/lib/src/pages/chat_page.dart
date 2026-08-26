@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
 import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
 import 'package:tuikit_atomic_x/base_component/utils/tui_event_bus.dart';
@@ -17,21 +18,27 @@ class ChatSettingPage extends StatelessWidget {
     this.onDestroyCallback,
   });
 
-  void _onSendMessageClick({required BuildContext context, String? userID, String? groupID}) async {
-    ConversationListStore conversationListStore = ConversationListStore.create();
+  void _onSendMessageClick(
+      {required BuildContext context, String? userID, String? groupID}) async {
+    ConversationListStore conversationListStore =
+        ConversationListStore.create();
     ConversationInfo conversation;
     if (userID != null) {
       String conversationID = '$c2cConversationIDPrefix$userID';
-      final convResult = await conversationListStore.getConversationInfo(conversationID: conversationID);
-      conversation = convResult.conversationInfo ?? ConversationInfo(
+      final convResult = await conversationListStore.getConversationInfo(
+          conversationID: conversationID);
+      conversation = convResult.conversationInfo ??
+          ConversationInfo(
             conversationID: conversationID,
             title: userID,
             type: ConversationType.c2c,
           );
     } else if (groupID != null) {
       String conversationID = '$groupConversationIDPrefix$groupID';
-      final convResult = await conversationListStore.getConversationInfo(conversationID: conversationID);
-      conversation = convResult.conversationInfo ?? ConversationInfo(
+      final convResult = await conversationListStore.getConversationInfo(
+          conversationID: conversationID);
+      conversation = convResult.conversationInfo ??
+          ConversationInfo(
             conversationID: conversationID,
             title: groupID,
             type: ConversationType.group,
@@ -41,15 +48,13 @@ class ChatSettingPage extends StatelessWidget {
     }
 
     if (context.mounted) {
-      if (conversationOfChatPage.conversationID == conversation.conversationID) {
-        Navigator.of(context).pop();
+      if (conversationOfChatPage.conversationID ==
+          conversation.conversationID) {
+        context.popChatUIKitPage();
       } else {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => ChatPage(
-              conversation: conversation,
-            ),
+        context.pushChatUIKitPage(
+          ChatPage(
+            conversation: conversation,
           ),
         );
       }
@@ -81,7 +86,8 @@ class ChatSettingPage extends StatelessWidget {
         groupID: groupID,
         onGroupDelete: onDestroyCallback,
         onSendMessageClick: ({String? userID, String? groupID}) {
-          _onSendMessageClick(context: context, userID: userID, groupID: groupID);
+          _onSendMessageClick(
+              context: context, userID: userID, groupID: groupID);
         },
       );
     }
@@ -93,6 +99,7 @@ class ChatSettingPage extends StatelessWidget {
   }
 }
 
+/// 展示完整聊天详情，并统一使用宿主 app_ui 提供的页面语义色。
 class ChatPage extends StatefulWidget {
   final ConversationInfo conversation;
   final MessageInfo? message;
@@ -118,7 +125,6 @@ class ChatPage extends StatefulWidget {
 
 class _ChatPageState extends State<ChatPage> {
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
 
   // Multi-select mode state
   MultiSelectState? _multiSelectState;
@@ -134,13 +140,12 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    colorsTheme = BaseThemeProvider.colorsOf(context);
-    atomicLocale = AtomicLocalizations.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
   }
 
   void _onDestroyCallback() {
     if (mounted) {
-      Navigator.of(context).pop();
+      context.popChatUIKitPage();
     }
   }
 
@@ -160,20 +165,15 @@ class _ChatPageState extends State<ChatPage> {
     }
 
     if (contactInfo != null && contactInfo.isFriend == false) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => AddFriend(contactInfo: contactInfo),
-        ),
+      context.pushChatUIKitPage(
+        AddFriend(contactInfo: contactInfo),
       );
     } else {
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (context) => ChatSettingPage(
-            conversation: widget.conversation,
-            conversationOfChatPage: widget.conversation,
-            onDestroyCallback: _onDestroyCallback,
-          ),
+      context.pushChatUIKitPage<void>(
+        ChatSettingPage(
+          conversation: widget.conversation,
+          conversationOfChatPage: widget.conversation,
+          onDestroyCallback: _onDestroyCallback,
         ),
       );
     }
@@ -182,36 +182,35 @@ class _ChatPageState extends State<ChatPage> {
   void _onUserClick(String userID) async {
     final contactStore = ContactStore.shared;
     final result = await contactStore.getContactInfo(userIDList: [userID]);
-    ContactInfo? contactInfo = result.isSuccess && result.contactInfoList.isNotEmpty
-        ? result.contactInfoList.first
-        : null;
+    ContactInfo? contactInfo =
+        result.isSuccess && result.contactInfoList.isNotEmpty
+            ? result.contactInfoList.first
+            : null;
     if (contactInfo != null && contactInfo.isFriend == false && mounted) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => AddFriend(contactInfo: contactInfo),
-        ),
+      context.pushChatUIKitPage(
+        AddFriend(contactInfo: contactInfo),
       );
       return;
     }
 
-    ConversationListStore conversationListStore = ConversationListStore.create();
+    ConversationListStore conversationListStore =
+        ConversationListStore.create();
     String conversationID = '$c2cConversationIDPrefix$userID';
-    final convResult = await conversationListStore.getConversationInfo(conversationID: conversationID);
-    ConversationInfo conversation = convResult.conversationInfo ?? ConversationInfo(
-                  conversationID: conversationID,
-                  title: userID,
-                  type: ConversationType.c2c,
-                );
+    final convResult = await conversationListStore.getConversationInfo(
+        conversationID: conversationID);
+    ConversationInfo conversation = convResult.conversationInfo ??
+        ConversationInfo(
+          conversationID: conversationID,
+          title: userID,
+          type: ConversationType.c2c,
+        );
 
     if (mounted) {
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (context) => ChatSettingPage(
-            conversation: conversation,
-            conversationOfChatPage: widget.conversation,
-            onDestroyCallback: _onDestroyCallback,
-          ),
+      context.pushChatUIKitPage<void>(
+        ChatSettingPage(
+          conversation: conversation,
+          conversationOfChatPage: widget.conversation,
+          onDestroyCallback: _onDestroyCallback,
         ),
       );
     }
@@ -238,14 +237,16 @@ class _ChatPageState extends State<ChatPage> {
           titleSpacing: 4.0,
           centerTitle: true,
           title: Text(
-            widget.conversation.title ?? atomicLocale.chat,
+            widget.conversation.title ??
+                AppLocalization.text(context, LocaleKeys.chat_title, '聊天'),
             style: FontScheme.caption2Medium,
             overflow: TextOverflow.ellipsis,
             maxLines: 1,
           ),
           scrolledUnderElevation: 0.0,
           leading: IconButton.buttonContent(
-            content: IconOnlyContent(Icon(Icons.arrow_back_ios, color: colorsTheme.buttonColorPrimaryDefault)),
+            content: IconOnlyContent(Icon(Icons.arrow_back_ios,
+                color: colorsTheme.textColorPrimary)),
             type: ButtonType.noBorder,
             size: ButtonSize.l,
             onClick: () => Navigator.of(context).pop(),
@@ -254,7 +255,8 @@ class _ChatPageState extends State<ChatPage> {
               ? [
                   IconButton.buttonContent(
                     content: IconOnlyContent(
-                      Icon(Icons.more_horiz, color: colorsTheme.buttonColorPrimaryDefault),
+                      Icon(Icons.more_horiz,
+                          color: colorsTheme.textColorPrimary),
                     ),
                     type: ButtonType.noBorder,
                     size: ButtonSize.l,

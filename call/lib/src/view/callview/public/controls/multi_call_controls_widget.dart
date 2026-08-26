@@ -1,6 +1,7 @@
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
-import 'package:tuikit_atomic_x/base_component/localizations/atomic_localizations.dart';
+import 'package:tuikit_atomic_x/base_component/base_component.dart'
+    show AppChatLocalizedText, AppLocalization, AppLocalizedText;
 import 'package:tencent_calls_uikit/src/manager/call_manager.dart';
 import 'package:tencent_calls_uikit/src/view/callview/core/common/widget/controls_button.dart';
 
@@ -9,13 +10,11 @@ import '../../core/common/call_colors.dart';
 class MultiCallControlsWidget extends StatefulWidget {
   final ValueChanged<double>? onHeightChanged;
 
-  const MultiCallControlsWidget({
-    super.key,
-    this.onHeightChanged,
-  });
+  const MultiCallControlsWidget({super.key, this.onHeightChanged});
 
   @override
-  State<MultiCallControlsWidget> createState() => _MultiCallControlsWidgetState();
+  State<MultiCallControlsWidget> createState() =>
+      _MultiCallControlsWidgetState();
 }
 
 class _MultiCallControlsWidgetState extends State<MultiCallControlsWidget> {
@@ -28,7 +27,7 @@ class _MultiCallControlsWidgetState extends State<MultiCallControlsWidget> {
   final int btnWidth = 100;
 
   bool isFunctionExpand = false;
-  late AtomicLocalizations _l10n;
+  late AppLocalizedText _l10n;
 
   @override
   void initState() {
@@ -37,17 +36,18 @@ class _MultiCallControlsWidgetState extends State<MultiCallControlsWidget> {
 
   @override
   Widget build(BuildContext context) {
-    _l10n = AtomicLocalizations.of(context);
+    _l10n = AppLocalization.of(context);
     return ValueListenableBuilder(
-        valueListenable: CallStore.shared.state.selfInfo,
-        builder: (context, selfInfo, child) {
-          if (selfInfo.status == CallParticipantStatus.waiting &&
-              selfInfo.id != CallStore.shared.state.activeCall.value.inviterId) {
-            return _buildWaitingFunctionView();
-          } else {
-            return _buildAcceptedFunctionView(context);
-          }
-        });
+      valueListenable: CallStore.shared.state.selfInfo,
+      builder: (context, selfInfo, child) {
+        if (selfInfo.status == CallParticipantStatus.waiting &&
+            selfInfo.id != CallStore.shared.state.activeCall.value.inviterId) {
+          return _buildWaitingFunctionView();
+        } else {
+          return _buildAcceptedFunctionView(context);
+        }
+      },
+    );
   }
 
   _buildWaitingFunctionView() {
@@ -55,12 +55,9 @@ class _MultiCallControlsWidgetState extends State<MultiCallControlsWidget> {
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            _getRejectButton(),
-            _getAcceptButton(),
-          ],
+          children: [_getRejectButton(), _getAcceptButton()],
         ),
-        const SizedBox(height: 40,),
+        const SizedBox(height: 40),
       ],
     );
   }
@@ -68,117 +65,148 @@ class _MultiCallControlsWidgetState extends State<MultiCallControlsWidget> {
   _buildAcceptedFunctionView(BuildContext context) {
     Curve curve = Curves.easeInOut;
     return ClipRRect(
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(16.0),
-          topRight: Radius.circular(16.0),
-        ),
-        child: GestureDetector(
-            onVerticalDragUpdate: (details) => _functionWidgetVerticalDragUpdate(details),
-            child: AnimatedContainer(
+      borderRadius: const BorderRadius.only(
+        topLeft: Radius.circular(16.0),
+        topRight: Radius.circular(16.0),
+      ),
+      child: GestureDetector(
+        onVerticalDragUpdate: (details) =>
+            _functionWidgetVerticalDragUpdate(details),
+        child: AnimatedContainer(
+          curve: curve,
+          height: isFunctionExpand ? 210 : 115,
+          duration: Duration(milliseconds: duration),
+          color: const Color.fromRGBO(52, 56, 66, 1.0),
+          child: Stack(
+            children: [
+              AnimatedPositioned(
                 curve: curve,
-                height: isFunctionExpand ? 210 : 115,
                 duration: Duration(milliseconds: duration),
-                color: const Color.fromRGBO(52, 56, 66, 1.0),
-                child: Stack(
-                  children: [
-                    AnimatedPositioned(
-                      curve: curve,
-                      duration: Duration(milliseconds: duration),
-                      left: isFunctionExpand
-                          ? ((MediaQuery.of(context).size.width / 4) - (btnWidth / 2))
-                          : (MediaQuery.of(context).size.width * 2 / 6 - btnWidth / 2),
-                      bottom: isFunctionExpand ? bottomEdge + bigBtnHeight + edge : collapsedBottomEdge,
-                      child: _getAnimatedMicButton(isFunctionExpand),
+                left: isFunctionExpand
+                    ? ((MediaQuery.of(context).size.width / 4) - (btnWidth / 2))
+                    : (MediaQuery.of(context).size.width * 2 / 6 -
+                          btnWidth / 2),
+                bottom: isFunctionExpand
+                    ? bottomEdge + bigBtnHeight + edge
+                    : collapsedBottomEdge,
+                child: _getAnimatedMicButton(isFunctionExpand),
+              ),
+              AnimatedPositioned(
+                curve: curve,
+                duration: Duration(milliseconds: duration),
+                left: isFunctionExpand
+                    ? (MediaQuery.of(context).size.width / 2 - btnWidth / 2)
+                    : (MediaQuery.of(context).size.width * 3 / 6 -
+                          btnWidth / 2),
+                bottom: isFunctionExpand
+                    ? bottomEdge + bigBtnHeight + edge
+                    : collapsedBottomEdge,
+                child: _getAnimatedSpeakerPhoneButton(isFunctionExpand),
+              ),
+              AnimatedPositioned(
+                curve: curve,
+                duration: Duration(milliseconds: duration),
+                left: isFunctionExpand
+                    ? (MediaQuery.of(context).size.width * 3 / 4 - btnWidth / 2)
+                    : (MediaQuery.of(context).size.width * 4 / 6 -
+                          btnWidth / 2),
+                bottom: isFunctionExpand
+                    ? bottomEdge + bigBtnHeight + edge
+                    : collapsedBottomEdge,
+                child: _getAnimatedCameraButton(isFunctionExpand),
+              ),
+              AnimatedPositioned(
+                curve: curve,
+                duration: Duration(milliseconds: duration),
+                left: isFunctionExpand
+                    ? (MediaQuery.of(context).size.width / 2 - btnWidth / 2)
+                    : (MediaQuery.of(context).size.width * 5 / 6 -
+                          btnWidth / 2),
+                bottom: isFunctionExpand ? bottomEdge : collapsedBottomEdge,
+                child: _getAnimatedHangupButton(isFunctionExpand),
+              ),
+              AnimatedPositioned(
+                curve: curve,
+                duration: Duration(milliseconds: duration),
+                left:
+                    (MediaQuery.of(context).size.width / 6 -
+                    smallBtnHeight / 2),
+                bottom: isFunctionExpand
+                    ? bottomEdge + smallBtnHeight / 4 + 22
+                    : bottomEdge + 35,
+                child: InkWell(
+                  onTap: () {
+                    isFunctionExpand = !isFunctionExpand;
+                    widget.onHeightChanged?.call(isFunctionExpand ? 210 : 115);
+                    setState(() {});
+                  },
+                  child: Transform(
+                    alignment: Alignment.center,
+                    transform: Matrix4.identity()
+                      ..scale(1.0, isFunctionExpand ? 1.0 : -1.0, 1.0),
+                    child: Image.asset(
+                      'call_assets/arrow.png',
+                      package: 'tuikit_atomic_x',
+                      width: smallBtnHeight,
                     ),
-                    AnimatedPositioned(
-                      curve: curve,
-                      duration: Duration(milliseconds: duration),
-                      left: isFunctionExpand
-                          ? (MediaQuery.of(context).size.width / 2 - btnWidth / 2)
-                          : (MediaQuery.of(context).size.width * 3 / 6 - btnWidth / 2),
-                      bottom: isFunctionExpand ? bottomEdge + bigBtnHeight + edge : collapsedBottomEdge,
-                      child: _getAnimatedSpeakerPhoneButton(isFunctionExpand),
+                  ),
+                ),
+              ),
+              AnimatedPositioned(
+                curve: curve,
+                duration: Duration(milliseconds: duration),
+                left:
+                    (MediaQuery.of(context).size.width * 3 / 4 -
+                    bigBtnHeight / 2 -
+                    20),
+                bottom: isFunctionExpand
+                    ? bottomEdge + smallBtnHeight / 4
+                    : bottomEdge + 35,
+                child: AnimatedOpacity(
+                  duration: Duration(milliseconds: duration),
+                  opacity: isFunctionExpand ? 1.0 : 0.0,
+                  child: IgnorePointer(
+                    ignoring: !isFunctionExpand,
+                    child: ValueListenableBuilder(
+                      valueListenable: DeviceStore.shared.state.cameraStatus,
+                      builder: (context, value, child) {
+                        if (value != DeviceStatus.on) {
+                          return SizedBox(
+                            width: btnWidth.toDouble(),
+                            height: 28,
+                          );
+                        }
+                        return _getSwitchCameraSmallButton();
+                      },
                     ),
-                    AnimatedPositioned(
-                      curve: curve,
-                      duration: Duration(milliseconds: duration),
-                      left: isFunctionExpand
-                          ? (MediaQuery.of(context).size.width * 3 / 4 - btnWidth / 2)
-                          : (MediaQuery.of(context).size.width * 4 / 6 - btnWidth / 2),
-                      bottom: isFunctionExpand ? bottomEdge + bigBtnHeight + edge : collapsedBottomEdge,
-                      child: _getAnimatedCameraButton(isFunctionExpand),
-                    ),
-                    AnimatedPositioned(
-                      curve: curve,
-                      duration: Duration(milliseconds: duration),
-                      left: isFunctionExpand
-                          ? (MediaQuery.of(context).size.width / 2 - btnWidth / 2)
-                          : (MediaQuery.of(context).size.width * 5 / 6 - btnWidth / 2),
-                      bottom: isFunctionExpand ? bottomEdge : collapsedBottomEdge,
-                      child: _getAnimatedHangupButton(isFunctionExpand),
-                    ),
-                    AnimatedPositioned(
-                        curve: curve,
-                        duration: Duration(milliseconds: duration),
-                        left: (MediaQuery.of(context).size.width / 6 - smallBtnHeight / 2),
-                        bottom: isFunctionExpand ? bottomEdge + smallBtnHeight / 4 + 22 : bottomEdge + 35,
-                        child: InkWell(
-                          onTap: () {
-                            isFunctionExpand = !isFunctionExpand;
-                            widget.onHeightChanged?.call(isFunctionExpand ? 210 : 115);
-                            setState(() {});
-                          },
-                          child: Transform(
-                            alignment: Alignment.center,
-                            transform: Matrix4.identity()..scale(1.0, isFunctionExpand ? 1.0 : -1.0, 1.0),
-                            child: Image.asset(
-                              'call_assets/arrow.png',
-                              package: 'tuikit_atomic_x',
-                              width: smallBtnHeight,
-                            ),
-                          ),
-                        )),
-                    AnimatedPositioned(
-                        curve: curve,
-                        duration: Duration(milliseconds: duration),
-                        left: (MediaQuery.of(context).size.width * 3 / 4 - bigBtnHeight / 2 - 20),
-                        bottom: isFunctionExpand
-                            ? bottomEdge + smallBtnHeight / 4
-                            : bottomEdge + 35,
-                        child: AnimatedOpacity(
-                          duration: Duration(milliseconds: duration),
-                          opacity: isFunctionExpand ? 1.0 : 0.0,
-                          child: IgnorePointer(
-                            ignoring: !isFunctionExpand,
-                            child: ValueListenableBuilder(
-                                valueListenable: DeviceStore.shared.state.cameraStatus,
-                                builder: (context, value, child) {
-                                  if (value != DeviceStatus.on) {
-                                    return SizedBox(width: btnWidth.toDouble(), height: 28);
-                                  }
-                                  return _getSwitchCameraSmallButton();
-                                }),
-                          ),
-                        )),
-                  ],
-                ))));
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _getSwitchCameraSmallButton() {
     return ValueListenableBuilder(
-        valueListenable: DeviceStore.shared.state.isFrontCamera,
-        builder: (context, value, child) {
-          return ControlsButton(
-            imgUrl: "call_assets/switch_camera.png",
-            tips: '',
-            textColor: CallColors.colorG7,
-            imgHeight: 28,
-            imgOffsetX: -16,
-            onTap: () {
-              CallManager.instance.switchCamera(!DeviceStore.shared.state.isFrontCamera.value);
-            },
-          );
-        });
+      valueListenable: DeviceStore.shared.state.isFrontCamera,
+      builder: (context, value, child) {
+        return ControlsButton(
+          imgUrl: "call_assets/switch_camera.png",
+          tips: '',
+          textColor: CallColors.colorG7,
+          imgHeight: 28,
+          imgOffsetX: -16,
+          onTap: () {
+            CallManager.instance.switchCamera(
+              !DeviceStore.shared.state.isFrontCamera.value,
+            );
+          },
+        );
+      },
+    );
   }
 
   _functionWidgetVerticalDragUpdate(DragUpdateDetails details) {
@@ -218,73 +246,91 @@ class _MultiCallControlsWidgetState extends State<MultiCallControlsWidget> {
 
   Widget _getAnimatedMicButton(bool isFunctionExpand) {
     return ValueListenableBuilder(
-        valueListenable: DeviceStore.shared.state.microphoneStatus,
-        builder: (context, value, child) {
-          return ControlsButton(
-            imgUrl: value == DeviceStatus.on ? "call_assets/mute.png" : "call_assets/mute_on.png",
-            tips: isFunctionExpand
-                ? (value == DeviceStatus.on ? _l10n.callMicrophoneIsOn : _l10n.callMicrophoneIsOff)
-                : '',
-            textColor: CallColors.colorG7,
-            imgHeight: isFunctionExpand ? bigBtnHeight : smallBtnHeight,
-            onTap: () {
-              if (value == DeviceStatus.on) {
-                CallManager.instance.closeLocalMicrophone();
-              } else {
-                CallManager.instance.openLocalMicrophone();
-              }
-            },
-            useAnimation: true,
-            duration: Duration(milliseconds: duration),
-          );
-        });
+      valueListenable: DeviceStore.shared.state.microphoneStatus,
+      builder: (context, value, child) {
+        return ControlsButton(
+          imgUrl: value == DeviceStatus.on
+              ? "call_assets/mute.png"
+              : "call_assets/mute_on.png",
+          tips: isFunctionExpand
+              ? (value == DeviceStatus.on
+                    ? _l10n.callMicrophoneIsOn
+                    : _l10n.callMicrophoneIsOff)
+              : '',
+          textColor: CallColors.colorG7,
+          imgHeight: isFunctionExpand ? bigBtnHeight : smallBtnHeight,
+          onTap: () {
+            if (value == DeviceStatus.on) {
+              CallManager.instance.closeLocalMicrophone();
+            } else {
+              CallManager.instance.openLocalMicrophone();
+            }
+          },
+          useAnimation: true,
+          duration: Duration(milliseconds: duration),
+        );
+      },
+    );
   }
 
   Widget _getAnimatedSpeakerPhoneButton(bool isFunctionExpand) {
     return ValueListenableBuilder(
-        valueListenable: DeviceStore.shared.state.currentAudioRoute,
-        builder: (context, value, child) {
-          return ControlsButton(
-            imgUrl: value == AudioRoute.speakerphone ? "call_assets/handsfree_on.png" : "call_assets/handsfree.png",
-            tips: isFunctionExpand
-                ? (value == AudioRoute.speakerphone ? _l10n.callSpeakerIsOn : _l10n.callSpeakerIsOff)
-                : '',
-            textColor: CallColors.colorG7,
-            imgHeight: isFunctionExpand ? bigBtnHeight : smallBtnHeight,
-            onTap: () {
-              if (value == AudioRoute.speakerphone) {
-                CallManager.instance.setAudioRoute(AudioRoute.earpiece);
-              } else {
-                CallManager.instance.setAudioRoute(AudioRoute.speakerphone);
-              }
-            },
-            useAnimation: true,
-            duration: Duration(milliseconds: duration),
-          );
-        });
+      valueListenable: DeviceStore.shared.state.currentAudioRoute,
+      builder: (context, value, child) {
+        return ControlsButton(
+          imgUrl: value == AudioRoute.speakerphone
+              ? "call_assets/handsfree_on.png"
+              : "call_assets/handsfree.png",
+          tips: isFunctionExpand
+              ? (value == AudioRoute.speakerphone
+                    ? _l10n.callSpeakerIsOn
+                    : _l10n.callSpeakerIsOff)
+              : '',
+          textColor: CallColors.colorG7,
+          imgHeight: isFunctionExpand ? bigBtnHeight : smallBtnHeight,
+          onTap: () {
+            if (value == AudioRoute.speakerphone) {
+              CallManager.instance.setAudioRoute(AudioRoute.earpiece);
+            } else {
+              CallManager.instance.setAudioRoute(AudioRoute.speakerphone);
+            }
+          },
+          useAnimation: true,
+          duration: Duration(milliseconds: duration),
+        );
+      },
+    );
   }
 
   Widget _getAnimatedCameraButton(bool isFunctionExpand) {
     return ValueListenableBuilder(
-        valueListenable: DeviceStore.shared.state.cameraStatus,
-        builder: (context, value, child) {
-          return ControlsButton(
-            imgUrl: value == DeviceStatus.on ? "call_assets/camera_on.png" : "call_assets/camera_off.png",
-            tips:
-                isFunctionExpand ? (value == DeviceStatus.on ? _l10n.callCameraIsOn : _l10n.callCameraIsOff) : '',
-            textColor: CallColors.colorG7,
-            imgHeight: isFunctionExpand ? bigBtnHeight : smallBtnHeight,
-            onTap: () {
-              if (value == DeviceStatus.on) {
-                CallManager.instance.closeLocalCamera();
-              } else {
-                CallManager.instance.openLocalCamera(DeviceStore.shared.state.isFrontCamera.value);
-              }
-            },
-            useAnimation: true,
-            duration: Duration(milliseconds: duration),
-          );
-        });
+      valueListenable: DeviceStore.shared.state.cameraStatus,
+      builder: (context, value, child) {
+        return ControlsButton(
+          imgUrl: value == DeviceStatus.on
+              ? "call_assets/camera_on.png"
+              : "call_assets/camera_off.png",
+          tips: isFunctionExpand
+              ? (value == DeviceStatus.on
+                    ? _l10n.callCameraIsOn
+                    : _l10n.callCameraIsOff)
+              : '',
+          textColor: CallColors.colorG7,
+          imgHeight: isFunctionExpand ? bigBtnHeight : smallBtnHeight,
+          onTap: () {
+            if (value == DeviceStatus.on) {
+              CallManager.instance.closeLocalCamera();
+            } else {
+              CallManager.instance.openLocalCamera(
+                DeviceStore.shared.state.isFrontCamera.value,
+              );
+            }
+          },
+          useAnimation: true,
+          duration: Duration(milliseconds: duration),
+        );
+      },
+    );
   }
 
   Widget _getAnimatedHangupButton(bool isFunctionExpand) {

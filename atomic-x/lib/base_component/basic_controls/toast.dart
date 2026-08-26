@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../theme/font.dart';
-import '../theme/theme_state.dart';
+import '../theme/color_scheme.dart';
 
 enum ToastType {
   loading,
@@ -73,7 +73,8 @@ class IconToast extends StatefulWidget {
   State<IconToast> createState() => _IconToastState();
 }
 
-class _IconToastState extends State<IconToast> with SingleTickerProviderStateMixin {
+class _IconToastState extends State<IconToast>
+    with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
 
   @override
@@ -92,9 +93,11 @@ class _IconToastState extends State<IconToast> with SingleTickerProviderStateMix
   @override
   void didUpdateWidget(IconToast oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.type == ToastType.loading && oldWidget.type != ToastType.loading) {
+    if (widget.type == ToastType.loading &&
+        oldWidget.type != ToastType.loading) {
       _animationController.repeat();
-    } else if (widget.type != ToastType.loading && oldWidget.type == ToastType.loading) {
+    } else if (widget.type != ToastType.loading &&
+        oldWidget.type == ToastType.loading) {
       _animationController.stop();
     }
   }
@@ -111,7 +114,7 @@ class _IconToastState extends State<IconToast> with SingleTickerProviderStateMix
       return const SizedBox.shrink();
     }
 
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     return Positioned(
       top: 0,
@@ -128,7 +131,8 @@ class _IconToastState extends State<IconToast> with SingleTickerProviderStateMix
               child: GestureDetector(
                 onTap: widget.onDismiss,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
                     color: colorsTheme.floatingColorDefault,
                     borderRadius: BorderRadius.circular(6),
@@ -169,7 +173,8 @@ class _IconToastState extends State<IconToast> with SingleTickerProviderStateMix
                           height: 16,
                           package: 'tuikit_atomic_x',
                           colorFilter: ColorFilter.mode(
-                            ToastTypeHelper.getIconColor(widget.type, colorsTheme),
+                            ToastTypeHelper.getIconColor(
+                                widget.type, colorsTheme),
                             BlendMode.srcIn,
                           ),
                         ),
@@ -214,7 +219,7 @@ class SimpleToast extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     return Positioned(
       top: 0,
@@ -231,7 +236,8 @@ class SimpleToast extends StatelessWidget {
               child: GestureDetector(
                 onTap: onDismiss,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
                     color: colorsTheme.floatingColorDefault,
                     borderRadius: BorderRadius.circular(6),
@@ -280,32 +286,43 @@ class Toast {
   Timer? _hideTimer;
 
   static void success(BuildContext context, String message,
-      {Duration duration = const Duration(seconds: 2), bool useRootOverlay = false}) {
-    instance._showToast(context, message, ToastType.success, duration, useRootOverlay);
+      {Duration duration = const Duration(seconds: 2),
+      bool useRootOverlay = false}) {
+    instance._showToast(
+        context, message, ToastType.success, duration, useRootOverlay);
   }
 
   static void info(BuildContext context, String message,
-      {Duration duration = const Duration(seconds: 2), bool useRootOverlay = false}) {
-    instance._showToast(context, message, ToastType.info, duration, useRootOverlay);
+      {Duration duration = const Duration(seconds: 2),
+      bool useRootOverlay = false}) {
+    instance._showToast(
+        context, message, ToastType.info, duration, useRootOverlay);
   }
 
   static void warning(BuildContext context, String message,
-      {Duration duration = const Duration(seconds: 2), bool useRootOverlay = false}) {
-    instance._showToast(context, message, ToastType.warning, duration, useRootOverlay);
+      {Duration duration = const Duration(seconds: 2),
+      bool useRootOverlay = false}) {
+    instance._showToast(
+        context, message, ToastType.warning, duration, useRootOverlay);
   }
 
   static void error(BuildContext context, String message,
-      {Duration duration = const Duration(seconds: 2), bool useRootOverlay = false}) {
-    instance._showToast(context, message, ToastType.error, duration, useRootOverlay);
+      {Duration duration = const Duration(seconds: 2),
+      bool useRootOverlay = false}) {
+    instance._showToast(
+        context, message, ToastType.error, duration, useRootOverlay);
   }
 
   static void loading(BuildContext context, String message,
-      {Duration duration = const Duration(seconds: 3), bool useRootOverlay = false}) {
-    instance._showToast(context, message, ToastType.loading, duration, useRootOverlay);
+      {Duration duration = const Duration(seconds: 3),
+      bool useRootOverlay = false}) {
+    instance._showToast(
+        context, message, ToastType.loading, duration, useRootOverlay);
   }
 
   static void simple(BuildContext context, String message,
-      {Duration duration = const Duration(seconds: 2), bool useRootOverlay = false}) {
+      {Duration duration = const Duration(seconds: 2),
+      bool useRootOverlay = false}) {
     instance._showSimpleToast(context, message, duration, useRootOverlay);
   }
 
@@ -323,7 +340,8 @@ class Toast {
     instance._hide();
   }
 
-  void _showToast(BuildContext context, String message, ToastType type, Duration duration, bool useRootOverlay) {
+  void _showToast(BuildContext context, String message, ToastType type,
+      Duration duration, bool useRootOverlay) {
     _hide();
 
     _overlayEntry = OverlayEntry(
@@ -347,7 +365,8 @@ class Toast {
     }
   }
 
-  void _showSimpleToast(BuildContext context, String message, Duration duration, bool useRootOverlay) {
+  void _showSimpleToast(BuildContext context, String message, Duration duration,
+      bool useRootOverlay) {
     _hide();
 
     _overlayEntry = OverlayEntry(
@@ -372,7 +391,8 @@ class Toast {
     }
   }
 
-  void _showToastFallback(BuildContext context, String message, Duration duration) {
+  void _showToastFallback(
+      BuildContext context, String message, Duration duration) {
     try {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

@@ -31,7 +31,8 @@ class RecentEmojiManager {
   }
 
   /// Get quick emojis for reaction picker (6 recent + fill with defaults)
-  static Future<List<EmojiPickerModelItem>> getQuickEmojis(BuildContext context) async {
+  static Future<List<EmojiPickerModelItem>> getQuickEmojis(
+      BuildContext context) async {
     final allEmojis = _getAllEmojis(context);
     if (allEmojis.isEmpty) return [];
 
@@ -91,7 +92,8 @@ class RecentEmojiManager {
   }
 
   /// Get emoji item by reactionID
-  static EmojiPickerModelItem? getEmojiByReactionID(BuildContext context, String reactionID) {
+  static EmojiPickerModelItem? getEmojiByReactionID(
+      BuildContext context, String reactionID) {
     final allEmojis = _getAllEmojis(context);
     try {
       return allEmojis.firstWhere((e) => e.name == reactionID);

@@ -5,9 +5,11 @@ import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/cupertino.dart';
 
 class CallUIExtension {
-  static Widget getJoinInGroupCallWidget(String groupId, Map<String, String>? groupAttributes) {
+  static Widget getJoinInGroupCallWidget(
+      String groupId, Map<String, String>? groupAttributes) {
     try {
-      if (groupAttributes == null || !groupAttributes.containsKey('inner_attr_kit_info')) {
+      if (groupAttributes == null ||
+          !groupAttributes.containsKey('inner_attr_kit_info')) {
         return const SizedBox();
       }
 
@@ -24,7 +26,8 @@ class CallUIExtension {
         return const SizedBox();
       }
 
-      List<Map<String, dynamic>> userListMap = List<Map<String, dynamic>>.from(userListFromAttribute);
+      List<Map<String, dynamic>> userListMap =
+          List<Map<String, dynamic>>.from(userListFromAttribute);
 
       String roomId = "";
       if (roomIDType != null && roomIDValue != null) {
@@ -46,7 +49,9 @@ class CallUIExtension {
         }
       }
 
-      if (businessType != 'callkit' || userIds.length <= 1 || (mediaTypeString?.isEmpty ?? true)) {
+      if (businessType != 'callkit' ||
+          userIds.length <= 1 ||
+          (mediaTypeString?.isEmpty ?? true)) {
         return const SizedBox();
       }
 

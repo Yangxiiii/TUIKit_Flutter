@@ -13,9 +13,7 @@ class EventBusHandler extends TUIObserver {
 
   @override
   void onNotify(String event, String? key, NotifyParams? params) {
-    if (params == null ||
-        params.data == null ||
-        params.data!.isEmpty) {
+    if (params == null || params.data == null || params.data!.isEmpty) {
       return;
     }
 
@@ -33,8 +31,7 @@ class EventBusHandler extends TUIObserver {
   void handleStartCall(String? key, NotifyParams? params) {
     List<String> participantIds = params?.data?["participantIds"] ?? [];
     String chatGroupId = params?.data?["chatGroupId"] ?? "";
-    CallMediaType mediaType =
-        params?.data?["mediaType"] ?? CallMediaType.audio;
+    CallMediaType mediaType = params?.data?["mediaType"] ?? CallMediaType.audio;
     int timeout = params?.data?["timeout"] ?? 30;
 
     CallParams callParams = CallParams();

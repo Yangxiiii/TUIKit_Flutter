@@ -66,7 +66,7 @@ class MessageTooltip extends StatefulWidget {
 class MessageTooltipState extends State<MessageTooltip> {
   @override
   Widget build(BuildContext context) {
-    final colorTheme = BaseThemeProvider.colorsOf(context);
+    final colorTheme = SemanticColorScheme.of(context);
 
     return Container(
       decoration: BoxDecoration(
@@ -93,8 +93,10 @@ class MessageTooltipState extends State<MessageTooltip> {
                   },
                   onExpandClick: () async {
                     widget.onCloseTooltip();
-                    final selectedEmoji = await ReactionEmojiPickerSheet.show(context);
-                    if (selectedEmoji != null && widget.onReactionSelected != null) {
+                    final selectedEmoji =
+                        await ReactionEmojiPickerSheet.show(context);
+                    if (selectedEmoji != null &&
+                        widget.onReactionSelected != null) {
                       widget.onReactionSelected!(selectedEmoji);
                     }
                   },
@@ -105,7 +107,9 @@ class MessageTooltipState extends State<MessageTooltip> {
               alignment: WrapAlignment.start,
               spacing: 4,
               runSpacing: 4,
-              children: widget.menuItems.map((item) => _buildMenuItem(item, colorTheme)).toList(),
+              children: widget.menuItems
+                  .map((item) => _buildMenuItem(item, colorTheme))
+                  .toList(),
             ),
           ],
         ),
@@ -137,7 +141,9 @@ class MessageTooltipState extends State<MessageTooltip> {
                 item.title,
                 style: FontScheme.caption3Regular.copyWith(
                   decoration: TextDecoration.none,
-                  color: item.isDestructive ? colorTheme.textColorError : colorTheme.textColorPrimary,
+                  color: item.isDestructive
+                      ? colorTheme.textColorError
+                      : colorTheme.textColorPrimary,
                 ),
                 textAlign: TextAlign.center,
                 maxLines: 2,
@@ -151,14 +157,16 @@ class MessageTooltipState extends State<MessageTooltip> {
   }
 
   Widget _buildMenuIcon(MessageMenuItem item, SemanticColorScheme colorTheme) {
-    // Derive the icon color from the theme (ThemeState) so it stays visible in
+    // 图标色跟随当前 app_ui 主题，确保在不同背景上保持可见。
     // both light and dark modes; destructive actions (e.g. delete) use the
     // error color to match their label.
-    final color = item.isDestructive ? colorTheme.textColorError : colorTheme.textColorPrimary;
-    
+    final color = item.isDestructive
+        ? colorTheme.textColorError
+        : colorTheme.textColorPrimary;
+
     if (item.assetName != null && item.assetName!.isNotEmpty) {
       final isSvg = item.assetName!.toLowerCase().endsWith('.svg');
-      
+
       if (isSvg) {
         return SvgPicture.asset(
           item.assetName!,
@@ -189,7 +197,7 @@ class MessageTooltipState extends State<MessageTooltip> {
         );
       }
     }
-    
+
     return Icon(
       item.icon,
       size: 18,

@@ -13,7 +13,11 @@ abstract class TUICallKit {
   /// @param sdkAppId      sdkAppId
   /// @param userId        userId
   /// @param userSig       userSig
-  Future<CompletionHandler> login(int sdkAppId, String userId, String userSig) async {
+  Future<CompletionHandler> login(
+    int sdkAppId,
+    String userId,
+    String userSig,
+  ) async {
     // TODO: implement login
     throw UnimplementedError();
   }
@@ -41,8 +45,11 @@ abstract class TUICallKit {
   /// @param userIdList    List of userId
   /// @param callMediaType Call type
   /// @param params        Call extension parameters
-  Future<CompletionHandler> calls(List<String> userIdList, CallMediaType callMediaType,
-      [CallParams? params]) async {
+  Future<CompletionHandler> calls(
+    List<String> userIdList,
+    CallMediaType callMediaType, [
+    CallParams? params,
+  ]) async {
     // TODO: implement calls
     throw UnimplementedError();
   }
@@ -89,7 +96,7 @@ abstract class TUICallKit {
     throw UnimplementedError();
   }
 
-  void enableIncomingBanner(bool enable) ;
+  void enableIncomingBanner(bool enable);
 
   /// Call experimental interface
   ///

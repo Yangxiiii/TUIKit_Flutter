@@ -27,12 +27,12 @@ class AndroidPipChannel {
           'enable': enable,
         }
       };
-      
+
       final result = await _methodChannel.invokeMethod<bool>(
         _enablePictureInPictureMethod,
         params,
       );
-      
+
       return result ?? false;
     } on PlatformException catch (e) {
       print('enable pip failed: ${e.message}');
@@ -45,7 +45,7 @@ class AndroidPipChannel {
       final result = await _methodChannel.invokeMethod<bool>(
         'closePictureInPicture',
       );
-      
+
       return result ?? false;
     } on PlatformException catch (e) {
       print('close pip failed: ${e.message}');
@@ -62,7 +62,7 @@ class AndroidPipChannel {
       }
       return PictureInPictureState.leave;
     });
-    
+
     return _pipStateStream!;
   }
 

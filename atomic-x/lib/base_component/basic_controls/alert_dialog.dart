@@ -1,8 +1,8 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart' hide AlertDialog;
 import 'package:flutter/material.dart' as material show AlertDialog;
 import '../base_component.dart';
-import '../localizations/atomic_localizations.dart';
-import '../theme/theme_state.dart';
+import '../theme/color_scheme.dart';
 
 enum TextColorPreset { primary, grey, blue, red }
 
@@ -51,14 +51,11 @@ class AlertDialogConfig {
     this.confirmConfig,
     this.cancelConfig,
     this.itemList = const [],
-    @Deprecated('Use cancelConfig instead')
-    this.cancelText,
-    @Deprecated('Use confirmConfig instead')
-    this.defaultText,
+    @Deprecated('Use cancelConfig instead') this.cancelText,
+    @Deprecated('Use confirmConfig instead') this.defaultText,
     @Deprecated('Use confirmConfig with type = TextColorPreset.red instead')
     this.isDestructive = false,
-    @Deprecated('Use confirmConfig.onClick instead')
-    this.defaultCallback,
+    @Deprecated('Use confirmConfig.onClick instead') this.defaultCallback,
   });
 }
 
@@ -86,11 +83,14 @@ class AlertDialog extends StatelessWidget {
           config: AlertDialogConfig(
             title: title,
             content: content,
-            cancelConfig: cancelText != null ? ButtonConfig(text: cancelText) : null,
+            cancelConfig:
+                cancelText != null ? ButtonConfig(text: cancelText) : null,
             confirmConfig: confirmText != null
                 ? ButtonConfig(
                     text: confirmText,
-                    type: isDestructive ? TextColorPreset.red : TextColorPreset.blue,
+                    type: isDestructive
+                        ? TextColorPreset.red
+                        : TextColorPreset.blue,
                     onClick: onConfirm,
                   )
                 : null,
@@ -102,16 +102,20 @@ class AlertDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
-    final appLocale = AtomicLocalizations.of(context);
+    final colorsTheme = SemanticColorScheme.of(context);
+    final appLocale = AppLocalization.of(context);
 
     final effectiveCancelConfig = config.cancelConfig ??
-        (config.cancelText != null ? ButtonConfig(text: config.cancelText!) : null);
+        (config.cancelText != null
+            ? ButtonConfig(text: config.cancelText!)
+            : null);
     final effectiveConfirmConfig = config.confirmConfig ??
         (config.defaultText != null
             ? ButtonConfig(
                 text: config.defaultText!,
-                type: config.isDestructive ? TextColorPreset.red : TextColorPreset.blue,
+                type: config.isDestructive
+                    ? TextColorPreset.red
+                    : TextColorPreset.blue,
                 onClick: config.defaultCallback,
               )
             : null);
@@ -146,7 +150,9 @@ class AlertDialog extends StatelessWidget {
               effectiveCancelConfig.onClick?.call();
             },
             child: Text(
-              effectiveCancelConfig.text.isNotEmpty ? effectiveCancelConfig.text : appLocale.cancel,
+              effectiveCancelConfig.text.isNotEmpty
+                  ? effectiveCancelConfig.text
+                  : appLocale.cancel,
               style: TextStyle(
                 color: colorsTheme.textColorPrimary,
                 fontSize: 16,
@@ -160,9 +166,12 @@ class AlertDialog extends StatelessWidget {
               effectiveConfirmConfig.onClick?.call();
             },
             child: Text(
-              effectiveConfirmConfig.text.isNotEmpty ? effectiveConfirmConfig.text : appLocale.confirm,
+              effectiveConfirmConfig.text.isNotEmpty
+                  ? effectiveConfirmConfig.text
+                  : appLocale.confirm,
               style: TextStyle(
-                color: _resolveButtonTextColor(effectiveConfirmConfig.type, colorsTheme),
+                color: _resolveButtonTextColor(
+                    effectiveConfirmConfig.type, colorsTheme),
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
               ),
@@ -172,7 +181,8 @@ class AlertDialog extends StatelessWidget {
     );
   }
 
-  Color _resolveButtonTextColor(TextColorPreset type, SemanticColorScheme colorsTheme) {
+  Color _resolveButtonTextColor(
+      TextColorPreset type, SemanticColorScheme colorsTheme) {
     switch (type) {
       case TextColorPreset.red:
         return colorsTheme.textColorError;
@@ -224,7 +234,8 @@ class AtomicAlertDialog extends StatefulWidget {
         confirmConfig: confirmText.isNotEmpty
             ? ButtonConfig(
                 text: confirmText,
-                type: isDestructive ? TextColorPreset.red : TextColorPreset.blue,
+                type:
+                    isDestructive ? TextColorPreset.red : TextColorPreset.blue,
                 onClick: onConfirm,
               )
             : null,
@@ -245,12 +256,16 @@ class AtomicAlertDialog extends StatefulWidget {
     final dialogId = 'alert_dialog_${DateTime.now().millisecondsSinceEpoch}';
 
     final effectiveCancelConfig = config.cancelConfig ??
-        (config.cancelText?.isNotEmpty == true ? ButtonConfig(text: config.cancelText!) : null);
+        (config.cancelText?.isNotEmpty == true
+            ? ButtonConfig(text: config.cancelText!)
+            : null);
     final effectiveConfirmConfig = config.confirmConfig ??
         (config.defaultText?.isNotEmpty == true
             ? ButtonConfig(
                 text: config.defaultText!,
-                type: config.isDestructive ? TextColorPreset.red : TextColorPreset.blue,
+                type: config.isDestructive
+                    ? TextColorPreset.red
+                    : TextColorPreset.blue,
                 isBold: true,
                 onClick: config.defaultCallback,
               )
@@ -339,7 +354,8 @@ class _AtomicAlertDialogState extends State<AtomicAlertDialog> {
       if (!mounted) return false;
       setState(() {
         _remainingSeconds--;
-        _cancelDisplayText = '${widget.config.cancelConfig?.text ?? ''} ($_remainingSeconds)';
+        _cancelDisplayText =
+            '${widget.config.cancelConfig?.text ?? ''} ($_remainingSeconds)';
       });
       if (_remainingSeconds <= 0) {
         widget.config.cancelConfig?.onClick?.call();
@@ -351,8 +367,9 @@ class _AtomicAlertDialogState extends State<AtomicAlertDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
-    final widthScale = MediaQuery.sizeOf(context).width / AtomicAlertDialog.designWidth;
+    final colorsTheme = SemanticColorScheme.of(context);
+    final widthScale =
+        MediaQuery.sizeOf(context).width / AtomicAlertDialog.designWidth;
 
     return Container(
       width: 259 * widthScale,
@@ -454,13 +471,15 @@ class _AtomicAlertDialogState extends State<AtomicAlertDialog> {
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (index > 0) Divider(height: 0.0, color: colorsTheme.strokeColorSecondary),
+            if (index > 0)
+              Divider(height: 0.0, color: colorsTheme.strokeColorSecondary),
             SizedBox(
               height: 56,
               width: double.infinity,
               child: TextButton(
                 style: ButtonStyle(
-                  overlayColor: WidgetStateProperty.all<Color>(Colors.transparent),
+                  overlayColor:
+                      WidgetStateProperty.all<Color>(Colors.transparent),
                 ),
                 onPressed: item.onClick,
                 child: Text(
@@ -468,7 +487,8 @@ class _AtomicAlertDialogState extends State<AtomicAlertDialog> {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 16,
-                    fontWeight: item.isBold ? FontWeight.bold : FontWeight.normal,
+                    fontWeight:
+                        item.isBold ? FontWeight.bold : FontWeight.normal,
                     color: _resolveButtonTextColor(item.type, colorsTheme),
                   ),
                 ),
@@ -491,11 +511,16 @@ class _AtomicAlertDialogState extends State<AtomicAlertDialog> {
           ),
           onPressed: cancelConfig?.onClick,
           child: Text(
-            widget.config.countdownDuration > 0 ? _cancelDisplayText : (cancelConfig?.text ?? ''),
+            widget.config.countdownDuration > 0
+                ? _cancelDisplayText
+                : (cancelConfig?.text ?? ''),
             style: TextStyle(
               fontSize: 16,
-              fontWeight: (cancelConfig?.isBold ?? false) ? FontWeight.bold : FontWeight.normal,
-              color: _resolveButtonTextColor(cancelConfig?.type ?? TextColorPreset.grey, colorsTheme),
+              fontWeight: (cancelConfig?.isBold ?? false)
+                  ? FontWeight.bold
+                  : FontWeight.normal,
+              color: _resolveButtonTextColor(
+                  cancelConfig?.type ?? TextColorPreset.grey, colorsTheme),
             ),
           ),
         ),
@@ -505,7 +530,8 @@ class _AtomicAlertDialogState extends State<AtomicAlertDialog> {
 
   Widget _buildButtonDivider(SemanticColorScheme colorsTheme) {
     return Visibility(
-      visible: widget.config.confirmConfig != null && widget.config.cancelConfig != null,
+      visible: widget.config.confirmConfig != null &&
+          widget.config.cancelConfig != null,
       child: VerticalDivider(width: 1, color: colorsTheme.strokeColorSecondary),
     );
   }
@@ -525,8 +551,11 @@ class _AtomicAlertDialogState extends State<AtomicAlertDialog> {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 16,
-              fontWeight: (confirmConfig?.isBold ?? false) ? FontWeight.bold : FontWeight.normal,
-              color: _resolveButtonTextColor(confirmConfig?.type ?? TextColorPreset.blue, colorsTheme),
+              fontWeight: (confirmConfig?.isBold ?? false)
+                  ? FontWeight.bold
+                  : FontWeight.normal,
+              color: _resolveButtonTextColor(
+                  confirmConfig?.type ?? TextColorPreset.blue, colorsTheme),
             ),
           ),
         ),
@@ -534,7 +563,8 @@ class _AtomicAlertDialogState extends State<AtomicAlertDialog> {
     );
   }
 
-  Color _resolveButtonTextColor(TextColorPreset type, SemanticColorScheme colorsTheme) {
+  Color _resolveButtonTextColor(
+      TextColorPreset type, SemanticColorScheme colorsTheme) {
     switch (type) {
       case TextColorPreset.red:
         return colorsTheme.textColorError;
@@ -614,7 +644,8 @@ class DialogOverlayManager {
     }
 
     overlay.insert(overlayEntry);
-    _overlays[dialogId] = OverlayEntryWrapper(overlayEntry: overlayEntry, isVisible: isVisable);
+    _overlays[dialogId] =
+        OverlayEntryWrapper(overlayEntry: overlayEntry, isVisible: isVisable);
   }
 
   static void setVisible(String dialogId, bool visible) {

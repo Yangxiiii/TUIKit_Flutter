@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_list/message_list_config.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
@@ -41,12 +42,14 @@ class CallMessageWidget extends StatefulWidget {
   State<CallMessageWidget> createState() => _CallMessageWidgetState();
 }
 
-class _CallMessageWidgetState extends State<CallMessageWidget> with MessageStatusMixin {
+class _CallMessageWidgetState extends State<CallMessageWidget>
+    with MessageStatusMixin {
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
-    final atomicLocale = AtomicLocalizations.of(context);
-    CallingMessageDataProvider provider = CallingMessageDataProvider(widget.message, context);
+    final colors = SemanticColorScheme.of(context);
+    final atomicLocale = AppLocalization.of(context);
+    CallingMessageDataProvider provider =
+        CallingMessageDataProvider(widget.message, context);
     if (!provider.isCallingSignal) {
       return Container();
     }
@@ -81,13 +84,14 @@ class _CallMessageWidgetState extends State<CallMessageWidget> with MessageStatu
 
     return GestureDetector(
       onTap: () {
-        final isVideoCall = provider.streamMediaType == CallStreamMediaType.video;
-        
+        final isVideoCall =
+            provider.streamMediaType == CallStreamMediaType.video;
+
         // Get the userID of the other party from the message
         final userID = widget.message.isSentBySelf
             ? widget.message.rawMessage?.userID ?? ''
             : widget.message.rawMessage?.sender ?? '';
-        
+
         if (widget.onCallMessageClick != null && userID.isNotEmpty) {
           widget.onCallMessageClick!(userID, isVideoCall);
         }
@@ -98,7 +102,7 @@ class _CallMessageWidgetState extends State<CallMessageWidget> with MessageStatu
 
   Widget _buildCallContentWithStatusAndTime(
     SemanticColorScheme colors,
-    AtomicLocalizations atomicLocale,
+    AppLocalizedText atomicLocale,
     CallingMessageDataProvider provider,
   ) {
     return Row(
@@ -125,7 +129,7 @@ class _CallMessageWidgetState extends State<CallMessageWidget> with MessageStatu
 
   Widget _buildCallContent(
     SemanticColorScheme colors,
-    AtomicLocalizations atomicLocale,
+    AppLocalizedText atomicLocale,
     CallingMessageDataProvider provider,
   ) {
     return Row(
@@ -137,7 +141,9 @@ class _CallMessageWidgetState extends State<CallMessageWidget> with MessageStatu
           child: Text(
             provider.content,
             style: FontScheme.caption2Medium.copyWith(
-              color: widget.isSelf ? colors.textColorAntiPrimary : colors.textColorPrimary,
+              color: widget.isSelf
+                  ? colors.textColorAntiPrimary
+                  : colors.textColorPrimary,
               height: 1.4,
             ),
           ),
@@ -146,7 +152,8 @@ class _CallMessageWidgetState extends State<CallMessageWidget> with MessageStatu
     );
   }
 
-  Widget _buildCallIcon(SemanticColorScheme colors, CallingMessageDataProvider provider) {
+  Widget _buildCallIcon(
+      SemanticColorScheme colors, CallingMessageDataProvider provider) {
     IconData iconData;
 
     if (provider.streamMediaType == CallStreamMediaType.audio) {
@@ -158,7 +165,9 @@ class _CallMessageWidgetState extends State<CallMessageWidget> with MessageStatu
     return Icon(
       iconData,
       size: 16,
-      color: widget.isSelf ? colors.textColorAntiPrimary : colors.textColorSecondary,
+      color: widget.isSelf
+          ? colors.textColorAntiPrimary
+          : colors.textColorSecondary,
     );
   }
 

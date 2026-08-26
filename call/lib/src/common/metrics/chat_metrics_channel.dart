@@ -11,7 +11,8 @@ import 'key_metrics.dart';
 
 class ChatMetricsChannel {
   final String _tag = "IMMetrics";
-  final String _apiReportRoomEngineEvent = "internal_operation_report_room_engine_event";
+  final String _apiReportRoomEngineEvent =
+      "internal_operation_report_room_engine_event";
 
   void countEvent(EventId eventId) async {
     try {
@@ -30,16 +31,18 @@ class ChatMetricsChannel {
   Future<Map<String, dynamic>> _buildExtensionJson() async {
     return {
       MetricsJsonKeys.basicInfo: _buildBasicInfoJson(),
-      MetricsJsonKeys.platformInfo: await _buildPlatformInfoJson()
+      MetricsJsonKeys.platformInfo: await _buildPlatformInfoJson(),
     };
   }
 
   Map<String, dynamic> _buildBasicInfoJson() {
     return {
-      MetricsJsonKeys.callId: CallStore.shared.state.activeCall.value.callId ?? "",
+      MetricsJsonKeys.callId:
+          CallStore.shared.state.activeCall.value.callId ?? "",
       MetricsJsonKeys.intRoomId: 0,
-      MetricsJsonKeys.strRoomId: CallStore.shared.state.activeCall.value.roomId ?? "",
-      MetricsJsonKeys.uiKitVersion: Constants.pluginVersion
+      MetricsJsonKeys.strRoomId:
+          CallStore.shared.state.activeCall.value.roomId ?? "",
+      MetricsJsonKeys.uiKitVersion: Constants.pluginVersion,
     };
   }
 
@@ -49,16 +52,24 @@ class ChatMetricsChannel {
       MetricsJsonKeys.framework: 7,
       MetricsJsonKeys.deviceBrand: _getDeviceBrand(),
       MetricsJsonKeys.deviceModel: _getDeviceModel(),
-      MetricsJsonKeys.androidVersion: Platform.isAndroid ? _getAndroidVersion() : "",
+      MetricsJsonKeys.androidVersion: Platform.isAndroid
+          ? _getAndroidVersion()
+          : "",
       MetricsJsonKeys.isForeground: await _isAppInForeground(),
       MetricsJsonKeys.isScreenLocked: await _isScreenLocked(),
-      MetricsJsonKeys.hasFloatingWindowPermission: await _hasFloatingWindowPermission(),
-      MetricsJsonKeys.hasBackgroundLaunchPermission: await _hasBackgroundLaunchPermission(),
-      MetricsJsonKeys.hasNotificationPermission: await _hasNotificationPermission()
+      MetricsJsonKeys.hasFloatingWindowPermission:
+          await _hasFloatingWindowPermission(),
+      MetricsJsonKeys.hasBackgroundLaunchPermission:
+          await _hasBackgroundLaunchPermission(),
+      MetricsJsonKeys.hasNotificationPermission:
+          await _hasNotificationPermission(),
     };
   }
 
-  Map<String, dynamic> _buildEventPayload(EventId eventId, String extensionMessage) {
+  Map<String, dynamic> _buildEventPayload(
+    EventId eventId,
+    String extensionMessage,
+  ) {
     String prefix = "report_room_engine_event_param_";
     return {
       prefix + MetricsJsonKeys.eventId: eventId.value(),
@@ -66,7 +77,7 @@ class ChatMetricsChannel {
       prefix + MetricsJsonKeys.eventResult: 0,
       prefix + MetricsJsonKeys.eventMessage: Constants.pluginVersion,
       prefix + MetricsJsonKeys.moreMessage: "",
-      prefix + MetricsJsonKeys.extensionMessage: extensionMessage
+      prefix + MetricsJsonKeys.extensionMessage: extensionMessage,
     };
   }
 
@@ -98,7 +109,8 @@ class ChatMetricsChannel {
   Future<bool> _hasBackgroundLaunchPermission() async {
     try {
       final status = await Permission.check(PermissionType.systemAlertWindow);
-      return status == PermissionStatus.granted || status == PermissionStatus.limited;
+      return status == PermissionStatus.granted ||
+          status == PermissionStatus.limited;
     } catch (e) {
       print('$_tag: check background launch permission exception: $e');
       return false;
@@ -107,8 +119,11 @@ class ChatMetricsChannel {
 
   Future<bool> _hasFloatingWindowPermission() async {
     try {
-      final status = await Permission.check(PermissionType.displayOverOtherApps);
-      return status == PermissionStatus.granted || status == PermissionStatus.limited;
+      final status = await Permission.check(
+        PermissionType.displayOverOtherApps,
+      );
+      return status == PermissionStatus.granted ||
+          status == PermissionStatus.limited;
     } catch (e) {
       print('$_tag: check floating window permission exception: $e');
       return false;
@@ -133,11 +148,11 @@ class ChatMetricsChannel {
   Future<bool> _hasNotificationPermission() async {
     try {
       final status = await Permission.check(PermissionType.notification);
-      return status == PermissionStatus.granted || status == PermissionStatus.limited;
+      return status == PermissionStatus.granted ||
+          status == PermissionStatus.limited;
     } catch (e) {
       print('$_tag: check notification permission exception: $e');
       return false;
     }
   }
 }
-

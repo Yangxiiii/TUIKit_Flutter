@@ -70,7 +70,8 @@ class ImageViewerManager {
     _isShowingImageViewer = false;
   }
 
-  void handleImageViewerEvent(Map<String, dynamic> eventData, Function(dynamic) callback) {
+  void handleImageViewerEvent(
+      Map<String, dynamic> eventData, Function(dynamic) callback) {
     final event = eventData['event'] as String;
 
     switch (event) {
@@ -98,8 +99,9 @@ class ImageViewerManager {
 
   Future<void> _handleLoadMore(bool isOlder, Function(dynamic) callback) async {
     try {
-      final result = await _imageViewerDataManager?.loadMoreData(isOlder: isOlder) ??
-          (elements: <ImageElement>[], hasMoreData: false);
+      final result =
+          await _imageViewerDataManager?.loadMoreData(isOlder: isOlder) ??
+              (elements: <ImageElement>[], hasMoreData: false);
       callback({
         'elements': result.elements,
         'hasMoreData': result.hasMoreData,
@@ -112,15 +114,18 @@ class ImageViewerManager {
     }
   }
 
-  Future<void> _handleDownloadVideo(String imagePath, Function(dynamic) callback) async {
-    final targetMessage = _imageViewerDataManager?.findMessage(byImagePath: imagePath);
+  Future<void> _handleDownloadVideo(
+      String imagePath, Function(dynamic) callback) async {
+    final targetMessage =
+        _imageViewerDataManager?.findMessage(byImagePath: imagePath);
     if (targetMessage == null) {
       callback([]);
       return;
     }
 
     final videoPayload = targetMessage.messagePayload as VideoMessagePayload?;
-    if (videoPayload?.videoPath != null && videoPayload!.videoPath!.isNotEmpty) {
+    if (videoPayload?.videoPath != null &&
+        videoPayload!.videoPath!.isNotEmpty) {
       final file = File(videoPayload.videoPath!);
       if (await file.exists()) {
         callback([videoPayload.videoPath!]);
@@ -135,7 +140,8 @@ class ImageViewerManager {
       orElse: () => targetMessage,
     );
 
-    final newVideoPath = (updatedMessage.messagePayload as VideoMessagePayload?)?.videoPath;
+    final newVideoPath =
+        (updatedMessage.messagePayload as VideoMessagePayload?)?.videoPath;
     if (newVideoPath != null && newVideoPath.isNotEmpty) {
       final newFile = File(newVideoPath);
       if (await newFile.exists()) {
@@ -150,7 +156,6 @@ class ImageViewerManager {
 
   void dispose() {
     _imageViewerDataManager?.dispose();
-    
   }
 }
 
@@ -187,11 +192,14 @@ class ImageViewerDataManager {
           .toList();
     }
     return messageListStore.state.messageList.value
-        .where((msg) => msg.messageType == MessageType.image || msg.messageType == MessageType.video)
+        .where((msg) =>
+            msg.messageType == MessageType.image ||
+            msg.messageType == MessageType.video)
         .toList();
   }
 
-  Future<({List<ImageElement> mediaElements, int currentIndex})> loadInitialData() async {
+  Future<({List<ImageElement> mediaElements, int currentIndex})>
+      loadInitialData() async {
     if (_isPresetMode) {
       // Skip the live store fetch — the merged bundle is the entire
       // dataset. Build elements directly from the preset list.
@@ -206,12 +214,14 @@ class ImageViewerDataManager {
     option.cursor = currentMessage;
     option.messageTypeList = [MessageType.image, MessageType.video];
 
-    final mediaElements = await _loadMediaMessages(option: option, isInitialLoad: true);
+    final mediaElements =
+        await _loadMediaMessages(option: option, isInitialLoad: true);
     final currentIndex = _findCurrentMessageIndex();
     return (mediaElements: mediaElements, currentIndex: currentIndex);
   }
 
-  Future<({List<ImageElement> elements, bool hasMoreData})> loadMoreData({required bool isOlder}) async {
+  Future<({List<ImageElement> elements, bool hasMoreData})> loadMoreData(
+      {required bool isOlder}) async {
     // Merged bundles are bounded in-memory lists; nothing to page.
     if (_isPresetMode) {
       return (elements: <ImageElement>[], hasMoreData: false);
@@ -240,15 +250,18 @@ class ImageViewerDataManager {
     }
 
     try {
-      final anchorMessage = isOlder ? _mediaMessages.first : _mediaMessages.last;
+      final anchorMessage =
+          isOlder ? _mediaMessages.first : _mediaMessages.last;
 
       var option = MessageLoadOption();
-      option.direction = isOlder ? MessageLoadDirection.older : MessageLoadDirection.newer;
+      option.direction =
+          isOlder ? MessageLoadDirection.older : MessageLoadDirection.newer;
       option.pageCount = 5;
       option.cursor = anchorMessage;
       option.messageTypeList = [MessageType.image, MessageType.video];
 
-      final allElements = await _loadMediaMessages(option: option, isInitialLoad: false);
+      final allElements =
+          await _loadMediaMessages(option: option, isInitialLoad: false);
       hasMoreData = isOlder
           ? messageListStore.state.hasOlderMessages.value
           : messageListStore.state.hasNewerMessages.value;
@@ -266,13 +279,15 @@ class ImageViewerDataManager {
   }
 
   int _findCurrentMessageIndex() {
-    int index = _mediaMessages.indexWhere((msg) => msg.msgID == currentMessage.msgID);
+    int index =
+        _mediaMessages.indexWhere((msg) => msg.msgID == currentMessage.msgID);
     if (index >= 0) {
       return index;
     }
 
     if (currentMessage.msgID.isNotEmpty) {
-      index = _mediaMessages.indexWhere((msg) => msg.msgID == currentMessage.msgID);
+      index =
+          _mediaMessages.indexWhere((msg) => msg.msgID == currentMessage.msgID);
       if (index >= 0) {
         return index;
       }
@@ -284,9 +299,12 @@ class ImageViewerDataManager {
   MessageInfo? findMessage({required String byImagePath}) {
     return _mediaMessages.firstWhere((message) {
       if (message.messageType == MessageType.image) {
-        final originalImagePath = (message.messagePayload as ImageMessagePayload?)?.originalImagePath;
-        final largeImagePath = (message.messagePayload as ImageMessagePayload?)?.largeImagePath;
-        return originalImagePath == byImagePath || largeImagePath == byImagePath;
+        final originalImagePath =
+            (message.messagePayload as ImageMessagePayload?)?.originalImagePath;
+        final largeImagePath =
+            (message.messagePayload as ImageMessagePayload?)?.largeImagePath;
+        return originalImagePath == byImagePath ||
+            largeImagePath == byImagePath;
       } else if (message.messageType == MessageType.video) {
         final payload = message.messagePayload as VideoMessagePayload?;
         final videoSnapshotPath = payload?.videoSnapshotPath;
@@ -362,14 +380,17 @@ class ImageViewerDataManager {
     final imagePayload = msg.messagePayload as ImageMessagePayload?;
     String imagePath = '';
 
-    if (imagePayload?.largeImagePath != null && imagePayload!.largeImagePath!.isNotEmpty) {
+    if (imagePayload?.largeImagePath != null &&
+        imagePayload!.largeImagePath!.isNotEmpty) {
       final file = File(imagePayload.largeImagePath!);
       if (await file.exists()) {
         imagePath = imagePayload.largeImagePath!;
       }
     }
 
-    if (imagePath.isEmpty && imagePayload?.originalImagePath != null && imagePayload!.originalImagePath!.isNotEmpty) {
+    if (imagePath.isEmpty &&
+        imagePayload?.originalImagePath != null &&
+        imagePayload!.originalImagePath!.isNotEmpty) {
       final file = File(imagePayload.originalImagePath!);
       if (await file.exists()) {
         imagePath = imagePayload.originalImagePath!;
@@ -377,14 +398,20 @@ class ImageViewerDataManager {
     }
 
     if (imagePath.isEmpty) {
-      await MessageActionStore.create(msg).downloadMedia(quality: MediaQuality.standard);
+      await MessageActionStore.create(msg)
+          .downloadMedia(quality: MediaQuality.standard);
 
-      final updatedMessage = messageListStore.state.messageList.value.firstWhere(
+      final updatedMessage =
+          messageListStore.state.messageList.value.firstWhere(
         (message) => message.msgID == msg.msgID,
         orElse: () => msg,
       );
 
-      imagePath = (updatedMessage.messagePayload as ImageMessagePayload?)?.largeImagePath ?? (updatedMessage.messagePayload as ImageMessagePayload?)?.originalImagePath ?? '';
+      imagePath = (updatedMessage.messagePayload as ImageMessagePayload?)
+              ?.largeImagePath ??
+          (updatedMessage.messagePayload as ImageMessagePayload?)
+              ?.originalImagePath ??
+          '';
     }
 
     return ImageElement(
@@ -397,7 +424,8 @@ class ImageViewerDataManager {
     final videoPayload2 = msg.messagePayload as VideoMessagePayload?;
     String imagePath = '';
 
-    if (videoPayload2?.videoSnapshotPath != null && videoPayload2!.videoSnapshotPath!.isNotEmpty) {
+    if (videoPayload2?.videoSnapshotPath != null &&
+        videoPayload2!.videoSnapshotPath!.isNotEmpty) {
       final file = File(videoPayload2.videoSnapshotPath!);
       if (await file.exists()) {
         imagePath = videoPayload2.videoSnapshotPath!;
@@ -405,14 +433,20 @@ class ImageViewerDataManager {
     }
 
     if (imagePath.isEmpty) {
-      await MessageActionStore.create(msg).downloadMedia(quality: MediaQuality.thumbnail);
+      await MessageActionStore.create(msg)
+          .downloadMedia(quality: MediaQuality.thumbnail);
 
-      final updatedMessage = messageListStore.state.messageList.value.firstWhere(
+      final updatedMessage =
+          messageListStore.state.messageList.value.firstWhere(
         (message) => message.msgID == msg.msgID,
         orElse: () => msg,
       );
 
-      imagePath = (updatedMessage.messagePayload as VideoMessagePayload?)?.videoSnapshotPath ?? (updatedMessage.messagePayload as ImageMessagePayload?)?.thumbImagePath ?? '';
+      imagePath = (updatedMessage.messagePayload as VideoMessagePayload?)
+              ?.videoSnapshotPath ??
+          (updatedMessage.messagePayload as ImageMessagePayload?)
+              ?.thumbImagePath ??
+          '';
     }
 
     return ImageElement(

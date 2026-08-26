@@ -4,10 +4,7 @@ import 'package:flutter/material.dart' hide IconButton;
 class ChooseAvatarPage extends StatefulWidget {
   final String currentAvatarUrl;
 
-  const ChooseAvatarPage({
-    super.key,
-    required this.currentAvatarUrl,
-  });
+  const ChooseAvatarPage({super.key, required this.currentAvatarUrl});
 
   @override
   State<StatefulWidget> createState() => ChooseAvatarPageState();
@@ -15,9 +12,10 @@ class ChooseAvatarPage extends StatefulWidget {
 
 class ChooseAvatarPageState extends State<ChooseAvatarPage> {
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
 
-  final String _userFaceURL = "https://im.sdk.qcloud.com/download/tuikit-resource/avatar/avatar_%s.png";
+  final String _userFaceURL =
+      "https://im.sdk.qcloud.com/download/tuikit-resource/avatar/avatar_%s.png";
   final int _userFaceCount = 26;
   List<String> userAvatars = [];
   String selectedAvatarUrl = '';
@@ -35,8 +33,8 @@ class ChooseAvatarPageState extends State<ChooseAvatarPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    atomicLocale = AtomicLocalizations.of(context);
-    colorsTheme = BaseThemeProvider.colorsOf(context);
+    atomicLocale = AppLocalization.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
   }
 
   @override
@@ -47,7 +45,12 @@ class ChooseAvatarPageState extends State<ChooseAvatarPage> {
         backgroundColor: colorsTheme.bgColorTopBar,
         scrolledUnderElevation: 0,
         leading: IconButton.buttonContent(
-          content: IconOnlyContent(Icon(Icons.arrow_back_ios, color: colorsTheme.buttonColorPrimaryDefault)),
+          content: IconOnlyContent(
+            Icon(
+              Icons.arrow_back_ios,
+              color: colorsTheme.buttonColorPrimaryDefault,
+            ),
+          ),
           type: ButtonType.noBorder,
           size: ButtonSize.l,
           onClick: () => Navigator.of(context).pop(),
@@ -72,10 +75,7 @@ class ChooseAvatarPageState extends State<ChooseAvatarPage> {
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Container(
-            height: 1,
-            color: colorsTheme.strokeColorPrimary,
-          ),
+          child: Container(height: 1, color: colorsTheme.strokeColorPrimary),
         ),
       ),
       body: Container(
@@ -102,7 +102,9 @@ class ChooseAvatarPageState extends State<ChooseAvatarPage> {
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: isSelected ? colorsTheme.buttonColorPrimaryDefault : Colors.transparent,
+                    color: isSelected
+                        ? colorsTheme.buttonColorPrimaryDefault
+                        : Colors.transparent,
                     width: 2,
                   ),
                 ),
@@ -114,19 +116,14 @@ class ChooseAvatarPageState extends State<ChooseAvatarPage> {
                     errorBuilder: (context, error, stackTrace) {
                       return Container(
                         color: Colors.grey[200],
-                        child: const Icon(
-                          Icons.person,
-                          color: Colors.grey,
-                        ),
+                        child: const Icon(Icons.person, color: Colors.grey),
                       );
                     },
                     loadingBuilder: (context, child, loadingProgress) {
                       if (loadingProgress == null) return child;
                       return Container(
                         color: Colors.grey[200],
-                        child: const Center(
-                          child: CircularProgressIndicator(),
-                        ),
+                        child: const Center(child: CircularProgressIndicator()),
                       );
                     },
                   ),
@@ -140,7 +137,8 @@ class ChooseAvatarPageState extends State<ChooseAvatarPage> {
   }
 
   Future<void> _submitAvatar() async {
-    if (selectedAvatarUrl.isNotEmpty && selectedAvatarUrl != widget.currentAvatarUrl) {
+    if (selectedAvatarUrl.isNotEmpty &&
+        selectedAvatarUrl != widget.currentAvatarUrl) {
       if (mounted) {
         Navigator.of(context).pop(selectedAvatarUrl);
       }

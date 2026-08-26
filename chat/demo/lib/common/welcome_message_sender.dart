@@ -42,7 +42,7 @@ class WelcomeMessageSender {
     }
   }
 
-  /// Resolves the effective locale the same way [LocaleProvider] does: honour
+  /// Resolves the effective locale from Flutter's active localization context.
   /// the in-app language override when set, otherwise fall back to the system
   /// locale.
   static Future<Locale> _currentLocale() async {

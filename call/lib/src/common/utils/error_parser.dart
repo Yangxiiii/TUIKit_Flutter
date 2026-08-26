@@ -1,7 +1,8 @@
-import 'package:tuikit_atomic_x/base_component/localizations/atomic_localizations.dart';
+import 'package:tuikit_atomic_x/base_component/base_component.dart'
+    show AppChatLocalizedText, AppLocalization, AppLocalizedText;
 
 class ErrorParser {
-  static String? getErrorMessage(int errorCode, AtomicLocalizations? l10n) {
+  static String? getErrorMessage(int errorCode, AppLocalizedText? l10n) {
     if (l10n == null) return null;
     switch (errorCode) {
       case -1001:

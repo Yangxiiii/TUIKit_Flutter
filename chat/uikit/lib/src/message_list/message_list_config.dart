@@ -97,7 +97,8 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
       return _userIsSupportCopy;
     } else {
       final config = AppBuilder.getInstance();
-      return config.messageListConfig.messageActionList.contains(AppBuilder.MESSAGE_ACTION_COPY);
+      return config.messageListConfig.messageActionList
+          .contains(AppBuilder.MESSAGE_ACTION_COPY);
     }
   }
 
@@ -107,7 +108,8 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
       return _userIsSupportDelete;
     } else {
       final config = AppBuilder.getInstance();
-      return config.messageListConfig.messageActionList.contains(AppBuilder.MESSAGE_ACTION_DELETE);
+      return config.messageListConfig.messageActionList
+          .contains(AppBuilder.MESSAGE_ACTION_DELETE);
     }
   }
 
@@ -117,7 +119,8 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
       return _userIsSupportRecall;
     } else {
       final config = AppBuilder.getInstance();
-      return config.messageListConfig.messageActionList.contains(AppBuilder.MESSAGE_ACTION_RECALL);
+      return config.messageListConfig.messageActionList
+          .contains(AppBuilder.MESSAGE_ACTION_RECALL);
     }
   }
 

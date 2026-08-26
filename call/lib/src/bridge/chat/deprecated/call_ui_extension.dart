@@ -12,7 +12,10 @@ class CallUIExtension extends AbstractTUIExtension {
   static CallUIExtension get instance => _instance;
 
   @override
-  Future<Widget> onRaiseExtension(TUIExtensionID extensionID, Map<String, dynamic> param) {
+  Future<Widget> onRaiseExtension(
+    TUIExtensionID extensionID,
+    Map<String, dynamic> param,
+  ) {
     if (extensionID == TUIExtensionID.joinInGroup) {
       return _getGroupAttributes(param).catchError((error, stackTrace) {
         Logger.error("onRaiseExtension error: $error");
@@ -30,7 +33,8 @@ class CallUIExtension extends AbstractTUIExtension {
       final resultMap = await TencentImSDKPlugin.v2TIMManager.v2TIMGroupManager
           .getGroupAttributes(groupID: groupId);
 
-      if (resultMap.data == null || !resultMap.data!.containsKey('inner_attr_kit_info')) {
+      if (resultMap.data == null ||
+          !resultMap.data!.containsKey('inner_attr_kit_info')) {
         return Future<Widget>.value(const SizedBox());
       }
 
@@ -42,7 +46,9 @@ class CallUIExtension extends AbstractTUIExtension {
       final roomIDValue = groupAttAryMap['room_id'];
       final roomIDType = groupAttAryMap['room_id_type'];
       final mediaTypeString = groupAttAryMap['call_media_type'];
-      final userListMap = List<Map<String, dynamic>>.from(groupAttAryMap['user_list']);
+      final userListMap = List<Map<String, dynamic>>.from(
+        groupAttAryMap['user_list'],
+      );
 
       TUIRoomId? roomId;
       if (roomIDType != null && roomIDValue != null) {
@@ -72,12 +78,16 @@ class CallUIExtension extends AbstractTUIExtension {
       }
 
       return JoinInGroupWidget(
-        userIDs: userIds, roomId: roomId, mediaType: mediaType, groupId: groupId, callId: callId,);
+        userIDs: userIds,
+        roomId: roomId,
+        mediaType: mediaType,
+        groupId: groupId,
+        callId: callId,
+      );
     } on FormatException catch (e) {
       return Future<Widget>.value(const SizedBox());
     } catch (e) {
       return Future<Widget>.value(const SizedBox());
     }
   }
-
 }

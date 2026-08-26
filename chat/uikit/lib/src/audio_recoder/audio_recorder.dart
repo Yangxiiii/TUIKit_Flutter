@@ -41,7 +41,8 @@ class RecordInfo {
   }
 }
 
-typedef RecordingProgressCallback = void Function(int duration, double progress);
+typedef RecordingProgressCallback = void Function(
+    int duration, double progress);
 
 typedef RecordingStateCallback = void Function(bool isRecording);
 
@@ -138,18 +139,17 @@ class AudioRecorder {
           duration: (result.durationMs / 1000).floor(),
           path: result.filePath!,
         )..errorCode = result.resultCode;
-      } else if (result.resultCode == AudioRecordResultCode.errorLessThanMinDuration) {
+      } else if (result.resultCode ==
+          AudioRecordResultCode.errorLessThanMinDuration) {
         recordInfo = RecordInfo(
           duration: result.durationMs,
           path: '',
-        )
-          ..errorCode = result.resultCode;
+        )..errorCode = result.resultCode;
       } else {
         recordInfo = RecordInfo(
           duration: result.durationMs,
           path: result.filePath ?? '',
-        )
-          ..errorCode = result.resultCode;
+        )..errorCode = result.resultCode;
       }
 
       _cleanup();

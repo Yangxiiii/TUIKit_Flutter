@@ -6,9 +6,12 @@ class ChatUtils {
 
   /// Group member display name priority: nameCard > friendRemark > nickname > userID
   static String memberDisplayName(GroupMember member) {
-    if (member.nameCard != null && member.nameCard!.isNotEmpty) return member.nameCard!;
-    if (member.friendRemark != null && member.friendRemark!.isNotEmpty) return member.friendRemark!;
-    if (member.nickname != null && member.nickname!.isNotEmpty) return member.nickname!;
+    if (member.nameCard != null && member.nameCard!.isNotEmpty)
+      return member.nameCard!;
+    if (member.friendRemark != null && member.friendRemark!.isNotEmpty)
+      return member.friendRemark!;
+    if (member.nickname != null && member.nickname!.isNotEmpty)
+      return member.nickname!;
     return member.userID;
   }
 }

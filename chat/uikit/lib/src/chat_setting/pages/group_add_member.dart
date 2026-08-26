@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart' hide IconButton;
@@ -24,7 +25,7 @@ class _GroupAddMemberState extends State<GroupAddMember> {
   List<UserPickerData> _dataSource = [];
 
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
 
   @override
   void initState() {
@@ -35,8 +36,8 @@ class _GroupAddMemberState extends State<GroupAddMember> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    atomicLocale = AtomicLocalizations.of(context);
-    colorsTheme = BaseThemeProvider.colorsOf(context);
+    atomicLocale = AppLocalization.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
   }
 
   Future<void> _fetchFriendList() async {
@@ -48,7 +49,8 @@ class _GroupAddMemberState extends State<GroupAddMember> {
     if (result.errorCode == 0) {
       _dataSource = _buildDataSource();
     } else {
-      debugPrint('loadFriends failed, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}');
+      debugPrint(
+          'loadFriends failed, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}');
     }
 
     if (mounted) {
@@ -59,12 +61,15 @@ class _GroupAddMemberState extends State<GroupAddMember> {
   }
 
   List<UserPickerData> _buildDataSource() {
-    final existingMemberIds = widget.memberStore.state.memberList.value.map((m) => m.userID).toSet();
+    final existingMemberIds =
+        widget.memberStore.state.memberList.value.map((m) => m.userID).toSet();
 
     return _contactStore.state.friendList.value
         .map((friend) => UserPickerData(
               key: friend.userID,
-              label: (friend.nickname?.isNotEmpty == true ? friend.nickname! : friend.userID),
+              label: (friend.nickname?.isNotEmpty == true
+                  ? friend.nickname!
+                  : friend.userID),
               avatarURL: friend.avatarURL,
               isPreSelected: existingMemberIds.contains(friend.userID),
             ))
@@ -75,7 +80,8 @@ class _GroupAddMemberState extends State<GroupAddMember> {
     final userIDs = selectedItems.map((item) => item.key).toList();
     final result = await widget.memberStore.addMember(userIDList: userIDs);
     if (result.errorCode != 0) {
-      debugPrint('addMember failed, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}');
+      debugPrint(
+          'addMember failed, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}');
       if (mounted) {
         Toast.error(context, atomicLocale.addFailed);
       }
@@ -95,7 +101,8 @@ class _GroupAddMemberState extends State<GroupAddMember> {
           backgroundColor: colorsTheme.bgColorTopBar,
           elevation: 0,
           leading: IconButton.buttonContent(
-            content: IconOnlyContent(Icon(Icons.arrow_back_ios, color: colorsTheme.buttonColorPrimaryDefault)),
+            content: IconOnlyContent(Icon(Icons.arrow_back_ios,
+                color: colorsTheme.buttonColorPrimaryDefault)),
             type: ButtonType.noBorder,
             size: ButtonSize.l,
             onClick: () => Navigator.of(context).pop(),

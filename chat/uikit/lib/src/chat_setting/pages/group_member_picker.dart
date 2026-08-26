@@ -36,7 +36,7 @@ class _GroupMemberPickerState extends State<GroupMemberPicker> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    colorsTheme = BaseThemeProvider.colorsOf(context);
+    colorsTheme = SemanticColorScheme.of(context);
   }
 
   @override
@@ -53,7 +53,8 @@ class _GroupMemberPickerState extends State<GroupMemberPicker> {
     if (result.errorCode == 0) {
       _dataSource = _buildDataSource();
     } else {
-      debugPrint('loadMembers failed, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}');
+      debugPrint(
+          'loadMembers failed, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}');
     }
 
     if (mounted) {
@@ -95,7 +96,8 @@ class _GroupMemberPickerState extends State<GroupMemberPicker> {
           backgroundColor: colorsTheme.bgColorTopBar,
           elevation: 0,
           leading: IconButton.buttonContent(
-            content: IconOnlyContent(Icon(Icons.arrow_back_ios, color: colorsTheme.buttonColorPrimaryDefault)),
+            content: IconOnlyContent(Icon(Icons.arrow_back_ios,
+                color: colorsTheme.buttonColorPrimaryDefault)),
             type: ButtonType.noBorder,
             size: ButtonSize.l,
             onClick: () => Navigator.of(context).pop(),

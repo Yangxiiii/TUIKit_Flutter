@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart' hide CompletionHandler;
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -9,8 +10,12 @@ import 'package:tencent_chat_uikit/src/emoji_picker/emoji_manager.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_utils.dart';
 import 'package:tencent_chat_uikit/src/third_party/flutter_swipe_action_cell/core/cell.dart';
 
+/// 展示单条会话，并通过左滑提供置顶和删除操作。
 class ConversationItem extends StatefulWidget {
   final ConversationInfo conversation;
+
+  /// 会话行和滑动层背景；为空时沿用 TUIKit 默认列表颜色。
+  final Color? backgroundColor;
 
   final VoidCallback? onTap;
 
@@ -33,6 +38,7 @@ class ConversationItem extends StatefulWidget {
   const ConversationItem({
     super.key,
     required this.conversation,
+    this.backgroundColor,
     this.onTap,
     this.onLongPress,
     this.onPinToggle,
@@ -49,7 +55,7 @@ class ConversationItem extends StatefulWidget {
 }
 
 class _ConversationItemState extends State<ConversationItem> {
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
 
   @override
   void initState() {
@@ -58,40 +64,35 @@ class _ConversationItemState extends State<ConversationItem> {
 
   @override
   Widget build(BuildContext context) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
-    atomicLocale = AtomicLocalizations.of(context);
+    final colorsTheme = SemanticColorScheme.of(context);
+    atomicLocale = AppLocalization.of(context);
+    final backgroundColor =
+        widget.backgroundColor ?? colorsTheme.listColorDefault;
 
     return SwipeActionCell(
       key: ObjectKey(widget.conversation.conversationID),
       trailingActions: _buildSwipeActions(colorsTheme),
-      backgroundColor: colorsTheme.clearColor,
-      child: _buildConversationContent(context),
+      backgroundColor: backgroundColor,
+      child: _buildConversationContent(context, backgroundColor),
     );
   }
 
   List<SwipeAction> _buildSwipeActions(SemanticColorScheme colorsTheme) {
     final actions = <SwipeAction>[];
 
-    // Mark as read/unread button
-    if (widget.config.isSupportMarkUnread) {
-      final bool hasUnread = _hasUnreadStatus();
+    if (widget.config.isSupportPin) {
       actions.add(SwipeAction(
-        title: hasUnread ? atomicLocale.markAsRead : atomicLocale.markAsUnread,
+        title: widget.conversation.isPinned
+            ? atomicLocale.unpin
+            : atomicLocale.pin,
         onTap: (CompletionHandler handler) async {
-          if (hasUnread) {
-            widget.onMarkAsRead?.call();
-          } else {
-            widget.onMarkAsUnread?.call();
-          }
+          widget.onPinToggle?.call();
           handler(false);
         },
-        color: colorsTheme.textColorLink,
-        icon: SvgPicture.asset(
-          hasUnread ? 'chat_assets/icon/message_read_status.svg' : 'chat_assets/icon/message_unread_status.svg',
-          width: 20,
-          height: 20,
-          colorFilter: ColorFilter.mode(colorsTheme.textColorButton, BlendMode.srcIn),
-          package: 'tencent_chat_uikit',
+        color: colorsTheme.buttonColorPrimaryDefault,
+        icon: Icon(
+          Icons.push_pin_outlined,
+          color: colorsTheme.textColorButton,
         ),
         style: FontScheme.caption3Regular.copyWith(
           color: colorsTheme.textColorButton,
@@ -99,16 +100,16 @@ class _ConversationItemState extends State<ConversationItem> {
       ));
     }
 
-    if (_hasMoreActions()) {
+    if (widget.config.isSupportDelete) {
       actions.add(SwipeAction(
-        title: atomicLocale.more,
+        title: atomicLocale.delete,
         onTap: (CompletionHandler handler) async {
-          await _showMoreActions(context, colorsTheme);
+          widget.onDelete?.call();
           handler(false);
         },
-        color: colorsTheme.bgColorMask,
+        color: colorsTheme.textColorError,
         icon: Icon(
-          Icons.more_horiz,
+          Icons.delete_outline,
           color: colorsTheme.textColorButton,
         ),
         style: FontScheme.caption3Regular.copyWith(
@@ -120,23 +121,17 @@ class _ConversationItemState extends State<ConversationItem> {
     return actions;
   }
 
-  /// Returns true if the conversation has unread status (unreadCount > 0 or marked as unread).
-  bool _hasUnreadStatus() {
-    return widget.conversation.unreadCount > 0 ||
-        widget.conversation.conversationMarkList.any((mark) => mark == ConversationMarkType.unread);
-  }
-
-  Widget _buildConversationContent(BuildContext context) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
-    String formatTime = TimeUtil.convertToFormatTime(widget.conversation.lastMessage?.timestamp ?? 0, context);
+  Widget _buildConversationContent(
+      BuildContext context, Color backgroundColor) {
+    final colorsTheme = SemanticColorScheme.of(context);
+    String formatTime = TimeUtil.convertToFormatTime(
+        widget.conversation.lastMessage?.timestamp ?? 0, context);
 
     return InkWell(
       onTap: widget.onTap,
       onLongPress: widget.onLongPress,
       child: Container(
-        decoration: BoxDecoration(
-          color: widget.conversation.isPinned ? colorsTheme.bgColorDefault : colorsTheme.bgColorOperate,
-        ),
+        decoration: BoxDecoration(color: backgroundColor),
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
         child: Row(
           children: [
@@ -196,8 +191,10 @@ class _ConversationItemState extends State<ConversationItem> {
     // If there's a draft, show draft with red label
     if (draft != null && draft.isNotEmpty) {
       // Convert emoji codes to localized names for preview
-      String localizedDraft = EmojiManager.getEmojiMap(context).keys.fold(draft, (previous, key) {
-        return previous.replaceAll(key, EmojiManager.getEmojiMap(context)[key]!);
+      String localizedDraft =
+          EmojiManager.getEmojiMap(context).keys.fold(draft, (previous, key) {
+        return previous.replaceAll(
+            key, EmojiManager.getEmojiMap(context)[key]!);
       });
 
       // Replace newlines with spaces for single-line display
@@ -205,8 +202,10 @@ class _ConversationItemState extends State<ConversationItem> {
 
       // Build prefix for unread count (only when muted and unreadCount >= 2)
       String unreadPrefix = '';
-      if (widget.conversation.receiveOption == ReceiveMessageOption.notNotify && widget.conversation.unreadCount >= 2) {
-        unreadPrefix = '[${_formatUnreadCount(widget.conversation.unreadCount)} ${atomicLocale.messageNum}]';
+      if (widget.conversation.receiveOption == ReceiveMessageOption.notNotify &&
+          widget.conversation.unreadCount >= 2) {
+        unreadPrefix =
+            '[${_formatUnreadCount(widget.conversation.unreadCount)} ${atomicLocale.messageNum}]';
       }
 
       return RichText(
@@ -246,16 +245,17 @@ class _ConversationItemState extends State<ConversationItem> {
     }
 
     // No draft: show last message as before
-    String replaceText = EmojiManager.getEmojiMap(context)
-        .keys
-        .fold(MessageUtil.getMessageAbstract(widget.conversation.lastMessage, context), (previous, key) {
+    String replaceText = EmojiManager.getEmojiMap(context).keys.fold(
+        MessageUtil.getMessageAbstract(
+            widget.conversation.lastMessage, context), (previous, key) {
       return previous.replaceAll(key, EmojiManager.getEmojiMap(context)[key]!);
     });
 
-    String unreadPrefix =
-        widget.conversation.receiveOption == ReceiveMessageOption.notNotify && widget.conversation.unreadCount >= 2
-            ? '[${_formatUnreadCount(widget.conversation.unreadCount)} ${atomicLocale.messageNum}]'
-            : '';
+    String unreadPrefix = widget.conversation.receiveOption ==
+                ReceiveMessageOption.notNotify &&
+            widget.conversation.unreadCount >= 2
+        ? '[${_formatUnreadCount(widget.conversation.unreadCount)} ${atomicLocale.messageNum}]'
+        : '';
 
     // If there's @ mention, show with red color
     if (atPrefix.isNotEmpty) {
@@ -349,62 +349,14 @@ class _ConversationItemState extends State<ConversationItem> {
     return '';
   }
 
-  bool _hasMoreActions() {
-    return widget.config.isSupportPin ||
-        widget.config.isSupportClearHistory ||
-        widget.config.isSupportDelete ||
-        widget.customActions.isNotEmpty;
-  }
-
-  Future<void> _showMoreActions(BuildContext context, SemanticColorScheme colors) async {
-    final actions = <ActionSheetItem>[];
-
-    // Pin/Unpin action
-    if (widget.config.isSupportPin) {
-      actions.add(ActionSheetItem(
-        title: widget.conversation.isPinned ? atomicLocale.unpin : atomicLocale.pin,
-        onTap: () => widget.onPinToggle?.call(),
-      ));
-    }
-
-    if (widget.config.isSupportClearHistory) {
-      actions.add(ActionSheetItem(
-        title: atomicLocale.clearMessage,
-        onTap: () => widget.onClearHistory?.call(),
-      ));
-    }
-
-    if (widget.config.isSupportDelete) {
-      actions.add(ActionSheetItem(
-        title: atomicLocale.delete,
-        isDestructive: true,
-        onTap: () => widget.onDelete?.call(),
-      ));
-    }
-
-    // Add custom actions
-    for (final customAction in widget.customActions) {
-      actions.add(ActionSheetItem(
-        title: customAction.title,
-        onTap: () => customAction.action(widget.conversation),
-      ));
-    }
-
-    if (actions.isNotEmpty) {
-      ActionSheet.show(
-        context,
-        actions: actions,
-      );
-    }
-  }
-
   Widget _buildAvatar(BuildContext context) {
     // Show red dot for muted conversations with unread status
     bool hasDot = false;
     if (widget.conversation.receiveOption == ReceiveMessageOption.notNotify) {
       // Check both unreadCount and markList for unread status
       hasDot = widget.conversation.unreadCount > 0 ||
-          widget.conversation.conversationMarkList.any((mark) => mark == ConversationMarkType.unread);
+          widget.conversation.conversationMarkList
+              .any((mark) => mark == ConversationMarkType.unread);
     }
 
     return Avatar.image(
@@ -416,7 +368,8 @@ class _ConversationItemState extends State<ConversationItem> {
   }
 
   String _getAvatarText() {
-    if (widget.conversation.title == null || widget.conversation.title!.isEmpty) {
+    if (widget.conversation.title == null ||
+        widget.conversation.title!.isEmpty) {
       return '?';
     }
 
@@ -431,7 +384,7 @@ class _ConversationItemState extends State<ConversationItem> {
   }
 
   Widget _buildUnreadOrMuteIcon() {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     // For muted conversations (except meeting groups), show mute icon
     if (widget.conversation.receiveOption == ReceiveMessageOption.notNotify &&
@@ -442,14 +395,16 @@ class _ConversationItemState extends State<ConversationItem> {
           'chat_assets/icon/ic_mute.svg',
           width: 18,
           height: 18,
-          colorFilter: ColorFilter.mode(colorsTheme.textColorTertiary, BlendMode.srcIn),
+          colorFilter:
+              ColorFilter.mode(colorsTheme.textColorTertiary, BlendMode.srcIn),
           package: 'tencent_chat_uikit',
         ),
       );
     }
 
     // Check for unread status: unreadCount > 0 OR marked as unread
-    final bool hasUnreadMark = widget.conversation.conversationMarkList.any((mark) => mark == ConversationMarkType.unread);
+    final bool hasUnreadMark = widget.conversation.conversationMarkList
+        .any((mark) => mark == ConversationMarkType.unread);
 
     if (widget.conversation.unreadCount > 0) {
       // Show real unread count
@@ -494,7 +449,8 @@ class _ConversationItemState extends State<ConversationItem> {
   Widget _buildErrorStatusIcon(SemanticColorScheme colorsTheme) {
     final lastMessage = widget.conversation.lastMessage;
     if (lastMessage != null &&
-        (lastMessage.status == MessageStatus.sendFail || lastMessage.status == MessageStatus.violation)) {
+        (lastMessage.status == MessageStatus.sendFail ||
+            lastMessage.status == MessageStatus.violation)) {
       return Padding(
         padding: const EdgeInsets.only(right: 4.0),
         child: Icon(

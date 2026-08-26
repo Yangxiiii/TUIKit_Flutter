@@ -2,18 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:tencent_live_uikit/common/index.dart';
 import 'package:tuikit_atomic_x/base_component/basic_controls/action_sheet.dart';
 import 'package:tuikit_atomic_x/base_component/theme/color_scheme.dart';
-import 'package:tuikit_atomic_x/base_component/theme/theme_state.dart';
+import 'package:tuikit_atomic_x/base_component/theme/color_scheme.dart';
 
 class ActionSheetItem {
   final String title;
   final bool isDestructive;
   final VoidCallback onTap;
 
-  const ActionSheetItem({
-    required this.title,
-    required this.onTap,
-    this.isDestructive = false,
-  });
+  const ActionSheetItem({required this.title, required this.onTap, this.isDestructive = false});
 }
 
 /// Guards against "tap-through" events that occur during a modal sheet's
@@ -126,8 +122,14 @@ class BaseBottomSheet {
       useRootNavigator: useRootNavigator,
       backgroundColor: Colors.transparent,
       builder: (buildContext) {
-        return _createWidget(buildContext,
-            title: title, message: message, actions: actions, showCancel: showCancel, cancelText: cancelText);
+        return _createWidget(
+          buildContext,
+          title: title,
+          message: message,
+          actions: actions,
+          showCancel: showCancel,
+          cancelText: cancelText,
+        );
       },
     );
     final navigator = Navigator.of(context, rootNavigator: useRootNavigator);
@@ -177,7 +179,7 @@ class BaseBottomSheet {
   }) {
     // Calculate max height: 60% of screen height
     final maxHeight = MediaQuery.of(context).size.height * 0.6;
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
     return Container(
       decoration: BoxDecoration(
         color: colors.bgColorDialog,
@@ -189,10 +191,7 @@ class BaseBottomSheet {
         children: [
           Container(
             constraints: BoxConstraints(maxHeight: maxHeight),
-            decoration: BoxDecoration(
-              color: colors.bgColorDialog,
-              borderRadius: BorderRadius.circular(14),
-            ),
+            decoration: BoxDecoration(color: colors.bgColorDialog, borderRadius: BorderRadius.circular(14)),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -204,20 +203,14 @@ class BaseBottomSheet {
                         if (title != null)
                           Text(
                             title,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: colors.textColorSecondary,
-                            ),
+                            style: TextStyle(fontSize: 13, color: colors.textColorSecondary),
                             textAlign: TextAlign.center,
                           ),
                         if (title != null && message != null) const SizedBox(height: 4),
                         if (message != null)
                           Text(
                             message,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: colors.textColorSecondary,
-                            ),
+                            style: TextStyle(fontSize: 13, color: colors.textColorSecondary),
                             textAlign: TextAlign.center,
                           ),
                       ],
@@ -257,10 +250,7 @@ class BaseBottomSheet {
             _buildDivider(colors, height: 6.0, padding: 0.0),
             Container(
               width: double.infinity,
-              decoration: BoxDecoration(
-                color: colors.bgColorDialog,
-                borderRadius: BorderRadius.circular(14),
-              ),
+              decoration: BoxDecoration(color: colors.bgColorDialog, borderRadius: BorderRadius.circular(14)),
               child: _buildCancelButton(
                 context: context,
                 colors: colors,
@@ -299,13 +289,7 @@ class BaseBottomSheet {
             ),
           ),
         ),
-        child: Text(
-          item.title,
-          style: TextStyle(
-            color: textColor,
-            fontSize: 16,
-          ),
-        ),
+        child: Text(item.title, style: TextStyle(color: textColor, fontSize: 16)),
       ),
     );
   }
@@ -322,17 +306,9 @@ class BaseBottomSheet {
         style: TextButton.styleFrom(
           padding: const EdgeInsets.symmetric(vertical: 16),
           backgroundColor: Colors.transparent,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
-        child: Text(
-          text,
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 16,
-          ),
-        ),
+        child: Text(text, style: TextStyle(color: Colors.white, fontSize: 16)),
       ),
     );
   }
@@ -340,10 +316,7 @@ class BaseBottomSheet {
   static Widget _buildDivider(SemanticColorScheme colors, {height = 0.5, padding = 20.0}) {
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: padding),
-      child: Container(
-        height: height,
-        color: colors.strokeColorPrimary,
-      ),
+      child: Container(height: height, color: colors.strokeColorPrimary),
     );
   }
 }

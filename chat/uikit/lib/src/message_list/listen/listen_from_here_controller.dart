@@ -1,10 +1,10 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:flutter/foundation.dart';
 import 'package:tuikit_atomic_x/atomicx.dart';
 
 import '../../ai/tts/tts_playback_helper.dart';
 import '../../ai/tts/voice_message_config.dart';
 import '../../audio_player/audio_player_platform.dart';
-import '../../common/language/gen/chat_localizations.dart';
 import 'listen_from_here.dart';
 
 /// Drives the "listen from here" sequential playback queue.
@@ -37,7 +37,7 @@ class ListenFromHereController extends ChangeNotifier {
   Future<void> start({
     required List<MessageInfo> messages,
     required String fromMessageId,
-    required ChatLocalizations l,
+    required AppLocalizedText l,
   }) async {
     stop();
     await VoiceMessageConfig.instance.load();
@@ -74,9 +74,7 @@ class ListenFromHereController extends ChangeNotifier {
     final audioPath = item.audioPath;
 
     // Same-sender audio items carry no spoken prefix → play the audio directly.
-    if (item.speechText.isEmpty &&
-        audioPath != null &&
-        audioPath.isNotEmpty) {
+    if (item.speechText.isEmpty && audioPath != null && audioPath.isNotEmpty) {
       _playAudio(audioPath);
       return;
     }

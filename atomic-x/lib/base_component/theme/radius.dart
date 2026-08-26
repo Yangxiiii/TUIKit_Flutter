@@ -9,15 +9,15 @@ final RadiusScheme = SemanticRadiusScheme(
 
 class SemanticRadiusScheme {
   final double tipsRadius;
-  
+
   final double smallRadius;
-  
+
   final double alertRadius;
-  
+
   final double largeRadius;
-  
+
   final double superLargeRadius;
-  
+
   final double roundRadius;
 
   const SemanticRadiusScheme({
@@ -37,4 +37,4 @@ class _Radius {
   static const double radius16 = 16.0;
   static const double radius20 = 20.0;
   static const double radius999 = 999.0;
-} 
+}

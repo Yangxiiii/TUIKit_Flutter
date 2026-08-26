@@ -25,22 +25,22 @@ class _MyAppState extends State<MyApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-        localizationsDelegates: const [
-          ...AppLocalizations.localizationsDelegates,
-          AtomicLocalizations.delegate,
-        ],
-        supportedLocales: AppLocalizations.supportedLocales,
-        navigatorObservers: [TUICallKit.navigatorObserver],
-        builder: (context, child) => Scaffold(
-              resizeToAvoidBottomInset: false,
-              body: GestureDetector(
-                onTap: () {
-                  hideKeyboard(context);
-                },
-                child: child,
-              ),
-            ),
-        home: const LoginWidget());
+      localizationsDelegates: const [
+        ...AppLocalizations.localizationsDelegates,
+      ],
+      supportedLocales: AppLocalizations.supportedLocales,
+      navigatorObservers: [TUICallKit.navigatorObserver],
+      builder: (context, child) => Scaffold(
+        resizeToAvoidBottomInset: false,
+        body: GestureDetector(
+          onTap: () {
+            hideKeyboard(context);
+          },
+          child: child,
+        ),
+      ),
+      home: const LoginWidget(),
+    );
   }
 
   void hideKeyboard(BuildContext context) {

@@ -1,12 +1,15 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
+import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
 
 import '../../user_picker/user_picker.dart';
 import 'create_group.dart';
 
 class StartGroupChat extends StatefulWidget {
-  final Function(String groupID, String groupName, String? avatar)? onGroupCreated;
+  final Function(String groupID, String groupName, String? avatar)?
+      onGroupCreated;
 
   const StartGroupChat({
     super.key,
@@ -20,7 +23,7 @@ class StartGroupChat extends StatefulWidget {
 class _StartGroupChatState extends State<StartGroupChat> {
   final ContactStore _contactStore = ContactStore.shared;
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
 
   @override
   void initState() {
@@ -31,8 +34,8 @@ class _StartGroupChatState extends State<StartGroupChat> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    colorsTheme = BaseThemeProvider.colorsOf(context);
-    atomicLocale = AtomicLocalizations.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
+    atomicLocale = AppLocalization.of(context);
   }
 
   Future<void> _loadData() async {
@@ -53,20 +56,17 @@ class _StartGroupChatState extends State<StartGroupChat> {
       selectedMembers.add(contactInfo);
     }
 
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => CreateGroup(
-          selectedMembers: selectedMembers,
-          onGroupCreated: (groupID, groupName, avatar) {
-            Navigator.of(context).pop();
-            Navigator.of(context).pop();
+    context.pushChatUIKitPage(
+      CreateGroup(
+        selectedMembers: selectedMembers,
+        onGroupCreated: (groupID, groupName, avatar) {
+          context.popChatUIKitPage();
+          context.popChatUIKitPage();
 
-            if (widget.onGroupCreated != null) {
-              widget.onGroupCreated!(groupID, groupName, avatar);
-            }
-          },
-        ),
+          if (widget.onGroupCreated != null) {
+            widget.onGroupCreated!(groupID, groupName, avatar);
+          }
+        },
       ),
     );
   }
@@ -79,7 +79,9 @@ class _StartGroupChatState extends State<StartGroupChat> {
         final dataSource = friendList
             .map((contact) => UserPickerData(
                   key: contact.userID,
-                  label: (contact.nickname?.isNotEmpty == true ? contact.nickname! : contact.userID),
+                  label: (contact.nickname?.isNotEmpty == true
+                      ? contact.nickname!
+                      : contact.userID),
                   avatarURL: contact.avatarURL,
                 ))
             .toList();

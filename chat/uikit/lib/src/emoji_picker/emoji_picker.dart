@@ -1,8 +1,7 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
 
-import 'package:tuikit_atomic_x/base_component/localizations/atomic_localizations.dart';
 import 'package:tuikit_atomic_x/base_component/theme/color_scheme.dart';
-import 'package:tuikit_atomic_x/base_component/theme/theme_state.dart';
 import 'emoji_picker_config.dart';
 import 'emoji_picker_model.dart';
 
@@ -24,7 +23,8 @@ class EmojiPicker extends StatefulWidget {
 
 typedef OnTabClickCallback = void Function(int currentIndex);
 
-class EmojiPickerState extends State<EmojiPicker> with SingleTickerProviderStateMixin {
+class EmojiPickerState extends State<EmojiPicker>
+    with SingleTickerProviderStateMixin {
   int activeTabIndex = 0;
   late OnTabClickCallback onTabClickCallback;
   late AnimationController _controller;
@@ -130,14 +130,15 @@ class EmojiPickerTabState extends State<EmojiPickerTab> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    colorsTheme = BaseThemeProvider.colorsOf(context);
+    colorsTheme = SemanticColorScheme.of(context);
   }
 
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: colorsTheme.strokeColorPrimary)),
+        border:
+            Border(bottom: BorderSide(color: colorsTheme.strokeColorPrimary)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(10),
@@ -147,7 +148,8 @@ class EmojiPickerTabState extends State<EmojiPickerTab> {
             (e) {
               int index = EmojiPickerConfig.customStickerLists.indexOf(e);
               bool showActiveStyle = index == widget.activeTabIndex;
-              bool isLastIndex = index == EmojiPickerConfig.customStickerLists.length - 1;
+              bool isLastIndex =
+                  index == EmojiPickerConfig.customStickerLists.length - 1;
 
               return GestureDetector(
                 onTap: () {
@@ -157,14 +159,17 @@ class EmojiPickerTabState extends State<EmojiPickerTab> {
                   height: 40,
                   width: 40,
                   decoration: BoxDecoration(
-                    color: showActiveStyle ? colorsTheme.buttonColorSecondaryActive : colorsTheme.clearColor,
+                    color: showActiveStyle
+                        ? colorsTheme.buttonColorSecondaryActive
+                        : colorsTheme.clearColor,
                     borderRadius: BorderRadius.circular(6),
                   ),
                   margin: EdgeInsets.only(right: isLastIndex ? 0 : 10),
                   child: Align(
                     alignment: Alignment.center,
                     child: Image(
-                      image: AssetImage(e.iconPath, package: 'tencent_chat_uikit'),
+                      image:
+                          AssetImage(e.iconPath, package: 'tencent_chat_uikit'),
                       width: e.iconSize,
                     ),
                   ),
@@ -197,13 +202,14 @@ class EmojiPickerContent extends StatefulWidget {
 }
 
 class EmojiPickerContentState extends State<EmojiPickerContent> {
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
   late SemanticColorScheme colorsTheme;
 
   sendStickerMessage(int type, String name, int stickerIndex) {
     if (name.startsWith('[') && name.endsWith(']')) {
       var adjustName = name.substring(1, name.length - 1);
-      name = adjustName.toLowerCase().startsWith('tuiemoji') ? name : adjustName;
+      name =
+          adjustName.toLowerCase().startsWith('tuiemoji') ? name : adjustName;
     }
 
     if (widget.onEmojiClick != null) {
@@ -219,8 +225,8 @@ class EmojiPickerContentState extends State<EmojiPickerContent> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    atomicLocale = AtomicLocalizations.of(context);
-    colorsTheme = BaseThemeProvider.colorsOf(context);
+    atomicLocale = AppLocalization.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
   }
 
   @override
@@ -229,11 +235,17 @@ class EmojiPickerContentState extends State<EmojiPickerContent> {
     int crossAxisCount = 7;
     int stickerType = 0;
     int stickerIndex = 0;
-    if (EmojiPickerConfig.customStickerLists.elementAtOrNull(widget.activeTabIndex) != null) {
-      currentStickerList = EmojiPickerConfig.customStickerLists[widget.activeTabIndex].stickers;
-      crossAxisCount = EmojiPickerConfig.customStickerLists[widget.activeTabIndex].rowNum;
-      stickerType = EmojiPickerConfig.customStickerLists[widget.activeTabIndex].type;
-      stickerIndex = EmojiPickerConfig.customStickerLists[widget.activeTabIndex].index;
+    if (EmojiPickerConfig.customStickerLists
+            .elementAtOrNull(widget.activeTabIndex) !=
+        null) {
+      currentStickerList =
+          EmojiPickerConfig.customStickerLists[widget.activeTabIndex].stickers;
+      crossAxisCount =
+          EmojiPickerConfig.customStickerLists[widget.activeTabIndex].rowNum;
+      stickerType =
+          EmojiPickerConfig.customStickerLists[widget.activeTabIndex].type;
+      stickerIndex =
+          EmojiPickerConfig.customStickerLists[widget.activeTabIndex].index;
     }
 
     return Expanded(
@@ -267,13 +279,15 @@ class EmojiPickerContentState extends State<EmojiPickerContent> {
                                     );
                                   },
                                   child: Image(
-                                    image: AssetImage(e.path, package: 'tencent_chat_uikit'),
+                                    image: AssetImage(e.path,
+                                        package: 'tencent_chat_uikit'),
                                   ),
                                 ),
                               )
                               .toList(),
                           // Add blank lines to avoid button obstruction
-                          ...List.generate(crossAxisCount, (index) => const SizedBox()),
+                          ...List.generate(
+                              crossAxisCount, (index) => const SizedBox()),
                         ],
                       ),
                     ),
@@ -293,7 +307,8 @@ class EmojiPickerContentState extends State<EmojiPickerContent> {
     );
   }
 
-  Widget _buildActionButtons(SemanticColorScheme colorsTheme, AtomicLocalizations atomicLocale) {
+  Widget _buildActionButtons(
+      SemanticColorScheme colorsTheme, AppLocalizedText atomicLocale) {
     return Container(
       height: 50,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

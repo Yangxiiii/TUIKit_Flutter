@@ -14,9 +14,12 @@ class EmojiPickerUtils {
       final screenWidth = size.width / win.devicePixelRatio;
       final screenHeight = size.height / win.devicePixelRatio;
 
-      final diagonalInInches = sqrt(pow(screenWidth, 2) + pow(screenHeight, 2)) / 96.0;
+      final diagonalInInches =
+          sqrt(pow(screenWidth, 2) + pow(screenHeight, 2)) / 96.0;
 
-      return diagonalInInches < 10 ? StickerDeviceScreenType.mobile : StickerDeviceScreenType.desktop;
+      return diagonalInInches < 10
+          ? StickerDeviceScreenType.mobile
+          : StickerDeviceScreenType.desktop;
     } else {
       double deviceWidth = MediaQuery.of(context).size.width;
       double deviceHeight = MediaQuery.of(context).size.height;

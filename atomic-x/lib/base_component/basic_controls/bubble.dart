@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../theme/theme_state.dart';
+import '../theme/color_scheme.dart';
 
 enum BubbleColorType {
   filled,
@@ -51,16 +51,16 @@ class RoundedCornerShape extends ShapeBorder {
         ..color = side.color
         ..strokeWidth = side.width
         ..style = PaintingStyle.stroke;
-      
+
       canvas.drawPath(getOuterPath(rect, textDirection: textDirection), paint);
     }
   }
 
   @override
   ShapeBorder scale(double t) => RoundedCornerShape(
-    radii: radii.map((r) => r * t).toList(),
-    side: side.scale(t),
-  );
+        radii: radii.map((r) => r * t).toList(),
+        side: side.scale(t),
+      );
 
   RoundedCornerShape copyWith({
     List<double>? radii,
@@ -95,25 +95,25 @@ class Bubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
-    
+    final colorsTheme = SemanticColorScheme.of(context);
+
     final shape = RoundedCornerShape(
       radii: radii,
-      side: (bubbleColorType == BubbleColorType.outlined || 
-             bubbleColorType == BubbleColorType.both)
+      side: (bubbleColorType == BubbleColorType.outlined ||
+              bubbleColorType == BubbleColorType.both)
           ? BorderSide(
               color: borderColor ?? colorsTheme.strokeColorPrimary,
               width: borderWidth,
             )
           : BorderSide.none,
     );
-    
+
     return Container(
       constraints: const BoxConstraints(minWidth: 40),
       decoration: ShapeDecoration(
         shape: shape,
-        color: bubbleColorType == BubbleColorType.outlined 
-            ? Colors.transparent 
+        color: bubbleColorType == BubbleColorType.outlined
+            ? Colors.transparent
             : backgroundColor,
         gradient: highlightColors != null && highlightColors!.length > 1
             ? LinearGradient(
@@ -249,4 +249,4 @@ class RightTopSquareBubble extends StatelessWidget {
       child: child,
     );
   }
-} 
+}

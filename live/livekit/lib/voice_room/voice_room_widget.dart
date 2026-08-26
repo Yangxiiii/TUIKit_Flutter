@@ -12,7 +12,6 @@ import 'package:tencent_live_uikit/seat_grid_widget/index.dart';
 import 'package:tencent_live_uikit/voice_room/manager/index.dart';
 import 'package:tencent_live_uikit/voice_room/widget/index.dart';
 
-import '../common/resources/live_theme_manager.dart';
 import '../common/widget/float_window/float_window_controller.dart';
 
 const maxConnectedViewersCount = 10;
@@ -55,8 +54,6 @@ class _TUIVoiceRoomWidgetState extends State<TUIVoiceRoomWidget> {
   final ToastService _toastService = ToastServiceImpl();
   late final VoidCallback _onFullScreenChangedListener = _onFullScreenChanged;
 
-  bool _hasEnteredThemeScene = false;
-
   @override
   void initState() {
     super.initState();
@@ -75,19 +72,7 @@ class _TUIVoiceRoomWidgetState extends State<TUIVoiceRoomWidget> {
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // Only switch theme on first entry
-    if (!_hasEnteredThemeScene) {
-      _hasEnteredThemeScene = true;
-      LiveThemeManager.instance.enterLiveKitScene(context);
-    }
-  }
-
-  @override
   void dispose() {
-    // Exit LiveKit scene and restore theme
-    LiveThemeManager.instance.exitLiveKitScene();
     widget.floatWindowController?.isFullScreen.removeListener(_onFullScreenChangedListener);
     _unsubscribeToast();
     seatGridController.dispose();
@@ -103,53 +88,51 @@ class _TUIVoiceRoomWidgetState extends State<TUIVoiceRoomWidget> {
     DeviceLanguage.checkLocale(context);
     return Scaffold(
       resizeToAvoidBottomInset: false,
-      body: Stack(
-        children: [_initVoiceRoomRootWidget(), _initVoiceRoomPrepareWidget()],
-      ),
+      body: Stack(children: [_initVoiceRoomRootWidget(), _initVoiceRoomPrepareWidget()]),
     );
   }
 
   void _onFullScreenChanged() {
     if (widget.floatWindowController == null) return;
     bool isFullScreen = widget.floatWindowController!.isFullScreen.value;
-    if (isFullScreen) {
-      LiveThemeManager.instance.resumeTheme();
-    } else {
-      LiveThemeManager.instance.pauseTheme();
-    }
     GlobalFloatWindowManager.instance.setFloatWindowMode(isFullScreen ? FloatWindowMode.none : FloatWindowMode.inApp);
   }
 
   Widget _initVoiceRoomPrepareWidget() {
     return ValueListenableBuilder(
-        valueListenable: _needToPrepare,
-        builder: (context, value, child) {
-          return Visibility(
-              visible: value,
-              child: VoiceRoomPrepareWidget(
-                  prepareStore: _prepareStore,
-                  toastService: _toastService,
-                  didClickStart: () {
-                    _needToPrepare.value = false;
-                  }));
-        });
+      valueListenable: _needToPrepare,
+      builder: (context, value, child) {
+        return Visibility(
+          visible: value,
+          child: VoiceRoomPrepareWidget(
+            prepareStore: _prepareStore,
+            toastService: _toastService,
+            didClickStart: () {
+              _needToPrepare.value = false;
+            },
+          ),
+        );
+      },
+    );
   }
 
   Widget _initVoiceRoomRootWidget() {
     return ValueListenableBuilder(
-        valueListenable: _needToPrepare,
-        builder: (context, value, child) {
-          return Visibility(
-              visible: !value,
-              child: VoiceRoomRootWidget(
-                liveID: liveID,
-                prepareStore: _prepareStore,
-                toastService: _toastService,
-                seatGridController: seatGridController,
-                isCreate: behavior != RoomBehavior.join,
-                floatWindowController: widget.floatWindowController,
-              ));
-        });
+      valueListenable: _needToPrepare,
+      builder: (context, value, child) {
+        return Visibility(
+          visible: !value,
+          child: VoiceRoomRootWidget(
+            liveID: liveID,
+            prepareStore: _prepareStore,
+            toastService: _toastService,
+            seatGridController: seatGridController,
+            isCreate: behavior != RoomBehavior.join,
+            floatWindowController: widget.floatWindowController,
+          ),
+        );
+      },
+    );
   }
 }
 
@@ -168,7 +151,8 @@ extension on _TUIVoiceRoomWidgetState {
     final hasMicrophonePermission = await Permission.microphone.status == PermissionStatus.granted;
     if (!hasMicrophonePermission) {
       LiveKitLogger.error(
-          '[ForegroundService] failed to start audio foreground service. reason: without microphone permission');
+        '[ForegroundService] failed to start audio foreground service. reason: without microphone permission',
+      );
       return;
     }
     TUILiveKitPlatform.instance.startForegroundService(ForegroundServiceType.audio, "", description);

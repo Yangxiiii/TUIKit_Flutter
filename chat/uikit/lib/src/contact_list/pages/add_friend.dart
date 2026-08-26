@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart' hide IconButton;
@@ -21,7 +22,7 @@ class _AddFriendState extends State<AddFriend> {
   bool _showAddFriendDetail = false;
 
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
 
   @override
   void initState() {
@@ -34,8 +35,8 @@ class _AddFriendState extends State<AddFriend> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    colorsTheme = BaseThemeProvider.colorsOf(context);
-    atomicLocale = AtomicLocalizations.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
+    atomicLocale = AppLocalization.of(context);
   }
 
   @override
@@ -83,7 +84,9 @@ class _AddFriendState extends State<AddFriend> {
   void _sendAddFriendRequest() async {
     if (widget.contactInfo == null && _searchResult == null) return;
     final result = await _contactStore.addFriend(
-      userID: widget.contactInfo != null ? widget.contactInfo!.userID : _searchResult!.userID,
+      userID: widget.contactInfo != null
+          ? widget.contactInfo!.userID
+          : _searchResult!.userID,
       addWording: _verificationController.text.trim(),
     );
 
@@ -92,19 +95,26 @@ class _AddFriendState extends State<AddFriend> {
         Toast.success(context, atomicLocale.contactAddedSuccessfully);
         Navigator.pop(context);
       } else {
-        if (result.errorCode == TIMErrCode.ERR_SVR_FRIENDSHIP_ALLOW_TYPE_NEED_CONFIRM.value) {
+        if (result.errorCode ==
+            TIMErrCode.ERR_SVR_FRIENDSHIP_ALLOW_TYPE_NEED_CONFIRM.value) {
           Toast.info(context, atomicLocale.waitAgreeFriend);
-        } else if (result.errorCode == TIMErrCode.ERR_SVR_FRIENDSHIP_ALLOW_TYPE_DENY_ANY.value) {
+        } else if (result.errorCode ==
+            TIMErrCode.ERR_SVR_FRIENDSHIP_ALLOW_TYPE_DENY_ANY.value) {
           Toast.error(context, atomicLocale.forbidAddFriend);
-        } else if (result.errorCode == TIMErrCode.ERR_SVR_FRIENDSHIP_IN_PEER_BLACKLIST.value) {
+        } else if (result.errorCode ==
+            TIMErrCode.ERR_SVR_FRIENDSHIP_IN_PEER_BLACKLIST.value) {
           Toast.error(context, atomicLocale.setInBlacklist);
-        } else if (result.errorCode == TIMErrCode.ERR_SVR_FRIENDSHIP_IN_SELF_BLACKLIST.value) {
+        } else if (result.errorCode ==
+            TIMErrCode.ERR_SVR_FRIENDSHIP_IN_SELF_BLACKLIST.value) {
           Toast.error(context, atomicLocale.inBlacklist);
-        } else if (result.errorCode == TIMErrCode.ERR_SVR_FRIENDSHIP_PEER_FRIEND_LIMIT.value) {
+        } else if (result.errorCode ==
+            TIMErrCode.ERR_SVR_FRIENDSHIP_PEER_FRIEND_LIMIT.value) {
           Toast.error(context, atomicLocale.otherFriendLimit);
-        } else if (result.errorCode == TIMErrCode.ERR_SVR_FRIENDSHIP_COUNT_LIMIT.value) {
+        } else if (result.errorCode ==
+            TIMErrCode.ERR_SVR_FRIENDSHIP_COUNT_LIMIT.value) {
           Toast.error(context, atomicLocale.friendLimit);
-        } else if (result.errorCode == TIMErrCode.ERR_SVR_FRIENDSHIP_INVALID_SDKAPPID.value) {
+        } else if (result.errorCode ==
+            TIMErrCode.ERR_SVR_FRIENDSHIP_INVALID_SDKAPPID.value) {
           Toast.error(context, atomicLocale.userNotExist);
         } else {
           Toast.error(context, result.errorMessage ?? '');
@@ -117,11 +127,13 @@ class _AddFriendState extends State<AddFriend> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(atomicLocale.addFriend, style: TextStyle(color: colorsTheme.textColorPrimary)),
+        title: Text(atomicLocale.addFriend,
+            style: TextStyle(color: colorsTheme.textColorPrimary)),
         backgroundColor: colorsTheme.bgColorOperate,
         scrolledUnderElevation: 0,
         leading: IconButton.buttonContent(
-          content: IconOnlyContent(Icon(Icons.arrow_back_ios, color: colorsTheme.buttonColorPrimaryDefault)),
+          content: IconOnlyContent(Icon(Icons.arrow_back_ios,
+              color: colorsTheme.buttonColorPrimaryDefault)),
           type: ButtonType.noBorder,
           size: ButtonSize.l,
           onClick: () {
@@ -136,7 +148,9 @@ class _AddFriendState extends State<AddFriend> {
         ),
       ),
       backgroundColor: colorsTheme.bgColorOperate,
-      body: _showAddFriendDetail ? _buildAddFriendDetail() : _buildSearchInterface(),
+      body: _showAddFriendDetail
+          ? _buildAddFriendDetail()
+          : _buildSearchInterface(),
     );
   }
 
@@ -262,11 +276,18 @@ class _AddFriendState extends State<AddFriend> {
   }
 
   Widget _buildAddFriendDetail() {
-    if (widget.contactInfo == null && _searchResult == null) return const SizedBox();
+    if (widget.contactInfo == null && _searchResult == null)
+      return const SizedBox();
 
-    final userID = widget.contactInfo != null ? widget.contactInfo!.userID : _searchResult!.userID;
-    final nickname = widget.contactInfo != null ? widget.contactInfo!.nickname ?? '' : _searchResult!.nickname ?? '';
-    final faceURL = widget.contactInfo != null ? widget.contactInfo!.avatarURL : _searchResult!.avatarURL;
+    final userID = widget.contactInfo != null
+        ? widget.contactInfo!.userID
+        : _searchResult!.userID;
+    final nickname = widget.contactInfo != null
+        ? widget.contactInfo!.nickname ?? ''
+        : _searchResult!.nickname ?? '';
+    final faceURL = widget.contactInfo != null
+        ? widget.contactInfo!.avatarURL
+        : _searchResult!.avatarURL;
 
     return SingleChildScrollView(
       child: Column(
@@ -364,7 +385,8 @@ class _AddFriendState extends State<AddFriend> {
                     decoration: InputDecoration(
                       border: InputBorder.none,
                       hintText: atomicLocale.profileRemark,
-                      hintStyle: FontScheme.caption1Regular.copyWith(color: colorsTheme.textColorTertiary),
+                      hintStyle: FontScheme.caption1Regular
+                          .copyWith(color: colorsTheme.textColorTertiary),
                     ),
                     style: FontScheme.caption1Regular.copyWith(
                       color: colorsTheme.textColorPrimary,
@@ -396,7 +418,8 @@ class _AddFriendState extends State<AddFriend> {
               ),
               child: Text(
                 atomicLocale.send,
-                style: FontScheme.caption1Medium.copyWith(color: colorsTheme.textColorLink),
+                style: FontScheme.caption1Medium
+                    .copyWith(color: colorsTheme.textColorLink),
               ),
             ),
           ),

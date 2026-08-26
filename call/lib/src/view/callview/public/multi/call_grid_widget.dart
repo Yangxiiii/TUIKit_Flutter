@@ -38,7 +38,10 @@ class _CallGridWidgetState extends State<CallGridWidget> {
             Positioned.fill(
               child: Image(
                 image: NetworkImage(
-                  StringStream.makeNull(selfInfo.avatarURL, Constants.defaultAvatar),
+                  StringStream.makeNull(
+                    selfInfo.avatarURL,
+                    Constants.defaultAvatar,
+                  ),
                 ),
                 fit: BoxFit.cover,
                 errorBuilder: (ctx, err, stackTrace) => Image.asset(
@@ -49,12 +52,10 @@ class _CallGridWidgetState extends State<CallGridWidget> {
             ),
             Opacity(
               opacity: 1,
-              child: Container(
-                color: const Color.fromRGBO(45, 45, 45, 0.9),
-              ),
+              child: Container(color: const Color.fromRGBO(45, 45, 45, 0.9)),
             ),
-            selfInfo.id != CallStore.shared.state.activeCall.value.inviterId
-                && selfInfo.status == CallParticipantStatus.waiting
+            selfInfo.id != CallStore.shared.state.activeCall.value.inviterId &&
+                    selfInfo.status == CallParticipantStatus.waiting
                 ? _buildReceivedGroupCallWaiting(context)
                 : _buildCallGridView(),
             Positioned(
@@ -62,31 +63,35 @@ class _CallGridWidgetState extends State<CallGridWidget> {
               width: MediaQuery.of(context).size.width,
               height: 100,
               child: const Center(
-                child: TimerWidget(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w500,
-                ),
+                child: TimerWidget(fontSize: 18, fontWeight: FontWeight.w500),
               ),
             ),
             Positioned(
               left: 0,
               right: 0,
-              bottom: _controlsHeight + 8 + MediaQuery.of(context).padding.bottom,
+              bottom:
+                  _controlsHeight + 8 + MediaQuery.of(context).padding.bottom,
               child: Container(
                 constraints: BoxConstraints(
                   maxWidth: MediaQuery.of(context).size.width * 0.9,
                   maxHeight: MediaQuery.of(context).size.height * 0.3,
                 ),
-                child: AISubtitle(userId: CallStore.shared.state.selfInfo.value.id),
+                child: AISubtitle(
+                  userId: CallStore.shared.state.selfInfo.value.id,
+                ),
               ),
             ),
-            
-            if (widget.enableAITranscriber && selfInfo.status == CallParticipantStatus.accept)
+
+            if (widget.enableAITranscriber &&
+                selfInfo.status == CallParticipantStatus.accept)
               AITranscriberPanel(
-                bottomOffset: _controlsHeight + 8 + MediaQuery.of(context).padding.bottom,
-                animationDuration: const Duration(milliseconds: _animationDuration),
+                bottomOffset:
+                    _controlsHeight + 8 + MediaQuery.of(context).padding.bottom,
+                animationDuration: const Duration(
+                  milliseconds: _animationDuration,
+                ),
               ),
-              
+
             Positioned(
               right: 0,
               left: 0,
@@ -130,7 +135,8 @@ class _CallGridWidgetState extends State<CallGridWidget> {
     return ValueListenableBuilder(
       valueListenable: CallStore.shared.state.selfInfo,
       builder: (context, selfInfo, child) {
-        if (selfInfo.status != CallParticipantStatus.accept || !widget.enableAITranscriber) {
+        if (selfInfo.status != CallParticipantStatus.accept ||
+            !widget.enableAITranscriber) {
           return const SizedBox();
         }
         return const Positioned(

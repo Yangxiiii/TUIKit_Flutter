@@ -7,7 +7,8 @@ class EmojiPickerModelItem {
     required this.path,
   });
   static EmojiPickerModelItem fromJson(json) {
-    return EmojiPickerModelItem(name: json["name"] ?? "", path: json["path"] ?? "");
+    return EmojiPickerModelItem(
+        name: json["name"] ?? "", path: json["path"] ?? "");
   }
 
   Map<String, dynamic> toJson() {
@@ -52,7 +53,9 @@ class EmojiPickerModel {
   static EmojiPickerModel fromJson(json) {
     return EmojiPickerModel(
       name: json["name"] ?? "",
-      stickers: (List<Map<String, dynamic>>.from((json["stickers"] ?? []))).map((e) => EmojiPickerModelItem.fromJson(e)).toList(),
+      stickers: (List<Map<String, dynamic>>.from((json["stickers"] ?? [])))
+          .map((e) => EmojiPickerModelItem.fromJson(e))
+          .toList(),
       iconPath: json["iconPath"] ?? "",
       rowNum: json["rowNum"] ?? 7,
       type: json["type"] ?? 0,

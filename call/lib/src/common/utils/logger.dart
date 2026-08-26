@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:tencent_rtc_sdk/trtc_cloud.dart';
+
 class Logger {
   static void info(String message) {
     _log(message, level: 0);
@@ -20,8 +21,8 @@ class Logger {
         "level": level,
         "message": "TUICallKit[Flutter] - $message",
         "file": "/some_path/.../foo.c",
-        "line": 90
-      }
+        "line": 90,
+      },
     };
 
     try {

@@ -1,18 +1,23 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'package:tencent_conference_uikit/base/widget/global.dart';
 import 'package:tencent_conference_uikit/tencent_conference_uikit.dart';
-import 'package:tuikit_atomic_x/atomicx.dart';
 import 'common/index.dart';
 import 'l10n/app_localizations.dart';
 import 'pages/index.dart';
 
 void main() {
   runApp(const MyApp());
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(statusBarColor: Colors.transparent));
-  SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(statusBarColor: Colors.transparent),
+  );
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
 }
 
 class MyApp extends StatelessWidget {
@@ -20,38 +25,37 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final themeState = ThemeState();
-    themeState.setThemeMode(ThemeType.dark);
-    return ComponentTheme(
-      themeState: themeState,
-      child: MaterialApp(
-        navigatorObservers: [RoomNavigatorObserver.instance],
-        theme: AppTheme.lightTheme,
-        localizationsDelegates: const [
-          AppLocalizations.delegate,
-          GlobalMaterialLocalizations.delegate,
-          GlobalWidgetsLocalizations.delegate,
-          GlobalCupertinoLocalizations.delegate,
-          ...RoomLocalizations.localizationsDelegates,
-          ...BarrageLocalizations.localizationsDelegates,
-        ],
-        supportedLocales: const [Locale('en'), Locale('zh')],
-        builder: (context, child) => Scaffold(
-          resizeToAvoidBottomInset: false,
-          body: GestureDetector(
-            onTap: () {
-              _hideKeyboard(context);
-            },
-            child: child,
-          ),
+    return MaterialApp(
+      navigatorObservers: [RoomNavigatorObserver.instance],
+      theme: AppThemeFactory.create(
+        const AppDarkColorScheme(),
+        Brightness.dark,
+      ),
+      themeMode: ThemeMode.dark,
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+        ...RoomLocalizations.localizationsDelegates,
+        ...BarrageLocalizations.localizationsDelegates,
+      ],
+      supportedLocales: const [Locale('en'), Locale('zh')],
+      builder: (context, child) => Scaffold(
+        resizeToAvoidBottomInset: false,
+        body: GestureDetector(
+          onTap: () {
+            _hideKeyboard(context);
+          },
+          child: child,
         ),
-        home: Navigator(
-          key: Global.secondaryNavigatorKey,
-          onGenerateRoute: (settings) => MaterialPageRoute(
-            builder: (BuildContext context) {
-              return const LoginPage();
-            },
-          ),
+      ),
+      home: Navigator(
+        key: Global.secondaryNavigatorKey,
+        onGenerateRoute: (settings) => MaterialPageRoute(
+          builder: (BuildContext context) {
+            return const LoginPage();
+          },
         ),
       ),
     );

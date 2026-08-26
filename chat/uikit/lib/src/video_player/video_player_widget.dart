@@ -5,12 +5,13 @@ import 'inline_video_player.dart';
 import 'video_player.dart';
 
 /// Full-screen video player widget with controls
-/// 
+///
 /// This widget uses InlineVideoPlayer with Flutter controls overlay,
 /// thumbnail support, and back button.
 class VideoPlayerWidget extends StatefulWidget {
   final VideoData video;
   final VoidCallback? onClose;
+
   /// Whether to show the close button (default: true)
   final bool showCloseButton;
 
@@ -52,12 +53,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 
   void _onPlayerUpdate() {
     if (!mounted) return;
-    
+
     setState(() {
       // Hide thumbnail when playing, show when paused/completed
       if (_controller.isPlaying) {
         _showThumbnail = false;
-      } else if (_controller.position == Duration.zero && !_controller.isPlaying) {
+      } else if (_controller.position == Duration.zero &&
+          !_controller.isPlaying) {
         // Show thumbnail when at start and not playing (completed or initial state)
         _showThumbnail = true;
       }
@@ -73,7 +75,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     setState(() {
       _showControls = true;
     });
-    
+
     _hideControlsTimer?.cancel();
     _hideControlsTimer = Timer(const Duration(seconds: 3), () {
       if (mounted && _controller.isPlaying) {
@@ -112,7 +114,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     final hours = duration.inHours;
     final minutes = duration.inMinutes.remainder(60);
     final seconds = duration.inSeconds.remainder(60);
-    
+
     if (hours > 0) {
       return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
     }
@@ -130,13 +132,14 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
           Positioned.fill(
             child: Padding(
               padding: EdgeInsets.only(
-                top: MediaQuery.of(context).padding.top + 50, // Space for close button
+                top: MediaQuery.of(context).padding.top +
+                    50, // Space for close button
                 bottom: 80, // Space for progress bar
               ),
               child: InlineVideoPlayer(controller: _controller),
             ),
           ),
-          
+
           // Thumbnail overlay (shown before playing and after completion)
           if (_showThumbnail)
             Positioned.fill(
@@ -148,11 +151,10 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
                 child: _buildThumbnail(),
               ),
             ),
-          
+
           // Controls overlay - handles its own tap events
-          if (_showControls)
-            Positioned.fill(child: _buildControlsOverlay()),
-          
+          if (_showControls) Positioned.fill(child: _buildControlsOverlay()),
+
           // Tap area when controls are hidden
           if (!_showControls)
             Positioned.fill(
@@ -162,7 +164,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
                 child: Container(color: Colors.transparent),
               ),
             ),
-          
+
           // Close button overlay (conditionally visible)
           if (widget.showCloseButton)
             Positioned(
@@ -225,7 +227,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             const SizedBox(height: 50),
-            
+
             // Center play/pause button
             GestureDetector(
               onTap: _togglePlayPause,
@@ -243,7 +245,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
                 ),
               ),
             ),
-            
+
             // Bottom controls
             _buildBottomControls(),
           ],
@@ -279,20 +281,20 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
                 ),
               ),
               const SizedBox(width: 8),
-              
+
               // Current time
               Text(
                 _formatDuration(_controller.position),
                 style: const TextStyle(color: Colors.white, fontSize: 12),
               ),
               const SizedBox(width: 8),
-              
+
               // Progress bar
               Expanded(
                 child: _buildProgressBar(),
               ),
               const SizedBox(width: 8),
-              
+
               // Total time
               Text(
                 _formatDuration(_controller.duration),
@@ -310,7 +312,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final thumbPosition = (_controller.progress * width).clamp(0.0, width);
-        
+
         return GestureDetector(
           onTapDown: (details) {
             final progress = (details.localPosition.dx / width).clamp(0.0, 1.0);

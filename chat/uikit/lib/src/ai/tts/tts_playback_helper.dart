@@ -61,7 +61,9 @@ class TtsPlaybackHelper {
     // Aborted while the (async) TTS request was in flight — don't start
     // playing (e.g. user tapped "X" / stop during the loading window).
     if (myGeneration != _generation) return;
-    if (!result.success || result.audioUrl == null || result.audioUrl!.isEmpty) {
+    if (!result.success ||
+        result.audioUrl == null ||
+        result.audioUrl!.isEmpty) {
       _isPlaying = false;
       onError?.call(result.message ?? 'tts failed');
       return;

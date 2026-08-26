@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:atomic_x_core/api/group/group_store.dart' as group_api;
 import 'package:flutter/material.dart' hide IconButton;
@@ -18,7 +19,7 @@ class _AddGroupState extends State<AddGroup> {
   bool _showJoinGroupDetail = false;
 
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
 
   @override
   void initState() {
@@ -28,8 +29,8 @@ class _AddGroupState extends State<AddGroup> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    colorsTheme = BaseThemeProvider.colorsOf(context);
-    atomicLocale = AtomicLocalizations.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
+    atomicLocale = AppLocalization.of(context);
   }
 
   @override
@@ -61,7 +62,8 @@ class _AddGroupState extends State<AddGroup> {
       if (result.errorCode == TIMErrCode.ERR_SVR_GROUP_INVALID_GROUPID.value) {
         Toast.error(context, atomicLocale.groupIDInvalid);
       } else {
-        debugPrint('getGroupInfo failed, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}');
+        debugPrint(
+            'getGroupInfo failed, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}');
       }
     }
   }
@@ -90,13 +92,17 @@ class _AddGroupState extends State<AddGroup> {
           Toast.success(context, atomicLocale.joinedGroupSuccessfully);
           Navigator.pop(context);
         } else {
-          if (result.errorCode == TIMErrCode.ERR_SVR_GROUP_PERMISSION_DENY.value) {
+          if (result.errorCode ==
+              TIMErrCode.ERR_SVR_GROUP_PERMISSION_DENY.value) {
             Toast.error(context, atomicLocale.addGroupPermissionDeny);
-          } else if (result.errorCode == TIMErrCode.ERR_SVR_GROUP_ALLREADY_MEMBER.value) {
+          } else if (result.errorCode ==
+              TIMErrCode.ERR_SVR_GROUP_ALLREADY_MEMBER.value) {
             Toast.error(context, atomicLocale.addGroupAlreadyMember);
-          } else if (result.errorCode == TIMErrCode.ERR_SVR_GROUP_NOT_FOUND.value) {
+          } else if (result.errorCode ==
+              TIMErrCode.ERR_SVR_GROUP_NOT_FOUND.value) {
             Toast.error(context, atomicLocale.addGroupNotFound);
-          } else if (result.errorCode == TIMErrCode.ERR_SVR_GROUP_FULL_MEMBER_COUNT.value) {
+          } else if (result.errorCode ==
+              TIMErrCode.ERR_SVR_GROUP_FULL_MEMBER_COUNT.value) {
             Toast.error(context, atomicLocale.addGroupFullMember);
           } else {
             Toast.error(context, result.errorMessage ?? '');
@@ -114,11 +120,13 @@ class _AddGroupState extends State<AddGroup> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(atomicLocale.addGroup, style: TextStyle(color: colorsTheme.textColorPrimary)),
+        title: Text(atomicLocale.addGroup,
+            style: TextStyle(color: colorsTheme.textColorPrimary)),
         backgroundColor: colorsTheme.bgColorOperate,
         elevation: 0,
         leading: IconButton.buttonContent(
-          content: IconOnlyContent(Icon(Icons.arrow_back_ios, color: colorsTheme.buttonColorPrimaryDefault)),
+          content: IconOnlyContent(Icon(Icons.arrow_back_ios,
+              color: colorsTheme.buttonColorPrimaryDefault)),
           type: ButtonType.noBorder,
           size: ButtonSize.l,
           onClick: () {
@@ -133,7 +141,9 @@ class _AddGroupState extends State<AddGroup> {
         ),
       ),
       backgroundColor: colorsTheme.bgColorOperate,
-      body: _showJoinGroupDetail ? _buildJoinGroupDetail() : _buildSearchInterface(),
+      body: _showJoinGroupDetail
+          ? _buildJoinGroupDetail()
+          : _buildSearchInterface(),
     );
   }
 
@@ -351,7 +361,8 @@ class _AddGroupState extends State<AddGroup> {
               ),
               child: Text(
                 atomicLocale.send,
-                style: FontScheme.caption1Medium.copyWith(color: colorsTheme.textColorLink),
+                style: FontScheme.caption1Medium
+                    .copyWith(color: colorsTheme.textColorLink),
               ),
             ),
           ),

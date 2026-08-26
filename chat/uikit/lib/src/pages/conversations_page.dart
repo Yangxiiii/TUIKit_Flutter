@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart' hide SearchBar, IconButton;
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
 import 'package:tencent_chat_uikit/src/contact_list/pages/start_c2c_chat.dart';
@@ -22,66 +23,44 @@ class ConversationsPage extends StatefulWidget {
 }
 
 class _ConversationsPageState extends State<ConversationsPage> {
-  late AtomicLocalizations atomicLocale;
   late SemanticColorScheme colorsTheme;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    atomicLocale = AtomicLocalizations.of(context);
-    colorsTheme = BaseThemeProvider.colorsOf(context);
+    colorsTheme = SemanticColorScheme.of(context);
   }
 
   void _startC2CChat() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => StartC2CChat(
-          onSelect: (AZOrderedListItem item) {
-            ContactInfo contactInfo = item.extraData;
-            final conversation = ConversationInfo(
-              conversationID: 'c2c_${contactInfo.userID}',
-              title: contactInfo.nickname,
-              avatarURL: contactInfo.avatarURL,
-              type: ConversationType.c2c,
-            );
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => ChatPage(
-                  conversation: conversation,
-                ),
-              ),
-            );
-          },
-        ),
+    context.pushChatUIKitPage(
+      StartC2CChat(
+        onSelect: (AZOrderedListItem item) {
+          ContactInfo contactInfo = item.extraData;
+          final conversation = ConversationInfo(
+            conversationID: 'c2c_${contactInfo.userID}',
+            title: contactInfo.nickname,
+            avatarURL: contactInfo.avatarURL,
+            type: ConversationType.c2c,
+          );
+          context.pushChatUIKitPage(ChatPage(conversation: conversation));
+        },
       ),
     );
   }
 
   void _startGroupChat() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => StartGroupChat(
-          onGroupCreated: (String groupID, String groupName, String? avatar) {
-            final conversation = ConversationInfo(
-              conversationID: 'group_$groupID',
-              title: groupName,
-              avatarURL: avatar,
-              type: ConversationType.group,
-            );
+    context.pushChatUIKitPage(
+      StartGroupChat(
+        onGroupCreated: (String groupID, String groupName, String? avatar) {
+          final conversation = ConversationInfo(
+            conversationID: 'group_$groupID',
+            title: groupName,
+            avatarURL: avatar,
+            type: ConversationType.group,
+          );
 
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => ChatPage(
-                  conversation: conversation,
-                ),
-              ),
-            );
-          },
-        ),
+          context.pushChatUIKitPage(ChatPage(conversation: conversation));
+        },
       ),
     );
   }
@@ -98,31 +77,19 @@ class _ConversationsPageState extends State<ConversationsPage> {
       avatarURL: friendSearchInfo.userInfo?.avatarURL,
       type: ConversationType.c2c,
     );
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ChatPage(
-          conversation: conversation,
-        ),
-      ),
-    );
+    context.pushChatUIKitPage(ChatPage(conversation: conversation));
   }
 
   void _onSelectGroup(GroupSearchInfo groupSearchInfo) {
     final conversation = ConversationInfo(
       conversationID: 'group_${groupSearchInfo.groupID}',
-      title: (groupSearchInfo.groupName?.isNotEmpty == true) ? groupSearchInfo.groupName! : groupSearchInfo.groupID,
+      title: (groupSearchInfo.groupName?.isNotEmpty == true)
+          ? groupSearchInfo.groupName!
+          : groupSearchInfo.groupID,
       avatarURL: groupSearchInfo.groupAvatarURL,
       type: ConversationType.group,
     );
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ChatPage(
-          conversation: conversation,
-        ),
-      ),
-    );
+    context.pushChatUIKitPage(ChatPage(conversation: conversation));
   }
 
   void _onSelectConversation(MessageSearchResultItem messageSearchResultItem) {
@@ -130,42 +97,40 @@ class _ConversationsPageState extends State<ConversationsPage> {
       conversationID: messageSearchResultItem.conversationID,
       title: messageSearchResultItem.conversationShowName,
       avatarURL: messageSearchResultItem.conversationAvatarURL,
-      type: messageSearchResultItem.conversationID.startsWith('c2c_') ? ConversationType.c2c : ConversationType.group,
+      type: messageSearchResultItem.conversationID.startsWith('c2c_')
+          ? ConversationType.c2c
+          : ConversationType.group,
     );
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ChatPage(
-          conversation: conversation,
-        ),
-      ),
-    );
+    context.pushChatUIKitPage(ChatPage(conversation: conversation));
   }
 
   void _onSelectMessage(MessageInfo messageInfo) async {
-    // Build conversationID from MessageInfo's conversationType and to
-    final conversationID = messageInfo.conversationType == ConversationType.group
+    // 搜索结果只携带消息对象，需要先按会话类型还原 SDK 会话 ID。
+    final conversationID = messageInfo.conversationType ==
+            ConversationType.group
         ? 'group_${messageInfo.to}'
         : 'c2c_${messageInfo.to.isNotEmpty ? messageInfo.to : messageInfo.from.userID}';
 
-    // Fetch conversation info from store
-    ConversationListStore conversationListStore = ConversationListStore.create();
-    final convResult = await conversationListStore.getConversationInfo(conversationID: conversationID);
-    ConversationInfo conversation = convResult.conversationInfo ?? ConversationInfo(
-                  conversationID: conversationID,
-                  title: messageInfo.from.nickname ?? messageInfo.from.userID,
-                  avatarURL: messageInfo.from.avatarURL,
-                  type: conversationID.startsWith('c2c_') ? ConversationType.c2c : ConversationType.group,
-                );
+    // 优先读取完整会话资料，查询不到时再用消息发送方信息补齐页面标题和头像。
+    ConversationListStore conversationListStore =
+        ConversationListStore.create();
+    final convResult = await conversationListStore.getConversationInfo(
+        conversationID: conversationID);
+    ConversationInfo conversation = convResult.conversationInfo ??
+        ConversationInfo(
+          conversationID: conversationID,
+          title: messageInfo.from.nickname ?? messageInfo.from.userID,
+          avatarURL: messageInfo.from.avatarURL,
+          type: conversationID.startsWith('c2c_')
+              ? ConversationType.c2c
+              : ConversationType.group,
+        );
 
     if (mounted) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ChatPage(
-            conversation: conversation,
-            message: messageInfo,
-          ),
+      context.pushChatUIKitPage(
+        ChatPage(
+          conversation: conversation,
+          message: messageInfo,
         ),
       );
     }
@@ -180,19 +145,22 @@ class _ConversationsPageState extends State<ConversationsPage> {
         automaticallyImplyLeading: false,
         leading: widget.onBackPressed != null
             ? IconButton.buttonContent(
-                content: IconOnlyContent(Icon(Icons.arrow_back_ios, color: colorsTheme.buttonColorPrimaryDefault)),
+                content: IconOnlyContent(Icon(Icons.arrow_back_ios,
+                    color: colorsTheme.buttonColorPrimaryDefault)),
                 type: ButtonType.noBorder,
                 size: ButtonSize.l,
                 onClick: widget.onBackPressed,
               )
             : null,
-        title: Text(atomicLocale.chat,
-            style: FontScheme.title3Medium.copyWith(color: colorsTheme.textColorPrimary)),
+        title: Text(AppLocalization.text(context, LocaleKeys.chat_title, '聊天'),
+            style: FontScheme.title3Medium
+                .copyWith(color: colorsTheme.textColorPrimary)),
         centerTitle: false,
         scrolledUnderElevation: 0,
         actions: [
           PopupMenuButton<String>(
-            icon: Icon(Icons.create_outlined, color: colorsTheme.textColorPrimary),
+            icon: Icon(Icons.create_outlined,
+                color: colorsTheme.textColorPrimary),
             offset: const Offset(0, 40),
             padding: EdgeInsets.zero,
             color: colorsTheme.bgColorDialog,
@@ -213,9 +181,13 @@ class _ConversationsPageState extends State<ConversationsPage> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.chat_outlined, color: colorsTheme.textColorPrimary),
+                    Icon(Icons.chat_outlined,
+                        color: colorsTheme.textColorPrimary),
                     const SizedBox(width: 8),
-                    Text(atomicLocale.startConversation, style: TextStyle(color: colorsTheme.textColorPrimary)),
+                    Text(
+                        AppLocalization.text(
+                            context, LocaleKeys.chat_startConversation, '发起会话'),
+                        style: TextStyle(color: colorsTheme.textColorPrimary)),
                   ],
                 ),
               ),
@@ -225,9 +197,13 @@ class _ConversationsPageState extends State<ConversationsPage> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.group_add_outlined, color: colorsTheme.textColorPrimary),
+                    Icon(Icons.group_add_outlined,
+                        color: colorsTheme.textColorPrimary),
                     const SizedBox(width: 8),
-                    Text(atomicLocale.createGroupChat, style: TextStyle(color: colorsTheme.textColorPrimary)),
+                    Text(
+                        AppLocalization.text(
+                            context, LocaleKeys.chat_createGroupChat, '创建群聊'),
+                        style: TextStyle(color: colorsTheme.textColorPrimary)),
                   ],
                 ),
               ),
@@ -247,13 +223,8 @@ class _ConversationsPageState extends State<ConversationsPage> {
           Expanded(
             child: ConversationList(
               onConversationClick: (conversation) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => ChatPage(
-                      conversation: conversation,
-                    ),
-                  ),
+                context.pushChatUIKitPage(
+                  ChatPage(conversation: conversation),
                 );
               },
             ),

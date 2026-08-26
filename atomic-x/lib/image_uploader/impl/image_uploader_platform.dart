@@ -4,8 +4,10 @@ import 'package:flutter/services.dart';
 /// Platform bridge for native image picking (camera/album only).
 /// Cropping and COS upload are handled in Dart.
 class ImageUploaderPlatform {
-  static const MethodChannel _methodChannel = MethodChannel('atomic_x/image_uploader');
-  static const EventChannel _eventChannel = EventChannel('atomic_x/image_uploader_events');
+  static const MethodChannel _methodChannel =
+      MethodChannel('atomic_x/image_uploader');
+  static const EventChannel _eventChannel =
+      EventChannel('atomic_x/image_uploader_events');
 
   static StreamSubscription? _eventSubscription;
   static Completer<String?>? _activeCompleter;
@@ -29,7 +31,9 @@ class ImageUploaderPlatform {
         if (event is Map) {
           final type = event['type'] is String ? event['type'] as String : null;
           if (type == 'pickCompleted') {
-            final localPath = event['localPath'] is String ? event['localPath'] as String : null;
+            final localPath = event['localPath'] is String
+                ? event['localPath'] as String
+                : null;
             if (!completer.isCompleted) {
               completer.complete(localPath);
             }

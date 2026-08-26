@@ -15,7 +15,8 @@ abstract class AlbumPickerMediaSendListener {
 }
 
 class AlbumPickerMediaSendManager {
-  static final AlbumPickerMediaSendManager shared = AlbumPickerMediaSendManager._();
+  static final AlbumPickerMediaSendManager shared =
+      AlbumPickerMediaSendManager._();
 
   AlbumPickerMediaSendManager._();
 
@@ -27,7 +28,8 @@ class AlbumPickerMediaSendManager {
     AlbumPickerConfig? config,
     AlbumPickerTheme? theme,
   }) async {
-    final sessionKey = '${DateTime.now().millisecondsSinceEpoch}_${conversationID.hashCode}';
+    final sessionKey =
+        '${DateTime.now().millisecondsSinceEpoch}_${conversationID.hashCode}';
     final session = _PickerSession(
       sessionKey: sessionKey,
       conversationID: conversationID,
@@ -35,17 +37,24 @@ class AlbumPickerMediaSendManager {
     );
     _pickerSessions[sessionKey] = session;
 
-    debugPrint("[MediaSendManager] pickAlbumMedia: session=$sessionKey, conversationID=$conversationID");
+    debugPrint(
+        "[MediaSendManager] pickAlbumMedia: session=$sessionKey, conversationID=$conversationID");
 
     await AlbumPicker.pickMedia(
       config: config,
       theme: theme,
       onPickConfirm: (pickedAlbumMedias, textMessage) {
-        debugPrint("[MediaSendManager] onPickConfirm: ${pickedAlbumMedias.length} items, session=$sessionKey");
-        _handlePickConfirm(pickedAlbumMedias: pickedAlbumMedias, session: session);
+        debugPrint(
+            "[MediaSendManager] onPickConfirm: ${pickedAlbumMedias.length} items, session=$sessionKey");
+        _handlePickConfirm(
+            pickedAlbumMedias: pickedAlbumMedias, session: session);
       },
       onMediaProcessing: (albumMedia, progress, error) {
-        _handleMediaProcessing(media: albumMedia, progress: progress, error: error, session: session);
+        _handleMediaProcessing(
+            media: albumMedia,
+            progress: progress,
+            error: error,
+            session: session);
       },
       onMediaProcessed: () {
         debugPrint("[MediaSendManager] onMediaProcessed: session=$sessionKey");
@@ -132,10 +141,12 @@ class AlbumPickerMediaSendManager {
 
     switch (media.mediaType) {
       case AlbumMediaType.image:
-        _handleImageProcessing(media: media, progress: progress, session: session);
+        _handleImageProcessing(
+            media: media, progress: progress, session: session);
         break;
       case AlbumMediaType.video:
-        _handleVideoProcessing(media: media, progress: progress, session: session);
+        _handleVideoProcessing(
+            media: media, progress: progress, session: session);
         break;
     }
   }
@@ -208,8 +219,11 @@ class AlbumPickerMediaSendManager {
     required AlbumMediaType mediaType,
   }) async {
     final placeholder = MessageInfo();
-    placeholder.msgID = 'placeholder_${DateTime.now().millisecondsSinceEpoch}_${thumbnailPath.hashCode}';
-    placeholder.messageType = mediaType == AlbumMediaType.video ? MessageType.video : MessageType.image;
+    placeholder.msgID =
+        'placeholder_${DateTime.now().millisecondsSinceEpoch}_${thumbnailPath.hashCode}';
+    placeholder.messageType = mediaType == AlbumMediaType.video
+        ? MessageType.video
+        : MessageType.image;
     placeholder.status = MessageStatus.sending;
     placeholder.isSentBySelf = true;
     placeholder.timestamp = DateTime.now().millisecondsSinceEpoch ~/ 1000;
@@ -260,7 +274,8 @@ class AlbumPickerMediaSendManager {
     // videoType 用于 IMSDK createVideoMessage 的 type 入参,不能为空。
     // 鸿蒙相册返回的沙盒文件名有时不带扩展名(media URI 无后缀),
     // split('.').last 会拿到整段文件名 -> 非法 type 导致发送失败,这里兜底为 mp4。
-    final ext = media.mediaPath.contains('.') ? media.mediaPath.split('.').last : '';
+    final ext =
+        media.mediaPath.contains('.') ? media.mediaPath.split('.').last : '';
     final videoType = (ext.isEmpty || ext.length > 5) ? 'mp4' : ext;
 
     messageInfo.messagePayload = VideoMessagePayload(
@@ -277,7 +292,8 @@ class AlbumPickerMediaSendManager {
   String? _cachedBlackSnapshotPath;
 
   Future<String> _generateBlackSnapshot() async {
-    if (_cachedBlackSnapshotPath != null && File(_cachedBlackSnapshotPath!).existsSync()) {
+    if (_cachedBlackSnapshotPath != null &&
+        File(_cachedBlackSnapshotPath!).existsSync()) {
       return _cachedBlackSnapshotPath!;
     }
     final recorder = ui.PictureRecorder();

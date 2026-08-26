@@ -7,37 +7,35 @@ class TimerWidget extends StatelessWidget {
   final double? fontSize;
   final FontWeight? fontWeight;
 
-  const TimerWidget({
-    super.key,
-    this.fontSize,
-    this.fontWeight,
-  });
+  const TimerWidget({super.key, this.fontSize, this.fontWeight});
 
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder(
-        valueListenable: CallStore.shared.state.selfInfo,
-        builder: (context, info, child) {
-          if (info.status == CallParticipantStatus.accept) {
-            return ValueListenableBuilder(
-              valueListenable: CallStore.shared.state.activeCall,
-              builder: (context, activeCall, child) {
-                return Text(
-                  formatDuration(activeCall.duration.toInt()),
-                  style: TextStyle(
-                    fontSize: fontSize,
-                    fontWeight: fontWeight,
-                    color: CallStore.shared.state.activeCall.value.mediaType == CallMediaType.audio
-                        ? CallColors.colorG7
-                        : CallColors.colorWhite,
-                  ),
-                );
-              },
-            );
-          } else {
-            return Container();
-          }
+      valueListenable: CallStore.shared.state.selfInfo,
+      builder: (context, info, child) {
+        if (info.status == CallParticipantStatus.accept) {
+          return ValueListenableBuilder(
+            valueListenable: CallStore.shared.state.activeCall,
+            builder: (context, activeCall, child) {
+              return Text(
+                formatDuration(activeCall.duration.toInt()),
+                style: TextStyle(
+                  fontSize: fontSize,
+                  fontWeight: fontWeight,
+                  color:
+                      CallStore.shared.state.activeCall.value.mediaType ==
+                          CallMediaType.audio
+                      ? CallColors.colorG7
+                      : CallColors.colorWhite,
+                ),
+              );
+            },
+          );
+        } else {
+          return Container();
         }
+      },
     );
   }
 
@@ -55,5 +53,4 @@ class TimerWidget extends StatelessWidget {
       return '$minuteShow:$secondShow';
     }
   }
-
 }

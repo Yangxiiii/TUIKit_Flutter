@@ -1,5 +1,7 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
+import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_input/src/chat_special_text_span_builder.dart';
 import 'package:tencent_chat_uikit/src/message_list/message_list_config.dart';
@@ -40,10 +42,11 @@ class MergedMessageWidget extends StatefulWidget {
   State<MergedMessageWidget> createState() => _MergedMessageWidgetState();
 }
 
-class _MergedMessageWidgetState extends State<MergedMessageWidget> with MessageStatusMixin {
+class _MergedMessageWidgetState extends State<MergedMessageWidget>
+    with MessageStatusMixin {
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
     final mergedInfo = (widget.message.messagePayload as MergedMessagePayload?);
 
     return GestureDetector(
@@ -57,7 +60,9 @@ class _MergedMessageWidgetState extends State<MergedMessageWidget> with MessageS
         ),
         decoration: BoxDecoration(
           color: widget.bubbleColor ??
-              (widget.isSelf ? colors.bgColorBubbleOwn : colors.bgColorBubbleReciprocal),
+              (widget.isSelf
+                  ? colors.bgColorBubbleOwn
+                  : colors.bgColorBubbleReciprocal),
           borderRadius: _getBubbleBorderRadius(),
         ),
         child: Column(
@@ -172,23 +177,21 @@ class _MergedMessageWidgetState extends State<MergedMessageWidget> with MessageS
   }
 
   void _openMergedMessagePayloadDetail(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => MergedMessageDetailPage(
-          message: widget.message,
-          messageListStore: widget.messageListStore,
-        ),
+    context.pushChatUIKitPage(
+      MergedMessageDetailPage(
+        message: widget.message,
+        messageListStore: widget.messageListStore,
       ),
     );
   }
 
   String _getDefaultTitle(BuildContext context) {
-    final locale = AtomicLocalizations.of(context);
+    final locale = AppLocalization.of(context);
     return locale.chatHistory;
   }
 
   String _getChatRecordsText(BuildContext context) {
-    final locale = AtomicLocalizations.of(context);
+    final locale = AppLocalization.of(context);
     return locale.chatHistory;
   }
 }

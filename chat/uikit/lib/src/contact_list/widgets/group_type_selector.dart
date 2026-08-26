@@ -1,10 +1,11 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart' hide IconButton;
 import 'package:url_launcher/url_launcher.dart';
 
 String getGroupTypeName(BuildContext context, GroupType type) {
-  AtomicLocalizations atomicLocale = AtomicLocalizations.of(context);
+  AppLocalizedText atomicLocale = AppLocalization.of(context);
   switch (type) {
     case GroupType.work:
       return atomicLocale.groupWork;
@@ -20,7 +21,8 @@ String getGroupTypeName(BuildContext context, GroupType type) {
 }
 
 class GroupTypeSelector extends StatefulWidget {
-  static const String imProductDocURL = "https://www.tencentcloud.com/document/product/1047/33515";
+  static const String imProductDocURL =
+      "https://www.tencentcloud.com/document/product/1047/33515";
 
   final GroupType selectedGroupType;
 
@@ -36,7 +38,7 @@ class GroupTypeSelector extends StatefulWidget {
 class _GroupTypeSelectorState extends State<GroupTypeSelector> {
   late GroupType _selectedGroupType;
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
 
   final List<GroupType> _groupTypes = [
     GroupType.work,
@@ -54,8 +56,8 @@ class _GroupTypeSelectorState extends State<GroupTypeSelector> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    colorsTheme = BaseThemeProvider.colorsOf(context);
-    atomicLocale = AtomicLocalizations.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
+    atomicLocale = AppLocalization.of(context);
   }
 
   String _getGroupTypeFullName(GroupType type) {
@@ -105,7 +107,8 @@ class _GroupTypeSelectorState extends State<GroupTypeSelector> {
         backgroundColor: colorsTheme.bgColorTopBar,
         elevation: 0,
         leading: IconButton.buttonContent(
-          content: IconOnlyContent(Icon(Icons.arrow_back_ios, color: colorsTheme.buttonColorPrimaryDefault)),
+          content: IconOnlyContent(Icon(Icons.arrow_back_ios,
+              color: colorsTheme.buttonColorPrimaryDefault)),
           type: ButtonType.noBorder,
           size: ButtonSize.l,
           onClick: () => Navigator.of(context).pop(),
@@ -152,13 +155,16 @@ class _GroupTypeSelectorState extends State<GroupTypeSelector> {
                     });
                   },
                   child: Container(
-                    margin: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
+                    margin: const EdgeInsets.symmetric(
+                        vertical: 12.0, horizontal: 16.0),
                     padding: const EdgeInsets.all(16.0),
                     decoration: BoxDecoration(
                       color: colorsTheme.listColorDefault,
                       borderRadius: BorderRadius.circular(16.0),
                       border: Border.all(
-                        color: isSelected ? colorsTheme.textColorLink : colorsTheme.strokeColorPrimary,
+                        color: isSelected
+                            ? colorsTheme.textColorLink
+                            : colorsTheme.strokeColorPrimary,
                         width: 1.0,
                       ),
                     ),

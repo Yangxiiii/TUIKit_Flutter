@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart' hide IconButton;
@@ -12,7 +13,7 @@ class FriendApplicationList extends StatefulWidget {
 class _FriendApplicationListState extends State<FriendApplicationList> {
   final ContactStore _contactStore = ContactStore.shared;
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
 
   @override
   void initState() {
@@ -23,8 +24,8 @@ class _FriendApplicationListState extends State<FriendApplicationList> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    colorsTheme = BaseThemeProvider.colorsOf(context);
-    atomicLocale = AtomicLocalizations.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
+    atomicLocale = AppLocalization.of(context);
   }
 
   Future<void> _loadData() async {
@@ -40,7 +41,8 @@ class _FriendApplicationListState extends State<FriendApplicationList> {
         backgroundColor: colorsTheme.bgColorOperate,
         scrolledUnderElevation: 0,
         leading: IconButton.buttonContent(
-          content: IconOnlyContent(Icon(Icons.arrow_back_ios, color: colorsTheme.buttonColorPrimaryDefault)),
+          content: IconOnlyContent(Icon(Icons.arrow_back_ios,
+              color: colorsTheme.buttonColorPrimaryDefault)),
           type: ButtonType.noBorder,
           size: ButtonSize.l,
           onClick: () => Navigator.pop(context),
@@ -133,7 +135,8 @@ class _FriendApplicationListState extends State<FriendApplicationList> {
                         color: colorsTheme.textColorPrimary,
                       ),
                     ),
-                    if (application.addWording != null && application.addWording!.isNotEmpty) ...[
+                    if (application.addWording != null &&
+                        application.addWording!.isNotEmpty) ...[
                       const SizedBox(height: 4),
                       Text(
                         application.addWording!,
@@ -192,8 +195,10 @@ class _FriendApplicationListState extends State<FriendApplicationList> {
     );
   }
 
-  Future<void> _acceptFriendApplication(FriendApplicationInfo application) async {
-    final result = await _contactStore.acceptFriendApplication(info: application);
+  Future<void> _acceptFriendApplication(
+      FriendApplicationInfo application) async {
+    final result =
+        await _contactStore.acceptFriendApplication(info: application);
     if (!result.isSuccess) {
       if (mounted) {
         Toast.error(context, '${result.errorMessage}');
@@ -201,8 +206,10 @@ class _FriendApplicationListState extends State<FriendApplicationList> {
     }
   }
 
-  Future<void> _refuseFriendApplication(FriendApplicationInfo application) async {
-    final result = await _contactStore.refuseFriendApplication(info: application);
+  Future<void> _refuseFriendApplication(
+      FriendApplicationInfo application) async {
+    final result =
+        await _contactStore.refuseFriendApplication(info: application);
     if (!result.isSuccess) {
       if (mounted) {
         Toast.error(context, '${result.errorMessage}');

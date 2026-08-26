@@ -25,7 +25,7 @@ class _ListenPlaybackBarState extends State<ListenPlaybackBar> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
     return ListenableBuilder(
       listenable: _controller,
       builder: (context, _) {

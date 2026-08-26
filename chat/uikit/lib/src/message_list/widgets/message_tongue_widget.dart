@@ -8,8 +8,10 @@ enum TongueType {
   backToLatest,
   newMessages,
   atMention,
+
   /// Unread messages tongue shown at the top-right when entering a chat with unread messages
   unreadMessages,
+
   /// Back to quote position tongue shown after navigating to a quoted message
   backToQuote,
 }
@@ -82,7 +84,7 @@ class MessageTongueWidget extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
     final text = _getDisplayText();
 
     return GestureDetector(

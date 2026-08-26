@@ -1,6 +1,5 @@
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
 import 'video_recorder_platform.dart';
 
@@ -79,12 +78,12 @@ class VideoRecorder {
       throw Exception('Context is no longer mounted');
     }
 
-    final localeProvider = Provider.of<LocaleProvider>(context, listen: false);
-    final themeState = BaseThemeProvider.of(context);
+    final primaryColor = Theme.of(context).colorScheme.primary.toARGB32();
     return VideoRecorderPlatform.startRecordNative(
       config: config ?? const VideoRecorderConfig(),
-      locale: localeProvider.locale,
-      primaryColor: themeState.currentPrimaryColor,
+      locale: Localizations.localeOf(context),
+      primaryColor:
+          '#${(primaryColor & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}',
     );
   }
 }

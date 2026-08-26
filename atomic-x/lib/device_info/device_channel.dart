@@ -5,7 +5,8 @@ class DeviceChannel {
 
   static Future<Map<String, dynamic>?> getDeviceInfo() async {
     try {
-      final Map<dynamic, dynamic>? result = await _channel.invokeMethod('getDeviceInfo');
+      final Map<dynamic, dynamic>? result =
+          await _channel.invokeMethod('getDeviceInfo');
       return result?.cast<String, dynamic>();
     } catch (e) {
       print('Failed to get device info: ${e.toString()}');

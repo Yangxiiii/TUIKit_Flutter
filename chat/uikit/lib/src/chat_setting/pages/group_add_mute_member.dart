@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
@@ -21,7 +22,7 @@ class _GroupAddMuteMemberState extends State<GroupAddMuteMember> {
   List<UserPickerData> _dataSource = [];
 
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
 
   @override
   void initState() {
@@ -32,13 +33,15 @@ class _GroupAddMuteMemberState extends State<GroupAddMuteMember> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    atomicLocale = AtomicLocalizations.of(context);
-    colorsTheme = BaseThemeProvider.colorsOf(context);
+    atomicLocale = AppLocalization.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
   }
 
   void _initMemberList() {
     final selectableMembers = widget.memberStore.state.memberList.value
-        .where((member) => member.role != GroupMemberRole.owner && member.role != GroupMemberRole.admin)
+        .where((member) =>
+            member.role != GroupMemberRole.owner &&
+            member.role != GroupMemberRole.admin)
         .toList();
 
     _dataSource = selectableMembers.map((member) {
@@ -65,7 +68,8 @@ class _GroupAddMuteMemberState extends State<GroupAddMuteMember> {
       );
 
       if (result.errorCode != 0) {
-        debugPrint('muteMember failed, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}');
+        debugPrint(
+            'muteMember failed, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}');
         if (mounted) {
           Toast.error(context, atomicLocale.addFailed);
         }

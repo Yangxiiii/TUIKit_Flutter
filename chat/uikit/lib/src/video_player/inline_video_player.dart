@@ -8,45 +8,46 @@ class InlineVideoPlayerController extends ChangeNotifier {
   final String videoPath;
   final int width;
   final int height;
-  
+
   MethodChannel? _channel;
   int? _viewId;
-  
+
   bool _isPlaying = false;
   bool _isReady = false;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   bool _isDisposed = false;
-  
+
   bool get isPlaying => _isPlaying;
   bool get isReady => _isReady;
   Duration get position => _position;
   Duration get duration => _duration;
-  double get progress => _duration.inMilliseconds > 0 
-      ? (_position.inMilliseconds / _duration.inMilliseconds).clamp(0.0, 1.0) 
+  double get progress => _duration.inMilliseconds > 0
+      ? (_position.inMilliseconds / _duration.inMilliseconds).clamp(0.0, 1.0)
       : 0.0;
-  
+
   InlineVideoPlayerController({
     required this.videoPath,
     this.width = 0,
     this.height = 0,
   });
-  
+
   void _onViewCreated(int viewId) {
     _viewId = viewId;
     _channel = MethodChannel('tencent_chat_uikit/inline_video_player_$viewId');
     _channel!.setMethodCallHandler(_handleMethodCall);
   }
-  
+
   Future<dynamic> _handleMethodCall(MethodCall call) async {
     if (_isDisposed) return;
-    
+
     switch (call.method) {
       case 'onReady':
         _isReady = true;
         final args = call.arguments as Map?;
         if (args != null) {
-          _duration = Duration(milliseconds: (args['duration'] as num?)?.toInt() ?? 0);
+          _duration =
+              Duration(milliseconds: (args['duration'] as num?)?.toInt() ?? 0);
         }
         notifyListeners();
         break;
@@ -75,7 +76,7 @@ class InlineVideoPlayerController extends ChangeNotifier {
         break;
     }
   }
-  
+
   Future<void> play() async {
     if (_channel == null || _isDisposed) return;
     try {
@@ -84,7 +85,7 @@ class InlineVideoPlayerController extends ChangeNotifier {
       debugPrint('InlineVideoPlayerController.play error: $e');
     }
   }
-  
+
   Future<void> pause() async {
     if (_channel == null || _isDisposed) return;
     try {
@@ -93,7 +94,7 @@ class InlineVideoPlayerController extends ChangeNotifier {
       debugPrint('InlineVideoPlayerController.pause error: $e');
     }
   }
-  
+
   Future<void> togglePlayPause() async {
     if (_isPlaying) {
       await pause();
@@ -101,7 +102,7 @@ class InlineVideoPlayerController extends ChangeNotifier {
       await play();
     }
   }
-  
+
   Future<void> seekTo(Duration position) async {
     if (_channel == null || _isDisposed) return;
     try {
@@ -112,14 +113,14 @@ class InlineVideoPlayerController extends ChangeNotifier {
       debugPrint('InlineVideoPlayerController.seekTo error: $e');
     }
   }
-  
+
   Future<void> seekToProgress(double progress) async {
     final targetPosition = Duration(
       milliseconds: (progress * _duration.inMilliseconds).toInt(),
     );
     await seekTo(targetPosition);
   }
-  
+
   @override
   void dispose() {
     _isDisposed = true;
@@ -133,7 +134,7 @@ class InlineVideoPlayerController extends ChangeNotifier {
 class InlineVideoPlayer extends StatefulWidget {
   final InlineVideoPlayerController controller;
   final BoxFit fit;
-  
+
   const InlineVideoPlayer({
     super.key,
     required this.controller,
@@ -160,10 +161,10 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
       );
     }
   }
-  
+
   Widget _buildAndroidView() {
     const String viewType = 'tencent_chat_uikit/inline_video_player';
-    
+
     final Map<String, dynamic> creationParams = {
       'videoPath': widget.controller.videoPath,
       'width': widget.controller.width.toDouble(),
@@ -178,10 +179,10 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
       onPlatformViewCreated: widget.controller._onViewCreated,
     );
   }
-  
+
   Widget _buildIOSView() {
     const String viewType = 'tencent_chat_uikit/inline_video_player';
-    
+
     final Map<String, dynamic> creationParams = {
       'videoPath': widget.controller.videoPath,
       'width': widget.controller.width.toDouble(),
@@ -203,7 +204,7 @@ class InlineVideoPlayerWithControls extends StatefulWidget {
   final InlineVideoPlayerController controller;
   final bool showControls;
   final VoidCallback? onTap;
-  
+
   const InlineVideoPlayerWithControls({
     super.key,
     required this.controller,
@@ -212,42 +213,44 @@ class InlineVideoPlayerWithControls extends StatefulWidget {
   });
 
   @override
-  State<InlineVideoPlayerWithControls> createState() => _InlineVideoPlayerWithControlsState();
+  State<InlineVideoPlayerWithControls> createState() =>
+      _InlineVideoPlayerWithControlsState();
 }
 
-class _InlineVideoPlayerWithControlsState extends State<InlineVideoPlayerWithControls> {
+class _InlineVideoPlayerWithControlsState
+    extends State<InlineVideoPlayerWithControls> {
   bool _showControlsOverlay = true;
-  
+
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_onControllerUpdate);
   }
-  
+
   @override
   void dispose() {
     widget.controller.removeListener(_onControllerUpdate);
     super.dispose();
   }
-  
+
   void _onControllerUpdate() {
     if (mounted) {
       setState(() {});
     }
   }
-  
+
   void _toggleControls() {
     setState(() {
       _showControlsOverlay = !_showControlsOverlay;
     });
     widget.onTap?.call();
   }
-  
+
   String _formatDuration(Duration duration) {
     final hours = duration.inHours;
     final minutes = duration.inMinutes.remainder(60);
     final seconds = duration.inSeconds.remainder(60);
-    
+
     if (hours > 0) {
       return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
     }
@@ -263,7 +266,7 @@ class _InlineVideoPlayerWithControlsState extends State<InlineVideoPlayerWithCon
         children: [
           // Video player
           InlineVideoPlayer(controller: widget.controller),
-          
+
           // Controls overlay
           if (widget.showControls && _showControlsOverlay)
             _buildControlsOverlay(),
@@ -271,7 +274,7 @@ class _InlineVideoPlayerWithControlsState extends State<InlineVideoPlayerWithCon
       ),
     );
   }
-  
+
   Widget _buildControlsOverlay() {
     return Container(
       decoration: BoxDecoration(
@@ -292,7 +295,7 @@ class _InlineVideoPlayerWithControlsState extends State<InlineVideoPlayerWithCon
         children: [
           // Top spacer
           const SizedBox(height: 50),
-          
+
           // Center play/pause button
           GestureDetector(
             onTap: () => widget.controller.togglePlayPause(),
@@ -310,14 +313,14 @@ class _InlineVideoPlayerWithControlsState extends State<InlineVideoPlayerWithCon
               ),
             ),
           ),
-          
+
           // Bottom controls
           _buildBottomControls(),
         ],
       ),
     );
   }
-  
+
   Widget _buildBottomControls() {
     return SafeArea(
       child: Padding(
@@ -342,20 +345,20 @@ class _InlineVideoPlayerWithControlsState extends State<InlineVideoPlayerWithCon
               ),
             ),
             const SizedBox(width: 8),
-            
+
             // Current time
             Text(
               _formatDuration(widget.controller.position),
               style: const TextStyle(color: Colors.white, fontSize: 12),
             ),
             const SizedBox(width: 8),
-            
+
             // Progress bar
             Expanded(
               child: _buildProgressBar(),
             ),
             const SizedBox(width: 8),
-            
+
             // Total time
             Text(
               _formatDuration(widget.controller.duration),
@@ -366,7 +369,7 @@ class _InlineVideoPlayerWithControlsState extends State<InlineVideoPlayerWithCon
       ),
     );
   }
-  
+
   Widget _buildProgressBar() {
     return GestureDetector(
       onHorizontalDragStart: (details) {
@@ -380,7 +383,8 @@ class _InlineVideoPlayerWithControlsState extends State<InlineVideoPlayerWithCon
       },
       onTapDown: (details) {
         final RenderBox box = context.findRenderObject() as RenderBox;
-        final width = box.size.width - 120; // Approximate width excluding buttons and text
+        final width = box.size.width -
+            120; // Approximate width excluding buttons and text
         final tapX = details.localPosition.dx - 60; // Offset for left controls
         final progress = (tapX / width).clamp(0.0, 1.0);
         widget.controller.seekToProgress(progress);
@@ -412,7 +416,8 @@ class _InlineVideoPlayerWithControlsState extends State<InlineVideoPlayerWithCon
             ),
             // Thumb
             Positioned(
-              left: widget.controller.progress * (MediaQuery.of(context).size.width - 200),
+              left: widget.controller.progress *
+                  (MediaQuery.of(context).size.width - 200),
               child: Container(
                 width: 12,
                 height: 12,

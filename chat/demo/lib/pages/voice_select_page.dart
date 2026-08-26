@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:tencent_chat_uikit/tencent_chat_uikit.dart' hide CompletionHandler;
+import 'package:tencent_chat_uikit/tencent_chat_uikit.dart'
+    hide CompletionHandler;
 // Direct src import: SwipeActionCell is the ChatKit swipe component (same as the
 // conversation list). It can't be re-exported from the barrel because its
 // `CompletionHandler` clashes with the one from atomic_x_core.
@@ -38,22 +39,29 @@ class _VoiceSelectPageState extends State<VoiceSelectPage> {
   }
 
   Future<void> _select(CustomVoiceItem item) async {
-    await VoiceMessageConfig.instance
-        .setSelectedVoice(voiceId: item.voiceId, name: item.name);
+    await VoiceMessageConfig.instance.setSelectedVoice(
+      voiceId: item.voiceId,
+      name: item.name,
+    );
     if (mounted) setState(() => _selectedId = item.voiceId);
   }
 
   Future<bool> _delete(CustomVoiceItem item) async {
-    final chatLocale = ChatLocalizations.of(context)!;
-    final ok =
-        await AiMediaProcessManager.shared.deleteCustomVoice(voiceId: item.voiceId);
+    final chatLocale = AppLocalization.of(context);
+    final ok = await AiMediaProcessManager.shared.deleteCustomVoice(
+      voiceId: item.voiceId,
+    );
     if (!mounted) return ok;
     if (ok) {
-      setState(() => _customVoices.removeWhere((e) => e.voiceId == item.voiceId));
+      setState(
+        () => _customVoices.removeWhere((e) => e.voiceId == item.voiceId),
+      );
       // Deleting the currently selected voice falls back to the default.
       if (_selectedId == item.voiceId) {
-        await VoiceMessageConfig.instance
-            .setSelectedVoice(voiceId: '', name: '');
+        await VoiceMessageConfig.instance.setSelectedVoice(
+          voiceId: '',
+          name: '',
+        );
         if (mounted) setState(() => _selectedId = '');
       }
     } else {
@@ -64,8 +72,8 @@ class _VoiceSelectPageState extends State<VoiceSelectPage> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
-    final chatLocale = ChatLocalizations.of(context)!;
+    final colors = SemanticColorScheme.of(context);
+    final chatLocale = AppLocalization.of(context);
     final defaults = defaultVoiceList(chatLocale);
 
     return Scaffold(
@@ -138,8 +146,11 @@ class _VoiceSelectPageState extends State<VoiceSelectPage> {
     );
   }
 
-  Widget _voiceRow(SemanticColorScheme colors, CustomVoiceItem item,
-      {bool custom = false}) {
+  Widget _voiceRow(
+    SemanticColorScheme colors,
+    CustomVoiceItem item, {
+    bool custom = false,
+  }) {
     final selected = item.voiceId == _selectedId;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -175,7 +186,7 @@ class _VoiceSelectPageState extends State<VoiceSelectPage> {
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  ChatLocalizations.of(context)!.voiceCustomBadge,
+                  AppLocalization.of(context).voiceCustomBadge,
                   style: FontScheme.caption4Regular.copyWith(
                     color: colors.textColorButton,
                   ),

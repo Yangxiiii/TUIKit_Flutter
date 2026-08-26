@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
@@ -21,7 +22,7 @@ class GroupTransferOwner extends StatefulWidget {
 
 class _GroupTransferOwnerState extends State<GroupTransferOwner> {
   List<UserPickerData> _dataSource = [];
-  late AtomicLocalizations atomicLocal;
+  late AppLocalizedText atomicLocal;
 
   @override
   void initState() {
@@ -32,7 +33,7 @@ class _GroupTransferOwnerState extends State<GroupTransferOwner> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    atomicLocal = AtomicLocalizations.of(context);
+    atomicLocal = AppLocalization.of(context);
   }
 
   void _initMemberList() {

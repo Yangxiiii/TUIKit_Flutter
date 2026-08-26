@@ -1,5 +1,7 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart' hide IconButton;
+import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_checkbox.dart';
 
@@ -28,7 +30,8 @@ class ForwardTargetSelectorPage extends StatefulWidget {
   });
 
   @override
-  State<ForwardTargetSelectorPage> createState() => _ForwardTargetSelectorPageState();
+  State<ForwardTargetSelectorPage> createState() =>
+      _ForwardTargetSelectorPageState();
 
   /// Show forward target selector
   static Future<ForwardTargetSelectResult?> show(
@@ -37,20 +40,19 @@ class ForwardTargetSelectorPage extends StatefulWidget {
     int maxSelectCount = 9,
     String? excludeConversationID,
   }) async {
-    return Navigator.of(context).push<ForwardTargetSelectResult>(
-      MaterialPageRoute(
-        builder: (context) => ForwardTargetSelectorPage(
-          allowMultiSelect: allowMultiSelect,
-          maxSelectCount: maxSelectCount,
-          excludeConversationID: excludeConversationID,
-        ),
+    return context.pushChatUIKitPage<ForwardTargetSelectResult>(
+      ForwardTargetSelectorPage(
+        allowMultiSelect: allowMultiSelect,
+        maxSelectCount: maxSelectCount,
+        excludeConversationID: excludeConversationID,
       ),
     );
   }
 }
 
 class _ForwardTargetSelectorPageState extends State<ForwardTargetSelectorPage> {
-  final ConversationListStore _conversationListStore = ConversationListStore.create();
+  final ConversationListStore _conversationListStore =
+      ConversationListStore.create();
   final Set<String> _selectedConversationIDs = {};
   List<ConversationInfo> _conversations = [];
   bool _isLoading = true;
@@ -58,13 +60,15 @@ class _ForwardTargetSelectorPageState extends State<ForwardTargetSelectorPage> {
   @override
   void initState() {
     super.initState();
-    _conversationListStore.state.conversationList.addListener(_onConversationListChanged);
+    _conversationListStore.state.conversationList
+        .addListener(_onConversationListChanged);
     _loadConversations();
   }
 
   @override
   void dispose() {
-    _conversationListStore.state.conversationList.removeListener(_onConversationListChanged);
+    _conversationListStore.state.conversationList
+        .removeListener(_onConversationListChanged);
     super.dispose();
   }
 
@@ -116,8 +120,8 @@ class _ForwardTargetSelectorPageState extends State<ForwardTargetSelectorPage> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
-    final locale = AtomicLocalizations.of(context);
+    final colors = SemanticColorScheme.of(context);
+    final locale = AppLocalization.of(context);
 
     return Scaffold(
       backgroundColor: colors.bgColorOperate,
@@ -165,7 +169,8 @@ class _ForwardTargetSelectorPageState extends State<ForwardTargetSelectorPage> {
                   itemCount: _conversations.length,
                   itemBuilder: (context, index) {
                     final conversation = _conversations[index];
-                    final isSelected = _selectedConversationIDs.contains(conversation.conversationID);
+                    final isSelected = _selectedConversationIDs
+                        .contains(conversation.conversationID);
 
                     return _buildConversationItem(
                       conversation: conversation,
@@ -238,11 +243,11 @@ class _ForwardTargetSelectorPageState extends State<ForwardTargetSelectorPage> {
     );
   }
 
-  String _getTitle(AtomicLocalizations locale) {
+  String _getTitle(AppLocalizedText locale) {
     return locale.selectChat;
   }
 
-  String _getEmptyText(AtomicLocalizations locale) {
+  String _getEmptyText(AppLocalizedText locale) {
     final languageCode = locale.localeName;
     if (languageCode.startsWith('zh')) {
       return '暂无会话';

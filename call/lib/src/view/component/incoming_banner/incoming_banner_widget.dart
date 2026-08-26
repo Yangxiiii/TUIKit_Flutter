@@ -5,20 +5,21 @@ import 'package:rtc_room_engine/rtc_room_engine.dart';
 import 'package:tencent_cloud_chat_sdk/tencent_im_sdk_plugin.dart';
 import 'package:tencent_calls_uikit/src/common/constants.dart';
 import 'package:tencent_calls_uikit/src/manager/call_manager.dart';
-import 'package:tuikit_atomic_x/base_component/localizations/atomic_localizations.dart';
+import 'package:tuikit_atomic_x/base_component/base_component.dart'
+    show AppChatLocalizedText, AppLocalization, AppLocalizedText;
 
 class IncomingBannerWidget extends StatefulWidget {
   final VoidCallback? onShowCalling;
   final VoidCallback? onCloseAll;
 
-  const IncomingBannerWidget({Key? key, this.onShowCalling, this.onCloseAll}) : super(key: key);
+  const IncomingBannerWidget({Key? key, this.onShowCalling, this.onCloseAll})
+    : super(key: key);
 
   @override
   State<IncomingBannerWidget> createState() => _IncomingBannerWidgetState();
 }
 
 class _IncomingBannerWidgetState extends State<IncomingBannerWidget> {
-
   @override
   void initState() {
     super.initState();
@@ -38,7 +39,7 @@ class _IncomingBannerWidgetState extends State<IncomingBannerWidget> {
     await CallManager.instance.reject();
     widget.onCloseAll?.call();
   }
-  
+
   void _onTapBanner() {
     widget.onShowCalling?.call();
   }
@@ -64,7 +65,7 @@ class _IncomingBannerWidgetState extends State<IncomingBannerWidget> {
                 color: Colors.black.withOpacity(0.08),
                 blurRadius: 12,
                 offset: const Offset(0, 4),
-              )
+              ),
             ],
           ),
           child: Row(
@@ -74,7 +75,7 @@ class _IncomingBannerWidgetState extends State<IncomingBannerWidget> {
               const SizedBox(width: 12),
               _getInviterInfoWidget(),
               const SizedBox(width: 12),
-              _getActionButtonWidget()
+              _getActionButtonWidget(),
             ],
           ),
         ),
@@ -83,88 +84,92 @@ class _IncomingBannerWidgetState extends State<IncomingBannerWidget> {
   }
 
   _getInviterAvatarWidget() {
-    return ValueListenableBuilder(valueListenable: CallStore.shared.state.allParticipants,
-        builder: (context, allParticipants, child) {
-          final inviterId = CallStore.shared.state.activeCall.value.inviterId;
-          final inviter = allParticipants.firstWhere(
-                (participant) => participant.id == inviterId,
-            orElse: () => CallStore.shared.state.selfInfo.value,
-          );
+    return ValueListenableBuilder(
+      valueListenable: CallStore.shared.state.allParticipants,
+      builder: (context, allParticipants, child) {
+        final inviterId = CallStore.shared.state.activeCall.value.inviterId;
+        final inviter = allParticipants.firstWhere(
+          (participant) => participant.id == inviterId,
+          orElse: () => CallStore.shared.state.selfInfo.value,
+        );
 
-          return Container(
-            width: 50,
-            height: 50,
-            clipBehavior: Clip.hardEdge,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(4),
-              color: const Color(0xFFEFEFEF),
+        return Container(
+          width: 50,
+          height: 50,
+          clipBehavior: Clip.hardEdge,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(4),
+            color: const Color(0xFFEFEFEF),
+          ),
+          child: Image(
+            image: NetworkImage(inviter.avatarURL),
+            fit: BoxFit.cover,
+            errorBuilder: (ctx, err, stack) => Image.asset(
+              'assets/images/user_icon.png',
+              package: 'tencent_calls_uikit',
             ),
-            child: Image(
-              image: NetworkImage(inviter.avatarURL),
-              fit: BoxFit.cover,
-              errorBuilder: (ctx, err, stack) => Image.asset(
-                'assets/images/user_icon.png',
-                package: 'tencent_calls_uikit',
-              ),
-            ),
-          );
-        });
+          ),
+        );
+      },
+    );
   }
 
   _getInviterInfoWidget() {
-    return ValueListenableBuilder(valueListenable: CallStore.shared.state.allParticipants,
-        builder: (context, allParticipants, child) {
-          final inviterId = CallStore.shared.state.activeCall.value.inviterId;
-          final inviter = allParticipants.firstWhere(
-                (participant) => participant.id == inviterId,
-            orElse: () => CallStore.shared.state.selfInfo.value,
-          );
+    return ValueListenableBuilder(
+      valueListenable: CallStore.shared.state.allParticipants,
+      builder: (context, allParticipants, child) {
+        final inviterId = CallStore.shared.state.activeCall.value.inviterId;
+        final inviter = allParticipants.firstWhere(
+          (participant) => participant.id == inviterId,
+          orElse: () => CallStore.shared.state.selfInfo.value,
+        );
 
-          var inviterName = inviter.remark.isNotEmpty ?  inviter.remark : inviter.name;
-          if (inviterName.isEmpty) {
-            inviterName = inviter.id;
-          }
+        var inviterName = inviter.remark.isNotEmpty
+            ? inviter.remark
+            : inviter.name;
+        if (inviterName.isEmpty) {
+          inviterName = inviter.id;
+        }
 
-          var invitationInfo = '';
-          final l10n = AtomicLocalizations.of(context);
-          if (CallStore.shared.state.activeCall.value.inviteeIds.length >= 2) {
-            invitationInfo = l10n.callInvitedToGroupCall;
-          } else if (CallStore.shared.state.activeCall.value.mediaType == CallMediaType.audio) {
-            invitationInfo = l10n.callInvitedToAudioCall;
-          } else if (CallStore.shared.state.activeCall.value.mediaType == CallMediaType.video) {
-            invitationInfo = l10n.callInvitedToVideoCall;
-          }
+        var invitationInfo = '';
+        final l10n = AppLocalization.of(context);
+        if (CallStore.shared.state.activeCall.value.inviteeIds.length >= 2) {
+          invitationInfo = l10n.callInvitedToGroupCall;
+        } else if (CallStore.shared.state.activeCall.value.mediaType ==
+            CallMediaType.audio) {
+          invitationInfo = l10n.callInvitedToAudioCall;
+        } else if (CallStore.shared.state.activeCall.value.mediaType ==
+            CallMediaType.video) {
+          invitationInfo = l10n.callInvitedToVideoCall;
+        }
 
-          return Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  inviterName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
+        return Expanded(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                inviterName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  invitationInfo,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Colors.white,
-                  ),
-                ),
-              ],
-            ),
-          );
-    });
-
+              ),
+              const SizedBox(height: 2),
+              Text(
+                invitationInfo,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12, color: Colors.white),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   _getActionButtonWidget() {
@@ -175,9 +180,7 @@ class _IncomingBannerWidgetState extends State<IncomingBannerWidget> {
           child: Container(
             width: 36,
             height: 36,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-            ),
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(18)),
             alignment: Alignment.center,
             child: Image.asset(
               'assets/images/hangup.png',
@@ -193,9 +196,7 @@ class _IncomingBannerWidgetState extends State<IncomingBannerWidget> {
           child: Container(
             width: 36,
             height: 36,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-            ),
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(18)),
             alignment: Alignment.center,
             child: Image.asset(
               'assets/images/dialing.png',
@@ -209,5 +210,3 @@ class _IncomingBannerWidgetState extends State<IncomingBannerWidget> {
     );
   }
 }
-
-

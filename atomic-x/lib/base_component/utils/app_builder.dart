@@ -10,9 +10,6 @@ class AppBuilder {
   late Map<String, dynamic> _config;
   bool _isLoaded = false;
 
-  static const String THEME_MODE_LIGHT = 'light';
-  static const String THEME_MODE_DARK = 'dark';
-
   static const String MESSAGE_ALIGNMENT_TWO_SIDED = 'two-sided';
   static const String MESSAGE_ALIGNMENT_LEFT = 'left';
   static const String MESSAGE_ALIGNMENT_RIGHT = 'right';
@@ -35,8 +32,6 @@ class AppBuilder {
   static const String AVATAR_SHAPE_CIRCULAR = 'circular';
   static const String AVATAR_SHAPE_SQUARE = 'square';
   static const String AVATAR_SHAPE_ROUNDED = 'rounded';
-
-  late AtomicThemeConfig themeConfig;
 
   late MessageListConfig messageListConfig;
 
@@ -84,17 +79,18 @@ class AppBuilder {
   }
 
   void _parseConfig() {
-    themeConfig = AtomicThemeConfig.fromJson(_config['theme'] ?? {});
-    messageListConfig = MessageListConfig.fromJson(_config['messageList'] ?? {});
-    messageInputConfig = MessageInputConfig.fromJson(_config['messageInput'] ?? {});
-    conversationListConfig = ConversationListConfig.fromJson(_config['conversationList'] ?? {});
+    messageListConfig =
+        MessageListConfig.fromJson(_config['messageList'] ?? {});
+    messageInputConfig =
+        MessageInputConfig.fromJson(_config['messageInput'] ?? {});
+    conversationListConfig =
+        ConversationListConfig.fromJson(_config['conversationList'] ?? {});
     searchConfig = SearchConfig.fromJson(_config['search'] ?? {});
     avatarConfig = AvatarConfig.fromJson(_config['avatar'] ?? {});
     translateConfig = TranslateConfig();
   }
 
   void _setDefaultConfig() {
-    themeConfig = AtomicThemeConfig.defaultConfig();
     messageListConfig = MessageListConfig.defaultConfig();
     messageInputConfig = MessageInputConfig.defaultConfig();
     conversationListConfig = ConversationListConfig.defaultConfig();
@@ -104,36 +100,9 @@ class AppBuilder {
   }
 }
 
-class AtomicThemeConfig {
-  final String mode;
-  final String? primaryColor;
-
-  AtomicThemeConfig({
-    required this.mode,
-    this.primaryColor,
-  });
-
-  factory AtomicThemeConfig.fromJson(Map<String, dynamic> json) {
-    String mode = json['mode'] ?? 'light';
-    String primaryColor = json['primaryColor'] ?? '#1C66E5';
-
-    return AtomicThemeConfig(
-      mode: mode,
-      primaryColor: primaryColor,
-    );
-  }
-
-  factory AtomicThemeConfig.defaultConfig() {
-    return AtomicThemeConfig(
-      mode: 'light',
-      primaryColor: '#1C66E5',
-    );
-  }
-}
-
 class MessageListConfig {
   static const String _enableReadReceiptKey = 'atomic_enable_read_receipt';
-  
+
   final String alignment;
   final List<String> messageActionList;
   final bool _jsonEnableReadReceipt;
@@ -240,7 +209,8 @@ class MessageInputConfig {
   factory MessageInputConfig.fromJson(Map<String, dynamic> json) {
     return MessageInputConfig(
       hideSendButton: json['hideSendButton'] ?? false,
-      attachmentPickerMode: json['attachmentPickerMode'] ?? AppBuilder.ATTACHMENT_PICKER_MODE_COLLAPSED,
+      attachmentPickerMode: json['attachmentPickerMode'] ??
+          AppBuilder.ATTACHMENT_PICKER_MODE_COLLAPSED,
     );
   }
 
@@ -293,7 +263,8 @@ class AvatarConfig {
 }
 
 class TranslateConfig {
-  static const String _translateTargetLanguageKey = 'atomic_translate_target_language';
+  static const String _translateTargetLanguageKey =
+      'atomic_translate_target_language';
   String? _cachedTargetLanguage;
 
   TranslateConfig() {

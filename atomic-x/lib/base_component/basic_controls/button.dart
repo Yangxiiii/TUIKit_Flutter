@@ -1,9 +1,10 @@
-import 'package:flutter/material.dart' hide IconButton, OutlinedButton, FilledButton;
-import 'package:flutter/material.dart' as material show IconButton, OutlinedButton, FilledButton;
+import 'package:flutter/material.dart'
+    hide IconButton, OutlinedButton, FilledButton;
+import 'package:flutter/material.dart' as material
+    show IconButton, OutlinedButton, FilledButton;
 
 import '../theme/color_scheme.dart';
 import '../theme/font.dart';
-import '../theme/theme_state.dart';
 
 enum ButtonType {
   filled,
@@ -34,7 +35,8 @@ enum ButtonSize {
   m(40, 16, 80, 20),
   l(48, 20, 96, 20);
 
-  const ButtonSize(this.height, this.horizontalPadding, this.minWidth, this.iconSize);
+  const ButtonSize(
+      this.height, this.horizontalPadding, this.minWidth, this.iconSize);
 
   final double height;
   final double horizontalPadding;
@@ -102,7 +104,8 @@ TextStyle _fontForButtonSize(ButtonSize size) {
   }
 }
 
-ButtonColors _getButtonColors(ButtonType type, ButtonColorType colorType, SemanticColorScheme colors) {
+ButtonColors _getButtonColors(
+    ButtonType type, ButtonColorType colorType, SemanticColorScheme colors) {
   switch (type) {
     case ButtonType.filled:
       return _getFilledButtonColors(colorType, colors);
@@ -113,7 +116,8 @@ ButtonColors _getButtonColors(ButtonType type, ButtonColorType colorType, Semant
   }
 }
 
-ButtonColors _getFilledButtonColors(ButtonColorType colorType, SemanticColorScheme colors) {
+ButtonColors _getFilledButtonColors(
+    ButtonColorType colorType, SemanticColorScheme colors) {
   switch (colorType) {
     case ButtonColorType.primary:
       return ButtonColors(
@@ -145,7 +149,8 @@ ButtonColors _getFilledButtonColors(ButtonColorType colorType, SemanticColorSche
   }
 }
 
-ButtonColors _getOutlinedButtonColors(ButtonColorType colorType, SemanticColorScheme colors) {
+ButtonColors _getOutlinedButtonColors(
+    ButtonColorType colorType, SemanticColorScheme colors) {
   switch (colorType) {
     case ButtonColorType.primary:
       return ButtonColors(
@@ -177,7 +182,8 @@ ButtonColors _getOutlinedButtonColors(ButtonColorType colorType, SemanticColorSc
   }
 }
 
-ButtonColors _getNoBorderButtonColors(ButtonColorType colorType, SemanticColorScheme colors) {
+ButtonColors _getNoBorderButtonColors(
+    ButtonColorType colorType, SemanticColorScheme colors) {
   switch (colorType) {
     case ButtonColorType.primary:
       return ButtonColors(
@@ -209,7 +215,8 @@ ButtonColors _getNoBorderButtonColors(ButtonColorType colorType, SemanticColorSc
   }
 }
 
-Color _getPressedBackgroundColor(ButtonType type, ButtonColorType colorType, SemanticColorScheme colors) {
+Color _getPressedBackgroundColor(
+    ButtonType type, ButtonColorType colorType, SemanticColorScheme colors) {
   switch (type) {
     case ButtonType.filled:
       switch (colorType) {
@@ -226,7 +233,8 @@ Color _getPressedBackgroundColor(ButtonType type, ButtonColorType colorType, Sem
   }
 }
 
-Color _getHoverBackgroundColor(ButtonType type, ButtonColorType colorType, SemanticColorScheme colors) {
+Color _getHoverBackgroundColor(
+    ButtonType type, ButtonColorType colorType, SemanticColorScheme colors) {
   switch (type) {
     case ButtonType.filled:
       switch (colorType) {
@@ -243,7 +251,8 @@ Color _getHoverBackgroundColor(ButtonType type, ButtonColorType colorType, Seman
   }
 }
 
-Color _getPressedTextColor(ButtonType type, ButtonColorType colorType, SemanticColorScheme colors) {
+Color _getPressedTextColor(
+    ButtonType type, ButtonColorType colorType, SemanticColorScheme colors) {
   switch (type) {
     case ButtonType.filled:
       return colors.textColorButton;
@@ -260,7 +269,8 @@ Color _getPressedTextColor(ButtonType type, ButtonColorType colorType, SemanticC
   }
 }
 
-Color _getHoverTextColor(ButtonType type, ButtonColorType colorType, SemanticColorScheme colors) {
+Color _getHoverTextColor(
+    ButtonType type, ButtonColorType colorType, SemanticColorScheme colors) {
   switch (type) {
     case ButtonType.filled:
       return colors.textColorButton;
@@ -277,7 +287,8 @@ Color _getHoverTextColor(ButtonType type, ButtonColorType colorType, SemanticCol
   }
 }
 
-Color _getPressedBorderColor(ButtonType type, ButtonColorType colorType, SemanticColorScheme colors) {
+Color _getPressedBorderColor(
+    ButtonType type, ButtonColorType colorType, SemanticColorScheme colors) {
   switch (type) {
     case ButtonType.filled:
     case ButtonType.noBorder:
@@ -294,7 +305,8 @@ Color _getPressedBorderColor(ButtonType type, ButtonColorType colorType, Semanti
   }
 }
 
-Color _getHoverBorderColor(ButtonType type, ButtonColorType colorType, SemanticColorScheme colors) {
+Color _getHoverBorderColor(
+    ButtonType type, ButtonColorType colorType, SemanticColorScheme colors) {
   switch (type) {
     case ButtonType.filled:
     case ButtonType.noBorder:
@@ -331,7 +343,7 @@ class _AtomicxButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
     final colors = _getButtonColors(type, colorType, colorsTheme);
 
     if (content is IconOnlyContent && type == ButtonType.filled) {
@@ -432,7 +444,8 @@ class _AtomicxButton extends StatelessWidget {
     return button;
   }
 
-  ButtonStyle _buildFilledButtonStyle(ButtonColors colors, SemanticColorScheme colorsTheme) {
+  ButtonStyle _buildFilledButtonStyle(
+      ButtonColors colors, SemanticColorScheme colorsTheme) {
     return material.FilledButton.styleFrom(
       minimumSize: Size(_getMinWidth(), size.height),
       maximumSize: Size(double.infinity, size.height),
@@ -467,7 +480,8 @@ class _AtomicxButton extends StatelessWidget {
     );
   }
 
-  ButtonStyle _buildOutlinedButtonStyle(ButtonColors colors, SemanticColorScheme colorsTheme) {
+  ButtonStyle _buildOutlinedButtonStyle(
+      ButtonColors colors, SemanticColorScheme colorsTheme) {
     return material.OutlinedButton.styleFrom(
       minimumSize: Size(_getMinWidth(), size.height),
       maximumSize: Size(double.infinity, size.height),
@@ -497,10 +511,14 @@ class _AtomicxButton extends StatelessWidget {
             return BorderSide(color: colors.disabledBorderColor, width: 1);
           }
           if (states.contains(WidgetState.pressed)) {
-            return BorderSide(color: _getPressedBorderColor(type, colorType, colorsTheme), width: 1);
+            return BorderSide(
+                color: _getPressedBorderColor(type, colorType, colorsTheme),
+                width: 1);
           }
           if (states.contains(WidgetState.hovered)) {
-            return BorderSide(color: _getHoverBorderColor(type, colorType, colorsTheme), width: 1);
+            return BorderSide(
+                color: _getHoverBorderColor(type, colorType, colorsTheme),
+                width: 1);
           }
           return BorderSide(color: colors.borderColor, width: 1);
         },
@@ -508,7 +526,8 @@ class _AtomicxButton extends StatelessWidget {
     );
   }
 
-  ButtonStyle _buildTextButtonStyle(ButtonColors colors, SemanticColorScheme colorsTheme) {
+  ButtonStyle _buildTextButtonStyle(
+      ButtonColors colors, SemanticColorScheme colorsTheme) {
     return TextButton.styleFrom(
       minimumSize: Size(_getMinWidth(), size.height),
       maximumSize: Size(double.infinity, size.height),
@@ -518,7 +537,7 @@ class _AtomicxButton extends StatelessWidget {
       ),
       textStyle: _fontForButtonSize(size),
     ).copyWith(
-      backgroundColor: type == ButtonType.noBorder 
+      backgroundColor: type == ButtonType.noBorder
           ? WidgetStateProperty.all(Colors.transparent)
           : null,
       overlayColor: type == ButtonType.noBorder

@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart' hide IconButton;
@@ -20,7 +21,7 @@ class Blacklist extends StatefulWidget {
 class _BlacklistState extends State<Blacklist> {
   final ContactStore _contactStore = ContactStore.shared;
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
 
   @override
   void initState() {
@@ -31,8 +32,8 @@ class _BlacklistState extends State<Blacklist> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    colorsTheme = BaseThemeProvider.colorsOf(context);
-    atomicLocale = AtomicLocalizations.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
+    atomicLocale = AppLocalization.of(context);
   }
 
   Future<void> _loadData() async {
@@ -41,7 +42,7 @@ class _BlacklistState extends State<Blacklist> {
 
   @override
   Widget build(BuildContext context) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     return Scaffold(
       backgroundColor: colorsTheme.bgColorOperate,
@@ -49,7 +50,8 @@ class _BlacklistState extends State<Blacklist> {
         backgroundColor: colorsTheme.bgColorOperate,
         scrolledUnderElevation: 0,
         leading: IconButton.buttonContent(
-          content: IconOnlyContent(Icon(Icons.arrow_back_ios, color: colorsTheme.buttonColorPrimaryDefault)),
+          content: IconOnlyContent(Icon(Icons.arrow_back_ios,
+              color: colorsTheme.buttonColorPrimaryDefault)),
           type: ButtonType.noBorder,
           size: ButtonSize.l,
           onClick: () => Navigator.of(context).pop(),
@@ -75,7 +77,9 @@ class _BlacklistState extends State<Blacklist> {
           final dataSource = blackList
               .map((contact) => AZOrderedListItem(
                     key: contact.userID,
-                    label: (contact.nickname?.isNotEmpty == true ? contact.nickname! : contact.userID),
+                    label: (contact.nickname?.isNotEmpty == true
+                        ? contact.nickname!
+                        : contact.userID),
                     avatarURL: contact.avatarURL,
                     extraData: contact,
                   ))

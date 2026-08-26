@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart' hide IconButton;
@@ -24,7 +25,7 @@ class _GroupNoticeState extends State<GroupNotice> {
   bool _isEditing = false;
   late TextEditingController _controller;
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
 
   late String _currentNotice;
 
@@ -33,19 +34,21 @@ class _GroupNoticeState extends State<GroupNotice> {
     super.initState();
     _currentNotice = widget.groupInfo.notification ?? '';
     _controller = TextEditingController(text: _currentNotice);
-    GroupStore.shared.state.joinedGroupList.addListener(_onJoinedGroupListChanged);
+    GroupStore.shared.state.joinedGroupList
+        .addListener(_onJoinedGroupListChanged);
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    atomicLocale = AtomicLocalizations.of(context);
-    colorsTheme = BaseThemeProvider.colorsOf(context);
+    atomicLocale = AppLocalization.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
   }
 
   @override
   void dispose() {
-    GroupStore.shared.state.joinedGroupList.removeListener(_onJoinedGroupListChanged);
+    GroupStore.shared.state.joinedGroupList
+        .removeListener(_onJoinedGroupListChanged);
     _controller.dispose();
     super.dispose();
   }
@@ -93,7 +96,9 @@ class _GroupNoticeState extends State<GroupNotice> {
         // `_buildEditingView`'s TextField(expands: true) requires; the
         // display view doesn't need it but it's harmless there.
         child: SizedBox.expand(
-          child: _isEditing ? _buildEditingView() : _buildDisplayView(_currentNotice),
+          child: _isEditing
+              ? _buildEditingView()
+              : _buildDisplayView(_currentNotice),
         ),
       ),
     );
@@ -104,7 +109,8 @@ class _GroupNoticeState extends State<GroupNotice> {
       backgroundColor: colorsTheme.bgColorTopBar,
       elevation: 0,
       leading: IconButton.buttonContent(
-        content: IconOnlyContent(Icon(Icons.arrow_back_ios, color: colorsTheme.buttonColorPrimaryDefault)),
+        content: IconOnlyContent(Icon(Icons.arrow_back_ios,
+            color: colorsTheme.buttonColorPrimaryDefault)),
         type: ButtonType.noBorder,
         size: ButtonSize.l,
         onClick: () {
@@ -189,8 +195,10 @@ class _GroupNoticeState extends State<GroupNotice> {
 
   Future<void> _saveNotice() async {
     final newNotice = _controller.text.trim();
-    final updatedGroupInfo = GroupInfo(groupID: widget.groupID, notification: newNotice);
-    final result = await GroupStore.shared.updateProfile(groupInfo: updatedGroupInfo);
+    final updatedGroupInfo =
+        GroupInfo(groupID: widget.groupID, notification: newNotice);
+    final result =
+        await GroupStore.shared.updateProfile(groupInfo: updatedGroupInfo);
 
     if (!mounted) return;
 
@@ -200,7 +208,8 @@ class _GroupNoticeState extends State<GroupNotice> {
         _isEditing = false;
       });
     } else {
-      debugPrint('modify notice failed, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}');
+      debugPrint(
+          'modify notice failed, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}');
     }
   }
 }

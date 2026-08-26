@@ -20,7 +20,11 @@ class _ProfilePageState extends State<ProfilePage> {
     _loginStore = LoginStore.shared;
   }
 
-  void showNicknameEditDialog(BuildContext context, AtomicLocalizations atomicLocale, String? currentNickname) async {
+  void showNicknameEditDialog(
+    BuildContext context,
+    AppLocalizedText atomicLocale,
+    String? currentNickname,
+  ) async {
     final result = await BottomInputSheet.show(
       context,
       title: atomicLocale.setNickname,
@@ -33,7 +37,11 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  void showSignatureEditDialog(BuildContext context, AtomicLocalizations atomicLocale, String? currentSignature) async {
+  void showSignatureEditDialog(
+    BuildContext context,
+    AppLocalizedText atomicLocale,
+    String? currentSignature,
+  ) async {
     final result = await BottomInputSheet.show(
       context,
       title: atomicLocale.setSignature,
@@ -46,7 +54,11 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  void showGenderSelector(BuildContext context, AtomicLocalizations atomicLocale, Gender? currentGender) {
+  void showGenderSelector(
+    BuildContext context,
+    AppLocalizedText atomicLocale,
+    Gender? currentGender,
+  ) {
     final List<Map<String, dynamic>> options = [
       {"label": atomicLocale.male, "value": Gender.male},
       {"label": atomicLocale.female, "value": Gender.female},
@@ -55,11 +67,13 @@ class _ProfilePageState extends State<ProfilePage> {
     ActionSheet.show(
       context,
       actions: options
-          .map((option) => ActionSheetItem(
-                title: option["label"],
-                isDestructive: currentGender == option["value"],
-                onTap: () => _updateUserInfo(gender: option["value"]),
-              ))
+          .map(
+            (option) => ActionSheetItem(
+              title: option["label"],
+              isDestructive: currentGender == option["value"],
+              onTap: () => _updateUserInfo(gender: option["value"]),
+            ),
+          )
           .toList(),
     );
   }
@@ -122,7 +136,7 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  String getGenderName(AtomicLocalizations atomicLocale, Gender? gender) {
+  String getGenderName(AppLocalizedText atomicLocale, Gender? gender) {
     switch (gender) {
       case Gender.male:
         return atomicLocale.male;
@@ -133,7 +147,7 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  String getBirthdayString(AtomicLocalizations atomicLocale, int? birthday) {
+  String getBirthdayString(AppLocalizedText atomicLocale, int? birthday) {
     if (birthday == null) return atomicLocale.unknown;
 
     // Convert YYYYMMDD format (e.g., 20241101) to date string
@@ -153,7 +167,7 @@ class _ProfilePageState extends State<ProfilePage> {
       value: _loginStore,
       child: Scaffold(
         appBar: AppBar(
-          title: Text(AtomicLocalizations.of(context).contactInfo),
+          title: Text(AppLocalization.of(context).contactInfo),
           centerTitle: false,
         ),
         body: Consumer<LoginStore>(
@@ -166,7 +180,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Widget _buildBody(BuildContext context, LoginStore loginStore) {
-    AtomicLocalizations atomicLocale = AtomicLocalizations.of(context);
+    AppLocalizedText atomicLocale = AppLocalization.of(context);
     final currentUser = loginStore.loginState.loginUserInfo;
 
     return Column(
@@ -192,10 +206,14 @@ class _ProfilePageState extends State<ProfilePage> {
                 },
                 child: CircleAvatar(
                   radius: 50,
-                  backgroundImage: currentUser?.avatarURL != null && currentUser!.avatarURL!.isNotEmpty
+                  backgroundImage:
+                      currentUser?.avatarURL != null &&
+                          currentUser!.avatarURL!.isNotEmpty
                       ? NetworkImage(currentUser.avatarURL!)
                       : null,
-                  child: currentUser?.avatarURL == null || currentUser!.avatarURL!.isEmpty
+                  child:
+                      currentUser?.avatarURL == null ||
+                          currentUser!.avatarURL!.isEmpty
                       ? const Icon(Icons.person, size: 50)
                       : null,
                 ),
@@ -203,7 +221,11 @@ class _ProfilePageState extends State<ProfilePage> {
               const SizedBox(height: 16),
               GestureDetector(
                 onTap: () {
-                  showNicknameEditDialog(context, atomicLocale, currentUser?.nickname);
+                  showNicknameEditDialog(
+                    context,
+                    atomicLocale,
+                    currentUser?.nickname,
+                  );
                 },
                 child: Text(
                   currentUser?.nickname ?? currentUser?.userID ?? '',
@@ -232,7 +254,11 @@ class _ProfilePageState extends State<ProfilePage> {
                       title: atomicLocale.signature,
                       value: currentUser?.selfSignature ?? "",
                       onTap: () {
-                        showSignatureEditDialog(context, atomicLocale, currentUser?.selfSignature);
+                        showSignatureEditDialog(
+                          context,
+                          atomicLocale,
+                          currentUser?.selfSignature,
+                        );
                       },
                     ),
                     SettingWidgets.buildDivider(context),
@@ -241,14 +267,21 @@ class _ProfilePageState extends State<ProfilePage> {
                       title: atomicLocale.gender,
                       value: getGenderName(atomicLocale, currentUser?.gender),
                       onTap: () {
-                        showGenderSelector(context, atomicLocale, currentUser?.gender);
+                        showGenderSelector(
+                          context,
+                          atomicLocale,
+                          currentUser?.gender,
+                        );
                       },
                     ),
                     SettingWidgets.buildDivider(context),
                     SettingWidgets.buildNavigationRow(
                       context: context,
                       title: atomicLocale.birthday,
-                      value: getBirthdayString(atomicLocale, currentUser?.birthday),
+                      value: getBirthdayString(
+                        atomicLocale,
+                        currentUser?.birthday,
+                      ),
                       onTap: () {
                         showBirthdayPicker(context, currentUser?.birthday);
                       },

@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:flutter/material.dart' hide IconButton;
 
@@ -21,9 +22,10 @@ class ChooseGroupAvatar extends StatefulWidget {
 
 class ChooseGroupAvatarState extends State<ChooseGroupAvatar> {
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
 
-  final String _groupFaceURL = "https://im.sdk.qcloud.com/download/tuikit-resource/group-avatar/group_avatar_%s.png";
+  final String _groupFaceURL =
+      "https://im.sdk.qcloud.com/download/tuikit-resource/group-avatar/group_avatar_%s.png";
   final int _groupFaceCount = 24;
   List<String> groupAvatars = [];
   String selectedAvatarUrl = '';
@@ -41,8 +43,8 @@ class ChooseGroupAvatarState extends State<ChooseGroupAvatar> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    atomicLocale = AtomicLocalizations.of(context);
-    colorsTheme = BaseThemeProvider.colorsOf(context);
+    atomicLocale = AppLocalization.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
   }
 
   @override
@@ -53,7 +55,8 @@ class ChooseGroupAvatarState extends State<ChooseGroupAvatar> {
         backgroundColor: colorsTheme.bgColorTopBar,
         scrolledUnderElevation: 0,
         leading: IconButton.buttonContent(
-          content: IconOnlyContent(Icon(Icons.arrow_back_ios, color: colorsTheme.buttonColorPrimaryDefault)),
+          content: IconOnlyContent(Icon(Icons.arrow_back_ios,
+              color: colorsTheme.buttonColorPrimaryDefault)),
           type: ButtonType.noBorder,
           size: ButtonSize.l,
           onClick: () => Navigator.of(context).pop(),
@@ -105,7 +108,8 @@ class ChooseGroupAvatarState extends State<ChooseGroupAvatar> {
   }
 
   Future<void> _submitAvatar() async {
-    if (selectedAvatarUrl.isNotEmpty && selectedAvatarUrl != widget.selectedAvatarURL) {
+    if (selectedAvatarUrl.isNotEmpty &&
+        selectedAvatarUrl != widget.selectedAvatarURL) {
       if (mounted) {
         Navigator.of(context).pop(selectedAvatarUrl);
       }

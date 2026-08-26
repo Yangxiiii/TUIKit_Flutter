@@ -75,22 +75,23 @@ class ExtendedRenderParagraph extends _RenderParagraph
     return span == null
         ? PlaceholderDimensions.empty
         : PlaceholderDimensions(
-          size: layoutChild(child, childConstraints),
-          alignment: span.alignment,
-          baseline: span.baseline,
-          baselineOffset: switch (span.alignment) {
-            ui.PlaceholderAlignment.aboveBaseline ||
-            ui.PlaceholderAlignment.belowBaseline ||
-            ui.PlaceholderAlignment.bottom ||
-            ui.PlaceholderAlignment.middle ||
-            ui.PlaceholderAlignment.top => null,
-            ui.PlaceholderAlignment.baseline => getBaseline(
-              child,
-              childConstraints,
-              span.baseline!,
-            ),
-          },
-        );
+            size: layoutChild(child, childConstraints),
+            alignment: span.alignment,
+            baseline: span.baseline,
+            baselineOffset: switch (span.alignment) {
+              ui.PlaceholderAlignment.aboveBaseline ||
+              ui.PlaceholderAlignment.belowBaseline ||
+              ui.PlaceholderAlignment.bottom ||
+              ui.PlaceholderAlignment.middle ||
+              ui.PlaceholderAlignment.top =>
+                null,
+              ui.PlaceholderAlignment.baseline => getBaseline(
+                  child,
+                  childConstraints,
+                  span.baseline!,
+                ),
+            },
+          );
   }
 
   @override
@@ -106,7 +107,7 @@ class ExtendedRenderParagraph extends _RenderParagraph
     );
     if (_textPainter.text != _textCache && _constraints != constraints) {
       _textPainter.text = _textCache;
-    }    
+    }
     _layoutTextWithConstraints(constraints);
     positionInlineChildren(_textPainter.inlinePlaceholderBoxes!);
 
@@ -145,9 +146,9 @@ class ExtendedRenderParagraph extends _RenderParagraph
             final (double fadeStart, double fadeEnd) = switch (textDirection) {
               TextDirection.rtl => (fadeSizePainter.width, 0.0),
               TextDirection.ltr => (
-                size.width - fadeSizePainter.width,
-                size.width,
-              ),
+                  size.width - fadeSizePainter.width,
+                  size.width,
+                ),
             };
             _overflowShader = ui.Gradient.linear(
               Offset(fadeStart, 0.0),
@@ -179,7 +180,7 @@ class ExtendedRenderParagraph extends _RenderParagraph
       _disposeSelectableFragments();
       _updateSelectionRegistrarSubscription();
     }
-    _constraints = constraints;    
+    _constraints = constraints;
   }
 
   @override
@@ -311,10 +312,9 @@ class ExtendedRenderParagraph extends _RenderParagraph
     if (_needsClipping) {
       if (_overflowShader != null) {
         context.canvas.translate(offset.dx, offset.dy);
-        final Paint paint =
-            Paint()
-              ..blendMode = BlendMode.modulate
-              ..shader = _overflowShader;
+        final Paint paint = Paint()
+          ..blendMode = BlendMode.modulate
+          ..shader = _overflowShader;
         context.canvas.drawRect(Offset.zero & size, paint);
       }
       context.canvas.restore();

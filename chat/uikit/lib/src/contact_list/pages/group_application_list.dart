@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:atomic_x_core/api/group/group_store.dart';
 import 'package:flutter/material.dart' hide IconButton;
@@ -12,7 +13,7 @@ class GroupApplicationList extends StatefulWidget {
 class _GroupApplicationListState extends State<GroupApplicationList> {
   final GroupStore _groupStore = GroupStore.shared;
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
 
   @override
   void initState() {
@@ -23,8 +24,8 @@ class _GroupApplicationListState extends State<GroupApplicationList> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    colorsTheme = BaseThemeProvider.colorsOf(context);
-    atomicLocale = AtomicLocalizations.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
+    atomicLocale = AppLocalization.of(context);
   }
 
   Future<void> _loadData() async {
@@ -40,7 +41,8 @@ class _GroupApplicationListState extends State<GroupApplicationList> {
         backgroundColor: colorsTheme.bgColorOperate,
         elevation: 0,
         leading: IconButton.buttonContent(
-          content: IconOnlyContent(Icon(Icons.arrow_back_ios, color: colorsTheme.buttonColorPrimaryDefault)),
+          content: IconOnlyContent(Icon(Icons.arrow_back_ios,
+              color: colorsTheme.buttonColorPrimaryDefault)),
           type: ButtonType.noBorder,
           size: ButtonSize.l,
           onClick: () => Navigator.pop(context),
@@ -172,7 +174,8 @@ class _GroupApplicationListState extends State<GroupApplicationList> {
   }
 
   String _getDisplayUserName(GroupApplicationInfo application) {
-    if (application.fromUserNickname != null && application.fromUserNickname!.isNotEmpty) {
+    if (application.fromUserNickname != null &&
+        application.fromUserNickname!.isNotEmpty) {
       return application.fromUserNickname!;
     } else {
       return application.fromUser ?? '';
@@ -256,7 +259,8 @@ class _GroupApplicationListState extends State<GroupApplicationList> {
     final result = await _groupStore.acceptApplication(info: application);
     if (!result.isSuccess) {
       if (mounted) {
-        Toast.error(context, atomicLocale.groupApplicationAllReadyBeenProcessed);
+        Toast.error(
+            context, atomicLocale.groupApplicationAllReadyBeenProcessed);
       }
     }
   }
@@ -265,7 +269,8 @@ class _GroupApplicationListState extends State<GroupApplicationList> {
     final result = await _groupStore.refuseApplication(info: application);
     if (!result.isSuccess) {
       if (mounted) {
-        Toast.error(context, atomicLocale.groupApplicationAllReadyBeenProcessed);
+        Toast.error(
+            context, atomicLocale.groupApplicationAllReadyBeenProcessed);
       }
     }
   }

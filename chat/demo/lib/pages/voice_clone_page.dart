@@ -124,9 +124,11 @@ class _VoiceClonePageState extends State<VoiceClonePage> {
       maxDurationMs: _maxCloneSeconds * 1000,
       onComplete: (info) {
         if (!mounted) return;
-        final isSuccess = info != null &&
+        final isSuccess =
+            info != null &&
             (info.errorCode == AudioRecordResultCode.success ||
-                info.errorCode == AudioRecordResultCode.successExceedMaxDuration) &&
+                info.errorCode ==
+                    AudioRecordResultCode.successExceedMaxDuration) &&
             info.path.isNotEmpty;
         if (isSuccess && info.duration >= _minCloneSeconds) {
           setState(() => _recordedPath = info.path);
@@ -139,7 +141,7 @@ class _VoiceClonePageState extends State<VoiceClonePage> {
   }
 
   Future<void> _showTooShortDialog() async {
-    final chatLocale = ChatLocalizations.of(context)!;
+    final chatLocale = AppLocalization.of(context);
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -156,14 +158,15 @@ class _VoiceClonePageState extends State<VoiceClonePage> {
   }
 
   Future<void> _submit() async {
-    final chatLocale = ChatLocalizations.of(context)!;
+    final chatLocale = AppLocalization.of(context);
     if (_recordedPath == null) {
       Toast.warning(context, chatLocale.voiceCloneEmptyRecord);
       return;
     }
     final inputName = _nameController.text.trim();
-    final voiceName =
-        inputName.isEmpty ? chatLocale.voiceCloneDefaultName : inputName;
+    final voiceName = inputName.isEmpty
+        ? chatLocale.voiceCloneDefaultName
+        : inputName;
     setState(() => _submitting = true);
     final result = await AiMediaProcessManager.shared.voiceCloneFromFile(
       filePath: _recordedPath!,
@@ -173,8 +176,10 @@ class _VoiceClonePageState extends State<VoiceClonePage> {
     setState(() => _submitting = false);
     if (result.success && result.voiceId != null) {
       // Auto-select the freshly cloned voice.
-      await VoiceMessageConfig.instance
-          .setSelectedVoice(voiceId: result.voiceId!, name: voiceName);
+      await VoiceMessageConfig.instance.setSelectedVoice(
+        voiceId: result.voiceId!,
+        name: voiceName,
+      );
       if (!mounted) return;
       await showDialog<void>(
         context: context,
@@ -197,8 +202,8 @@ class _VoiceClonePageState extends State<VoiceClonePage> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
-    final chatLocale = ChatLocalizations.of(context)!;
+    final colors = SemanticColorScheme.of(context);
+    final chatLocale = AppLocalization.of(context);
     final canSubmit = _recordedPath != null && !_submitting;
 
     return Scaffold(
@@ -273,8 +278,8 @@ class _VoiceClonePageState extends State<VoiceClonePage> {
               _isRecording
                   ? chatLocale.voiceCloneStopRecord
                   : (_recordedPath != null
-                      ? chatLocale.voiceCloneRecordDone
-                      : chatLocale.voiceCloneStartRecord),
+                        ? chatLocale.voiceCloneRecordDone
+                        : chatLocale.voiceCloneStartRecord),
               textAlign: TextAlign.center,
               style: FontScheme.caption3Regular.copyWith(
                 color: colors.textColorSecondary,
@@ -304,8 +309,10 @@ class _VoiceClonePageState extends State<VoiceClonePage> {
                   borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide.none,
                 ),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
               ),
             ),
             const SizedBox(height: 24),
@@ -328,7 +335,8 @@ class _VoiceClonePageState extends State<VoiceClonePage> {
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
                           valueColor: AlwaysStoppedAnimation<Color>(
-                              colors.textColorButton),
+                            colors.textColorButton,
+                          ),
                         ),
                       )
                     : Text(

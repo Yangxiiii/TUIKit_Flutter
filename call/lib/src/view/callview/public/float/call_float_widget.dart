@@ -30,7 +30,8 @@ class _CallFloatWidgetState extends State<CallFloatWidget> {
 
   void _measureControlsHeight() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final renderBox = _controlsKey.currentContext?.findRenderObject() as RenderBox?;
+      final renderBox =
+          _controlsKey.currentContext?.findRenderObject() as RenderBox?;
       if (renderBox != null && mounted) {
         final height = renderBox.size.height;
         if (height != _controlsHeight) {
@@ -63,19 +64,29 @@ class _CallFloatWidgetState extends State<CallFloatWidget> {
             Positioned(
               left: 0,
               right: 0,
-              bottom: 40 + _controlsHeight + 8 + MediaQuery.of(context).padding.bottom,
+              bottom:
+                  40 +
+                  _controlsHeight +
+                  8 +
+                  MediaQuery.of(context).padding.bottom,
               child: Container(
                 constraints: BoxConstraints(
                   maxWidth: MediaQuery.of(context).size.width * 0.9,
                   maxHeight: MediaQuery.of(context).size.height * 0.3,
                 ),
-                child: AISubtitle(userId: CallStore.shared.state.selfInfo.value.id),
+                child: AISubtitle(
+                  userId: CallStore.shared.state.selfInfo.value.id,
+                ),
               ),
             ),
 
-            if (widget.enableAITranscriber && self.status == CallParticipantStatus.accept)
+            if (widget.enableAITranscriber &&
+                self.status == CallParticipantStatus.accept)
               AITranscriberPanel(
-                bottomOffset: _controlsHeight + 48 + MediaQuery.of(context).padding.bottom,
+                bottomOffset:
+                    _controlsHeight +
+                    48 +
+                    MediaQuery.of(context).padding.bottom,
                 animationDuration: Duration.zero,
               ),
 
@@ -94,8 +105,10 @@ class _CallFloatWidgetState extends State<CallFloatWidget> {
   }
 
   Widget _buildUserInfoWidget(BuildContext context) {
-    if (CallStore.shared.state.activeCall.value.mediaType == CallMediaType.video
-        && CallStore.shared.state.selfInfo.value.status == CallParticipantStatus.accept) {
+    if (CallStore.shared.state.activeCall.value.mediaType ==
+            CallMediaType.video &&
+        CallStore.shared.state.selfInfo.value.status ==
+            CallParticipantStatus.accept) {
       return Container();
     }
     return Positioned(
@@ -122,7 +135,10 @@ class _CallFloatWidgetState extends State<CallFloatWidget> {
                 ),
                 child: Image(
                   image: NetworkImage(
-                    StringStream.makeNull(remoteParticipant?.avatarURL, Constants.defaultAvatar),
+                    StringStream.makeNull(
+                      remoteParticipant?.avatarURL,
+                      Constants.defaultAvatar,
+                    ),
                   ),
                   fit: BoxFit.cover,
                   errorBuilder: (ctx, err, stackTrace) => Image.asset(
@@ -155,9 +171,7 @@ class _CallFloatWidgetState extends State<CallFloatWidget> {
       top: 20,
       width: MediaQuery.of(context).size.width,
       height: 100,
-      child: const Center(
-        child: TimerWidget(),
-      ),
+      child: const Center(child: TimerWidget()),
     );
   }
 
@@ -172,7 +186,8 @@ class _CallFloatWidgetState extends State<CallFloatWidget> {
   }
 
   _getUserNameColor() {
-    return CallStore.shared.state.activeCall.value.mediaType == CallMediaType.audio
+    return CallStore.shared.state.activeCall.value.mediaType ==
+            CallMediaType.audio
         ? CallColors.colorG7
         : CallColors.colorWhite;
   }
@@ -181,7 +196,8 @@ class _CallFloatWidgetState extends State<CallFloatWidget> {
     return ValueListenableBuilder(
       valueListenable: CallStore.shared.state.selfInfo,
       builder: (context, selfInfo, child) {
-        if (selfInfo.status != CallParticipantStatus.accept || !widget.enableAITranscriber) {
+        if (selfInfo.status != CallParticipantStatus.accept ||
+            !widget.enableAITranscriber) {
           return const SizedBox();
         }
         return const Positioned(

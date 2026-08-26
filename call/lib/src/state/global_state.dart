@@ -1,7 +1,6 @@
-
 class GlobalState {
-  static GlobalState instance  =  GlobalState._internal();
-  GlobalState._internal(){}
+  static GlobalState instance = GlobalState._internal();
+  GlobalState._internal() {}
 
   bool _enableMuteMode = false;
   bool _enableFloatWindow = false;

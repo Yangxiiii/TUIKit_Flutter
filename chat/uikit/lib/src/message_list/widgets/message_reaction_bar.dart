@@ -25,14 +25,15 @@ class MessageReactionBar extends StatelessWidget {
   Widget build(BuildContext context) {
     if (reactionList.isEmpty) return const SizedBox.shrink();
 
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
     final displayReactions = reactionList.take(_maxDisplayReactions).toList();
     final hasMore = reactionList.length > _maxDisplayReactions;
 
     return Padding(
       padding: const EdgeInsets.only(top: 2),
       child: Row(
-        mainAxisAlignment: isLeft ? MainAxisAlignment.start : MainAxisAlignment.end,
+        mainAxisAlignment:
+            isLeft ? MainAxisAlignment.start : MainAxisAlignment.end,
         children: [
           GestureDetector(
             onTap: onClick,
@@ -52,7 +53,9 @@ class MessageReactionBar extends StatelessWidget {
                   ...displayReactions.map((reaction) => _ReactionItem(
                         reaction: reaction,
                         showCount: displayReactions.length == 1,
-                        onTap: onReactionTap != null ? () => onReactionTap!(reaction) : null,
+                        onTap: onReactionTap != null
+                            ? () => onReactionTap!(reaction)
+                            : null,
                       )),
                   if (hasMore)
                     Padding(
@@ -101,8 +104,9 @@ class _ReactionItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
-    final emoji = RecentEmojiManager.getEmojiByReactionID(context, reaction.reactionID);
+    final colors = SemanticColorScheme.of(context);
+    final emoji =
+        RecentEmojiManager.getEmojiByReactionID(context, reaction.reactionID);
 
     return GestureDetector(
       onTap: onTap,

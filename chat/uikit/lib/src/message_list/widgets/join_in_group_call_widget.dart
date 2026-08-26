@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -27,7 +28,7 @@ class JoinInGroupCallWidget extends StatefulWidget {
 class _JoinInGroupCallWidgetState extends State<JoinInGroupCallWidget> {
   bool _isExpand = false;
   final List<String> _userAvatars = [];
-  late AtomicLocalizations _atomicLocale;
+  late AppLocalizedText _atomicLocale;
   late SemanticColorScheme _colorsTheme;
 
   @override
@@ -39,8 +40,8 @@ class _JoinInGroupCallWidgetState extends State<JoinInGroupCallWidget> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _atomicLocale = AtomicLocalizations.of(context);
-    _colorsTheme = BaseThemeProvider.colorsOf(context);
+    _atomicLocale = AppLocalization.of(context);
+    _colorsTheme = SemanticColorScheme.of(context);
   }
 
   @override
@@ -98,33 +99,43 @@ class _JoinInGroupCallWidgetState extends State<JoinInGroupCallWidget> {
                         const Padding(padding: EdgeInsets.only(left: 15)),
                       ],
                     ),
-                    _isExpand ? const Padding(padding: EdgeInsets.only(top: 10)) : const SizedBox(),
+                    _isExpand
+                        ? const Padding(padding: EdgeInsets.only(top: 10))
+                        : const SizedBox(),
                     _isExpand
                         ? Container(
                             width: MediaQuery.of(context).size.width - 30,
                             height: 200,
                             decoration: BoxDecoration(
                               color: _colorsTheme.bgColorEntryCard,
-                              borderRadius: BorderRadius.circular(5), // Set the corner radius
+                              borderRadius: BorderRadius.circular(
+                                  5), // Set the corner radius
                             ),
                             child: Column(
                               children: [
                                 SizedBox(
-                                    width: MediaQuery.of(context).size.width - 40,
+                                    width:
+                                        MediaQuery.of(context).size.width - 40,
                                     height: 150,
                                     child: Center(
                                         child: ListView.builder(
                                       itemCount: _userAvatars.length,
                                       scrollDirection: Axis.horizontal,
-                                      itemBuilder: (BuildContext context, int index) {
+                                      itemBuilder:
+                                          (BuildContext context, int index) {
                                         return Padding(
-                                            padding: const EdgeInsets.only(left: 2.5, right: 2.5, top: 35, bottom: 35),
+                                            padding: const EdgeInsets.only(
+                                                left: 2.5,
+                                                right: 2.5,
+                                                top: 35,
+                                                bottom: 35),
                                             child: Container(
                                               height: 80,
                                               width: 80,
                                               clipBehavior: Clip.hardEdge,
                                               decoration: const BoxDecoration(
-                                                borderRadius: BorderRadius.all(Radius.circular(5)),
+                                                borderRadius: BorderRadius.all(
+                                                    Radius.circular(5)),
                                               ),
                                               child: Avatar.image(
                                                 name: widget.userIDs[index],
@@ -135,9 +146,19 @@ class _JoinInGroupCallWidgetState extends State<JoinInGroupCallWidget> {
                                       },
                                       padding: EdgeInsets.only(
                                           left: _computeEdge(
-                                              MediaQuery.of(context).size.width - 40, 85, _userAvatars.length),
+                                              MediaQuery.of(context)
+                                                      .size
+                                                      .width -
+                                                  40,
+                                              85,
+                                              _userAvatars.length),
                                           right: _computeEdge(
-                                              MediaQuery.of(context).size.width - 40, 85, _userAvatars.length)),
+                                              MediaQuery.of(context)
+                                                      .size
+                                                      .width -
+                                                  40,
+                                              85,
+                                              _userAvatars.length)),
                                     ))),
                                 Container(
                                   height: 1,

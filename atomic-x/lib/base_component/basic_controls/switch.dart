@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 
@@ -6,7 +7,8 @@ enum SwitchSize {
   m(32, 20, 15, 2.5, 12),
   l(40, 24, 18, 3, 14);
 
-  const SwitchSize(this.width, this.height, this.thumbSize, this.padding, this.textSize);
+  const SwitchSize(
+      this.width, this.height, this.thumbSize, this.padding, this.textSize);
 
   final double width;
   final double height;
@@ -70,7 +72,8 @@ class CustomSwitch extends StatefulWidget {
   State<CustomSwitch> createState() => _CustomSwitchState();
 }
 
-class _CustomSwitchState extends State<CustomSwitch> with SingleTickerProviderStateMixin {
+class _CustomSwitchState extends State<CustomSwitch>
+    with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _animation;
 
@@ -114,17 +117,22 @@ class _CustomSwitchState extends State<CustomSwitch> with SingleTickerProviderSt
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
-    final localizations = AtomicLocalizations.of(context);
+    final colors = SemanticColorScheme.of(context);
+    final localizations = AppLocalization.of(context);
 
-    final width = widget.type == SwitchType.basic ? widget.size.width : widget.size.height * 2;
+    final width = widget.type == SwitchType.basic
+        ? widget.size.width
+        : widget.size.height * 2;
     final maxOffset = width - widget.size.thumbSize - widget.size.padding * 2;
 
-    final trackColor = widget.checked ? colors.switchColorOn : colors.switchColorOff;
+    final trackColor =
+        widget.checked ? colors.switchColorOn : colors.switchColorOff;
     final thumbColor = colors.switchColorButton;
 
-    final effectiveTrackColor = widget.enabled ? trackColor : trackColor.withOpacity(0.6);
-    final effectiveThumbColor = widget.enabled ? thumbColor : thumbColor.withOpacity(0.6);
+    final effectiveTrackColor =
+        widget.enabled ? trackColor : trackColor.withOpacity(0.6);
+    final effectiveThumbColor =
+        widget.enabled ? thumbColor : thumbColor.withOpacity(0.6);
 
     return GestureDetector(
       onTap: () {
@@ -146,7 +154,8 @@ class _CustomSwitchState extends State<CustomSwitch> with SingleTickerProviderSt
                 borderRadius: BorderRadius.circular(widget.size.height / 2),
               ),
             ),
-            if (widget.type == SwitchType.withText || widget.type == SwitchType.withIcon)
+            if (widget.type == SwitchType.withText ||
+                widget.type == SwitchType.withIcon)
               Positioned.fill(
                 child: AnimatedBuilder(
                   animation: _animation,
@@ -156,7 +165,8 @@ class _CustomSwitchState extends State<CustomSwitch> with SingleTickerProviderSt
                         if (widget.checked)
                           Expanded(
                             child: Container(
-                              margin: EdgeInsets.only(left: 8, right: widget.size.thumbSize + 8),
+                              margin: EdgeInsets.only(
+                                  left: 8, right: widget.size.thumbSize + 8),
                               alignment: Alignment.center,
                               child: widget.type == SwitchType.withIcon
                                   ? Icon(
@@ -178,7 +188,8 @@ class _CustomSwitchState extends State<CustomSwitch> with SingleTickerProviderSt
                         if (!widget.checked)
                           Expanded(
                             child: Container(
-                              margin: EdgeInsets.only(left: widget.size.thumbSize + 8, right: 8),
+                              margin: EdgeInsets.only(
+                                  left: widget.size.thumbSize + 8, right: 8),
                               alignment: Alignment.center,
                               child: widget.type == SwitchType.withIcon
                                   ? Icon(

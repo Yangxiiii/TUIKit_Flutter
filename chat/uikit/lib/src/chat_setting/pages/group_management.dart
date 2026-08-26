@@ -1,6 +1,8 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
+import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
 import 'package:flutter/material.dart' hide IconButton;
 
 import 'group_add_mute_member.dart';
@@ -21,7 +23,7 @@ class GroupManagement extends StatefulWidget {
 
 class _GroupManagementState extends State<GroupManagement> {
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
   GroupInfo? _groupInfo;
 
   @override
@@ -33,12 +35,13 @@ class _GroupManagementState extends State<GroupManagement> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    atomicLocale = AtomicLocalizations.of(context);
-    colorsTheme = BaseThemeProvider.colorsOf(context);
+    atomicLocale = AppLocalization.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
   }
 
   Future<void> _loadGroupInfo() async {
-    final result = await GroupStore.shared.getGroupInfo(groupID: widget.groupID);
+    final result =
+        await GroupStore.shared.getGroupInfo(groupID: widget.groupID);
     if (result.isSuccess && result.groupInfo != null && mounted) {
       setState(() {
         _groupInfo = result.groupInfo;
@@ -47,14 +50,20 @@ class _GroupManagementState extends State<GroupManagement> {
   }
 
   Future<void> _onMuteAllChanged(bool value) async {
-    final result = await GroupStore.shared.muteAllMembers(groupID: widget.groupID, isMuted: value);
+    final result = await GroupStore.shared
+        .muteAllMembers(groupID: widget.groupID, isMuted: value);
     if (result.errorCode == 0) {
       if (mounted) {
-        Toast.success(context, value ? atomicLocale.groupMuteAllEnabled : atomicLocale.groupMuteAllDisabled);
+        Toast.success(
+            context,
+            value
+                ? atomicLocale.groupMuteAllEnabled
+                : atomicLocale.groupMuteAllDisabled);
         _loadGroupInfo();
       }
     } else {
-      debugPrint('setMuteAllMembers failed, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}');
+      debugPrint(
+          'setMuteAllMembers failed, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}');
     }
   }
 
@@ -68,7 +77,8 @@ class _GroupManagementState extends State<GroupManagement> {
         backgroundColor: colorsTheme.bgColorTopBar,
         scrolledUnderElevation: 0,
         leading: IconButton.buttonContent(
-          content: IconOnlyContent(Icon(Icons.arrow_back_ios, color: colorsTheme.buttonColorPrimaryDefault)),
+          content: IconOnlyContent(Icon(Icons.arrow_back_ios,
+              color: colorsTheme.buttonColorPrimaryDefault)),
           type: ButtonType.noBorder,
           size: ButtonSize.l,
           onClick: () => Navigator.of(context).pop(),
@@ -112,7 +122,8 @@ class _GroupManagementState extends State<GroupManagement> {
                       color: colorsTheme.buttonColorSecondaryHover,
                     ),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
                       child: Text(
                         atomicLocale.groupMuteTip,
                         style: FontScheme.caption3Regular.copyWith(
@@ -171,7 +182,8 @@ class _GroupManagementState extends State<GroupManagement> {
               }
               return colorsTheme.switchColorOff;
             }),
-            trackOutlineColor: WidgetStateProperty.resolveWith<Color?>((states) {
+            trackOutlineColor:
+                WidgetStateProperty.resolveWith<Color?>((states) {
               return colorsTheme.clearColor;
             }),
           ),
@@ -191,7 +203,8 @@ class _GroupManagementState extends State<GroupManagement> {
               onTap: _onAddMuteMember,
               child: Container(
                 margin: const EdgeInsets.only(bottom: 4),
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                 color: colorsTheme.bgColorOperate,
                 child: Row(
                   children: [
@@ -229,11 +242,9 @@ class _GroupManagementState extends State<GroupManagement> {
   }
 
   void _onAddMuteMember() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => GroupAddMuteMember(
-          memberStore: widget.memberStore,
-        ),
+    context.pushChatUIKitPage<void>(
+      GroupAddMuteMember(
+        memberStore: widget.memberStore,
       ),
     );
   }
@@ -256,12 +267,17 @@ class _GroupManagementState extends State<GroupManagement> {
                       fit: BoxFit.cover,
                     )
                   : null,
-              color: member.avatarURL?.isEmpty != false ? colorsTheme.listColorHover : null,
+              color: member.avatarURL?.isEmpty != false
+                  ? colorsTheme.listColorHover
+                  : null,
             ),
             child: member.avatarURL?.isEmpty != false
                 ? Center(
                     child: Text(
-                      () { final n = UIKitUtil.memberDisplayName(member); return n.isNotEmpty ? n[0].toUpperCase() : '?'; }(),
+                      () {
+                        final n = UIKitUtil.memberDisplayName(member);
+                        return n.isNotEmpty ? n[0].toUpperCase() : '?';
+                      }(),
                       style: FontScheme.caption1Medium.copyWith(
                         color: colorsTheme.textColorButton,
                       ),

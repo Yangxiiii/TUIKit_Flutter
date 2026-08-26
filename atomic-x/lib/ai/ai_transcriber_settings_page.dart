@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
@@ -16,10 +17,12 @@ class AITranscriberSettingsPage extends StatefulWidget {
   });
 
   @override
-  State<AITranscriberSettingsPage> createState() => _AITranscriberSettingsPageState();
+  State<AITranscriberSettingsPage> createState() =>
+      _AITranscriberSettingsPageState();
 }
 
-class _AITranscriberSettingsPageState extends State<AITranscriberSettingsPage> with TickerProviderStateMixin {
+class _AITranscriberSettingsPageState extends State<AITranscriberSettingsPage>
+    with TickerProviderStateMixin {
   late AITranscriberSettings _settings;
   late List<SourceLanguage> _sourceLanguages;
   late List<TranslationLanguage> _translationLanguages;
@@ -30,7 +33,7 @@ class _AITranscriberSettingsPageState extends State<AITranscriberSettingsPage> w
   @override
   void initState() {
     super.initState();
-    
+
     _animationController = AnimationController(
       duration: const Duration(milliseconds: 300),
       vsync: this,
@@ -38,27 +41,29 @@ class _AITranscriberSettingsPageState extends State<AITranscriberSettingsPage> w
     _slideAnimation = Tween<Offset>(
       begin: const Offset(1, 0),
       end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _animationController, curve: Curves.easeOut));
+    ).animate(
+        CurvedAnimation(parent: _animationController, curve: Curves.easeOut));
 
     _settings = aiTranscriberConfigManager.currentSettings.value;
     _sourceLanguages = widget.sourceLanguages ?? SourceLanguage.values;
-    _translationLanguages = widget.translationLanguages ?? const [
-      TranslationLanguage.chinese,
-      TranslationLanguage.english,
-      TranslationLanguage.vietnamese,
-      TranslationLanguage.japanese,
-      TranslationLanguage.korean,
-      TranslationLanguage.indonesian,
-      TranslationLanguage.thai,
-      TranslationLanguage.portuguese,
-      TranslationLanguage.arabic,
-      TranslationLanguage.spanish,
-      TranslationLanguage.french,
-      TranslationLanguage.malay,
-      TranslationLanguage.german,
-      TranslationLanguage.italian,
-      TranslationLanguage.russian,
-    ];
+    _translationLanguages = widget.translationLanguages ??
+        const [
+          TranslationLanguage.chinese,
+          TranslationLanguage.english,
+          TranslationLanguage.vietnamese,
+          TranslationLanguage.japanese,
+          TranslationLanguage.korean,
+          TranslationLanguage.indonesian,
+          TranslationLanguage.thai,
+          TranslationLanguage.portuguese,
+          TranslationLanguage.arabic,
+          TranslationLanguage.spanish,
+          TranslationLanguage.french,
+          TranslationLanguage.malay,
+          TranslationLanguage.german,
+          TranslationLanguage.italian,
+          TranslationLanguage.russian,
+        ];
   }
 
   @override
@@ -75,21 +80,14 @@ class _AITranscriberSettingsPageState extends State<AITranscriberSettingsPage> w
 
   Future<void> _showPickerOverlay(Widget picker) async {
     if (_pickerOverlay != null) return;
-    
-    final locale = Localizations.localeOf(context);
+
     _pickerOverlay = OverlayEntry(
-      builder: (overlayContext) => Localizations(
-        locale: locale,
-        delegates: AtomicLocalizations.localizationsDelegates,
-        child: ComponentTheme(
-          child: SlideTransition(
-            position: _slideAnimation,
-            child: picker,
-          ),
-        ),
+      builder: (overlayContext) => SlideTransition(
+        position: _slideAnimation,
+        child: picker,
       ),
     );
-    
+
     Overlay.of(context).insert(_pickerOverlay!);
     _animationController.forward();
   }
@@ -107,8 +105,8 @@ class _AITranscriberSettingsPageState extends State<AITranscriberSettingsPage> w
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
-    final locale = AtomicLocalizations.of(context);
+    final colors = SemanticColorScheme.of(context);
+    final locale = AppLocalization.of(context);
 
     return Scaffold(
       backgroundColor: colors.bgColorOperate,
@@ -135,7 +133,8 @@ class _AITranscriberSettingsPageState extends State<AITranscriberSettingsPage> w
     }
   }
 
-  PreferredSizeWidget _buildAppBar(BuildContext context, SemanticColorScheme colors, AtomicLocalizations locale) {
+  PreferredSizeWidget _buildAppBar(BuildContext context,
+      SemanticColorScheme colors, AppLocalizedText locale) {
     return AppBar(
       backgroundColor: colors.bgColorOperate,
       scrolledUnderElevation: 0,
@@ -163,7 +162,8 @@ class _AITranscriberSettingsPageState extends State<AITranscriberSettingsPage> w
     );
   }
 
-  Widget _buildSectionHeader(BuildContext context, SemanticColorScheme colors, AtomicLocalizations locale) {
+  Widget _buildSectionHeader(BuildContext context, SemanticColorScheme colors,
+      AppLocalizedText locale) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Text(
@@ -176,7 +176,8 @@ class _AITranscriberSettingsPageState extends State<AITranscriberSettingsPage> w
     );
   }
 
-  Widget _buildSettingsGroup(BuildContext context, SemanticColorScheme colors, AtomicLocalizations locale) {
+  Widget _buildSettingsGroup(BuildContext context, SemanticColorScheme colors,
+      AppLocalizedText locale) {
     return Container(
       decoration: BoxDecoration(
         color: colors.bgColorTopBar,
@@ -187,7 +188,8 @@ class _AITranscriberSettingsPageState extends State<AITranscriberSettingsPage> w
             context: context,
             colors: colors,
             title: locale.aiSubtitleRecognitionLanguage,
-            value: LanguageDisplayConfig.getSourceLanguageDisplayName(context, _settings.sourceLanguage),
+            value: LanguageDisplayConfig.getSourceLanguageDisplayName(
+                context, _settings.sourceLanguage),
             onTap: () => _showSourceLanguagePicker(context, colors, locale),
           ),
           _buildDivider(colors),
@@ -195,8 +197,10 @@ class _AITranscriberSettingsPageState extends State<AITranscriberSettingsPage> w
             context: context,
             colors: colors,
             title: locale.aiSubtitleTranslationLanguage,
-            value: LanguageDisplayConfig.getTranslationLanguageDisplayName(context, _settings.translationLanguage),
-            onTap: () => _showTranslationLanguagePicker(context, colors, locale),
+            value: LanguageDisplayConfig.getTranslationLanguageDisplayName(
+                context, _settings.translationLanguage),
+            onTap: () =>
+                _showTranslationLanguagePicker(context, colors, locale),
           ),
           _buildDivider(colors),
           _buildSwitchRow(
@@ -300,7 +304,8 @@ class _AITranscriberSettingsPageState extends State<AITranscriberSettingsPage> w
               }
               return colors.switchColorOff;
             }),
-            trackOutlineColor: WidgetStateProperty.resolveWith<Color?>((states) {
+            trackOutlineColor:
+                WidgetStateProperty.resolveWith<Color?>((states) {
               return colors.clearColor;
             }),
           ),
@@ -317,13 +322,15 @@ class _AITranscriberSettingsPageState extends State<AITranscriberSettingsPage> w
     );
   }
 
-  void _showSourceLanguagePicker(BuildContext context, SemanticColorScheme colors, AtomicLocalizations locale) {
+  void _showSourceLanguagePicker(BuildContext context,
+      SemanticColorScheme colors, AppLocalizedText locale) {
     _showPickerOverlay(
       _LanguagePickerPage<SourceLanguage>(
         title: locale.aiSubtitleSelectRecognitionLanguage,
         options: _sourceLanguages,
         selectedValue: _settings.sourceLanguage,
-        displayNameBuilder: (lang) => LanguageDisplayConfig.getSourceLanguageDisplayName(context, lang),
+        displayNameBuilder: (lang) =>
+            LanguageDisplayConfig.getSourceLanguageDisplayName(context, lang),
         onBack: _closePickerOverlay,
         onSelected: (language) async {
           await _closePickerOverlay();
@@ -333,13 +340,16 @@ class _AITranscriberSettingsPageState extends State<AITranscriberSettingsPage> w
     );
   }
 
-  void _showTranslationLanguagePicker(BuildContext context, SemanticColorScheme colors, AtomicLocalizations locale) {
+  void _showTranslationLanguagePicker(BuildContext context,
+      SemanticColorScheme colors, AppLocalizedText locale) {
     _showPickerOverlay(
       _LanguagePickerPage<TranslationLanguage?>(
         title: locale.aiSubtitleSelectTranslationLanguage,
         options: [null, ..._translationLanguages],
         selectedValue: _settings.translationLanguage,
-        displayNameBuilder: (lang) => LanguageDisplayConfig.getTranslationLanguageDisplayName(context, lang),
+        displayNameBuilder: (lang) =>
+            LanguageDisplayConfig.getTranslationLanguageDisplayName(
+                context, lang),
         onBack: _closePickerOverlay,
         onSelected: (language) async {
           await _closePickerOverlay();
@@ -373,7 +383,7 @@ class _LanguagePickerPage<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
 
     return Material(
       child: Scaffold(
@@ -423,8 +433,8 @@ class _LanguagePickerPage<T> extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w400,
-                    color: isSelected 
-                        ? colors.buttonColorPrimaryDefault 
+                    color: isSelected
+                        ? colors.buttonColorPrimaryDefault
                         : colors.textColorPrimary,
                   ),
                 ),

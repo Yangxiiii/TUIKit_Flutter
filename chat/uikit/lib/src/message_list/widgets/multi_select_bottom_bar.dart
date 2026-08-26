@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
@@ -21,14 +22,14 @@ class MultiSelectBottomBar extends StatelessWidget {
     this.isForwardEnabled = true,
   });
 
-  String _getSelectedCountText(AtomicLocalizations locale) {
+  String _getSelectedCountText(AppLocalizedText locale) {
     return locale.selectedCount(selectedCount);
   }
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
-    final locale = AtomicLocalizations.of(context);
+    final colors = SemanticColorScheme.of(context);
+    final locale = AppLocalization.of(context);
     final bottomPadding = MediaQuery.of(context).padding.bottom;
 
     return Container(
@@ -52,7 +53,8 @@ class MultiSelectBottomBar extends StatelessWidget {
               children: [
                 _buildActionButton(
                   assetPath: 'chat_assets/icon/forward.svg',
-                  onTap: isForwardEnabled && selectedCount > 0 ? onForward : null,
+                  onTap:
+                      isForwardEnabled && selectedCount > 0 ? onForward : null,
                   colors: colors,
                 ),
                 const SizedBox(width: 24),
@@ -103,7 +105,9 @@ class MultiSelectBottomBar extends StatelessWidget {
   }) {
     final isEnabled = onTap != null;
     final color = isEnabled
-        ? (isDestructive ? colors.textColorError : colors.buttonColorPrimaryDefault)
+        ? (isDestructive
+            ? colors.textColorError
+            : colors.buttonColorPrimaryDefault)
         : colors.textColorDisable;
 
     return GestureDetector(

@@ -1,10 +1,11 @@
 library ai_transcriber_manager;
 
+import 'package:app_ui/app_ui.dart';
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:tencent_rtc_sdk/trtc_cloud.dart';
-import '../base_component/localizations/atomic_localizations.dart';
 
 // ==================== Button Widget ====================
 
@@ -45,8 +46,9 @@ class AITranscriberButton extends StatelessWidget {
 // ==================== Models ====================
 
 class LanguageDisplayConfig {
-  static String getSourceLanguageDisplayName(BuildContext context, SourceLanguage language) {
-    final locale = AtomicLocalizations.of(context);
+  static String getSourceLanguageDisplayName(
+      BuildContext context, SourceLanguage language) {
+    final locale = AppLocalization.of(context);
     switch (language) {
       case SourceLanguage.chineseEnglish:
         return locale.aiSubtitleAutoDetectChineseEnglish;
@@ -59,8 +61,9 @@ class LanguageDisplayConfig {
     }
   }
 
-  static String getTranslationLanguageDisplayName(BuildContext context, TranslationLanguage? language) {
-    final locale = AtomicLocalizations.of(context);
+  static String getTranslationLanguageDisplayName(
+      BuildContext context, TranslationLanguage? language) {
+    final locale = AppLocalization.of(context);
     if (language == null) {
       return locale.aiSubtitleNoTranslation;
     }
@@ -118,7 +121,9 @@ class AITranscriberSettings {
   }) {
     return AITranscriberSettings(
       sourceLanguage: sourceLanguage ?? this.sourceLanguage,
-      translationLanguage: clearTranslationLanguage ? null : (translationLanguage ?? this.translationLanguage),
+      translationLanguage: clearTranslationLanguage
+          ? null
+          : (translationLanguage ?? this.translationLanguage),
       showBilingual: showBilingual ?? this.showBilingual,
     );
   }
@@ -126,7 +131,8 @@ class AITranscriberSettings {
   TranscriberConfig toTranscriberConfig() {
     return TranscriberConfig(
       sourceLanguage: sourceLanguage,
-      translationLanguages: translationLanguage != null ? [translationLanguage!] : [],
+      translationLanguages:
+          translationLanguage != null ? [translationLanguage!] : [],
     );
   }
 }
@@ -134,16 +140,17 @@ class AITranscriberSettings {
 // ==================== Config Manager ====================
 
 class AITranscriberConfigManager {
-  static final AITranscriberConfigManager _instance = AITranscriberConfigManager._internal();
-  
+  static final AITranscriberConfigManager _instance =
+      AITranscriberConfigManager._internal();
+
   factory AITranscriberConfigManager() => _instance;
-  
+
   AITranscriberConfigManager._internal() {
     _currentSettings.addListener(_onSettingsChanged);
     _observeCallId();
   }
 
-  final ValueNotifier<AITranscriberSettings> _currentSettings = 
+  final ValueNotifier<AITranscriberSettings> _currentSettings =
       ValueNotifier<AITranscriberSettings>(const AITranscriberSettings());
   final ValueNotifier<bool> _isRunning = ValueNotifier<bool>(false);
   final ValueNotifier<bool> _isPanelVisible = ValueNotifier<bool>(true);
@@ -198,7 +205,8 @@ class AITranscriberConfigManager {
     if (!_isRunning.value) return;
     var selfId = CallStore.shared.state.selfInfo.value.id;
     var activeCall = CallStore.shared.state.activeCall.value;
-    var isMulti = activeCall.chatGroupId.isNotEmpty || activeCall.inviteeIds.length > 1;
+    var isMulti =
+        activeCall.chatGroupId.isNotEmpty || activeCall.inviteeIds.length > 1;
     if (selfId == activeCall.inviterId && !isMulti) {
       _transcriberStore?.stopRealtimeTranscriber();
     }
@@ -235,7 +243,7 @@ class AITranscriberConfigManager {
 
   void _closeVAD() async {
     final trtcCloud = await TRTCCloud.sharedInstance();
-    
+
     final resetObj = {
       "api": "setPrivateConfig",
       "params": {
@@ -266,4 +274,3 @@ class AITranscriberConfigManager {
 }
 
 final aiTranscriberConfigManager = AITranscriberConfigManager();
-

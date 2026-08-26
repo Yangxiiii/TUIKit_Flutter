@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:tuikit_atomic_x/base_component/theme/color_scheme.dart';
 import 'package:tuikit_atomic_x/base_component/theme/font.dart';
-import 'package:tuikit_atomic_x/base_component/theme/theme_state.dart';
 import 'package:tencent_chat_uikit/src/third_party/azlistview/azlistview.dart';
 import 'package:tencent_chat_uikit/src/third_party/lpinyin/lpinyin.dart';
 
@@ -83,7 +82,7 @@ class _AZOrderedListState extends State<AZOrderedList> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    colorsTheme = BaseThemeProvider.colorsOf(context);
+    colorsTheme = SemanticColorScheme.of(context);
   }
 
   @override
@@ -186,11 +185,14 @@ class _AZOrderedListState extends State<AZOrderedList> {
             final itemModel = _itemList[index];
             return _buildSuspensionWidget(itemModel.getSuspensionTag());
           },
-          indexBarData: SuspensionUtil.getTagIndexList(_itemList).where((element) => element != "#").toList(),
+          indexBarData: SuspensionUtil.getTagIndexList(_itemList)
+              .where((element) => element != "#")
+              .toList(),
           indexBarOptions: IndexBarOptions(
             needRebuild: true,
             ignoreDragCancel: true,
-            downTextStyle: TextStyle(fontSize: 12, color: colorsTheme.textColorButton),
+            downTextStyle:
+                TextStyle(fontSize: 12, color: colorsTheme.textColorButton),
             downItemDecoration: BoxDecoration(
               shape: BoxShape.circle,
               color: colorsTheme.buttonColorPrimaryDefault,

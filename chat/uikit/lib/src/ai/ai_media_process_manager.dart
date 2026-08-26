@@ -90,7 +90,8 @@ typedef CallExperimentalApi = Future<V2TimValueCallback<dynamic>> Function({
 });
 
 /// Injectable signature for the SDK message-manager `translateText`.
-typedef TranslateApi = Future<V2TimValueCallback<Map<String, String>>> Function({
+typedef TranslateApi = Future<V2TimValueCallback<Map<String, String>>>
+    Function({
   required List<String> texts,
   required String targetLanguage,
   String? sourceLanguage,
@@ -101,9 +102,11 @@ typedef TranslateApi = Future<V2TimValueCallback<Map<String, String>>> Function(
 const String _apiUploadFile = 'internal_operation_upload_file';
 const String _apiConvertVoiceToText =
     'internal_operation_convert_voice_to_text';
-const String _apiConvertTextToVoice = 'internal_operation_convert_text_to_voice';
+const String _apiConvertTextToVoice =
+    'internal_operation_convert_text_to_voice';
 const String _apiVoiceClone = 'internal_operation_voice_clone';
-const String _apiGetCustomVoiceList = 'internal_operation_get_custom_voice_list';
+const String _apiGetCustomVoiceList =
+    'internal_operation_get_custom_voice_list';
 const String _apiDeleteCustomVoice = 'internal_operation_delete_custom_voice';
 
 const String _paramUploadFilePath = 'request_upload_file_file_path';
@@ -168,9 +171,8 @@ class AiMediaProcessManager {
     if (text == null || text.isEmpty) {
       return AiAsrFailure(
         code: asrResult.code,
-        message: asrResult.desc.isNotEmpty
-            ? asrResult.desc
-            : 'asr empty or failed',
+        message:
+            asrResult.desc.isNotEmpty ? asrResult.desc : 'asr empty or failed',
       );
     }
     return AiAsrSuccess(text);
@@ -193,7 +195,8 @@ class AiMediaProcessManager {
         String? translated = result.data![text];
         // Fallback: if exact-key lookup misses but there is exactly one entry,
         // use it — the single input can only map to that single output.
-        if ((translated == null || translated.isEmpty) && result.data!.length == 1) {
+        if ((translated == null || translated.isEmpty) &&
+            result.data!.length == 1) {
           translated = result.data!.values.first;
         }
         if (translated != null && translated.isNotEmpty) {
@@ -291,8 +294,8 @@ class AiMediaProcessManager {
     try {
       final result = await _call(api: _apiGetCustomVoiceList, param: {});
       if (result.code == 0 && result.data is Map) {
-        final list = (result.data as Map)[
-            'response_get_custom_voice_list_voice_list'];
+        final list =
+            (result.data as Map)['response_get_custom_voice_list_voice_list'];
         if (list is List) {
           final voices = <CustomVoiceItem>[];
           for (final item in list) {
@@ -357,8 +360,8 @@ Future<V2TimValueCallback<Map<String, String>>> _defaultTranslate({
   String? sourceLanguage,
 }) {
   return TencentImSDKPlugin.v2TIMManager.getMessageManager().translateText(
-    texts: texts,
-    targetLanguage: targetLanguage,
-    sourceLanguage: sourceLanguage,
-  );
+        texts: texts,
+        targetLanguage: targetLanguage,
+        sourceLanguage: sourceLanguage,
+      );
 }

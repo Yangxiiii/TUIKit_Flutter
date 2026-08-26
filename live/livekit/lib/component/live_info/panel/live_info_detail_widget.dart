@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:tuikit_atomic_x/base_component/theme/theme_state.dart';
+import 'package:tuikit_atomic_x/base_component/theme/color_scheme.dart';
 
 import '../../../../../common/constants/constants.dart';
 import '../../../../../common/language/index.dart';
@@ -40,49 +40,44 @@ class _LiveInfoDetailWidgetState extends State<LiveInfoDetailWidget> {
       height: 210.height,
       child: Stack(
         alignment: Alignment.topCenter,
-        children: [
-          _initBackground(),
-          _initAnchorAvatarWidget(),
-          _initInfoColumnWidget(),
-        ],
+        children: [_initBackground(), _initAnchorAvatarWidget(), _initInfoColumnWidget()],
       ),
     );
   }
 
   Widget _initBackground() {
-    final backgroundColor = BaseThemeProvider.of(context).colors.bgColorDialog;
+    final backgroundColor = SemanticColorScheme.of(context).bgColorDialog;
     return Container(
-        margin: EdgeInsets.only(top: 30.height),
-        width: MediaQuery.sizeOf(context).width,
-        height: 180.height,
-        decoration: BoxDecoration(
-          color: backgroundColor,
-          borderRadius: BorderRadius.only(topLeft: Radius.circular(20.radius), topRight: Radius.circular(20.radius)),
-        ));
+      margin: EdgeInsets.only(top: 30.height),
+      width: MediaQuery.sizeOf(context).width,
+      height: 180.height,
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.only(topLeft: Radius.circular(20.radius), topRight: Radius.circular(20.radius)),
+      ),
+    );
   }
 
   Widget _initAnchorAvatarWidget() {
     return Container(
-        margin: EdgeInsets.only(left: 4.width, right: 8.width),
-        width: 56.radius,
-        height: 56.radius,
-        child: ClipOval(
-          child: ValueListenableBuilder(
-            valueListenable: manager.state.ownerAvatarUrl,
-            builder: (context, ownerAvatarUrl, child) {
-              return Image.network(
-                ownerAvatarUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) {
-                  return Image.asset(
-                    LiveImages.defaultAvatar,
-                    package: Constants.pluginName,
-                  );
-                },
-              );
-            },
-          ),
-        ));
+      margin: EdgeInsets.only(left: 4.width, right: 8.width),
+      width: 56.radius,
+      height: 56.radius,
+      child: ClipOval(
+        child: ValueListenableBuilder(
+          valueListenable: manager.state.ownerAvatarUrl,
+          builder: (context, ownerAvatarUrl, child) {
+            return Image.network(
+              ownerAvatarUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) {
+                return Image.asset(LiveImages.defaultAvatar, package: Constants.pluginName);
+              },
+            );
+          },
+        ),
+      ),
+    );
   }
 
   Widget _initInfoColumnWidget() {
@@ -142,7 +137,11 @@ class _LiveInfoDetailWidgetState extends State<LiveInfoDetailWidget> {
                         _isFollow()
                             ? LiveKitLocalizations.of(Global.appContext())!.common_unfollow_anchor
                             : LiveKitLocalizations.of(Global.appContext())!.common_follow_anchor,
-                        style: const TextStyle(fontSize: 16, fontStyle: FontStyle.normal, color: LiveColors.designStandardG7),
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontStyle: FontStyle.normal,
+                          color: LiveColors.designStandardG7,
+                        ),
                       ),
                     ),
                   );

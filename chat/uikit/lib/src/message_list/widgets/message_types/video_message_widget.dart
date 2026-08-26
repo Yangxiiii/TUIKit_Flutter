@@ -22,6 +22,7 @@ class VideoMessageWidget extends StatefulWidget {
   final GlobalKey? bubbleKey;
   final MessageListConfigProtocol config;
   final bool isInMergedDetailView;
+
   /// See [ImageMessageWidget.mergedMediaMessages].
   final List<MessageInfo>? mergedMediaMessages;
 
@@ -46,7 +47,8 @@ class VideoMessageWidget extends StatefulWidget {
   State<VideoMessageWidget> createState() => _VideoMessageWidgetState();
 }
 
-class _VideoMessageWidgetState extends State<VideoMessageWidget> with MessageStatusMixin {
+class _VideoMessageWidgetState extends State<VideoMessageWidget>
+    with MessageStatusMixin {
   ImageViewerManager? _imageViewerManager;
 
   /// Raw pixel dimensions of the local snapshot file, once decoded.
@@ -161,7 +163,7 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget> with MessageSta
 
   @override
   Widget build(BuildContext context) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     final statusAndTimeWidgets = buildStatusAndTimeWidgets(
       message: widget.message,
@@ -190,7 +192,8 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget> with MessageSta
                 bottom: 8,
                 right: 8,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                   decoration: BoxDecoration(
                     color: colorsTheme.bgColorDefault,
                     borderRadius: BorderRadius.circular(4),
@@ -223,13 +226,15 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget> with MessageSta
     // synchronously (before the post-frame callback runs) so that
     // back-to-back rebuilds inside the same frame can't queue
     // duplicate triggers either.
-    final needsDownload = (videoSnapshotPath == null || videoSnapshotPath.isEmpty) &&
-        widget.messageListStore != null &&
-        _downloadRequestedForMsgID != widget.message.msgID;
+    final needsDownload =
+        (videoSnapshotPath == null || videoSnapshotPath.isEmpty) &&
+            widget.messageListStore != null &&
+            _downloadRequestedForMsgID != widget.message.msgID;
     if (needsDownload) {
       _downloadRequestedForMsgID = widget.message.msgID;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        MessageActionStore.create(widget.message).downloadMedia(quality: MediaQuality.thumbnail);
+        MessageActionStore.create(widget.message)
+            .downloadMedia(quality: MediaQuality.thumbnail);
       });
     }
 
@@ -246,7 +251,9 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget> with MessageSta
     if (_localSnapshotSize != null && _localSnapshotSize!.height > 0) {
       snapWidth = _localSnapshotSize!.width;
       snapHeight = _localSnapshotSize!.height;
-    } else if (payload != null && payload.videoSnapshotHeight > 0 && payload.videoSnapshotWidth > 0) {
+    } else if (payload != null &&
+        payload.videoSnapshotHeight > 0 &&
+        payload.videoSnapshotWidth > 0) {
       snapWidth = payload.videoSnapshotWidth.toDouble();
       snapHeight = payload.videoSnapshotHeight.toDouble();
     }
@@ -272,7 +279,8 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget> with MessageSta
               videoSnapshotPath,
               displayWidth,
               displayHeight,
-              Icon(Icons.video_library, color: colorsTheme.textColorSecondary, size: 40),
+              Icon(Icons.video_library,
+                  color: colorsTheme.textColorSecondary, size: 40),
             ),
           ),
         ),
@@ -308,10 +316,11 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget> with MessageSta
     }
   }
 
-  Widget _buildImageWithFallback(
-      BuildContext context, String? imagePath, double width, double height, Widget fallback) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
-    final remoteURL = (widget.message.messagePayload as VideoMessagePayload?)?.videoSnapshotURL;
+  Widget _buildImageWithFallback(BuildContext context, String? imagePath,
+      double width, double height, Widget fallback) {
+    final colorsTheme = SemanticColorScheme.of(context);
+    final remoteURL = (widget.message.messagePayload as VideoMessagePayload?)
+        ?.videoSnapshotURL;
 
     // No local path yet: render directly from the CDN URL while the
     // Store-side download is in flight. Without this, the cover stays
@@ -321,13 +330,15 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget> with MessageSta
     // ImageCache for the local path the cover never recovers.
     if (imagePath == null || imagePath.isEmpty) {
       if (remoteURL != null && remoteURL.isNotEmpty) {
-        return _buildNetworkImage(remoteURL, width, height, fallback, colorsTheme);
+        return _buildNetworkImage(
+            remoteURL, width, height, fallback, colorsTheme);
       }
       return _buildPlaceholder(width, height, fallback, colorsTheme);
     }
 
     if (imagePath.startsWith('http')) {
-      return _buildNetworkImage(imagePath, width, height, fallback, colorsTheme);
+      return _buildNetworkImage(
+          imagePath, width, height, fallback, colorsTheme);
     }
 
     return Image.file(
@@ -358,7 +369,8 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget> with MessageSta
         if (!_retriedFailedFilePaths.contains(imagePath)) {
           _retriedFailedFilePaths.add(imagePath);
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            PaintingBinding.instance.imageCache.evict(FileImage(File(imagePath)));
+            PaintingBinding.instance.imageCache
+                .evict(FileImage(File(imagePath)));
             if (mounted) {
               setState(() {
                 _imageGeneration += 1;
@@ -367,7 +379,8 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget> with MessageSta
           });
         }
         if (remoteURL != null && remoteURL.isNotEmpty) {
-          return _buildNetworkImage(remoteURL, width, height, fallback, colorsTheme);
+          return _buildNetworkImage(
+              remoteURL, width, height, fallback, colorsTheme);
         }
         return _buildPlaceholder(width, height, fallback, colorsTheme);
       },

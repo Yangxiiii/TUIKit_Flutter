@@ -1,7 +1,9 @@
+import 'package:app_ui/app_ui.dart';
 import 'dart:async';
 import 'dart:io';
 
-import 'package:tuikit_atomic_x/base_component/base_component.dart' hide IconButton;
+import 'package:tuikit_atomic_x/base_component/base_component.dart'
+    hide IconButton;
 import 'package:tencent_chat_uikit/src/file_picker/file_picker_platform.dart';
 import 'package:tencent_chat_uikit/src/video_player/video_player.dart';
 import 'package:tencent_chat_uikit/src/video_player/video_player_widget.dart';
@@ -9,7 +11,8 @@ import 'package:flutter/material.dart';
 
 import 'image_element.dart';
 
-typedef EventHandler = void Function(Map<String, dynamic> eventData, Function(dynamic) callback);
+typedef EventHandler = void Function(
+    Map<String, dynamic> eventData, Function(dynamic) callback);
 
 /// Play button overlay for videos that need to be downloaded
 class _PlayButtonView extends StatelessWidget {
@@ -163,15 +166,12 @@ class _ImageItemViewState extends State<_ImageItemView>
   // ─── Animation ───
 
   void _onAnimate() {
-    final t =
-        Curves.easeInOut.transform(_animationController.value);
+    final t = Curves.easeInOut.transform(_animationController.value);
     final newScale = _animStartScale + (_animEndScale - _animStartScale) * t;
     setState(() {
       _scale = newScale;
-      _offset = Offset.lerp(
-          Offset(_animStartOffset.dx, _animStartOffset.dy),
-          Offset(_animEndOffset.dx, _animEndOffset.dy),
-          t)!;
+      _offset = Offset.lerp(Offset(_animStartOffset.dx, _animStartOffset.dy),
+          Offset(_animEndOffset.dx, _animEndOffset.dy), t)!;
     });
     _updateZoomState(newScale > 1.01);
   }
@@ -366,8 +366,7 @@ class _ImageItemViewState extends State<_ImageItemView>
       }
 
       // Focal point delta for panning
-      final Offset focalDelta =
-          details.focalPoint - _scaleStartFocalPoint!;
+      final Offset focalDelta = details.focalPoint - _scaleStartFocalPoint!;
 
       Offset newOffset;
       if (details.pointerCount >= 2) {
@@ -745,7 +744,8 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
     Navigator.of(context).pop();
   }
 
-  void _onLoadMore(bool isOlder, Function(List<ImageElement>, bool) completion) {
+  void _onLoadMore(
+      bool isOlder, Function(List<ImageElement>, bool) completion) {
     widget.onEventTriggered({
       'event': 'onLoadMore',
       'param': {'isOlder': isOlder}
@@ -790,7 +790,9 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
       _onLoadMore(true, (newElementsData, hasMore) {
         _handleLoadMoreResponse(newElementsData, true);
       });
-    } else if (newIndex >= (_imageElements.length - preloadThreshold) && isSwipingRight && !_isLoadingNewer) {
+    } else if (newIndex >= (_imageElements.length - preloadThreshold) &&
+        isSwipingRight &&
+        !_isLoadingNewer) {
       _isLoadingNewer = true;
       _startLoadingTimer();
 
@@ -800,7 +802,8 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
     }
   }
 
-  void _handleLoadMoreResponse(List<ImageElement> newElementsData, bool isOlder) {
+  void _handleLoadMoreResponse(
+      List<ImageElement> newElementsData, bool isOlder) {
     _cancelLoadingTimer();
 
     final newElements = newElementsData;
@@ -880,7 +883,8 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
   void _showNoMoreDataToastWithDebounce() {
     final now = DateTime.now();
 
-    if (_lastOverscrollTime != null && now.difference(_lastOverscrollTime!).inMilliseconds < 1000) {
+    if (_lastOverscrollTime != null &&
+        now.difference(_lastOverscrollTime!).inMilliseconds < 1000) {
       return;
     }
 
@@ -890,14 +894,16 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
 
     _overscrollToastTimer = Timer(const Duration(milliseconds: 200), () {
       if (mounted) {
-        AtomicLocalizations atomicLocalizations = AtomicLocalizations.of(context);
+        AppLocalizedText atomicLocalizations = AppLocalization.of(context);
         Toast.info(context, atomicLocalizations.noMore);
       }
     });
   }
 
   void _downloadVideo(ImageElement element) {
-    if (!element.isVideo || element.hasVideoFile || _downloadingVideoElements.contains(element.imagePath)) {
+    if (!element.isVideo ||
+        element.hasVideoFile ||
+        _downloadingVideoElements.contains(element.imagePath)) {
       return;
     }
 
@@ -911,7 +917,8 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
       });
 
       if (videoPath != null && videoPath.isNotEmpty) {
-        final index = _imageElements.indexWhere((e) => e.imagePath == element.imagePath);
+        final index =
+            _imageElements.indexWhere((e) => e.imagePath == element.imagePath);
         if (index != -1) {
           setState(() {
             _imageElements[index] = ImageElement(
@@ -940,8 +947,10 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
             NotificationListener<ScrollNotification>(
               onNotification: (ScrollNotification notification) {
                 if (notification is OverscrollNotification) {
-                  final isAtStart = _currentIndex == 0 && notification.overscroll < 0;
-                  final isAtEnd = _currentIndex == _imageElements.length - 1 && notification.overscroll > 0;
+                  final isAtStart =
+                      _currentIndex == 0 && notification.overscroll < 0;
+                  final isAtEnd = _currentIndex == _imageElements.length - 1 &&
+                      notification.overscroll > 0;
 
                   if (isAtStart || isAtEnd) {
                     _showNoMoreDataToastWithDebounce();
@@ -967,7 +976,7 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
                 },
               ),
             ),
-          
+
           // Loading indicator
           Center(
             child: _LoadingIndicatorView(isShowing: _showLoadingIndicator),
@@ -979,7 +988,7 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
 
   Widget _buildMediaItem(ImageElement element, int index) {
     final isCurrentPage = index == _currentIndex;
-    
+
     if (element.isImage) {
       return _ImageItemView(
         element: element,
@@ -1001,7 +1010,7 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
         onClose: _onImageTap,
       );
     }
-    
+
     return const SizedBox.shrink();
   }
 }

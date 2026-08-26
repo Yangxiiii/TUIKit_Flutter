@@ -7,17 +7,13 @@ import '../hint/timer_widget.dart';
 class CallPipWidget extends StatefulWidget {
   final CallCoreController controller;
 
-  const CallPipWidget({
-    super.key,
-    required this.controller,
-  });
+  const CallPipWidget({super.key, required this.controller});
 
   @override
   State<StatefulWidget> createState() => _CallPipWidgetState();
 }
 
 class _CallPipWidgetState extends State<CallPipWidget> {
-
   @override
   Widget build(BuildContext context) {
     return Stack(
@@ -31,12 +27,9 @@ class _CallPipWidgetState extends State<CallPipWidget> {
           width: MediaQuery.of(context).size.width,
           height: 100,
           child: const Center(
-            child: TimerWidget(
-              fontSize: 35,
-              fontWeight: FontWeight.bold,
-            ),
+            child: TimerWidget(fontSize: 35, fontWeight: FontWeight.bold),
           ),
-        )
+        ),
       ],
     );
   }

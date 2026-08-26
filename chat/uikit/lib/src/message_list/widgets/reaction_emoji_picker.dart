@@ -42,7 +42,7 @@ class _ReactionEmojiPickerState extends State<ReactionEmojiPicker> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -91,7 +91,7 @@ class _ReactionEmojiItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
 
     return GestureDetector(
       onTap: onTap,
@@ -134,7 +134,7 @@ class ReactionEmojiPickerSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
     final allEmojis = RecentEmojiManager.getAllEmojis(context);
 
     return Container(

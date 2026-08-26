@@ -14,9 +14,17 @@ class FcmDataSyncHandler {
     }
   }
 
-  void openNotificationView(String name, String avatar, CallMediaType mediaType) {
+  void openNotificationView(
+    String name,
+    String avatar,
+    CallMediaType mediaType,
+  ) {
     if (AppLifecycle.instance.isBackground) {
-      TUICallKitPlatform.instance.openAndroidNotificationView(name, avatar, mediaType);
+      TUICallKitPlatform.instance.openAndroidNotificationView(
+        name,
+        avatar,
+        mediaType,
+      );
     }
   }
 

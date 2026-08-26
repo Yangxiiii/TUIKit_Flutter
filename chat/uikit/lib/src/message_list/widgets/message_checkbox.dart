@@ -16,7 +16,7 @@ class MessageCheckbox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
 
     return GestureDetector(
       onTap: isEnabled ? onTap : null,
@@ -28,10 +28,14 @@ class MessageCheckbox extends StatelessWidget {
           height: 20,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: isSelected ? colors.buttonColorPrimaryDefault : Colors.transparent,
+            color: isSelected
+                ? colors.buttonColorPrimaryDefault
+                : Colors.transparent,
             border: Border.all(
               color: isEnabled
-                  ? (isSelected ? colors.buttonColorPrimaryDefault : colors.strokeColorPrimary)
+                  ? (isSelected
+                      ? colors.buttonColorPrimaryDefault
+                      : colors.strokeColorPrimary)
                   : colors.textColorDisable,
               width: 1.5,
             ),

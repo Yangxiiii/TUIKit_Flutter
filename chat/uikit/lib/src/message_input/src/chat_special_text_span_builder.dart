@@ -20,7 +20,9 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
 
   @override
   SpecialText? createSpecialText(String flag,
-      {TextStyle? textStyle, SpecialTextGestureTapCallback? onTap, int? index}) {
+      {TextStyle? textStyle,
+      SpecialTextGestureTapCallback? onTap,
+      int? index}) {
     if (flag == '') {
       return null;
     }
@@ -28,7 +30,11 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
     ///index is end index of start flag, so text start index should be index-(flag.length-1)
     if (isStart(flag, HttpText.flag)) {
       return HttpText(
-          colorScheme: colorScheme, textStyle, onTap, onTapUrl: onTapUrl, start: index! - (HttpText.flag.length - 1));
+          colorScheme: colorScheme,
+          textStyle,
+          onTap,
+          onTapUrl: onTapUrl,
+          start: index! - (HttpText.flag.length - 1));
     } else if (isStart(flag, EmojiText.flag)) {
       return EmojiText(
         colorScheme: colorScheme,
@@ -110,7 +116,8 @@ class HttpText extends SpecialText {
 String getMarkDownStringData({
   String? text,
 }) {
-  String formattedText = _addSpaceAfterLeftBracket(_addSpaceBeforeHttp(_replaceSingleNewlineWithTwo(text ?? "")));
+  String formattedText = _addSpaceAfterLeftBracket(
+      _addSpaceBeforeHttp(_replaceSingleNewlineWithTwo(text ?? "")));
   RegExp emojiExp = RegExp(r"\[TUIEmoji_(\w{2,})\]");
   formattedText = formattedText.replaceAllMapped(emojiExp, (match) {
     String emojiName = match.group(0) ?? "";

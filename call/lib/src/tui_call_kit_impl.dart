@@ -39,23 +39,24 @@ class TUICallKitImpl implements TUICallKit {
         aiTranscriberConfigManager.start();
       }
     },
-    onCallReceived: (String callId, CallMediaType mediaType, String userData) async {
-      KeyMetrics.instance.countUV(EventId.received);
-      if (mediaType == CallMediaType.video) {
-        await CallManager.instance.openLocalCameraIfPermitted();
-      }
-    },
+    onCallReceived:
+        (String callId, CallMediaType mediaType, String userData) async {
+          KeyMetrics.instance.countUV(EventId.received);
+          if (mediaType == CallMediaType.video) {
+            await CallManager.instance.openLocalCameraIfPermitted();
+          }
+        },
     onCallEnded: (callId, mediaType, reason, userId) {
       CallManager.instance.closeLocalMicrophone();
       aiTranscriberConfigManager.reset(preserveSettings: false);
       _closePage();
       ForegroundService.stop();
-      if (CallStore.shared.state.activeCall.value.inviteeIds.length > 1
-          || CallStore.shared.state.activeCall.value.chatGroupId.isNotEmpty
-          || CallStore.shared.state.selfInfo.value.id == userId) {
+      if (CallStore.shared.state.activeCall.value.inviteeIds.length > 1 ||
+          CallStore.shared.state.activeCall.value.chatGroupId.isNotEmpty ||
+          CallStore.shared.state.selfInfo.value.id == userId) {
         return;
       }
-      final l10n = AtomicLocalizations.of(Global.appContext());
+      final l10n = AppLocalization.of(Global.appContext());
       switch (reason) {
         case CallEndReason.hangup:
           TUIToast.show(content: l10n.callOtherPartyHungUp);
@@ -81,91 +82,86 @@ class TUICallKitImpl implements TUICallKit {
           break;
         case CallEndReason.endByServer:
           break;
-        }
-    }
+      }
+    },
   );
 
   TUICallKitImpl() {
     CallStore.shared;
     voIPDataSyncHandler = VoIPDataSyncHandler();
     fcmDataSyncHandler = FcmDataSyncHandler();
-    pageRouter = CallPageRouter(navigatorGetter: () => Bootloader.instance.navigator);
+    pageRouter = CallPageRouter(
+      navigatorGetter: () => Bootloader.instance.navigator,
+    );
     CallManager.instance.bindPageManager(pageRouter);
     _subscribeState();
   }
 
   @override
-  Future<CompletionHandler> login(int sdkAppId, String userId, String userSig) async {
+  Future<CompletionHandler> login(
+    int sdkAppId,
+    String userId,
+    String userSig,
+  ) async {
     final completer = Completer<CompletionHandler>();
-    TUILogin.instance.login(sdkAppId, userId, userSig, TUICallback(
-      onSuccess: () {
-        CompletionHandler handler = CompletionHandler();
-        handler.errorCode = 0;
-        handler.errorMessage = "success";
-        completer.complete(handler);
-      },
-      onError: (code, message) {
-        handleErrorCode(code);
-        CompletionHandler handler = CompletionHandler();
-        handler.errorCode = code;
-        handler.errorMessage = message;
-        completer.complete(handler);
-      }
-    ));
+    TUILogin.instance.login(
+      sdkAppId,
+      userId,
+      userSig,
+      TUICallback(
+        onSuccess: () {
+          CompletionHandler handler = CompletionHandler();
+          handler.errorCode = 0;
+          handler.errorMessage = "success";
+          completer.complete(handler);
+        },
+        onError: (code, message) {
+          handleErrorCode(code);
+          CompletionHandler handler = CompletionHandler();
+          handler.errorCode = code;
+          handler.errorMessage = message;
+          completer.complete(handler);
+        },
+      ),
+    );
     return completer.future;
   }
 
   @override
   Future<void> logout() async {
-    TUILogin.instance.logout(TUICallback(
-      onSuccess: () {},
-      onError: (code, message) {},
-    ));
+    TUILogin.instance.logout(
+      TUICallback(onSuccess: () {}, onError: (code, message) {}),
+    );
   }
 
   @override
   Future<CompletionHandler> setSelfInfo(String nickname, String avatar) async {
     UserProfile userInfo = UserProfile(
-        userID: LoginStore.shared.loginState.loginUserInfo!.userID,
-        nickname: nickname,
-        avatarURL: avatar,
-        selfSignature: LoginStore.shared.loginState.loginUserInfo!.selfSignature,
-        gender: LoginStore
-            .shared
-            .loginState
-            .loginUserInfo!
-            .gender,
-        role: LoginStore
-            .shared
-            .loginState
-            .loginUserInfo!
-            .role,
-        level: LoginStore
-            .shared
-            .loginState
-            .loginUserInfo!
-            .level,
-        birthday: LoginStore
-            .shared
-            .loginState
-            .loginUserInfo!
-            .birthday,
-        allowType: LoginStore
-            .shared
-            .loginState
-            .loginUserInfo!
-            .allowType,
-        customInfo: LoginStore
-            .shared
-            .loginState
-            .loginUserInfo!
-            .customInfo);
+      userID: LoginStore.shared.loginState.loginUserInfo!.userID,
+      nickname: nickname,
+      avatarURL: avatar,
+      selfSignature: LoginStore.shared.loginState.loginUserInfo!.selfSignature,
+      gender: LoginStore.shared.loginState.loginUserInfo!.gender,
+      role: LoginStore.shared.loginState.loginUserInfo!.role,
+      level: LoginStore.shared.loginState.loginUserInfo!.level,
+      birthday: LoginStore.shared.loginState.loginUserInfo!.birthday,
+      allowType: LoginStore.shared.loginState.loginUserInfo!.allowType,
+      customInfo: LoginStore.shared.loginState.loginUserInfo!.customInfo,
+    );
     return CallManager.instance.setSelfInfo(userInfo);
   }
 
   @override
-  Future<CompletionHandler> calls(List<String> userIdList, callMediaType, [CallParams? params]) async {
-    final handler = await CallManager.instance.calls(userIdList, callMediaType, params);
+  Future<CompletionHandler> calls(
+    List<String> userIdList,
+    callMediaType, [
+    CallParams? params,
+  ]) async {
+    final handler = await CallManager.instance.calls(
+      userIdList,
+      callMediaType,
+      params,
+    );
     handleErrorCode(handler.errorCode);
     return handler;
   }
@@ -215,7 +211,10 @@ class TUICallKitImpl implements TUICallKit {
   void handleLoginSuccess(int sdkAppID, String userId, String userSig) {
     TUICallEngine.instance.init(sdkAppID, userId, userSig);
     LoginStore.shared.login(
-        sdkAppID: sdkAppID, userID: userId, userSig: userSig);
+      sdkAppID: sdkAppID,
+      userID: userId,
+      userSig: userSig,
+    );
     CallStore.shared.addListener(callEventListener);
     CallingBellFeature.instance.init();
     if (Platform.isIOS) {
@@ -258,11 +257,14 @@ class TUICallKitImpl implements TUICallKit {
 
     final activeCall = CallStore.shared.state.activeCall.value;
     if (AppLifecycle.instance.isBackground && activeCall.inviterId.isNotEmpty) {
-      final handler = await contactStore.getContactInfo(userIDList: [activeCall.inviterId]);
+      final handler = await contactStore.getContactInfo(
+        userIDList: [activeCall.inviterId],
+      );
       if (handler.isSuccess && handler.contactInfoList.isNotEmpty) {
         final selfInfo = CallStore.shared.state.selfInfo.value;
         final contactInfo = handler.contactInfoList.first;
-        if (activeCall.inviterId != selfInfo.id && activeCall.mediaType != null) {
+        if (activeCall.inviterId != selfInfo.id &&
+            activeCall.mediaType != null) {
           fcmDataSyncHandler.openNotificationView(
             contactInfo.nickname ?? "",
             contactInfo.avatarURL ?? "",
@@ -276,7 +278,8 @@ class TUICallKitImpl implements TUICallKit {
     if (GlobalState.instance.enableIncomingBanner &&
         CallStore.shared.state.selfInfo.value.id !=
             CallStore.shared.state.activeCall.value.inviterId &&
-        CallStore.shared.state.selfInfo.value.status == CallParticipantStatus.waiting) {
+        CallStore.shared.state.selfInfo.value.status ==
+            CallParticipantStatus.waiting) {
       pageRouter.showIncomingBanner();
     } else {
       pageRouter.showCallingPage();
@@ -292,7 +295,10 @@ class TUICallKitImpl implements TUICallKit {
   }
 
   void handleErrorCode(int errorCode) {
-    final errorMessage = ErrorParser.getErrorMessage(errorCode, AtomicLocalizations.of(Global.appContext()));
+    final errorMessage = ErrorParser.getErrorMessage(
+      errorCode,
+      AppLocalization.of(Global.appContext()),
+    );
     if (errorMessage != null) {
       TUIToast.show(content: errorMessage);
     }

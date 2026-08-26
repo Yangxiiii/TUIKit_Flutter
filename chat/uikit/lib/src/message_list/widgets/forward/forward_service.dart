@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'dart:convert';
 
 import 'package:atomic_x_core/atomicxcore.dart';
@@ -28,9 +29,11 @@ class ForwardService {
 
   /// Validate if messages can be forwarded (all must be sendSuccess)
   /// Returns error message if validation fails, null if valid
-  static String? validateMessagesStatus(BuildContext context, List<MessageInfo> messages) {
-    final locale = AtomicLocalizations.of(context);
-    final hasFailedMessage = messages.any((msg) => msg.status != MessageStatus.sendSuccess);
+  static String? validateMessagesStatus(
+      BuildContext context, List<MessageInfo> messages) {
+    final locale = AppLocalization.of(context);
+    final hasFailedMessage =
+        messages.any((msg) => msg.status != MessageStatus.sendSuccess);
     if (hasFailedMessage) {
       return locale.forwardFailedMessageTip;
     }
@@ -39,10 +42,11 @@ class ForwardService {
 
   /// Validate if separate forward limit is exceeded
   /// Returns error message if validation fails, null if valid
-  static String? validateSeparateForwardLimit(BuildContext context, List<MessageInfo> messages, ForwardType forwardType) {
+  static String? validateSeparateForwardLimit(BuildContext context,
+      List<MessageInfo> messages, ForwardType forwardType) {
     if (forwardType != ForwardType.separate) return null;
-    
-    final locale = AtomicLocalizations.of(context);
+
+    final locale = AppLocalization.of(context);
     if (messages.length > _forwardSeparateLimit) {
       return locale.forwardSeparateLimitTip;
     }
@@ -137,7 +141,9 @@ class ForwardService {
     try {
       // Build forward options
       final forwardOption = ForwardMessageOption(
-        forwardType: forwardType == ForwardType.separate ? MessageForwardType.separate : MessageForwardType.merged,
+        forwardType: forwardType == ForwardType.separate
+            ? MessageForwardType.separate
+            : MessageForwardType.merged,
         mergedForwardInfo: forwardType == ForwardType.merged
             ? _buildMergedForwardInfo(context, messages, sourceConversationID)
             : null,
@@ -174,7 +180,7 @@ class ForwardService {
     List<MessageInfo> messages,
     String? conversationID,
   ) {
-    final locale = AtomicLocalizations.of(context);
+    final locale = AppLocalization.of(context);
 
     // Generate title
     final title = _generateMergedTitle(locale, messages, conversationID);
@@ -194,7 +200,7 @@ class ForwardService {
 
   /// Generate merged message title
   static String _generateMergedTitle(
-    AtomicLocalizations locale,
+    AppLocalizedText locale,
     List<MessageInfo> messages,
     String? conversationID,
   ) {
@@ -203,7 +209,8 @@ class ForwardService {
     }
 
     // Check if it's a group chat (conversationID starts with "group_")
-    final isGroupChat = conversationID?.startsWith(_groupConversationIDPrefix) ?? false;
+    final isGroupChat =
+        conversationID?.startsWith(_groupConversationIDPrefix) ?? false;
 
     if (isGroupChat) {
       // Group chat: return group chat history
@@ -229,7 +236,8 @@ class ForwardService {
 
       if (senderNames.length == 2) {
         // Two senders: "A and B chat history"
-        return locale.chatHistoryForSomebodyFormat(senderNames[0], senderNames[1]);
+        return locale.chatHistoryForSomebodyFormat(
+            senderNames[0], senderNames[1]);
       } else if (senderNames.length == 1) {
         // One sender: "A's chat history"
         return locale.c2cChatHistoryFormat(senderNames[0]);
@@ -241,7 +249,8 @@ class ForwardService {
   }
 
   /// Generate abstract list
-  static List<String> _generateAbstractList(BuildContext context, List<MessageInfo> messages) {
+  static List<String> _generateAbstractList(
+      BuildContext context, List<MessageInfo> messages) {
     final abstractList = <String>[];
 
     for (int i = 0; i < messages.length && abstractList.length < 4; i++) {
@@ -259,7 +268,7 @@ class ForwardService {
 
   /// Get message abstract
   static String _getMessageAbstract(BuildContext context, MessageInfo message) {
-    final locale = AtomicLocalizations.of(context);
+    final locale = AppLocalization.of(context);
     switch (message.messageType) {
       case MessageType.text:
         return (message.messagePayload as TextMessagePayload?)?.text ?? '';
@@ -283,13 +292,14 @@ class ForwardService {
   }
 
   /// Get compatible text
-  static String _getCompatibleText(AtomicLocalizations locale) {
+  static String _getCompatibleText(AppLocalizedText locale) {
     return locale.forwardCompatibleText;
   }
 
   /// Show forward type selector using ActionSheet
-  static Future<ForwardType?> _showForwardTypeSelector(BuildContext context) async {
-    final locale = AtomicLocalizations.of(context);
+  static Future<ForwardType?> _showForwardTypeSelector(
+      BuildContext context) async {
+    final locale = AppLocalization.of(context);
     ForwardType? selectedType;
 
     await ActionSheet.show(
@@ -339,7 +349,8 @@ class ForwardService {
     int failureCount = 0;
 
     for (final targetConversationID in selectResult.conversationIDs) {
-      final messageInputStore = MessageInputStore.create(conversationID: targetConversationID);
+      final messageInputStore =
+          MessageInputStore.create(conversationID: targetConversationID);
 
       // Build text message
       final textPayload = TextSendMessagePayload(text: text);
@@ -361,7 +372,8 @@ class ForwardService {
       );
       if (!result.isSuccess) {
         failureCount++;
-        debugPrint('Failed to send text to $targetConversationID: ${result.errorCode}, ${result.errorMessage}');
+        debugPrint(
+            'Failed to send text to $targetConversationID: ${result.errorCode}, ${result.errorMessage}');
       }
     }
 
@@ -388,7 +400,9 @@ class ForwardService {
 
     if (conversationID != null) {
       isGroup = conversationID.startsWith(_groupConversationIDPrefix);
-      groupId = isGroup ? conversationID.substring(_groupConversationIDPrefix.length) : '';
+      groupId = isGroup
+          ? conversationID.substring(_groupConversationIDPrefix.length)
+          : '';
 
       // Try to get chat name from conversation list
       String? chatName;
@@ -405,7 +419,8 @@ class ForwardService {
     }
 
     if (message != null) {
-      description = _trimPushDescription(_getMessageTypeAbstract(context, message));
+      description =
+          _trimPushDescription(_getMessageTypeAbstract(context, message));
     }
 
     final ext = _createOfflinePushExtJson(
@@ -437,12 +452,14 @@ class ForwardService {
   }
 
   /// Get message type abstract for push notification
-  static String _getMessageTypeAbstract(BuildContext context, MessageInfo message) {
-    final locale = AtomicLocalizations.of(context);
+  static String _getMessageTypeAbstract(
+      BuildContext context, MessageInfo message) {
+    final locale = AppLocalization.of(context);
     switch (message.messageType) {
       case MessageType.text:
         // Convert emoji codes to localized names
-        return EmojiManager.createLocalizedStringFromEmojiCodes(context, (message.messagePayload as TextMessagePayload?)?.text ?? '');
+        return EmojiManager.createLocalizedStringFromEmojiCodes(context,
+            (message.messagePayload as TextMessagePayload?)?.text ?? '');
       case MessageType.image:
         return locale.messageTypeImage;
       case MessageType.video:

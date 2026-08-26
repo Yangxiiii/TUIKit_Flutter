@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
@@ -10,6 +11,7 @@ class ReactionDetailSheet extends StatefulWidget {
   final void Function(String reactionID) onFetchUsers;
   final void Function(String reactionID) onRemoveReaction;
   final ScrollController? scrollController;
+
   /// Whether to allow removing reactions (default: true)
   /// Set to false in merged message detail view
   final bool allowRemove;
@@ -92,7 +94,7 @@ class _ReactionDetailSheetState extends State<ReactionDetailSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
 
     return Container(
       decoration: BoxDecoration(
@@ -207,8 +209,9 @@ class _ReactionTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
-    final emoji = RecentEmojiManager.getEmojiByReactionID(context, reaction.reactionID);
+    final colors = SemanticColorScheme.of(context);
+    final emoji =
+        RecentEmojiManager.getEmojiByReactionID(context, reaction.reactionID);
 
     return GestureDetector(
       onTap: onTap,
@@ -329,9 +332,10 @@ class _ReactionUserItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
-    final atomicLocal = AtomicLocalizations.of(context);
-    final displayName = (user.nickname?.isNotEmpty == true) ? user.nickname! : user.userID;
+    final colors = SemanticColorScheme.of(context);
+    final atomicLocal = AppLocalization.of(context);
+    final displayName =
+        (user.nickname?.isNotEmpty == true) ? user.nickname! : user.userID;
 
     return GestureDetector(
       onTap: onTap,

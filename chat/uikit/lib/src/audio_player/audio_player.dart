@@ -135,4 +135,4 @@ class AudioPlayer {
     await AudioPlayerPlatform.dispose();
     _listener = null;
   }
-} 
+}

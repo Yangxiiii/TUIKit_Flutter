@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'conversation_list_config.dart';
 import 'widgets/conversation_item.dart';
 
+export 'conversation_list_config.dart';
 export 'widgets/conversation_item.dart';
 
 class ConversationCustomAction {
@@ -17,16 +18,33 @@ class ConversationCustomAction {
   });
 }
 
+/// 展示并管理 TUIKit 会话列表，宿主可选地筛选可见会话。
 class ConversationList extends StatefulWidget {
   final Function(ConversationInfo)? onConversationClick;
   final List<ConversationCustomAction> customActions;
   final ConversationActionConfigProtocol config;
+
+  /// 列表空隙和滚动区域背景；为空时沿用 TUIKit 默认操作区颜色。
+  final Color? backgroundColor;
+
+  /// 普通会话行背景；为空时沿用 TUIKit 默认列表颜色。
+  final Color? itemBackgroundColor;
+
+  /// 置顶会话行背景；为空时与普通会话行一致。
+  final Color? pinnedItemBackgroundColor;
+
+  /// 返回 `true` 的会话才会显示；为空时显示全部会话。
+  final bool Function(ConversationInfo)? filter;
 
   const ConversationList({
     super.key,
     this.onConversationClick,
     this.customActions = const [],
     this.config = const ChatConversationActionConfig(),
+    this.filter,
+    this.backgroundColor,
+    this.itemBackgroundColor,
+    this.pinnedItemBackgroundColor,
   });
 
   @override
@@ -54,7 +72,8 @@ class _ConversationListState extends State<ConversationList> {
 
     conversationListStore = ConversationListStore.create();
 
-    conversationListStore.state.conversationList.addListener(_conversationListChangedListener);
+    conversationListStore.state.conversationList
+        .addListener(_conversationListChangedListener);
 
     _scrollController.addListener(_scrollListenerCallback);
 
@@ -63,7 +82,8 @@ class _ConversationListState extends State<ConversationList> {
 
   @override
   void dispose() {
-    conversationListStore.state.conversationList.removeListener(_conversationListChangedListener);
+    conversationListStore.state.conversationList
+        .removeListener(_conversationListChangedListener);
     _scrollController.removeListener(_scrollListenerCallback);
     _scrollController.dispose();
     super.dispose();
@@ -71,12 +91,14 @@ class _ConversationListState extends State<ConversationList> {
 
   void _onConversationListChanged() {
     setState(() {
-      conversations = conversationListStore.state.conversationList.value.toList();
+      conversations =
+          conversationListStore.state.conversationList.value.toList();
     });
   }
 
   void _scrollListener() {
-    if (_scrollController.position.pixels == _scrollController.position.maxScrollExtent) {
+    if (_scrollController.position.pixels ==
+        _scrollController.position.maxScrollExtent) {
       if (!isLoading && hasMoreConversations) {
         _loadMoreConversations();
       }
@@ -91,9 +113,11 @@ class _ConversationListState extends State<ConversationList> {
     });
     final option = ConversationLoadOption();
 
-    final result = await conversationListStore.loadConversations(option: option);
+    final result =
+        await conversationListStore.loadConversations(option: option);
     setState(() {
-      hasMoreConversations = result.isSuccess && conversationListStore.state.hasMoreConversations.value;
+      hasMoreConversations = result.isSuccess &&
+          conversationListStore.state.hasMoreConversations.value;
       isLoading = false;
     });
   }
@@ -106,31 +130,37 @@ class _ConversationListState extends State<ConversationList> {
     });
     final result = await conversationListStore.loadMoreConversations();
     setState(() {
-      hasMoreConversations = result.isSuccess && conversationListStore.state.hasMoreConversations.value;
+      hasMoreConversations = result.isSuccess &&
+          conversationListStore.state.hasMoreConversations.value;
       isLoading = false;
     });
   }
 
   void _handlePinConversation(ConversationInfo conversationInfo) async {
     if (conversationInfo.isPinned) {
-      conversationListStore.pinConversation(conversationID: conversationInfo.conversationID, pin: false);
+      conversationListStore.pinConversation(
+          conversationID: conversationInfo.conversationID, pin: false);
     } else {
-      conversationListStore.pinConversation(conversationID: conversationInfo.conversationID, pin: true);
+      conversationListStore.pinConversation(
+          conversationID: conversationInfo.conversationID, pin: true);
     }
   }
 
   void _handleClearHistoryMessage(ConversationInfo conversationInfo) async {
-    conversationListStore.clearConversationMessages(conversationID: conversationInfo.conversationID);
+    conversationListStore.clearConversationMessages(
+        conversationID: conversationInfo.conversationID);
   }
 
   void _handleDeleteConversation(ConversationInfo conversationInfo) async {
-    conversationListStore.deleteConversation(conversationID: conversationInfo.conversationID);
+    conversationListStore.deleteConversation(
+        conversationID: conversationInfo.conversationID);
   }
 
   /// Marks a conversation as read by clearing unread count and removing unread mark.
   void _handleMarkAsRead(ConversationInfo conversationInfo) async {
     // Clear real unread count
-    conversationListStore.clearConversationUnreadCount(conversationID: conversationInfo.conversationID);
+    conversationListStore.clearConversationUnreadCount(
+        conversationID: conversationInfo.conversationID);
     // Remove unread mark from markList
     conversationListStore.markConversation(
       conversationIDList: [conversationInfo.conversationID],
@@ -151,33 +181,44 @@ class _ConversationListState extends State<ConversationList> {
 
   @override
   Widget build(BuildContext context) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
+    final visibleConversations = widget.filter == null
+        ? conversations
+        : conversations.where(widget.filter!).toList();
 
     return Container(
-      color: colorsTheme.bgColorOperate,
+      color: widget.backgroundColor ?? colorsTheme.bgColorOperate,
       child: Stack(
         children: [
           ListView.builder(
             controller: _scrollController,
             padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: conversations.length + (isLoading && hasMoreConversations ? 1 : 0),
+            itemCount: visibleConversations.length +
+                (isLoading && hasMoreConversations ? 1 : 0),
             itemBuilder: (context, index) {
-              if (isLoading && hasMoreConversations && index == conversations.length) {
+              if (isLoading &&
+                  hasMoreConversations &&
+                  index == visibleConversations.length) {
                 return Center(
                   child: Padding(
                     padding: const EdgeInsets.all(8.0),
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(colorsTheme.buttonColorPrimaryDefault),
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                          colorsTheme.buttonColorPrimaryDefault),
                     ),
                   ),
                 );
               }
 
-              final conversation = conversations[index];
+              final conversation = visibleConversations[index];
 
               return ConversationItem(
                 conversation: conversation,
+                backgroundColor: conversation.isPinned
+                    ? widget.pinnedItemBackgroundColor ??
+                        widget.itemBackgroundColor
+                    : widget.itemBackgroundColor,
                 onPinToggle: () {
                   _handlePinConversation(conversation);
                 },
@@ -208,7 +249,8 @@ class _ConversationListState extends State<ConversationList> {
           if (isLoading && conversations.isEmpty)
             Center(
               child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(colorsTheme.buttonColorPrimaryDefault),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                    colorsTheme.buttonColorPrimaryDefault),
               ),
             ),
         ],

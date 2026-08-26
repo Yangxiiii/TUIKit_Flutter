@@ -20,7 +20,11 @@ abstract class TUICallKitPlatform extends PlatformInterface {
     instance.stopVibration();
   }
 
-  void openAndroidNotificationView(String name, String avatar, CallMediaType mediaType) {
+  void openAndroidNotificationView(
+    String name,
+    String avatar,
+    CallMediaType mediaType,
+  ) {
     instance.openAndroidNotificationView(name, avatar, mediaType);
   }
 

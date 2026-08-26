@@ -1,9 +1,11 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/api/message/message_action_store.dart';
 import 'dart:io';
 
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
-import 'package:tuikit_atomic_x/base_component/base_component.dart' hide AlertDialog;
+import 'package:tuikit_atomic_x/base_component/base_component.dart'
+    hide AlertDialog;
 import 'package:tuikit_atomic_x/device_info/device.dart';
 import 'package:tencent_chat_uikit/src/file_picker/file_picker.dart';
 import 'package:tencent_chat_uikit/src/message_list/message_list_config.dart';
@@ -19,6 +21,7 @@ class FileMessageWidget extends StatefulWidget {
   final GlobalKey? bubbleKey;
   final MessageListConfigProtocol config;
   final bool isInMergedDetailView;
+
   /// Optional override for bubble background color (used for highlight animation)
   final Color? bubbleColor;
 
@@ -39,7 +42,8 @@ class FileMessageWidget extends StatefulWidget {
   State<FileMessageWidget> createState() => _FileMessageWidgetState();
 }
 
-class _FileMessageWidgetState extends State<FileMessageWidget> with MessageStatusMixin {
+class _FileMessageWidgetState extends State<FileMessageWidget>
+    with MessageStatusMixin {
   bool _isDownloading = false;
 
   @override
@@ -56,9 +60,7 @@ class _FileMessageWidgetState extends State<FileMessageWidget> with MessageStatu
       _isDownloading = true;
     });
 
-    MessageActionStore.create(widget.message)
-        .downloadMedia()
-        .then((_) {
+    MessageActionStore.create(widget.message).downloadMedia().then((_) {
       if (mounted) {
         setState(() {
           _isDownloading = false;
@@ -76,7 +78,7 @@ class _FileMessageWidgetState extends State<FileMessageWidget> with MessageStatu
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
 
     final statusAndTimeWidgets = buildStatusAndTimeWidgets(
       message: widget.message,
@@ -102,7 +104,8 @@ class _FileMessageWidgetState extends State<FileMessageWidget> with MessageStatu
         ),
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
         child: Column(
-          crossAxisAlignment: widget.isSelf ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          crossAxisAlignment:
+              widget.isSelf ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
             _buildFileContent(colors),
             if (statusAndTimeWidgets.isNotEmpty)
@@ -120,8 +123,10 @@ class _FileMessageWidgetState extends State<FileMessageWidget> with MessageStatu
   }
 
   void _handleTap() async {
-    final String? filePath = (widget.message.messagePayload as FileMessagePayload?)?.filePath;
-    final bool isFileAvailable = filePath != null && filePath.isNotEmpty && File(filePath).existsSync();
+    final String? filePath =
+        (widget.message.messagePayload as FileMessagePayload?)?.filePath;
+    final bool isFileAvailable =
+        filePath != null && filePath.isNotEmpty && File(filePath).existsSync();
 
     if (!isFileAvailable && !_isDownloading) {
       _startDownload();
@@ -136,7 +141,8 @@ class _FileMessageWidgetState extends State<FileMessageWidget> with MessageStatu
       final int? sdkInt = await Device.sdkInt;
       if (sdkInt != null && sdkInt <= 32) {
         if (!mounted) return;
-        final bool granted = await Permission.checkAndRequest(context, [PermissionType.storage]);
+        final bool granted =
+            await Permission.checkAndRequest(context, [PermissionType.storage]);
         if (!granted) return;
       }
     }
@@ -149,10 +155,9 @@ class _FileMessageWidgetState extends State<FileMessageWidget> with MessageStatu
     }
   }
 
-
   /// Show error dialog
   void _showErrorDialog(BuildContext context, String message) {
-    AtomicLocalizations atomicLocal = AtomicLocalizations.of(context);
+    AppLocalizedText atomicLocal = AppLocalization.of(context);
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -171,12 +176,16 @@ class _FileMessageWidgetState extends State<FileMessageWidget> with MessageStatu
   }
 
   Widget _buildFileContent(SemanticColorScheme colorsTheme) {
-    final String fileName = (widget.message.messagePayload as FileMessagePayload?)?.fileName ?? '';
-    final int fileSize = (widget.message.messagePayload as FileMessagePayload?)?.fileSize ?? 0;
-    final String? filePath = (widget.message.messagePayload as FileMessagePayload?)?.filePath;
+    final String fileName =
+        (widget.message.messagePayload as FileMessagePayload?)?.fileName ?? '';
+    final int fileSize =
+        (widget.message.messagePayload as FileMessagePayload?)?.fileSize ?? 0;
+    final String? filePath =
+        (widget.message.messagePayload as FileMessagePayload?)?.filePath;
     final String? fileExt = _getFileExtension(fileName);
 
-    final bool isFileAvailable = filePath != null && filePath.isNotEmpty && File(filePath).existsSync();
+    final bool isFileAvailable =
+        filePath != null && filePath.isNotEmpty && File(filePath).existsSync();
 
     return Container(
       decoration: BoxDecoration(
@@ -203,7 +212,8 @@ class _FileMessageWidgetState extends State<FileMessageWidget> with MessageStatu
                       height: 20,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(colorsTheme.textColorAntiPrimary),
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                            colorsTheme.textColorAntiPrimary),
                       ),
                     )
                   : !isFileAvailable
@@ -228,7 +238,9 @@ class _FileMessageWidgetState extends State<FileMessageWidget> with MessageStatu
                 Text(
                   fileName,
                   style: FontScheme.caption2Medium.copyWith(
-                    color: widget.isSelf ? colorsTheme.textColorAntiPrimary : colorsTheme.textColorPrimary,
+                    color: widget.isSelf
+                        ? colorsTheme.textColorAntiPrimary
+                        : colorsTheme.textColorPrimary,
                   ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -241,7 +253,9 @@ class _FileMessageWidgetState extends State<FileMessageWidget> with MessageStatu
                           ? 'Tap to download'
                           : _formatFileSize(fileSize),
                   style: FontScheme.caption3Regular.copyWith(
-                    color: widget.isSelf ? colorsTheme.textColorAntiSecondary : colorsTheme.textColorSecondary,
+                    color: widget.isSelf
+                        ? colorsTheme.textColorAntiSecondary
+                        : colorsTheme.textColorSecondary,
                   ),
                 ),
               ],
@@ -276,7 +290,7 @@ class _FileMessageWidgetState extends State<FileMessageWidget> with MessageStatu
   }
 
   Color _getFileTypeColor(BuildContext context, String? fileExt) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
     return colorsTheme.buttonColorSecondaryHover;
   }
 

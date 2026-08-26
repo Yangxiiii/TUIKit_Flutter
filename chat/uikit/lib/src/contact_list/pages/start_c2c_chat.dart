@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart' hide IconButton;
@@ -15,7 +16,7 @@ class StartC2CChat extends StatefulWidget {
 class _StartC2CChatState extends State<StartC2CChat> {
   final ContactStore _contactStore = ContactStore.shared;
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
 
   @override
   void initState() {
@@ -26,8 +27,8 @@ class _StartC2CChatState extends State<StartC2CChat> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    colorsTheme = BaseThemeProvider.colorsOf(context);
-    atomicLocale = AtomicLocalizations.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
+    atomicLocale = AppLocalization.of(context);
   }
 
   Future<void> _loadData() async {
@@ -42,7 +43,8 @@ class _StartC2CChatState extends State<StartC2CChat> {
         backgroundColor: colorsTheme.bgColorOperate,
         scrolledUnderElevation: 0,
         leading: IconButton.buttonContent(
-          content: IconOnlyContent(Icon(Icons.arrow_back_ios, color: colorsTheme.buttonColorPrimaryDefault)),
+          content: IconOnlyContent(Icon(Icons.arrow_back_ios,
+              color: colorsTheme.buttonColorPrimaryDefault)),
           type: ButtonType.noBorder,
           size: ButtonSize.l,
           onClick: () => Navigator.of(context).pop(),
@@ -68,7 +70,9 @@ class _StartC2CChatState extends State<StartC2CChat> {
           final dataSource = friendList
               .map((contact) => AZOrderedListItem(
                     key: contact.userID,
-                    label: (contact.nickname?.isNotEmpty == true ? contact.nickname! : contact.userID),
+                    label: (contact.nickname?.isNotEmpty == true
+                        ? contact.nickname!
+                        : contact.userID),
                     avatarURL: contact.avatarURL,
                     extraData: contact,
                   ))

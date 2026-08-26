@@ -1,4 +1,4 @@
-import '../../common/language/gen/chat_localizations.dart';
+import 'package:app_ui/app_ui.dart';
 
 /// A TTS voice option (built-in default voice or a user cloned custom voice).
 class CustomVoiceItem {
@@ -28,8 +28,8 @@ const String kVoiceIdXiaoxinFemale = 'female-kefu-xiaoxin';
 const String kVoiceIdXiaoyueFemale = 'female-kefu-xiaoyue';
 
 /// Built-in default voice list: the "default" entry (empty voiceId) followed by
-/// the system voices. Names are resolved from [ChatLocalizations].
-List<CustomVoiceItem> defaultVoiceList(ChatLocalizations l) {
+/// the system voices. Names are resolved from [AppLocalizedText].
+List<CustomVoiceItem> defaultVoiceList(AppLocalizedText l) {
   return [
     CustomVoiceItem(voiceId: '', name: l.voiceDefault, isDefault: true),
     CustomVoiceItem(

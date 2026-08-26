@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
@@ -8,13 +9,13 @@ import 'package:atomic_x_core/impl/message/message_list_store_impl.dart';
 import 'package:atomic_x_core/impl/message/message_action_store_impl.dart';
 import 'package:flutter/material.dart' hide IconButton;
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:provider/provider.dart';
 import 'package:tuikit_atomic_x/album_picker/album_picker.dart';
 import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
 import 'package:tencent_chat_uikit/src/message_input/album_picker_media_send_manager.dart';
 import 'package:tencent_chat_uikit/src/message_input/utils/image_size_reader.dart';
 import 'package:tencent_chat_uikit/src/audio_recoder/audio_recorder.dart';
-import 'package:tuikit_atomic_x/base_component/base_component.dart' hide AlertDialog;
+import 'package:tuikit_atomic_x/base_component/base_component.dart'
+    hide AlertDialog;
 import 'package:tuikit_atomic_x/base_component/utils/tui_event_bus.dart';
 import 'package:tencent_chat_uikit/src/chat_setting/pages/group_member_picker.dart';
 import 'package:tencent_chat_uikit/src/emoji_picker/emoji_manager.dart';
@@ -22,6 +23,7 @@ import 'package:tencent_chat_uikit/src/emoji_picker/emoji_picker.dart';
 import 'package:tencent_chat_uikit/src/file_picker/file_picker.dart';
 import 'package:tencent_chat_uikit/src/message_input/src/chat_special_text_span_builder.dart';
 import 'package:tencent_chat_uikit/src/message_input/src/record_pointer_up_action.dart';
+import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
 import 'package:tencent_chat_uikit/src/third_party/extended_text_field/extended_text_field.dart';
 import 'package:tencent_chat_uikit/src/audio_player/audio_player_platform.dart';
 import 'package:tuikit_atomic_x/permission/permission.dart';
@@ -57,7 +59,8 @@ class MessageInput extends StatefulWidget {
   State<MessageInput> createState() => MessageInputState();
 }
 
-class MessageInputState extends State<MessageInput> with TickerProviderStateMixin {
+class MessageInputState extends State<MessageInput>
+    with TickerProviderStateMixin {
   /// Group conversation ID prefix
   static const String _groupConversationIDPrefix = 'group_';
 
@@ -67,8 +70,7 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
   final FocusNode _textEditingFocusNode = FocusNode();
   Widget stickerWidget = Container();
 
-  late AtomicLocalizations atomicLocale;
-  late LocaleProvider localeProvider;
+  late AppLocalizedText atomicLocale;
 
   Timer? _recordingStarter;
   bool _isWaitingToStartRecord = false;
@@ -79,6 +81,7 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
   /// If the timer fires while the pointer is still down, it's a long-press (→ start recording).
   Timer? _idleLongPressTimer;
   bool _isIdleLongPressing = false;
+
   /// Set when the idle long-press timer has fired (i.e. recording was triggered).
   /// Used to suppress the synthetic GestureDetector.onTap that Flutter still
   /// emits after a long press, so we don't accidentally switch into text mode
@@ -120,7 +123,7 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
 
   // Conversation info for offline push
   ConversationInfo? _conversationInfo;
-  
+
   late final _AlbumPickerMediaSendListenerImpl _albumPickerListener;
 
   // Quote reply state
@@ -129,7 +132,8 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
   @override
   void initState() {
     super.initState();
-    _messageInputStore = MessageInputStore.create(conversationID: widget.conversationID);
+    _messageInputStore =
+        MessageInputStore.create(conversationID: widget.conversationID);
     _conversationListStore = ConversationListStore.create();
     _albumPickerListener = _AlbumPickerMediaSendListenerImpl(this);
     AlbumPickerMediaSendManager.shared.restorePlaceholders(
@@ -141,7 +145,6 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
     _textEditingFocusNode.addListener(_onFocusChanged);
     _loadDraft();
     _extractGroupID();
-    _fetchConversationInfo();
   }
 
   /// Extract groupID from conversationID for group chats
@@ -175,7 +178,8 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
         _showMorePanel = false;
         needsRebuild = true;
       }
-      if (_inputMode == _InputMode.text && _textEditingController.text.isEmpty) {
+      if (_inputMode == _InputMode.text &&
+          _textEditingController.text.isEmpty) {
         _inputMode = _InputMode.idle;
         needsRebuild = true;
       }
@@ -215,7 +219,7 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
   /// This is called when user long presses on another member's avatar in the message list
   void insertMention({required String userID, required String displayName}) {
     if (!_isGroupChat) return;
-    
+
     // Don't allow mentioning self
     final currentUserID = LoginStore.shared.loginState.loginUserInfo?.userID;
     if (userID == currentUserID) return;
@@ -292,15 +296,6 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
     });
   }
 
-  Future<void> _fetchConversationInfo() async {
-    final result = await _conversationListStore.getConversationInfo(
-      conversationID: widget.conversationID,
-    );
-    if (result.isSuccess && result.conversationInfo != null) {
-      _conversationInfo = result.conversationInfo;
-    }
-  }
-
   @override
   void dispose() {
     _removeRecordOverlay();
@@ -321,7 +316,8 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
       conversationID: widget.conversationID,
     );
     if (result.isSuccess && result.conversationInfo != null) {
-      final draft = result.conversationInfo!.draft;
+      _conversationInfo = result.conversationInfo;
+      final draft = _conversationInfo!.draft;
       if (draft != null && draft.isNotEmpty) {
         _setDraftToInput(draft);
       }
@@ -425,25 +421,26 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
     if (_groupID == null) return;
     _isMentionPickerShowing = true;
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => MentionMemberPicker(
-          groupID: _groupID!,
-          onMembersSelected: _onMembersSelected,
-          onCancel: () {
-            _isMentionPickerShowing = false;
-            // Keep the '@' character when cancelled (per spec requirement)
-            // No action needed - '@' remains in input
-          },
-        ),
+    context
+        .pushChatUIKitPage(
+      MentionMemberPicker(
+        groupID: _groupID!,
+        onMembersSelected: _onMembersSelected,
+        onCancel: () {
+          _isMentionPickerShowing = false;
+          // Keep the '@' character when cancelled (per spec requirement)
+          // No action needed - '@' remains in input
+        },
       ),
-    ).then((_) {
+    )
+        .then((_) {
       _isMentionPickerShowing = false;
       // After the picker route pops (whether by selecting members or by
       // cancelling), restore the input state so the typed text is visible
       // and the keyboard pops back up for continued editing.
       if (!mounted) return;
-      if (_textEditingController.text.isNotEmpty && _inputMode != _InputMode.voice) {
+      if (_textEditingController.text.isNotEmpty &&
+          _inputMode != _InputMode.voice) {
         if (_inputMode != _InputMode.text) {
           setState(() {
             _inputMode = _InputMode.text;
@@ -483,17 +480,18 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
 
     // Remove the triggering '@' character - use atPos + 1 to skip the '@'
     final beforeAt = text.substring(0, atPos);
-    final afterAt = text.substring(atPos + 1); // Skip the '@' that triggered the picker
+    final afterAt =
+        text.substring(atPos + 1); // Skip the '@' that triggered the picker
 
     // Build the mention text to insert (each mention includes its own '@')
     final StringBuffer mentionBuffer = StringBuffer();
     int currentPos = atPos;
-    
+
     for (int i = 0; i < mentions.length; i++) {
       final mention = mentions[i];
       final mentionText = mention.mentionText; // "@displayName "
       mentionBuffer.write(mentionText);
-      
+
       // Update mention with correct position and add to controller
       final updatedMention = mention.copyWith(startIndex: currentPos);
       _textEditingController.addMention(updatedMention);
@@ -501,7 +499,7 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
     }
 
     final newText = '$beforeAt$mentionBuffer$afterAt';
-    
+
     // Temporarily disable listener and mark as internal update to prevent
     // the value setter from incorrectly adjusting mention positions
     _textEditingController.removeListener(_onTextChanged);
@@ -532,7 +530,8 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
           if (_textEditingController.text == "") {
             space = " ";
           }
-          _textEditingController.text = "$space${_textEditingController.text}${data["name"]}";
+          _textEditingController.text =
+              "$space${_textEditingController.text}${data["name"]}";
         }
       }
     }
@@ -546,16 +545,17 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
     final targetPos = cursorPos == -1 ? text.length : cursorPos;
 
     // First check if we're deleting a mention (cursor at end or inside)
-    MentionInfo? mentionToDelete = _textEditingController.getMentionEndingAt(targetPos);
+    MentionInfo? mentionToDelete =
+        _textEditingController.getMentionEndingAt(targetPos);
     mentionToDelete ??= _textEditingController.getMentionAt(targetPos);
-    
+
     if (mentionToDelete != null) {
       // Delete the entire mention
       _textEditingController._isInternalUpdate = true;
-      final newText = text.substring(0, mentionToDelete.startIndex) + 
-                      text.substring(mentionToDelete.endIndex);
+      final newText = text.substring(0, mentionToDelete.startIndex) +
+          text.substring(mentionToDelete.endIndex);
       _textEditingController._mentions.remove(mentionToDelete);
-      
+
       // Update positions of mentions after the removed one
       final removedLength = mentionToDelete.length;
       for (final m in _textEditingController._mentions) {
@@ -563,7 +563,7 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
           m.startIndex -= removedLength;
         }
       }
-      
+
       _textEditingController.value = TextEditingValue(
         text: newText,
         selection: TextSelection.collapsed(offset: mentionToDelete.startIndex),
@@ -577,7 +577,8 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
       final deletedLength = text.length - deletedText.length;
       _textEditingController.text = deletedText;
 
-      final newCursorPos = (targetPos - deletedLength).clamp(0, deletedText.length);
+      final newCursorPos =
+          (targetPos - deletedLength).clamp(0, deletedText.length);
       _textEditingController.selection = TextSelection.fromPosition(
         TextPosition(offset: newCursorPos),
       );
@@ -649,13 +650,13 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
 
     final result = await _sendMessage(messageInfo);
     if (!result.isSuccess) {
-      debugPrint("_handleTextSendMessagePayload, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}");
+      debugPrint(
+          "_handleTextSendMessagePayload, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}");
     }
   }
-  
+
   void _onPickAlbum() async {
-    final themeState = BaseThemeProvider.of(context);
-    final locale = localeProvider.locale;
+    final locale = Localizations.localeOf(context);
 
     AlbumPickerConfig config = AlbumPickerConfig(
       mediaFilter: AlbumPickerMediaFilter.imageAndVideo,
@@ -667,9 +668,7 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
     );
 
     AlbumPickerTheme theme = AlbumPickerTheme(
-      primaryColor: themeState.hasCustomPrimaryColor
-          ? _hexToColor(themeState.currentPrimaryColor)
-          : null,
+      primaryColor: Theme.of(context).colorScheme.primary,
     );
 
     try {
@@ -682,15 +681,6 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
     } catch (e) {
       debugPrint("_onPickAlbum error: $e");
     }
-  }
-
-  Color? _hexToColor(String? hex) {
-    if (hex == null || hex.isEmpty) return null;
-    final cleaned = hex.replaceFirst('#', '');
-    if (cleaned.length != 6) return null;
-    final value = int.tryParse(cleaned, radix: 16);
-    if (value == null) return null;
-    return Color(0xFF000000 | value);
   }
 
   AlbumPickerLanguage _localeToAlbumPickerLanguage(Locale? locale) {
@@ -708,7 +698,9 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
   Future<CompletionHandler> _sendMessage(MessageInfo messageInfo) async {
     final payload = _convertToSendPayload(messageInfo.messagePayload);
     if (payload == null) {
-      return CompletionHandler()..errorCode = -1..errorMessage = "Unsupported payload";
+      return CompletionHandler()
+        ..errorCode = -1
+        ..errorMessage = "Unsupported payload";
     }
 
     // If quoting a message, set quoteInfo on the outgoing message
@@ -725,13 +717,15 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
     }
 
     final option = SendMessageOption(
-      atUserList: messageInfo.atUserList.isNotEmpty ? messageInfo.atUserList : null,
+      atUserList:
+          messageInfo.atUserList.isNotEmpty ? messageInfo.atUserList : null,
       quotedMessage: quotedMsg,
       needReadReceipt: widget.config.enableReadReceipt,
       offlinePushInfo: _createOfflinePushInfo(messageInfo),
     );
 
-    final result = await _messageInputStore.sendMessage(payload: payload, option: option);
+    final result =
+        await _messageInputStore.sendMessage(payload: payload, option: option);
     if (!result.isSuccess) {
       if (mounted) {
         Toast.error(context, atomicLocale.sendMessageFail);
@@ -747,7 +741,8 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
   void _sendPlaceholderMessage(MessageInfo placeholder) {
     notificationCenter.post(
       MessageSendNotifyKey.messageSendBegin,
-      MessageSendEventData(conversationID: widget.conversationID, message: placeholder),
+      MessageSendEventData(
+          conversationID: widget.conversationID, message: placeholder),
     );
   }
 
@@ -773,15 +768,22 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
         );
       case VideoMessagePayload p:
         return VideoSendMessagePayload(
-          videoFilePath: p.videoPath ?? '', videoType: p.videoType ?? '',
-          duration: p.videoDuration, snapshotPath: p.videoSnapshotPath ?? '',
+          videoFilePath: p.videoPath ?? '',
+          videoType: p.videoType ?? '',
+          duration: p.videoDuration,
+          snapshotPath: p.videoSnapshotPath ?? '',
         );
       case AudioMessagePayload p:
-        return AudioSendMessagePayload(audioFilePath: p.audioPath ?? '', duration: p.audioDuration);
+        return AudioSendMessagePayload(
+            audioFilePath: p.audioPath ?? '', duration: p.audioDuration);
       case FileMessagePayload p:
-        return FileSendMessagePayload(filePath: p.filePath ?? '', fileName: p.fileName ?? '', fileSize: p.fileSize);
+        return FileSendMessagePayload(
+            filePath: p.filePath ?? '',
+            fileName: p.fileName ?? '',
+            fileSize: p.fileSize);
       case FaceMessagePayload p:
-        return FaceSendMessagePayload(index: p.faceIndex, data: p.faceData ?? '');
+        return FaceSendMessagePayload(
+            index: p.faceIndex, data: p.faceData ?? '');
       case CustomMessagePayload p:
         return CustomSendMessagePayload(
           customData: p.customData,
@@ -799,7 +801,9 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
   OfflinePushInfo _createOfflinePushInfo(MessageInfo message) {
     final conversationID = widget.conversationID;
     final isGroup = conversationID.startsWith(_groupConversationIDPrefix);
-    final groupId = isGroup ? conversationID.substring(_groupConversationIDPrefix.length) : '';
+    final groupId = isGroup
+        ? conversationID.substring(_groupConversationIDPrefix.length)
+        : '';
 
     final loginUserInfo = LoginStore.shared.loginState.loginUserInfo;
     final selfUserId = loginUserInfo?.userID ?? '';
@@ -846,7 +850,8 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
     switch (message.messageType) {
       case MessageType.text:
         // Convert emoji codes to localized names
-        content = EmojiManager.createLocalizedStringFromEmojiCodes(context, (message.messagePayload as TextMessagePayload?)?.text ?? '');
+        content = EmojiManager.createLocalizedStringFromEmojiCodes(context,
+            (message.messagePayload as TextMessagePayload?)?.text ?? '');
         break;
       case MessageType.image:
         content = atomicLocale.messageTypeImage;
@@ -945,7 +950,8 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
       );
       final result = await _sendMessage(messageInfo);
       if (!result.isSuccess) {
-        debugPrint("_onPickFile, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}");
+        debugPrint(
+            "_onPickFile, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}");
       }
     }
   }
@@ -966,11 +972,9 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
       participantIds = [ChatUtil.getUserID(widget.conversationID)];
     } else {
       chatGroupId = groupID;
-      final selectedMembers = await Navigator.push<List<UserPickerData>>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => GroupMemberPicker(groupID: groupID),
-        ),
+      final selectedMembers =
+          await context.pushChatUIKitPage<List<UserPickerData>>(
+        GroupMemberPicker(groupID: groupID),
       );
       if (selectedMembers == null || selectedMembers.isEmpty) {
         // User cancelled the picker — abort the call.
@@ -996,9 +1000,7 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
       VideoRecorderResult result = await VideoRecorder.startRecord(
         context: context,
         config: const VideoRecorderConfig(
-          recordMode: RecordMode.mixed,
-          minDurationMs: 500
-        ),
+            recordMode: RecordMode.mixed, minDurationMs: 500),
       );
 
       if (result.filePath.isEmpty) {
@@ -1021,13 +1023,16 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
           videoPath: result.filePath,
           videoSnapshotPath: result.thumbnailPath,
           videoType: result.filePath.split('.').last,
-          videoDuration: (result.durationMs != null) ? (result.durationMs! / 1000).round() : 0,
+          videoDuration: (result.durationMs != null)
+              ? (result.durationMs! / 1000).round()
+              : 0,
         );
       }
 
       final sendResult = await _sendMessage(messageInfo);
       if (!sendResult.isSuccess) {
-        debugPrint("_onTakeVideo, errorCode:${sendResult.errorCode}, errorMessage:${sendResult.errorMessage}");
+        debugPrint(
+            "_onTakeVideo, errorCode:${sendResult.errorCode}, errorMessage:${sendResult.errorMessage}");
       }
     } catch (e) {
       debugPrint("_onTakeVideo error: $e");
@@ -1057,7 +1062,8 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
       );
       final sendResult = await _sendMessage(messageInfo);
       if (!sendResult.isSuccess) {
-        debugPrint("_onTakePhoto, errorCode:${sendResult.errorCode}, errorMessage:${sendResult.errorMessage}");
+        debugPrint(
+            "_onTakePhoto, errorCode:${sendResult.errorCode}, errorMessage:${sendResult.errorMessage}");
       }
     } catch (e) {
       debugPrint("_onTakePhoto error: $e");
@@ -1070,8 +1076,8 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
     // Capture inherited dependencies from current context before creating
     // the OverlayEntry, since the overlay lives in a different widget subtree
     // and cannot look up these InheritedWidgets.
-    final colorScheme = BaseThemeProvider.colorsOf(context);
-    final atomicLocalizations = AtomicLocalizations.of(context);
+    final colorScheme = SemanticColorScheme.of(context);
+    final atomicLocalizations = AppLocalization.of(context);
     final overlay = Overlay.of(context);
     final enableConvert = widget.config.enableVoiceToTextOnRecord;
 
@@ -1091,7 +1097,8 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
               if (_pendingConvertRecord) {
                 _pendingConvertRecord = false;
                 if (recordInfo.errorCode == AudioRecordResultCode.success ||
-                    recordInfo.errorCode == AudioRecordResultCode.successExceedMaxDuration) {
+                    recordInfo.errorCode ==
+                        AudioRecordResultCode.successExceedMaxDuration) {
                   _recordOverlayKey.currentState
                       ?.enterConverting(recordInfo.path, recordInfo.duration);
                   return;
@@ -1124,7 +1131,8 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
 
   void _onAudioRecorderFinished(RecordInfo recordInfo) async {
     if (recordInfo.errorCode != AudioRecordResultCode.success &&
-        recordInfo.errorCode != AudioRecordResultCode.successExceedMaxDuration) {
+        recordInfo.errorCode !=
+            AudioRecordResultCode.successExceedMaxDuration) {
       debugPrint("_onAudioRecorderFinished, errorCode:${recordInfo.errorCode}");
       return;
     }
@@ -1138,7 +1146,8 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
 
     final result = await _sendMessage(messageInfo);
     if (!result.isSuccess) {
-      debugPrint("_onRecordFinish, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}");
+      debugPrint(
+          "_onRecordFinish, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}");
     }
   }
 
@@ -1236,8 +1245,10 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
       });
     } else {
       final overlayState = _recordOverlayKey.currentState;
-      final overCancel = overlayState?.isPointerOverCancelButton(event.position) ?? false;
-      final overConvert = overlayState?.isPointerOverConvertButton(event.position) ?? false;
+      final overCancel =
+          overlayState?.isPointerOverCancelButton(event.position) ?? false;
+      final overConvert =
+          overlayState?.isPointerOverConvertButton(event.position) ?? false;
       final action = recordPointerUpAction(
         overCancel: overCancel,
         overConvert: overConvert,
@@ -1336,7 +1347,8 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
 
     // Each page shows 2 rows × 4 columns = 8 items max
     const int itemsPerPage = 8;
-    final int pageCount = items.isEmpty ? 0 : (items.length / itemsPerPage).ceil();
+    final int pageCount =
+        items.isEmpty ? 0 : (items.length / itemsPerPage).ceil();
 
     return Container(
       color: colorsTheme.bgColorInput,
@@ -1358,7 +1370,8 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
                     },
                     itemBuilder: (context, pageIndex) {
                       final startIndex = pageIndex * itemsPerPage;
-                      final endIndex = (startIndex + itemsPerPage).clamp(0, items.length);
+                      final endIndex =
+                          (startIndex + itemsPerPage).clamp(0, items.length);
                       final pageItems = items.sublist(startIndex, endIndex);
 
                       // Each item row: icon 64 + spacing 8 + text ~14 = ~86pt
@@ -1367,8 +1380,9 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
 
                       return LayoutBuilder(
                         builder: (context, constraints) {
-                          final topPadding = ((constraints.maxHeight - twoRowHeight) / 2)
-                              .clamp(8.0, double.infinity);
+                          final topPadding =
+                              ((constraints.maxHeight - twoRowHeight) / 2)
+                                  .clamp(8.0, double.infinity);
                           return Padding(
                             padding: EdgeInsets.only(
                               left: 24,
@@ -1411,7 +1425,8 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
   }
 
   /// Build a single page of the more panel grid (up to 2 rows × 4 columns)
-  Widget _buildMorePanelPage(List<_MorePanelItem> pageItems, SemanticColorScheme colorsTheme) {
+  Widget _buildMorePanelPage(
+      List<_MorePanelItem> pageItems, SemanticColorScheme colorsTheme) {
     const int columns = 4;
     // Split items into rows of 4
     final List<List<_MorePanelItem>> rows = [];
@@ -1432,7 +1447,8 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
               children: [
                 for (int colIndex = 0; colIndex < columns; colIndex++)
                   if (colIndex < rows[rowIndex].length)
-                    _buildMorePanelItemWidget(rows[rowIndex][colIndex], colorsTheme)
+                    _buildMorePanelItemWidget(
+                        rows[rowIndex][colIndex], colorsTheme)
                   else
                     const SizedBox(width: 64), // Placeholder for grid alignment
               ],
@@ -1444,7 +1460,8 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
   }
 
   /// Build a single action item widget in the more panel
-  Widget _buildMorePanelItemWidget(_MorePanelItem item, SemanticColorScheme colorsTheme) {
+  Widget _buildMorePanelItemWidget(
+      _MorePanelItem item, SemanticColorScheme colorsTheme) {
     return GestureDetector(
       onTap: item.onTap,
       child: SizedBox(
@@ -1491,13 +1508,11 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
   @override
   Widget build(BuildContext context) {
     _bottomPadding = MediaQuery.paddingOf(context).bottom;
-    atomicLocale = AtomicLocalizations.of(context);
-    localeProvider = Provider.of<LocaleProvider>(context);
-
+    atomicLocale = AppLocalization.of(context);
     final panelHeight = _getBottomContainerHeight();
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
-        final colors = BaseThemeProvider.colorsOf(context);
+        final colors = SemanticColorScheme.of(context);
         return Column(
           children: [
             _buildInputWidget(colors),
@@ -1512,14 +1527,15 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
               clipBehavior: Clip.hardEdge,
               decoration: BoxDecoration(color: colors.bgColorInput),
               height: panelHeight,
-              constraints: (_showEmojiPanel || _showMorePanel) 
-                  ? BoxConstraints(minHeight: panelHeight) 
+              constraints: (_showEmojiPanel || _showMorePanel)
+                  ? BoxConstraints(minHeight: panelHeight)
                   : null,
               child: _showEmojiPanel
                   ? Center(
                       child: FutureBuilder<bool>(
                         future: getEmojiPanelWidget(),
-                        builder: (BuildContext context, AsyncSnapshot<bool> snapshot) {
+                        builder: (BuildContext context,
+                            AsyncSnapshot<bool> snapshot) {
                           return stickerWidget;
                         },
                       ),
@@ -1543,15 +1559,9 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
     return true;
   }
 
-  /// WeChat-style input bar layout (aligned to Figma spec):
-  /// [Voice/Keyboard toggle] [Input field / Hold-to-talk] [Emoji] [More / Send]
+  /// 按微信风格排列语音切换、输入区、表情和更多操作。
   ///
-  /// Figma spec (750px canvas = 2x, all values in logical pt):
-  /// - Bar background: #EBF0F6, top shadow: 0px -2px #E6E9EB (via divider)
-  /// - Horizontal padding: ~16pt, vertical padding: 8pt
-  /// - Icon size: 26pt (52px@2x), input height: 34pt (68px@2x)
-  /// - Input field bg: white, border-radius: 4pt (8px@2x)
-  /// - Gap between icon and input: ~10pt
+  /// 输入栏使用聊天背景色，内部输入区使用页面操作面颜色以保持明暗主题可读。
   Widget _buildInputWidget(SemanticColorScheme colorsTheme) {
     return Container(
       color: colorsTheme.bgColorInput,
@@ -1560,70 +1570,18 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                // Left: Voice / Keyboard toggle button (28×28pt icon)
-                // SizedBox height matches input field minHeight so button is
-                // vertically centered when single-line, and stays at bottom when multi-line.
-                if (widget.config.isShowAudioRecorder)
-                  SizedBox(
-                    height: 34,
-                    child: Center(
-                      child: GestureDetector(
-                        onTap: _toggleVoiceMode,
-                        child: _inputMode == _InputMode.voice
-                            ? SvgPicture.asset(
-                                'chat_assets/icon/keyboard.svg',
-                                package: 'tencent_chat_uikit',
-                                colorFilter: ColorFilter.mode(
-                                  colorsTheme.textColorPrimary,
-                                  BlendMode.srcIn,
-                                ),
-                                width: 26,
-                                height: 26,
-                              )
-                            : SvgPicture.asset(
-                                'chat_assets/icon/mic.svg',
-                                package: 'tencent_chat_uikit',
-                                colorFilter: ColorFilter.mode(
-                                  colorsTheme.textColorPrimary,
-                                  BlendMode.srcIn,
-                                ),
-                                width: 26,
-                                height: 26,
-                              ),
-                      ),
-                    ),
-                  ),
-                // Gap: 10pt between voice icon and input field
-                const SizedBox(width: 10),
-
-                // Middle: Input field or "Hold to talk" button
-                Expanded(
-                  child: _inputMode == _InputMode.voice
-                      ? _buildHoldToTalkButton(colorsTheme)
-                      : _inputMode == _InputMode.idle
-                          ? _buildIdleInputArea(colorsTheme)
-                          : Container(
-                              constraints: const BoxConstraints(minHeight: 34),
-                              decoration: BoxDecoration(
-                                color: colorsTheme.textColorButtonDisabled,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: _buildInputTextField(colorsTheme: colorsTheme),
-                            ),
-                ),
-
-                // Gap: 10pt between input field and emoji icon
-                const SizedBox(width: 10),
-
-                // Right: Emoji button (28×28pt icon)
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              // Left: Voice / Keyboard toggle button (28×28pt icon)
+              // SizedBox height matches input field minHeight so button is
+              // vertically centered when single-line, and stays at bottom when multi-line.
+              if (widget.config.isShowAudioRecorder)
                 SizedBox(
                   height: 34,
                   child: Center(
                     child: GestureDetector(
-                      onTap: _toggleEmojiPanel,
-                      child: _showEmojiPanel
+                      onTap: _toggleVoiceMode,
+                      child: _inputMode == _InputMode.voice
                           ? SvgPicture.asset(
                               'chat_assets/icon/keyboard.svg',
                               package: 'tencent_chat_uikit',
@@ -1631,11 +1589,11 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
                                 colorsTheme.textColorPrimary,
                                 BlendMode.srcIn,
                               ),
-                              width: 28,
-                              height: 28,
+                              width: 26,
+                              height: 26,
                             )
                           : SvgPicture.asset(
-                              'chat_assets/icon/emoji.svg',
+                              'chat_assets/icon/mic.svg',
                               package: 'tencent_chat_uikit',
                               colorFilter: ColorFilter.mode(
                                 colorsTheme.textColorPrimary,
@@ -1647,35 +1605,88 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
                     ),
                   ),
                 ),
+              // Gap: 10pt between voice icon and input field
+              const SizedBox(width: 10),
 
-                // Gap: 10pt between emoji and more/send
-                const SizedBox(width: 10),
+              // Middle: Input field or "Hold to talk" button
+              Expanded(
+                child: _inputMode == _InputMode.voice
+                    ? _buildHoldToTalkButton(colorsTheme)
+                    : _inputMode == _InputMode.idle
+                        ? _buildIdleInputArea(colorsTheme)
+                        : Container(
+                            constraints: const BoxConstraints(minHeight: 34),
+                            decoration: BoxDecoration(
+                              color: colorsTheme.bgColorOperate,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child:
+                                _buildInputTextField(colorsTheme: colorsTheme),
+                          ),
+              ),
 
-                // Right: More button or Send button (28×28pt icon)
-                SizedBox(
-                  height: 34,
-                  child: Center(
-                    child: _showSendButton && _inputMode != _InputMode.voice
-                        ? _buildSendButton(colorsTheme)
-                        : widget.config.isShowMore
-                            ? GestureDetector(
-                                onTap: _toggleMorePanel,
-                                child: SvgPicture.asset(
-                                  'chat_assets/icon/add.svg',
-                                  package: 'tencent_chat_uikit',
-                                  colorFilter: ColorFilter.mode(
-                                    colorsTheme.textColorPrimary,
-                                    BlendMode.srcIn,
-                                  ),
-                                  width: 26,
-                                  height: 26,
-                                ),
-                              )
-                            : const SizedBox.shrink(),
+              // Gap: 10pt between input field and emoji icon
+              const SizedBox(width: 10),
+
+              // Right: Emoji button (28×28pt icon)
+              SizedBox(
+                height: 34,
+                child: Center(
+                  child: GestureDetector(
+                    onTap: _toggleEmojiPanel,
+                    child: _showEmojiPanel
+                        ? SvgPicture.asset(
+                            'chat_assets/icon/keyboard.svg',
+                            package: 'tencent_chat_uikit',
+                            colorFilter: ColorFilter.mode(
+                              colorsTheme.textColorPrimary,
+                              BlendMode.srcIn,
+                            ),
+                            width: 28,
+                            height: 28,
+                          )
+                        : SvgPicture.asset(
+                            'chat_assets/icon/emoji.svg',
+                            package: 'tencent_chat_uikit',
+                            colorFilter: ColorFilter.mode(
+                              colorsTheme.textColorPrimary,
+                              BlendMode.srcIn,
+                            ),
+                            width: 26,
+                            height: 26,
+                          ),
                   ),
                 ),
-              ],
-            ),
+              ),
+
+              // Gap: 10pt between emoji and more/send
+              const SizedBox(width: 10),
+
+              // Right: More button or Send button (28×28pt icon)
+              SizedBox(
+                height: 34,
+                child: Center(
+                  child: _showSendButton && _inputMode != _InputMode.voice
+                      ? _buildSendButton(colorsTheme)
+                      : widget.config.isShowMore
+                          ? GestureDetector(
+                              onTap: _toggleMorePanel,
+                              child: SvgPicture.asset(
+                                'chat_assets/icon/add.svg',
+                                package: 'tencent_chat_uikit',
+                                colorFilter: ColorFilter.mode(
+                                  colorsTheme.textColorPrimary,
+                                  BlendMode.srcIn,
+                                ),
+                                width: 26,
+                                height: 26,
+                              ),
+                            )
+                          : const SizedBox.shrink(),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -1720,8 +1731,7 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
     }
   }
 
-  /// Build the "Hold to talk" button for voice recording
-  /// Height: 34pt, bg: white, border-radius: 4pt (aligned to Figma input field spec)
+  /// 构建与文本输入区同色的按住说话按钮。
   Widget _buildHoldToTalkButton(SemanticColorScheme colorsTheme) {
     return Listener(
       onPointerDown: _onStartRecording,
@@ -1733,7 +1743,7 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
       child: Container(
         height: 34,
         decoration: BoxDecoration(
-          color: colorsTheme.textColorButtonDisabled,
+          color: colorsTheme.bgColorOperate,
           borderRadius: BorderRadius.circular(4),
         ),
         child: Center(
@@ -1748,9 +1758,7 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
     );
   }
 
-  /// Build the idle-mode input area.
-  /// - Tap: switch to text mode and show keyboard (via GestureDetector to win arena over parent).
-  /// - Long press (pointer held > 200ms): start recording directly (stay in idle mode).
+  /// 构建空闲输入区：点击进入文本模式，长按超过 200ms 直接录音。
   Widget _buildIdleInputArea(SemanticColorScheme colorsTheme) {
     return GestureDetector(
       onTap: () {
@@ -1808,13 +1816,14 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
         },
         onPointerMove: (PointerMoveEvent event) {
           if (_isIdleLongPressing) {
-            _recordOverlayKey.currentState?.updatePointerPosition(event.position);
+            _recordOverlayKey.currentState
+                ?.updatePointerPosition(event.position);
           }
         },
         child: Container(
           constraints: const BoxConstraints(minHeight: 34),
           decoration: BoxDecoration(
-            color: colorsTheme.textColorButtonDisabled,
+            color: colorsTheme.bgColorOperate,
             borderRadius: BorderRadius.circular(4),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
@@ -1877,7 +1886,6 @@ class MessageInputState extends State<MessageInput> with TickerProviderStateMixi
 
     return _bottomPadding;
   }
-
 }
 
 /// Custom TextEditingController that manages mention ranges
@@ -1941,7 +1949,9 @@ class _MentionTextEditingController extends TextEditingController {
   int getAnchorPosition(MentionInfo mention, int position) {
     final distanceToStart = position - mention.startIndex;
     final distanceToEnd = mention.endIndex - position;
-    return distanceToStart <= distanceToEnd ? mention.startIndex : mention.endIndex;
+    return distanceToStart <= distanceToEnd
+        ? mention.startIndex
+        : mention.endIndex;
   }
 
   @override
@@ -1953,7 +1963,7 @@ class _MentionTextEditingController extends TextEditingController {
 
     final oldText = text;
     final newText = newValue.text;
-    
+
     // Skip if no text change
     if (oldText == newText) {
       super.value = newValue;
@@ -1961,14 +1971,14 @@ class _MentionTextEditingController extends TextEditingController {
     }
 
     final delta = newText.length - oldText.length;
-    
+
     // Handle deletion
     if (delta < 0) {
       final cursorPos = newValue.selection.baseOffset;
       // The deletion happened at cursorPos, and deleted (-delta) characters
       final deleteStart = cursorPos;
       final deleteEnd = cursorPos - delta; // This is the position in old text
-      
+
       // Check if the deletion affects any mention
       // We need to find if any mention overlaps with [deleteStart, deleteEnd) in old text
       MentionInfo? affectedMention;
@@ -1979,18 +1989,18 @@ class _MentionTextEditingController extends TextEditingController {
           break;
         }
       }
-      
+
       if (affectedMention != null) {
         // Delete the entire mention
         _isInternalUpdate = true;
-        
+
         final beforeMention = oldText.substring(0, affectedMention.startIndex);
         final afterMention = oldText.substring(affectedMention.endIndex);
         final updatedText = '$beforeMention$afterMention';
-        
+
         // Remove the mention from list
         _mentions.remove(affectedMention);
-        
+
         // Update positions of mentions after the removed one
         final removedLength = affectedMention.length;
         for (final m in _mentions) {
@@ -1998,16 +2008,17 @@ class _MentionTextEditingController extends TextEditingController {
             m.startIndex -= removedLength;
           }
         }
-        
+
         super.value = TextEditingValue(
           text: updatedText,
-          selection: TextSelection.collapsed(offset: affectedMention.startIndex),
+          selection:
+              TextSelection.collapsed(offset: affectedMention.startIndex),
         );
-        
+
         _isInternalUpdate = false;
         return;
       }
-      
+
       // No mention affected, update mention positions normally
       for (final mention in _mentions) {
         if (mention.startIndex >= deleteEnd) {
@@ -2023,7 +2034,7 @@ class _MentionTextEditingController extends TextEditingController {
         }
       }
     }
-    
+
     super.value = newValue;
   }
 }
@@ -2078,15 +2089,17 @@ class _MentionTextFieldState extends State<_MentionTextField> {
       final mention = widget.controller.getMentionContaining(selStart);
       if (mention != null) {
         // Jump to nearest boundary
-        final anchorPos = widget.controller.getAnchorPosition(mention, selStart);
-        
+        final anchorPos =
+            widget.controller.getAnchorPosition(mention, selStart);
+
         // Only adjust if cursor is actually inside the mention (not at boundary)
         if (selStart != anchorPos) {
           _isAdjustingSelection = true;
           // Use microtask to ensure adjustment happens immediately but after current event
           Future.microtask(() {
             if (mounted) {
-              widget.controller.selection = TextSelection.collapsed(offset: anchorPos);
+              widget.controller.selection =
+                  TextSelection.collapsed(offset: anchorPos);
             }
             _isAdjustingSelection = false;
           });
@@ -2115,7 +2128,8 @@ class _MentionTextFieldState extends State<_MentionTextField> {
         _isAdjustingSelection = true;
         Future.microtask(() {
           if (mounted) {
-            widget.controller.selection = TextSelection(baseOffset: newStart, extentOffset: newEnd);
+            widget.controller.selection =
+                TextSelection(baseOffset: newStart, extentOffset: newEnd);
           }
           _isAdjustingSelection = false;
         });
@@ -2169,7 +2183,8 @@ class _MorePanelItem {
 
 // MARK: - AlbumPickerMediaSendListener Implementation
 
-class _AlbumPickerMediaSendListenerImpl implements AlbumPickerMediaSendListener {
+class _AlbumPickerMediaSendListenerImpl
+    implements AlbumPickerMediaSendListener {
   final MessageInputState _state;
 
   _AlbumPickerMediaSendListenerImpl(this._state);
@@ -2178,7 +2193,8 @@ class _AlbumPickerMediaSendListenerImpl implements AlbumPickerMediaSendListener 
   void onSendMessage(MessageInfo messageInfo) {
     _state._sendMessage(messageInfo).then((result) {
       if (!result.isSuccess) {
-        debugPrint("AlbumPicker onSendMessage failed: ${result.errorCode}, ${result.errorMessage}");
+        debugPrint(
+            "AlbumPicker onSendMessage failed: ${result.errorCode}, ${result.errorMessage}");
       }
     });
   }

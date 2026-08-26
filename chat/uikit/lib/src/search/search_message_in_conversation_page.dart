@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
@@ -25,16 +26,18 @@ class SearchMessageInConversationPage extends StatefulWidget {
   });
 
   @override
-  State<SearchMessageInConversationPage> createState() => _SearchMessageInConversationPageState();
+  State<SearchMessageInConversationPage> createState() =>
+      _SearchMessageInConversationPageState();
 }
 
-class _SearchMessageInConversationPageState extends State<SearchMessageInConversationPage> {
+class _SearchMessageInConversationPageState
+    extends State<SearchMessageInConversationPage> {
   late SearchStore _searchStore;
   late final TextEditingController _textEditingController;
   final FocusNode _focusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
   late SemanticColorScheme _colorScheme;
-  late AtomicLocalizations _atomicLocale;
+  late AppLocalizedText _atomicLocale;
   bool _isSearching = false;
   bool _isLoadingMore = false;
 
@@ -50,8 +53,8 @@ class _SearchMessageInConversationPageState extends State<SearchMessageInConvers
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _colorScheme = BaseThemeProvider.colorsOf(context);
-    _atomicLocale = AtomicLocalizations.of(context);
+    _colorScheme = SemanticColorScheme.of(context);
+    _atomicLocale = AppLocalization.of(context);
   }
 
   @override
@@ -63,7 +66,9 @@ class _SearchMessageInConversationPageState extends State<SearchMessageInConvers
   }
 
   void _onScroll() {
-    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200 && !_isLoadingMore) {
+    if (_scrollController.position.pixels >=
+            _scrollController.position.maxScrollExtent - 200 &&
+        !_isLoadingMore) {
       if (!_searchStore.state.hasMoreMessageResults.value) return;
       setState(() {
         _isLoadingMore = true;
@@ -89,7 +94,8 @@ class _SearchMessageInConversationPageState extends State<SearchMessageInConvers
       _isSearching = true;
     });
 
-    final messageFilter = MessageSearchFilter(conversationID: widget.conversationID);
+    final messageFilter =
+        MessageSearchFilter(conversationID: widget.conversationID);
     final option = SearchOption(
       searchScope: [SearchType.message],
       messageFilter: messageFilter,
@@ -166,7 +172,8 @@ class _SearchMessageInConversationPageState extends State<SearchMessageInConvers
                 child: Row(
                   children: [
                     const SizedBox(width: 8),
-                    Icon(Icons.search, size: 20, color: _colorScheme.textColorSecondary),
+                    Icon(Icons.search,
+                        size: 20, color: _colorScheme.textColorSecondary),
                     const SizedBox(width: 4),
                     Expanded(
                       child: TextField(
@@ -222,13 +229,16 @@ class _SearchMessageInConversationPageState extends State<SearchMessageInConvers
   Widget _buildConversationHeader() {
     return ListTile(
       leading: Avatar.image(
-        name: widget.conversationName.isNotEmpty ? widget.conversationName[0].toUpperCase() : '?',
+        name: widget.conversationName.isNotEmpty
+            ? widget.conversationName[0].toUpperCase()
+            : '?',
         url: widget.conversationAvatar,
         size: AvatarSize.m,
       ),
       title: Text(
         widget.conversationName,
-        style: TextStyle(color: _colorScheme.textColorPrimary, fontWeight: FontWeight.bold),
+        style: TextStyle(
+            color: _colorScheme.textColorPrimary, fontWeight: FontWeight.bold),
       ),
       trailing: Icon(
         Icons.arrow_forward_ios,
@@ -264,9 +274,13 @@ class _SearchMessageInConversationPageState extends State<SearchMessageInConvers
         url: senderAvatar,
         size: AvatarSize.m,
       ),
-      title: TextHighlighter.buildHighlightedText(senderName, keyword, titleStyle, _colorScheme.textColorLink),
+      title: TextHighlighter.buildHighlightedText(
+          senderName, keyword, titleStyle, _colorScheme.textColorLink),
       subtitle: TextHighlighter.buildHighlightedText(
-          MessageUtil.getMessageAbstract(message, context), keyword, subtitleStyle, _colorScheme.textColorLink),
+          MessageUtil.getMessageAbstract(message, context),
+          keyword,
+          subtitleStyle,
+          _colorScheme.textColorLink),
       onTap: () {
         if (widget.onMessageSelect != null) {
           widget.onMessageSelect!(message);

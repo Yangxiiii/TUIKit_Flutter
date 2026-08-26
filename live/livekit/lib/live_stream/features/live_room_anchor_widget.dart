@@ -7,7 +7,6 @@ import 'package:live_uikit_barrage/widget/display/barrage_display_controller.dar
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../common/index.dart';
-import '../../common/resources/live_theme_manager.dart';
 import '../../common/widget/float_window/index.dart';
 import '../../component/beauty/live_beauty_store.dart';
 import '../../component/float_window/global_float_window_manager.dart';
@@ -27,13 +26,14 @@ class TUILiveRoomAnchorWidget extends StatefulWidget {
   final VoidCallback? onStartLive;
   final FloatWindowController? floatWindowController;
 
-  const TUILiveRoomAnchorWidget(
-      {super.key,
-      required this.roomId,
-      this.needPrepare = true,
-      this.liveInfo,
-      this.onStartLive,
-      this.floatWindowController});
+  const TUILiveRoomAnchorWidget({
+    super.key,
+    required this.roomId,
+    this.needPrepare = true,
+    this.liveInfo,
+    this.onStartLive,
+    this.floatWindowController,
+  });
 
   @override
   State<TUILiveRoomAnchorWidget> createState() => _TUILiveRoomAnchorWidgetState();
@@ -49,8 +49,6 @@ class _TUILiveRoomAnchorWidgetState extends State<TUILiveRoomAnchorWidget> {
   final ScreenShareGuideDialog _iOSScreenShareGuideDialog = ScreenShareGuideDialog();
   late final VoidCallback _onScreenCaptureListener = _onScreenCaptureChanged;
 
-  bool _hasEnteredThemeScene = false;
-
   @override
   void initState() {
     super.initState();
@@ -63,19 +61,7 @@ class _TUILiveRoomAnchorWidgetState extends State<TUILiveRoomAnchorWidget> {
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // Only switch theme on first entry
-    if (!_hasEnteredThemeScene) {
-      _hasEnteredThemeScene = true;
-      LiveThemeManager.instance.enterLiveKitScene(context);
-    }
-  }
-
-  @override
   void dispose() {
-    // Exit LiveKit scene and restore theme
-    LiveThemeManager.instance.exitLiveKitScene();
     _iOSScreenShareGuideDialog.dismiss();
     _stopWakeLock();
     _stopForegroundService();
@@ -99,39 +85,46 @@ class _TUILiveRoomAnchorWidgetState extends State<TUILiveRoomAnchorWidget> {
 
   Widget _buildAnchorBroadcastWidget() {
     return ValueListenableBuilder(
-        valueListenable: _isShowingPreviewWidget,
-        builder: (context, showPreview, _) {
-          if (showPreview) return const SizedBox.shrink();
-          return AnchorBroadcastWidget(
-            liveStreamManager: _liveStreamManager,
-            liveCoreController: _liveCoreController,
-            onTapEnterFloatWindowInApp: () {
-              final isLandscape = _liveStreamManager.floatWindowState.isLandscape.value;
-              widget.floatWindowController?.setScreenOrientation(isLandscape);
-              widget.floatWindowController?.onTapSwitchFloatWindowInApp(true);
-            },
-          );
-        });
+      valueListenable: _isShowingPreviewWidget,
+      builder: (context, showPreview, _) {
+        if (showPreview) return const SizedBox.shrink();
+        return AnchorBroadcastWidget(
+          liveStreamManager: _liveStreamManager,
+          liveCoreController: _liveCoreController,
+          onTapEnterFloatWindowInApp: () {
+            final isLandscape = _liveStreamManager.floatWindowState.isLandscape.value;
+            widget.floatWindowController?.setScreenOrientation(isLandscape);
+            widget.floatWindowController?.onTapSwitchFloatWindowInApp(true);
+          },
+        );
+      },
+    );
   }
 
   Widget _buildAnchorPreviewWidget() {
     return ValueListenableBuilder(
-        valueListenable: _isShowingPreviewWidget,
-        builder: (context, showPreview, _) {
-          return Visibility(
-            visible: showPreview,
-            child: AnchorPreviewWidget(
-              liveStreamManager: _liveStreamManager,
-              didClickBack: () {
-                Navigator.of(context).pop();
-              },
-              didClickStart: (editInfo) {
-                _startLiveStream(editInfo.videoStreamSource.value, editInfo.roomName.value, editInfo.coverUrl.value,
-                    editInfo.privacyMode.value, editInfo.coGuestTemplateMode.value);
-              },
-            ),
-          );
-        });
+      valueListenable: _isShowingPreviewWidget,
+      builder: (context, showPreview, _) {
+        return Visibility(
+          visible: showPreview,
+          child: AnchorPreviewWidget(
+            liveStreamManager: _liveStreamManager,
+            didClickBack: () {
+              Navigator.of(context).pop();
+            },
+            didClickStart: (editInfo) {
+              _startLiveStream(
+                editInfo.videoStreamSource.value,
+                editInfo.roomName.value,
+                editInfo.coverUrl.value,
+                editInfo.privacyMode.value,
+                editInfo.coGuestTemplateMode.value,
+              );
+            },
+          ),
+        );
+      },
+    );
   }
 }
 
@@ -197,8 +190,13 @@ extension on _TUILiveRoomAnchorWidgetState {
     _startForegroundService();
   }
 
-  void _startLiveStream(VideoStreamSource videoStreamSource, String? roomName, String? coverUrl,
-      LiveStreamPrivacyStatus? privacyMode, LiveTemplateMode templateMode) async {
+  void _startLiveStream(
+    VideoStreamSource videoStreamSource,
+    String? roomName,
+    String? coverUrl,
+    LiveStreamPrivacyStatus? privacyMode,
+    LiveTemplateMode templateMode,
+  ) async {
     _liveStreamManager.roomState.videoStreamSource = videoStreamSource;
     _liveStreamManager.roomState.liveInfo.seatTemplate = LiveInfoUtils.convertToSeatLayoutTemplateByID(templateMode.id);
     _isShowingPreviewWidget.value = false;
@@ -266,8 +264,9 @@ extension on _TUILiveRoomAnchorWidgetState {
   void _startCamera() async {
     final startCameraResult = await _liveStreamManager.mediaManager.openLocalCamera(true);
     if (startCameraResult.code != TUIError.success) {
-      _liveStreamManager.toastSubject
-          .add(ErrorHandler.convertToErrorMessage(startCameraResult.code.rawValue, startCameraResult.message) ?? '');
+      _liveStreamManager.toastSubject.add(
+        ErrorHandler.convertToErrorMessage(startCameraResult.code.rawValue, startCameraResult.message) ?? '',
+      );
     }
   }
 
@@ -275,7 +274,8 @@ extension on _TUILiveRoomAnchorWidgetState {
     final startMicrophoneResult = await _liveStreamManager.mediaManager.openLocalMicrophone();
     if (startMicrophoneResult.code != TUIError.success) {
       _liveStreamManager.toastSubject.add(
-          ErrorHandler.convertToErrorMessage(startMicrophoneResult.code.rawValue, startMicrophoneResult.message) ?? '');
+        ErrorHandler.convertToErrorMessage(startMicrophoneResult.code.rawValue, startMicrophoneResult.message) ?? '',
+      );
     }
   }
 
@@ -304,7 +304,8 @@ extension on _TUILiveRoomAnchorWidgetState {
     final hasCameraPermission = await Permission.camera.status == PermissionStatus.granted;
     if (!hasCameraPermission) {
       LiveKitLogger.error(
-          '[ForegroundService] failed to start video foreground service. reason: without camera permission');
+        '[ForegroundService] failed to start video foreground service. reason: without camera permission',
+      );
       return;
     }
     TUILiveKitPlatform.instance.startForegroundService(ForegroundServiceType.video, "", description);
@@ -320,7 +321,8 @@ extension on _TUILiveRoomAnchorWidgetState {
     final hasMicrophonePermission = await Permission.microphone.status == PermissionStatus.granted;
     if (!hasMicrophonePermission) {
       LiveKitLogger.error(
-          '[ForegroundService] failed to start audio foreground service. reason: without microphone permission');
+        '[ForegroundService] failed to start audio foreground service. reason: without microphone permission',
+      );
       return;
     }
     TUILiveKitPlatform.instance.startForegroundService(ForegroundServiceType.audio, "", description);
@@ -368,12 +370,10 @@ extension on _TUILiveRoomAnchorWidgetState {
     bool isFullScreen = widget.floatWindowController!.isFullScreen.value;
     FloatWindowMode floatWindowMode = _liveStreamManager.floatWindowState.floatWindowMode.value;
     if (isFullScreen) {
-      LiveThemeManager.instance.resumeTheme();
       if (floatWindowMode != FloatWindowMode.outOfApp) {
         _liveStreamManager.setFloatWindowMode(FloatWindowMode.none);
       }
     } else {
-      LiveThemeManager.instance.pauseTheme();
       _liveStreamManager.setFloatWindowMode(FloatWindowMode.inApp);
     }
   }

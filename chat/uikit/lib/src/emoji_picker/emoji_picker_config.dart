@@ -108,11 +108,15 @@ class EmojiPickerConfig {
 
   static void fromJson(Map<String, dynamic> json) {
     EmojiPickerConfig.useDefaultSticker = json["useDefaultSticker"] ?? true;
-    EmojiPickerConfig.customStickerLists = (List<Map<String, dynamic>>.from(json["customStickerLists"] ?? []))
-        .map((e) => EmojiPickerModel.fromJson(e))
-        .toList();
-    EmojiPickerConfig.useDefaultCustomFace_4350 = json["useDefaultCustomFace_4350"] ?? false;
-    EmojiPickerConfig.useDefaultCustomFace_4351 = json["useDefaultCustomFace_4351"] ?? false;
-    EmojiPickerConfig.useDefaultCustomFace_4352 = json["useDefaultCustomFace_4352"] ?? false;
+    EmojiPickerConfig.customStickerLists =
+        (List<Map<String, dynamic>>.from(json["customStickerLists"] ?? []))
+            .map((e) => EmojiPickerModel.fromJson(e))
+            .toList();
+    EmojiPickerConfig.useDefaultCustomFace_4350 =
+        json["useDefaultCustomFace_4350"] ?? false;
+    EmojiPickerConfig.useDefaultCustomFace_4351 =
+        json["useDefaultCustomFace_4351"] ?? false;
+    EmojiPickerConfig.useDefaultCustomFace_4352 =
+        json["useDefaultCustomFace_4352"] ?? false;
   }
 }

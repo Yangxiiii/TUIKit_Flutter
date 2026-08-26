@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/api/message/message_action_store.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart' hide IconButton;
@@ -18,7 +19,8 @@ class MergedMessageDetailPage extends StatefulWidget {
   });
 
   @override
-  State<MergedMessageDetailPage> createState() => _MergedMessageDetailPageState();
+  State<MergedMessageDetailPage> createState() =>
+      _MergedMessageDetailPageState();
 }
 
 class _MergedMessageDetailPageState extends State<MergedMessageDetailPage> {
@@ -111,7 +113,8 @@ class _MergedMessageDetailPageState extends State<MergedMessageDetailPage> {
       // Reuses the same string as the main chat shows when an original
       // quoted message can't be located — keeps the user-facing copy
       // consistent across the two surfaces.
-      Toast.info(context, AtomicLocalizations.of(context).quotedOriginalMessageUnreachable);
+      Toast.info(context,
+          AppLocalization.of(context).quotedOriginalMessageUnreachable);
       return;
     }
 
@@ -123,8 +126,8 @@ class _MergedMessageDetailPageState extends State<MergedMessageDetailPage> {
     // leaves a band of blank space above the pinned item. Skipping the
     // jump in that case keeps the layout natural and the user simply
     // sees the flash highlight on the existing position.
-    if (!_isTargetFullyVisible(targetIndex)
-        && _itemScrollController.isAttached) {
+    if (!_isTargetFullyVisible(targetIndex) &&
+        _itemScrollController.isAttached) {
       // alignment 0 (NOT 0.3 like the main chat) because this list is
       // forward-scrolled (`reverse: false`), so 0 means "pin to the
       // top of the viewport". A fractional alignment here would
@@ -152,7 +155,7 @@ class _MergedMessageDetailPageState extends State<MergedMessageDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
     final mergedInfo = widget.message.messagePayload as MergedMessagePayload?;
     final title = mergedInfo?.title ?? _getDefaultTitle();
 
@@ -202,8 +205,8 @@ class _MergedMessageDetailPageState extends State<MergedMessageDetailPage> {
         addSemanticIndexes: false,
         itemBuilder: (context, index) {
           final message = _mergedMessages[index];
-          final isHighlighted = _highlightedMessageId != null
-              && message.msgID == _highlightedMessageId;
+          final isHighlighted = _highlightedMessageId != null &&
+              message.msgID == _highlightedMessageId;
           return MessageItem(
             message: message,
             conversationID: '',
@@ -229,7 +232,7 @@ class _MergedMessageDetailPageState extends State<MergedMessageDetailPage> {
   }
 
   String _getDefaultTitle() {
-    final locale = AtomicLocalizations.of(context);
+    final locale = AppLocalization.of(context);
     return locale.chatHistory;
   }
 }

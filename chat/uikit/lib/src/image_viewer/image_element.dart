@@ -1,8 +1,8 @@
 class ImageElement {
   final int type;
-  
+
   final String imagePath;
-  
+
   final String? videoPath;
 
   const ImageElement({
@@ -12,9 +12,9 @@ class ImageElement {
   });
 
   bool get isImage => type == 0;
-  
+
   bool get isVideo => type == 1;
-  
+
   bool get hasVideoFile => videoPath != null && videoPath!.isNotEmpty;
 
   factory ImageElement.fromMap(Map<String, dynamic> map) {
@@ -51,4 +51,4 @@ class ImageElement {
   int get hashCode {
     return type.hashCode ^ imagePath.hashCode ^ videoPath.hashCode;
   }
-} 
+}

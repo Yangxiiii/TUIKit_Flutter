@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
@@ -191,13 +192,15 @@ class _ImageCropPageState extends State<ImageCropPage> {
     if (minOffsetX <= maxOffsetX) {
       _offsetX = _offsetX.clamp(minOffsetX, maxOffsetX);
     } else {
-      _offsetX = (_cropRect.left + _cropRect.left + _cropRect.width - scaledWidth) / 2;
+      _offsetX =
+          (_cropRect.left + _cropRect.left + _cropRect.width - scaledWidth) / 2;
     }
 
     if (minOffsetY <= maxOffsetY) {
       _offsetY = _offsetY.clamp(minOffsetY, maxOffsetY);
     } else {
-      _offsetY = (_cropRect.top + _cropRect.top + _cropRect.height - scaledHeight) / 2;
+      _offsetY =
+          (_cropRect.top + _cropRect.top + _cropRect.height - scaledHeight) / 2;
     }
   }
 
@@ -249,7 +252,8 @@ class _ImageCropPageState extends State<ImageCropPage> {
         _offsetY += dy;
 
         // Scale
-        final newZoom = (_lastScale * details.scale).clamp(_minZoomScale, _maxZoom);
+        final newZoom =
+            (_lastScale * details.scale).clamp(_minZoomScale, _maxZoom);
         if (newZoom != _zoomScale) {
           final focalX = details.localFocalPoint.dx;
           final focalY = details.localFocalPoint.dy;
@@ -337,7 +341,8 @@ class _ImageCropPageState extends State<ImageCropPage> {
     var outputWidth = clampedWidth;
     var outputHeight = clampedHeight;
     if (clampedWidth > _maxCanvasSize || clampedHeight > _maxCanvasSize) {
-      final scale = min(_maxCanvasSize / clampedWidth, _maxCanvasSize / clampedHeight);
+      final scale =
+          min(_maxCanvasSize / clampedWidth, _maxCanvasSize / clampedHeight);
       outputWidth = (clampedWidth * scale).floor();
       outputHeight = (clampedHeight * scale).floor();
     }
@@ -351,13 +356,16 @@ class _ImageCropPageState extends State<ImageCropPage> {
       clampedWidth.toDouble(),
       clampedHeight.toDouble(),
     );
-    final dstRect = Rect.fromLTWH(0, 0, outputWidth.toDouble(), outputHeight.toDouble());
+    final dstRect =
+        Rect.fromLTWH(0, 0, outputWidth.toDouble(), outputHeight.toDouble());
 
-    canvas.drawImageRect(_image!, srcRect, dstRect, Paint()..filterQuality = FilterQuality.high);
+    canvas.drawImageRect(
+        _image!, srcRect, dstRect, Paint()..filterQuality = FilterQuality.high);
 
     final picture = recorder.endRecording();
     final croppedImage = await picture.toImage(outputWidth, outputHeight);
-    final byteData = await croppedImage.toByteData(format: ui.ImageByteFormat.png);
+    final byteData =
+        await croppedImage.toByteData(format: ui.ImageByteFormat.png);
     croppedImage.dispose();
     picture.dispose();
 
@@ -381,7 +389,8 @@ class _ImageCropPageState extends State<ImageCropPage> {
       child: Scaffold(
         backgroundColor: Colors.black,
         body: _isLoading
-            ? const Center(child: CircularProgressIndicator(color: Colors.white))
+            ? const Center(
+                child: CircularProgressIndicator(color: Colors.white))
             : Stack(
                 children: [
                   // Image layer with gesture detection
@@ -429,7 +438,10 @@ class _ImageCropPageState extends State<ImageCropPage> {
           top: _offsetY,
           width: displayWidth,
           height: displayHeight,
-          child: RawImage(image: _image, fit: BoxFit.fill, filterQuality: FilterQuality.low),
+          child: RawImage(
+              image: _image,
+              fit: BoxFit.fill,
+              filterQuality: FilterQuality.low),
         ),
       ],
     );
@@ -451,28 +463,31 @@ class _ImageCropPageState extends State<ImageCropPage> {
             GestureDetector(
               onTap: _onCancel,
               child: Text(
-                AtomicLocalizations.of(context).cancel,
+                AppLocalization.of(context).cancel,
                 style: const TextStyle(color: Colors.white, fontSize: 16),
               ),
             ),
             GestureDetector(
               onTap: _isCropping ? null : _onConfirm,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
                   color: _isCropping
                       ? Colors.grey
-                      : BaseThemeProvider.of(context).colors.buttonColorPrimaryDefault,
+                      : SemanticColorScheme.of(context)
+                          .buttonColorPrimaryDefault,
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: _isCropping
                     ? const SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
                       )
                     : Text(
-                        AtomicLocalizations.of(context).confirm,
+                        AppLocalization.of(context).confirm,
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 16,
@@ -494,7 +509,10 @@ class _CropOverlayPainter extends CustomPainter {
   final bool isCircle;
   final double maskOpacity;
 
-  _CropOverlayPainter({required this.cropRect, required this.isCircle, required this.maskOpacity});
+  _CropOverlayPainter(
+      {required this.cropRect,
+      required this.isCircle,
+      required this.maskOpacity});
 
   @override
   void paint(Canvas canvas, Size size) {

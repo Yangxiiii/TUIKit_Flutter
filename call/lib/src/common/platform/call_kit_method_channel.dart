@@ -28,14 +28,18 @@ class MethodChannelTUICallKit extends TUICallKitPlatform {
   }
 
   @override
-  void openAndroidNotificationView(String name, String avatar, CallMediaType mediaType) {
+  void openAndroidNotificationView(
+    String name,
+    String avatar,
+    CallMediaType mediaType,
+  ) {
     if (kIsWeb) return;
 
     if (Platform.isAndroid) {
       methodChannel.invokeMethod('openNotificationView', {
         "name": name,
         "avatar": avatar,
-        "mediaType": mediaType.index
+        "mediaType": mediaType.index,
       });
     }
   }
@@ -55,7 +59,7 @@ class MethodChannelTUICallKit extends TUICallKitPlatform {
 
     if (Platform.isAndroid) {
       methodChannel.invokeMethod('startForegroundService', {
-        "isVideo": isVideo
+        "isVideo": isVideo,
       });
     }
   }
@@ -86,7 +90,6 @@ class MethodChannelTUICallKit extends TUICallKitPlatform {
       methodChannel.invokeMethod<bool>('imSDKInitSuccess');
     }
   }
-
 
   void _handleNativeCall(MethodCall call) {
     switch (call.method) {
@@ -122,15 +125,16 @@ class MethodChannelTUICallKit extends TUICallKitPlatform {
   }
 
   void _handleVoipChangeMute(MethodCall call) {
-      bool mute = call.arguments['mute'];
-      TUICallKitImpl.instance.voIPDataSyncHandler.handleVoipChangeMute(mute);
+    bool mute = call.arguments['mute'];
+    TUICallKitImpl.instance.voIPDataSyncHandler.handleVoipChangeMute(mute);
   }
 
   void _handleVoipChangeAudioPlaybackDevice(MethodCall call) {
     AudioRoute audioDevice = call.arguments['audioPlaybackDevice'] == 0
         ? AudioRoute.speakerphone
         : AudioRoute.earpiece;
-    TUICallKitImpl.instance.voIPDataSyncHandler.handleVoipChangeAudioPlaybackDevice(audioDevice);
+    TUICallKitImpl.instance.voIPDataSyncHandler
+        .handleVoipChangeAudioPlaybackDevice(audioDevice);
   }
 
   void _handleVoipHangup() {

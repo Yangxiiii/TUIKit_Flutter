@@ -1,7 +1,7 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
-import '../base_component/localizations/atomic_localizations.dart';
 
 class AITranscriberDisplayWidget extends StatefulWidget {
   final bool showBilingual;
@@ -18,10 +18,12 @@ class AITranscriberDisplayWidget extends StatefulWidget {
   });
 
   @override
-  State<AITranscriberDisplayWidget> createState() => AITranscriberDisplayWidgetState();
+  State<AITranscriberDisplayWidget> createState() =>
+      AITranscriberDisplayWidgetState();
 }
 
-class AITranscriberDisplayWidgetState extends State<AITranscriberDisplayWidget> with WidgetsBindingObserver {
+class AITranscriberDisplayWidgetState extends State<AITranscriberDisplayWidget>
+    with WidgetsBindingObserver {
   final ScrollController _scrollController = ScrollController();
   int _lastMessageCount = 0;
   bool _isAtBottom = true;
@@ -84,11 +86,11 @@ class AITranscriberDisplayWidgetState extends State<AITranscriberDisplayWidget> 
 
   void _onScrollChanged() {
     if (!_scrollController.hasClients) return;
-    
+
     final maxScroll = _scrollController.position.maxScrollExtent;
     final currentScroll = _scrollController.position.pixels;
     final isAtBottom = (maxScroll - currentScroll) < 50;
-    
+
     if (_isAtBottom != isAtBottom) {
       setState(() {
         _isAtBottom = isAtBottom;
@@ -100,7 +102,7 @@ class AITranscriberDisplayWidgetState extends State<AITranscriberDisplayWidget> 
     final messages = _messageListenable?.value ?? [];
     final hasNewMessage = messages.length != _lastMessageCount;
     _lastMessageCount = messages.length;
-    
+
     if (_isAtBottom) {
       _scrollToBottom();
     } else if (hasNewMessage) {
@@ -138,8 +140,10 @@ class AITranscriberDisplayWidgetState extends State<AITranscriberDisplayWidget> 
     );
   }
 
-  Widget _buildSubtitleContainer(BuildContext context, List<TranscriberMessage> messages) {
-    final effectiveMaxHeight = MediaQuery.of(context).size.height * widget.maxHeightRatio;
+  Widget _buildSubtitleContainer(
+      BuildContext context, List<TranscriberMessage> messages) {
+    final effectiveMaxHeight =
+        MediaQuery.of(context).size.height * widget.maxHeightRatio;
 
     return GestureDetector(
       onTap: widget.onArrowTap,
@@ -154,7 +158,8 @@ class AITranscriberDisplayWidgetState extends State<AITranscriberDisplayWidget> 
         child: Stack(
           children: [
             Padding(
-              padding: const EdgeInsets.all(12).add(const EdgeInsets.only(right: 24)),
+              padding: const EdgeInsets.all(12)
+                  .add(const EdgeInsets.only(right: 24)),
               child: messages.isEmpty
                   ? const SizedBox(height: 40)
                   : ListView.builder(
@@ -163,8 +168,11 @@ class AITranscriberDisplayWidgetState extends State<AITranscriberDisplayWidget> 
                       physics: const ClampingScrollPhysics(),
                       itemCount: messages.length,
                       itemBuilder: (context, index) {
-                        final previousSpeakerId = index > 0 ? messages[index - 1].speakerUserId : null;
-                        return _buildSubtitleItem(context, messages[index], index, messages.length, previousSpeakerId);
+                        final previousSpeakerId = index > 0
+                            ? messages[index - 1].speakerUserId
+                            : null;
+                        return _buildSubtitleItem(context, messages[index],
+                            index, messages.length, previousSpeakerId);
                       },
                     ),
             ),
@@ -187,12 +195,13 @@ class AITranscriberDisplayWidgetState extends State<AITranscriberDisplayWidget> 
     );
   }
 
-  Widget _buildSubtitleItem(BuildContext context, TranscriberMessage message, int index, int totalCount, String? previousSpeakerId) {
+  Widget _buildSubtitleItem(BuildContext context, TranscriberMessage message,
+      int index, int totalCount, String? previousSpeakerId) {
     final isLastItem = index == totalCount - 1;
     final translationText = _getTranslationText(message);
     final isSelf = _isSelfMessage(message);
     final showSpeakerName = previousSpeakerId != message.speakerUserId;
-    
+
     return Padding(
       padding: EdgeInsets.only(bottom: isLastItem ? 0 : 12),
       child: Column(
@@ -232,22 +241,24 @@ class AITranscriberDisplayWidgetState extends State<AITranscriberDisplayWidget> 
     if (message.translationTexts.isEmpty) {
       return '';
     }
-    
+
     if (widget.displayTranslationLanguage != null) {
-      return message.translationTexts[widget.displayTranslationLanguage] 
-          ?? message.translationTexts.values.first;
+      return message.translationTexts[widget.displayTranslationLanguage] ??
+          message.translationTexts.values.first;
     }
-    
+
     return message.translationTexts.values.first;
   }
 
-  Widget _buildSpeakerName(BuildContext context, TranscriberMessage message, bool isSelf) {
-    final displayName = message.speakerUserName.isNotEmpty 
-        ? message.speakerUserName 
+  Widget _buildSpeakerName(
+      BuildContext context, TranscriberMessage message, bool isSelf) {
+    final displayName = message.speakerUserName.isNotEmpty
+        ? message.speakerUserName
         : message.speakerUserId;
-    final locale = AtomicLocalizations.of(context);
-    final nameText = isSelf ? '$displayName ${locale.aiSubtitleMe}:' : '$displayName:';
-    
+    final locale = AppLocalization.of(context);
+    final nameText =
+        isSelf ? '$displayName ${locale.aiSubtitleMe}:' : '$displayName:';
+
     return Text(
       nameText,
       style: const TextStyle(

@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
 
 import 'package:tuikit_atomic_x/atomicx.dart';
@@ -44,7 +45,7 @@ class ImageUploaderImpl {
     required Function(String? localPath) onPickCompleted,
     Function(int statusCode)? onCosUploadCompleted,
   }) {
-    final appLocale = AtomicLocalizations.of(context);
+    final appLocale = AppLocalization.of(context);
 
     ActionSheet.show(
       context,
@@ -88,7 +89,8 @@ class ImageUploaderImpl {
     Function(int statusCode)? onCosUploadCompleted,
   }) async {
     try {
-      final imagePath = await ImageUploaderPlatform.pickImageNative(source: source);
+      final imagePath =
+          await ImageUploaderPlatform.pickImageNative(source: source);
       if (imagePath != null && context.mounted) {
         showCropPage(
           context: context,

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
 import '../file_picker/file_picker_platform.dart';
 import 'video_player_widget.dart';
 
@@ -21,26 +22,32 @@ class VideoData {
     this.width = 0,
     this.height = 0,
   });
-  
+
   /// Get the video path (prefer local path over URL)
   String? get videoPath => localPath ?? url;
-  
+
   /// Get the snapshot path (prefer local path over URL)
   String? get snapshotPath => snapshotLocalPath ?? snapshotUrl;
-  
+
   /// Check if video file exists locally
-  bool get hasLocalFile => localPath != null && localPath!.isNotEmpty && File(localPath!).existsSync();
-  
+  bool get hasLocalFile =>
+      localPath != null &&
+      localPath!.isNotEmpty &&
+      File(localPath!).existsSync();
+
   /// Check if snapshot file exists locally
-  bool get hasSnapshotFile => snapshotLocalPath != null && snapshotLocalPath!.isNotEmpty && File(snapshotLocalPath!).existsSync();
+  bool get hasSnapshotFile =>
+      snapshotLocalPath != null &&
+      snapshotLocalPath!.isNotEmpty &&
+      File(snapshotLocalPath!).existsSync();
 }
 
 class VideoPlayer {
   /// Play video in a Flutter-based full-screen player with controls
-  /// 
+  ///
   /// This method launches a full-screen video player using InlineVideoPlayer
   /// with Flutter controls overlay, thumbnail support, and back button.
-  /// 
+  ///
   /// Usage:
   /// ```dart
   /// await VideoPlayer.play(
@@ -61,9 +68,10 @@ class VideoPlayer {
       debugPrint('VideoPlayer.play: No video path available');
       return;
     }
-    
+
     if (!video.hasLocalFile) {
-      debugPrint('VideoPlayer.play: Video file does not exist: ${video.localPath}');
+      debugPrint(
+          'VideoPlayer.play: Video file does not exist: ${video.localPath}');
       return;
     }
 
@@ -73,15 +81,14 @@ class VideoPlayer {
     if (Platform.operatingSystem == 'ohos') {
       final opened = await FilePickerPlatform.openFile(video.localPath!);
       if (!opened) {
-        debugPrint('VideoPlayer.play: system player failed to open ${video.localPath}');
+        debugPrint(
+            'VideoPlayer.play: system player failed to open ${video.localPath}');
       }
       return;
     }
 
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => VideoPlayerWidget(video: video),
-      ),
+    await context.pushChatUIKitPage(
+      VideoPlayerWidget(video: video),
     );
   }
 }

@@ -1,6 +1,8 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
+import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
 import 'package:flutter/material.dart' hide IconButton, AlertDialog;
 
 import 'c2c_chat_setting.dart';
@@ -28,13 +30,13 @@ class GroupMemberList extends StatefulWidget {
 
 class _GroupMemberListState extends State<GroupMemberList> {
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    atomicLocale = AtomicLocalizations.of(context);
-    colorsTheme = BaseThemeProvider.colorsOf(context);
+    atomicLocale = AppLocalization.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
   }
 
   bool _canDeleteMember(GroupMember member) {
@@ -92,7 +94,8 @@ class _GroupMemberListState extends State<GroupMemberList> {
       actions.add(
         ActionSheetItem(
           title: isAdmin ? atomicLocale.cancelAdmin : atomicLocale.setAdmin,
-          onTap: () => _setMemberRole(member, isAdmin ? GroupMemberRole.member : GroupMemberRole.admin),
+          onTap: () => _setMemberRole(
+              member, isAdmin ? GroupMemberRole.member : GroupMemberRole.admin),
         ),
       );
     }
@@ -111,17 +114,16 @@ class _GroupMemberListState extends State<GroupMemberList> {
   }
 
   void _showMemberInfo(GroupMember member) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => C2CChatSetting(
-          userID: member.userID,
-          onSendMessageClick: widget.onSendMessageClick,
-        ),
+    context.pushChatUIKitPage<void>(
+      C2CChatSetting(
+        userID: member.userID,
+        onSendMessageClick: widget.onSendMessageClick,
       ),
     );
   }
 
-  Future<void> _setMemberRole(GroupMember member, GroupMemberRole newRole) async {
+  Future<void> _setMemberRole(
+      GroupMember member, GroupMemberRole newRole) async {
     final result = await widget.memberStore.setMemberRole(
       userID: member.userID,
       role: newRole,
@@ -130,15 +132,18 @@ class _GroupMemberListState extends State<GroupMemberList> {
     if (result.errorCode == 0) {
       _showToast(atomicLocale.settingSuccess);
     } else {
-      debugPrint('setMemberRole failed, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}');
+      debugPrint(
+          'setMemberRole failed, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}');
     }
   }
 
   Future<void> _deleteMember(GroupMember member) async {
-    final result = await widget.memberStore.deleteMember(userIDList: [member.userID]);
+    final result =
+        await widget.memberStore.deleteMember(userIDList: [member.userID]);
 
     if (result.errorCode != 0) {
-      debugPrint('deleteMember failed, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}');
+      debugPrint(
+          'deleteMember failed, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}');
     }
   }
 
@@ -165,10 +170,11 @@ class _GroupMemberListState extends State<GroupMemberList> {
   }
 
   Widget _buildNameAccessory(BuildContext context, GroupMember member) {
-    if (member.role != GroupMemberRole.owner && member.role != GroupMemberRole.admin) {
+    if (member.role != GroupMemberRole.owner &&
+        member.role != GroupMemberRole.admin) {
       return const SizedBox.shrink();
     }
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       decoration: BoxDecoration(
@@ -177,7 +183,9 @@ class _GroupMemberListState extends State<GroupMemberList> {
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(
-        member.role == GroupMemberRole.owner ? atomicLocale.groupOwner : atomicLocale.admin,
+        member.role == GroupMemberRole.owner
+            ? atomicLocale.groupOwner
+            : atomicLocale.admin,
         style: FontScheme.caption4Regular.copyWith(
           color: colorsTheme.buttonColorPrimaryHover,
         ),
@@ -193,7 +201,8 @@ class _GroupMemberListState extends State<GroupMemberList> {
         backgroundColor: colorsTheme.bgColorTopBar,
         scrolledUnderElevation: 0,
         leading: IconButton.buttonContent(
-          content: IconOnlyContent(Icon(Icons.arrow_back_ios, color: colorsTheme.buttonColorPrimaryDefault)),
+          content: IconOnlyContent(Icon(Icons.arrow_back_ios,
+              color: colorsTheme.buttonColorPrimaryDefault)),
           type: ButtonType.noBorder,
           size: ButtonSize.l,
           onClick: () => Navigator.of(context).pop(),
@@ -222,7 +231,8 @@ class _GroupMemberListState extends State<GroupMemberList> {
               label: UIKitUtil.memberDisplayName(member),
               avatarURL: member.avatarURL,
               extraData: member,
-              nameAccessoryBuilder: (context) => _buildNameAccessory(context, member),
+              nameAccessoryBuilder: (context) =>
+                  _buildNameAccessory(context, member),
             );
           }).toList();
 

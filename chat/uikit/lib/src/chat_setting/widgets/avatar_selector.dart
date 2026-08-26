@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import 'package:tuikit_atomic_x/base_component/theme/color_scheme.dart';
-import 'package:tuikit_atomic_x/base_component/theme/theme_state.dart';
 
 class AvatarSelectorConfig {
   final Axis scrollDirection;
@@ -54,7 +53,7 @@ class _AvatarSelectorState extends State<AvatarSelector> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    colorsTheme = BaseThemeProvider.colorsOf(context);
+    colorsTheme = SemanticColorScheme.of(context);
   }
 
   @override
@@ -82,7 +81,9 @@ class _AvatarSelectorState extends State<AvatarSelector> {
           Container(
             decoration: BoxDecoration(
               border: Border.all(
-                color: isSelected ? colorsTheme.checkboxColorSelected : Colors.transparent,
+                color: isSelected
+                    ? colorsTheme.checkboxColorSelected
+                    : Colors.transparent,
                 width: 2,
               ),
               borderRadius: BorderRadius.circular(10),
@@ -164,7 +165,8 @@ class _AvatarSelectorState extends State<AvatarSelector> {
       },
     );
 
-    if (widget.config.scrollDirection == Axis.horizontal && widget.config.height != null) {
+    if (widget.config.scrollDirection == Axis.horizontal &&
+        widget.config.height != null) {
       return SizedBox(
         height: widget.config.height,
         child: gridView,

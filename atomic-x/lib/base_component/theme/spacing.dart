@@ -13,23 +13,23 @@ final SpacingScheme = SemanticSpacingScheme(
 
 class SemanticSpacingScheme {
   final double iconTextSpacing;
-  
+
   final double smallSpacing;
-  
+
   final double iconIconSpacing;
-  
+
   final double bubbleSpacing;
-  
+
   final double contentSpacing;
-  
+
   final double normalSpacing;
-  
+
   final double titleSpacing;
-  
+
   final double cardSpacing;
-  
+
   final double largeSpacing;
-  
+
   final double maxSpacing;
 
   const SemanticSpacingScheme({
@@ -57,4 +57,4 @@ class _Spacings {
   static const double spacing40 = 40.0;
   static const double spacing56 = 56.0;
   static const double spacing72 = 72.0;
-} 
+}

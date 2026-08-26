@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -22,8 +23,8 @@ class QuoteMessagePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
-    final locale = AtomicLocalizations.of(context);
+    final colors = SemanticColorScheme.of(context);
+    final locale = AppLocalization.of(context);
 
     return GestureDetector(
       onTap: () => _handleTap(context, locale),
@@ -49,7 +50,8 @@ class QuoteMessagePreview extends StatelessWidget {
               // Content area
               Flexible(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                   child: _buildContent(colors, locale),
                 ),
               ),
@@ -60,7 +62,7 @@ class QuoteMessagePreview extends StatelessWidget {
     );
   }
 
-  Widget _buildContent(SemanticColorScheme colors, AtomicLocalizations locale) {
+  Widget _buildContent(SemanticColorScheme colors, AppLocalizedText locale) {
     // Display priority — derived from (status, payload) only; no extra
     // "isNotFound" flag is needed because the engine repurposes
     // `status = deleted` to mean "original unreachable" when cloud
@@ -113,7 +115,7 @@ class QuoteMessagePreview extends StatelessWidget {
   ///     repurposed by the engine to mean "cloud lookup gave up" —
   ///     either way it can't be located in the list)
   ///   - any other state (including partial-loading) → defer to caller
-  void _handleTap(BuildContext context, AtomicLocalizations locale) {
+  void _handleTap(BuildContext context, AppLocalizedText locale) {
     final unreachable = quoteInfo.status == MessageStatus.revoked ||
         quoteInfo.status == MessageStatus.deleted;
     if (unreachable) {
@@ -158,7 +160,8 @@ class QuoteMessagePreview extends StatelessWidget {
     );
   }
 
-  Widget _buildFullContent(SemanticColorScheme colors, AtomicLocalizations locale) {
+  Widget _buildFullContent(
+      SemanticColorScheme colors, AppLocalizedText locale) {
     final senderName = _getSenderName();
     final payload = quoteInfo.messagePayload!;
     final thumbnail = _getThumbnailUrl(payload);
@@ -200,7 +203,8 @@ class QuoteMessagePreview extends StatelessWidget {
     );
   }
 
-  Widget _buildContentWidget(MessagePayload payload, SemanticColorScheme colors, AtomicLocalizations locale) {
+  Widget _buildContentWidget(MessagePayload payload, SemanticColorScheme colors,
+      AppLocalizedText locale) {
     final textStyle = FontScheme.caption3Regular.copyWith(
       color: colors.textColorSecondary,
     );
@@ -211,20 +215,23 @@ class QuoteMessagePreview extends StatelessWidget {
         final duration = p.audioDuration;
         final minutes = duration ~/ 60;
         final seconds = duration % 60;
-        final timeText = '${minutes > 0 ? "$minutes:" : ""}${seconds.toString().padLeft(2, '0')}"';
+        final timeText =
+            '${minutes > 0 ? "$minutes:" : ""}${seconds.toString().padLeft(2, '0')}"';
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.volume_up, size: 14, color: colors.textColorSecondary),
             const SizedBox(width: 2),
-            Text(timeText, style: textStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
+            Text(timeText,
+                style: textStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
           ],
         );
       case FileMessagePayload p:
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.insert_drive_file, size: 14, color: colors.textColorSecondary),
+            Icon(Icons.insert_drive_file,
+                size: 14, color: colors.textColorSecondary),
             const SizedBox(width: 2),
             Flexible(
               child: Text(
@@ -260,7 +267,7 @@ class QuoteMessagePreview extends StatelessWidget {
     return sender.userID;
   }
 
-  String _getContentSummary(MessagePayload payload, AtomicLocalizations locale) {
+  String _getContentSummary(MessagePayload payload, AppLocalizedText locale) {
     switch (payload) {
       case TextMessagePayload p:
         return p.text;

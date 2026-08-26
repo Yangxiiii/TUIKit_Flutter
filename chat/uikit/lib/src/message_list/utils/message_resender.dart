@@ -39,7 +39,8 @@ class MessageResender {
       offlinePushInfo: message.offlinePushInfo,
     );
 
-    await MessageInputStore.create(conversationID: conversationID).sendMessage(payload: payload, option: option);
+    await MessageInputStore.create(conversationID: conversationID)
+        .sendMessage(payload: payload, option: option);
   }
 
   static SendMessagePayload? _convertToSendPayload(MessagePayload? payload) {
@@ -59,7 +60,12 @@ class MessageResender {
         final path = p.videoPath;
         final snapshot = p.videoSnapshotPath;
         final type = p.videoType;
-        if (path == null || path.isEmpty || snapshot == null || snapshot.isEmpty || type == null || type.isEmpty) {
+        if (path == null ||
+            path.isEmpty ||
+            snapshot == null ||
+            snapshot.isEmpty ||
+            type == null ||
+            type.isEmpty) {
           return null;
         }
         return VideoSendMessagePayload(
@@ -80,7 +86,8 @@ class MessageResender {
       case FileMessagePayload p:
         final path = p.filePath;
         final name = p.fileName;
-        if (path == null || path.isEmpty || name == null || name.isEmpty) return null;
+        if (path == null || path.isEmpty || name == null || name.isEmpty)
+          return null;
         return FileSendMessagePayload(
           filePath: path,
           fileName: name,

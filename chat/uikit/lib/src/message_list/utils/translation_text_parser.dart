@@ -137,12 +137,15 @@ class TranslationTextParser {
 
     // Fetch user info for regular users using ContactStore
     List<String> names = List.filled(regularUserIDs.length, '');
-    
-    final handler = await ContactStore.shared.getContactInfo(userIDList: regularUserIDs);
+
+    final handler =
+        await ContactStore.shared.getContactInfo(userIDList: regularUserIDs);
     if (handler.isSuccess) {
       for (int index = 0; index < regularUserIDs.length; index++) {
         final userID = regularUserIDs[index];
-        final contactInfo = handler.contactInfoList.where((c) => c.userID == userID).firstOrNull;
+        final contactInfo = handler.contactInfoList
+            .where((c) => c.userID == userID)
+            .firstOrNull;
         if (contactInfo != null && (contactInfo.nickname?.isNotEmpty == true)) {
           names[index] = contactInfo.nickname!;
         } else {
@@ -184,7 +187,8 @@ class TranslationTextParser {
     for (String user in atUsers) {
       for (int idx in atPositions) {
         if (usedPositions.contains(idx)) continue;
-        if (string.length >= user.length && idx <= string.length - user.length) {
+        if (string.length >= user.length &&
+            idx <= string.length - user.length) {
           String substring = string.substring(idx, idx + user.length);
           if (substring == user) {
             result.add(_TextRange(idx, user.length));
@@ -196,7 +200,8 @@ class TranslationTextParser {
     return result;
   }
 
-  static _SplitResult? _splitArrayWithRanges(List<_TextRange> ranges, String string) {
+  static _SplitResult? _splitArrayWithRanges(
+      List<_TextRange> ranges, String string) {
     if (ranges.isEmpty) return _SplitResult([string], []);
     if (string.isEmpty) return null;
 
@@ -288,8 +293,10 @@ class TranslationTextParser {
       return translatedTextMap[originalText] ?? originalText;
     }
 
-    final resultArray = splitResult[kSplitStringResultKey] as List<String>? ?? [];
-    final textIndexArray = splitResult[kSplitStringTextIndexKey] as List<int>? ?? [];
+    final resultArray =
+        splitResult[kSplitStringResultKey] as List<String>? ?? [];
+    final textIndexArray =
+        splitResult[kSplitStringTextIndexKey] as List<int>? ?? [];
 
     // Reconstruct with translations
     final translated = replacedStringWithArray(

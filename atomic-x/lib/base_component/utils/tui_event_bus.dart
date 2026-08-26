@@ -68,7 +68,8 @@ class TUIEventBus {
     if (observers != null) {
       NotifyParams? notifyParams;
       if (params != null && (params.data != null || params.callback != null)) {
-        notifyParams = NotifyParams(data: params.data, callback: params.callback);
+        notifyParams =
+            NotifyParams(data: params.data, callback: params.callback);
       }
 
       for (final observer in observers) {

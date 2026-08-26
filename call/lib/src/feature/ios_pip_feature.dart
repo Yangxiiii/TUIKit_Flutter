@@ -134,16 +134,10 @@ class IosPipRequest {
   final String api;
   IosPipParams params;
 
-  IosPipRequest({
-    required this.api,
-    required this.params,
-  });
+  IosPipRequest({required this.api, required this.params});
 
   Map<String, dynamic> toJson() {
-    return {
-      'api': api,
-      'params': params.toJson(),
-    };
+    return {'api': api, 'params': params.toJson()};
   }
 }
 
@@ -182,7 +176,10 @@ class IosPipFeature {
 
   IosPipFeature() {
     _log = Log.getCallLog("PictureInPictureFeature");
-    IosPipParams params = const IosPipParams(enable: true, cameraBackgroundCapture: true);
+    IosPipParams params = const IosPipParams(
+      enable: true,
+      cameraBackgroundCapture: true,
+    );
     _sendPictureInPictureRequest(params);
     _registerObservers();
     _getDefaultAvatarFilePath();
@@ -194,7 +191,9 @@ class IosPipFeature {
 
   Future<void> _getDefaultAvatarFilePath() async {
     try {
-      final byteData = await rootBundle.load('packages/tencent_calls_uikit/assets/images/user_icon.png');
+      final byteData = await rootBundle.load(
+        'packages/tencent_calls_uikit/assets/images/user_icon.png',
+      );
       final directory = await getTemporaryDirectory();
       final file = File('${directory.path}/default_avatar.png');
       await file.writeAsBytes(byteData.buffer.asUint8List());
@@ -209,14 +208,14 @@ class IosPipFeature {
     _allParticipantsListener = () => _handleParticipantsChange();
     _selfInfoListener = () => _handleParticipantsChange();
 
-    CallStore.shared.state.allParticipants
-        .addListener(_allParticipantsListener);
+    CallStore.shared.state.allParticipants.addListener(
+      _allParticipantsListener,
+    );
     CallStore.shared.state.selfInfo.addListener(_selfInfoListener);
   }
 
   void _handleParticipantsChange() {
-    final participants =
-        CallStore.shared.state.allParticipants.value;
+    final participants = CallStore.shared.state.allParticipants.value;
 
     if (participants.isEmpty) {
       if (_currentRequest?.params.enable == true) {
@@ -235,14 +234,15 @@ class IosPipFeature {
   }
 
   void _unregisterObservers() {
-    CallStore.shared.state.allParticipants
-        .removeListener(_allParticipantsListener);
-    CallStore.shared.state.selfInfo
-        .removeListener(_selfInfoListener);
+    CallStore.shared.state.allParticipants.removeListener(
+      _allParticipantsListener,
+    );
+    CallStore.shared.state.selfInfo.removeListener(_selfInfoListener);
   }
 
   Future<void> updatePictureInPicture(
-      List<CallParticipantInfo> participants) async {
+    List<CallParticipantInfo> participants,
+  ) async {
     final userList = List<CallParticipantInfo>.from(participants);
     final selfInfo = CallStore.shared.state.selfInfo.value;
 
@@ -300,7 +300,8 @@ class IosPipFeature {
   }
 
   Future<void> _downloadParticipantAvatar(
-      CallParticipantInfo participant) async {
+    CallParticipantInfo participant,
+  ) async {
     try {
       final avatarUrl = participant.avatarURL;
       if (avatarUrl.isEmpty) return;
@@ -331,7 +332,9 @@ class IosPipFeature {
   }
 
   Future<void> _setBackgroundImage(
-      String userId, String backgroundImage) async {
+    String userId,
+    String backgroundImage,
+  ) async {
     final currentRequest = _currentRequest;
     final regions = currentRequest?.params.regions;
 
@@ -346,8 +349,9 @@ class IosPipFeature {
       return region;
     }).toList();
 
-    final updatedParams =
-        currentRequest.params.copyWith(regions: updatedRegions);
+    final updatedParams = currentRequest.params.copyWith(
+      regions: updatedRegions,
+    );
     await _sendPictureInPictureRequest(updatedParams);
   }
 
@@ -373,7 +377,8 @@ class IosPipFeature {
   }
 
   List<IosPipRegion> _createTwoParticipantsLayout(
-      List<CallParticipantInfo> participants) {
+    List<CallParticipantInfo> participants,
+  ) {
     final selfUserId = CallStore.shared.state.selfInfo.value.id;
     final regions = <IosPipRegion>[];
 
@@ -385,19 +390,22 @@ class IosPipFeature {
       }
     }
 
-    regions.add(_createRegion(
-      CallStore.shared.state.selfInfo.value,
-      _IosPipConfiguration.smallWindowSize,
-      _IosPipConfiguration.smallWindowSize,
-      _IosPipConfiguration.smallWindowX,
-      _IosPipConfiguration.smallWindowY,
-    ));
+    regions.add(
+      _createRegion(
+        CallStore.shared.state.selfInfo.value,
+        _IosPipConfiguration.smallWindowSize,
+        _IosPipConfiguration.smallWindowSize,
+        _IosPipConfiguration.smallWindowX,
+        _IosPipConfiguration.smallWindowY,
+      ),
+    );
 
     return regions;
   }
 
   List<IosPipRegion> _createThreeParticipantsLayout(
-      List<CallParticipantInfo> participants) {
+    List<CallParticipantInfo> participants,
+  ) {
     final regions = <IosPipRegion>[];
 
     for (int i = 0; i < participants.length; i++) {
@@ -412,20 +420,23 @@ class IosPipFeature {
         y = _IosPipConfiguration.halfSize;
       }
 
-      regions.add(_createRegion(
-        participant,
-        _IosPipConfiguration.halfSize,
-        _IosPipConfiguration.halfSize,
-        x,
-        y,
-      ));
+      regions.add(
+        _createRegion(
+          participant,
+          _IosPipConfiguration.halfSize,
+          _IosPipConfiguration.halfSize,
+          x,
+          y,
+        ),
+      );
     }
 
     return regions;
   }
 
   List<IosPipRegion> _createFourParticipantsLayout(
-      List<CallParticipantInfo> participants) {
+    List<CallParticipantInfo> participants,
+  ) {
     final regions = <IosPipRegion>[];
 
     for (int i = 0; i < participants.length; i++) {
@@ -433,13 +444,15 @@ class IosPipFeature {
       final row = i ~/ 2;
       final col = i % 2;
 
-      regions.add(_createRegion(
-        participant,
-        _IosPipConfiguration.halfSize,
-        _IosPipConfiguration.halfSize,
-        col * _IosPipConfiguration.halfSize,
-        row * _IosPipConfiguration.halfSize,
-      ));
+      regions.add(
+        _createRegion(
+          participant,
+          _IosPipConfiguration.halfSize,
+          _IosPipConfiguration.halfSize,
+          col * _IosPipConfiguration.halfSize,
+          row * _IosPipConfiguration.halfSize,
+        ),
+      );
     }
 
     return regions;
@@ -455,13 +468,15 @@ class IosPipFeature {
       final row = i ~/ 3;
       final col = i % 3;
 
-      regions.add(_createRegion(
-        participant,
-        _IosPipConfiguration.gridSize,
-        _IosPipConfiguration.gridSize,
-        col * _IosPipConfiguration.gridSize,
-        row * _IosPipConfiguration.gridSize,
-      ));
+      regions.add(
+        _createRegion(
+          participant,
+          _IosPipConfiguration.gridSize,
+          _IosPipConfiguration.gridSize,
+          col * _IosPipConfiguration.gridSize,
+          row * _IosPipConfiguration.gridSize,
+        ),
+      );
     }
 
     return regions;

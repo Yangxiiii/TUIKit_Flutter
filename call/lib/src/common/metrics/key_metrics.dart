@@ -15,7 +15,8 @@ class KeyMetrics {
   void countUV(EventId eventId) {
     if (eventId == EventId.wakeup) {
       if (CallStore.shared.state.activeCall.value.callId == _callId ||
-          CallStore.shared.state.selfInfo.value.id == CallStore.shared.state.activeCall.value.inviterId) {
+          CallStore.shared.state.selfInfo.value.id ==
+              CallStore.shared.state.activeCall.value.inviterId) {
         return;
       }
       _callId = CallStore.shared.state.activeCall.value.callId;
@@ -26,11 +27,7 @@ class KeyMetrics {
   }
 }
 
-enum EventId {
-  received,
-  wakeup,
-  wakeupByPush,
-}
+enum EventId { received, wakeup, wakeupByPush }
 
 const _EventIdEnumMap = {
   EventId.received: 171010,
@@ -71,7 +68,9 @@ class MetricsJsonKeys {
   static const String androidVersion = "androidVersion";
   static const String isForeground = "isForeground";
   static const String isScreenLocked = "isScreenLocked";
-  static const String hasFloatingWindowPermission = "hasFloatingWindowPermission";
-  static const String hasBackgroundLaunchPermission = "hasBackgroundLaunchPermission";
+  static const String hasFloatingWindowPermission =
+      "hasFloatingWindowPermission";
+  static const String hasBackgroundLaunchPermission =
+      "hasBackgroundLaunchPermission";
   static const String hasNotificationPermission = "hasNotificationPermission";
 }

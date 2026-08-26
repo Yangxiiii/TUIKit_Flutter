@@ -1,15 +1,18 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:atomic_x_core/api/group/group_store.dart' as group_api;
 import 'package:flutter/material.dart' hide IconButton;
 import 'package:flutter_svg/svg.dart';
+import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
 
 import '../../chat_setting/widgets/avatar_selector.dart';
 import '../widgets/group_type_selector.dart';
 
 class CreateGroup extends StatefulWidget {
   final List<ContactInfo> selectedMembers;
-  final Function(String groupID, String groupName, String? avatar)? onGroupCreated;
+  final Function(String groupID, String groupName, String? avatar)?
+      onGroupCreated;
 
   const CreateGroup({
     super.key,
@@ -26,13 +29,14 @@ class _CreateGroupState extends State<CreateGroup> {
   final TextEditingController _groupIdController = TextEditingController();
 
   late SemanticColorScheme colorsTheme;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
 
   String _selectedAvatarURL = '';
   GroupType _selectedGroupType = GroupType.work;
   bool _isCreating = false;
 
-  final String _groupFaceURL = "https://im.sdk.qcloud.com/download/tuikit-resource/group-avatar/group_avatar_%s.png";
+  final String _groupFaceURL =
+      "https://im.sdk.qcloud.com/download/tuikit-resource/group-avatar/group_avatar_%s.png";
   final int _groupFaceCount = 24;
   late List<String> _groupAvatars;
 
@@ -46,8 +50,8 @@ class _CreateGroupState extends State<CreateGroup> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    atomicLocale = AtomicLocalizations.of(context);
-    colorsTheme = BaseThemeProvider.colorsOf(context);
+    atomicLocale = AppLocalization.of(context);
+    colorsTheme = SemanticColorScheme.of(context);
   }
 
   @override
@@ -88,7 +92,9 @@ class _CreateGroupState extends State<CreateGroup> {
   }
 
   String _getContactDisplayName(ContactInfo contact) {
-    return (contact.nickname?.isNotEmpty == true ? contact.nickname! : contact.userID);
+    return (contact.nickname?.isNotEmpty == true
+        ? contact.nickname!
+        : contact.userID);
   }
 
   Widget _buildTextField({
@@ -129,12 +135,9 @@ class _CreateGroupState extends State<CreateGroup> {
   Widget _buildGroupTypeSelector() {
     return GestureDetector(
       onTap: () async {
-        final result = await Navigator.push<GroupType>(
-          context,
-          MaterialPageRoute(
-            builder: (context) => GroupTypeSelector(
-              selectedGroupType: _selectedGroupType,
-            ),
+        final result = await context.pushChatUIKitPage<GroupType>(
+          GroupTypeSelector(
+            selectedGroupType: _selectedGroupType,
           ),
         );
 
@@ -309,14 +312,17 @@ class _CreateGroupState extends State<CreateGroup> {
         params: group_api.GroupCreateParams(
       groupType: _selectedGroupType,
       groupName: groupName,
-      groupID: _groupIdController.text.trim().isNotEmpty ? _groupIdController.text.trim() : null,
+      groupID: _groupIdController.text.trim().isNotEmpty
+          ? _groupIdController.text.trim()
+          : null,
       avatarURL: _selectedAvatarURL,
       memberList: widget.selectedMembers.map((c) => c.userID).toList(),
     ));
     if (result.isSuccess) {
       await Future.delayed(const Duration(milliseconds: 200));
 
-      String loginUserID = LoginStore.shared.loginState.loginUserInfo?.userID ?? '';
+      String loginUserID =
+          LoginStore.shared.loginState.loginUserInfo?.userID ?? '';
       int cmdValue = _selectedGroupType == GroupType.community ? 1 : 0;
       Map<String, dynamic> customMessageJson = {
         'version': 4,
@@ -342,8 +348,10 @@ class _CreateGroupState extends State<CreateGroup> {
       }
     } else {
       if (mounted) {
-        Toast.error(context, 'Failed, errorCode: ${result.errorCode}, errorMessage:${result.errorMessage}');
-        debugPrint('createGroup failed, errorCode: ${result.errorCode}, errorMessage:${result.errorMessage}');
+        Toast.error(context,
+            'Failed, errorCode: ${result.errorCode}, errorMessage:${result.errorMessage}');
+        debugPrint(
+            'createGroup failed, errorCode: ${result.errorCode}, errorMessage:${result.errorMessage}');
       }
     }
 
@@ -362,7 +370,8 @@ class _CreateGroupState extends State<CreateGroup> {
         backgroundColor: colorsTheme.bgColorOperate,
         scrolledUnderElevation: 0,
         leading: IconButton.buttonContent(
-          content: IconOnlyContent(Icon(Icons.arrow_back_ios, color: colorsTheme.buttonColorPrimaryDefault)),
+          content: IconOnlyContent(Icon(Icons.arrow_back_ios,
+              color: colorsTheme.buttonColorPrimaryDefault)),
           type: ButtonType.noBorder,
           size: ButtonSize.l,
           onClick: () => Navigator.of(context).pop(),

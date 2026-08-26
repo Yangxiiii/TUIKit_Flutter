@@ -2,7 +2,6 @@ import 'package:tencent_calls_uikit/tencent_calls_uikit.dart';
 import 'package:tencent_cloud_uikit_core/tencent_cloud_uikit_core.dart';
 import 'package:rtc_room_engine/rtc_room_engine.dart';
 
-
 class CallService extends AbstractTUIService {
   static final CallService _instance = CallService();
 
@@ -31,7 +30,11 @@ class CallService extends AbstractTUIService {
 
       CallParams callParams = CallParams();
       callParams.chatGroupId = groupId;
-      TUICallKit.instance.calls(userIDs, mediaType ?? CallMediaType.audio, callParams);
+      TUICallKit.instance.calls(
+        userIDs,
+        mediaType ?? CallMediaType.audio,
+        callParams,
+      );
     }
   }
 }

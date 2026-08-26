@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
@@ -42,7 +43,8 @@ mixin MessageStatusMixin {
           height: 14,
           child: CircularProgressIndicator(
             strokeWidth: 1,
-            valueColor: AlwaysStoppedAnimation<Color>(colorsTheme.textColorSecondary),
+            valueColor:
+                AlwaysStoppedAnimation<Color>(colorsTheme.textColorSecondary),
           ),
         );
       default:
@@ -52,7 +54,8 @@ mixin MessageStatusMixin {
 
   /// Check if message has error status (sendFail or violation)
   bool hasErrorStatus(MessageInfo message) {
-    return message.status == MessageStatus.sendFail || message.status == MessageStatus.violation;
+    return message.status == MessageStatus.sendFail ||
+        message.status == MessageStatus.violation;
   }
 
   /// Check if message status should be shown outside bubble
@@ -98,7 +101,9 @@ mixin MessageStatusMixin {
 
     Color textColor = isOverlay
         ? colorsTheme.textColorAntiPrimary
-        : (isSelf ? colorsTheme.textColorAntiSecondary : colorsTheme.textColorTertiary);
+        : (isSelf
+            ? colorsTheme.textColorAntiSecondary
+            : colorsTheme.textColorTertiary);
 
     return Text(
       _formatMessageTime(dateTime),
@@ -137,7 +142,8 @@ mixin MessageStatusMixin {
     }
 
     if (isShowTimeInBubble) {
-      DateTime dateTime = DateTime.fromMillisecondsSinceEpoch((message.timestamp ?? 0) * 1000);
+      DateTime dateTime =
+          DateTime.fromMillisecondsSinceEpoch((message.timestamp ?? 0) * 1000);
       final timeWidget = buildMessageTimeIndicator(
         dateTime: dateTime,
         colorsTheme: colors,
@@ -168,7 +174,7 @@ mixin MessageStatusMixin {
   Widget? buildOutsideReadReceiptLabel({
     required MessageInfo message,
     required SemanticColorScheme colorsTheme,
-    required AtomicLocalizations locale,
+    required AppLocalizedText locale,
     required bool enableReadReceipt,
     bool isInMergedDetailView = false,
     VoidCallback? onTap,
@@ -193,7 +199,8 @@ mixin MessageStatusMixin {
         textColor = colorsTheme.textColorSecondary; // gray
       } else {
         text = locale.groupDeliveredTo; // "未读"
-        textColor = colorsTheme.buttonColorPrimaryDefault; // primary/theme color
+        textColor =
+            colorsTheme.buttonColorPrimaryDefault; // primary/theme color
       }
     } else {
       // Group conversation
@@ -208,11 +215,13 @@ mixin MessageStatusMixin {
       } else if (readCount > 0) {
         // Partially read
         text = locale.readReceiptNPersonRead(readCount); // "N人已读"
-        textColor = colorsTheme.buttonColorPrimaryDefault; // primary/theme color
+        textColor =
+            colorsTheme.buttonColorPrimaryDefault; // primary/theme color
       } else {
         // No one read
         text = locale.groupDeliveredTo; // "未读"
-        textColor = colorsTheme.buttonColorPrimaryDefault; // primary/theme color
+        textColor =
+            colorsTheme.buttonColorPrimaryDefault; // primary/theme color
       }
     }
 

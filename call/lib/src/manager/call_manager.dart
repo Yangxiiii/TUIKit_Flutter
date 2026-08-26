@@ -185,6 +185,5 @@ class CallManager {
   }
 
   bool _isUsable(PermissionStatus status) =>
-      status == PermissionStatus.granted ||
-      status == PermissionStatus.limited;
+      status == PermissionStatus.granted || status == PermissionStatus.limited;
 }

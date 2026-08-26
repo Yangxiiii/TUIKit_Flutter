@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'dart:async';
 
 import 'package:atomic_x_core/atomicxcore.dart';
@@ -45,7 +46,8 @@ typedef OnUserLongPress = void Function(String userID, String displayName);
 typedef OnCallMessageClick = void Function(String userID, bool isVideoCall);
 
 /// Multi-select mode state callback
-typedef OnMultiSelectModeChanged = void Function(bool isMultiSelectMode, int selectedCount);
+typedef OnMultiSelectModeChanged = void Function(
+    bool isMultiSelectMode, int selectedCount);
 
 /// Multi-select mode state
 class MultiSelectState {
@@ -98,19 +100,26 @@ class MessageList extends StatefulWidget {
   final MessageListConfigProtocol config;
   final MessageInfo? locateMessage;
   final OnUserClick? onUserClick;
+
   /// Callback when user long presses on avatar (for @ mention feature in group chat)
   final OnUserLongPress? onUserLongPress;
+
   /// Callback when call message is clicked in C2C conversation
   final OnCallMessageClick? onCallMessageClick;
+
   /// Callback when user taps "Quote" in the long-press menu
   final void Function(MessageInfo message)? onQuoteMessage;
   final List<MessageCustomAction> customActions;
+
   /// Multi-select mode change callback
   final OnMultiSelectModeChanged? onMultiSelectModeChanged;
+
   /// Multi-select state change callback (includes action methods)
   final void Function(MultiSelectState? state)? onMultiSelectStateChanged;
+
   /// Group at-mention info list from ConversationInfo for tongue navigation
   final List<GroupAtInfo>? groupAtInfoList;
+
   /// Initial unread count from ConversationInfo when entering the chat
   final int initialUnreadCount;
 
@@ -207,12 +216,14 @@ class _NavReloadingLatest extends _NavigationState {
   const _NavReloadingLatest();
 }
 
-class _MessageListState extends State<MessageList> with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+class _MessageListState extends State<MessageList>
+    with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   late MessageListStore _messageListStore;
   GroupInfo? _groupInfo;
-  late AtomicLocalizations _atomicLocale;
+  late AppLocalizedText _atomicLocale;
   final ItemScrollController _itemScrollController = ItemScrollController();
-  final ItemPositionsListener _itemPositionsListener = ItemPositionsListener.create();
+  final ItemPositionsListener _itemPositionsListener =
+      ItemPositionsListener.create();
   List<MessageInfo> _messages = [];
   StreamSubscription<MessageEvent>? _messageEventSubscription;
   bool isLoading = false;
@@ -224,6 +235,12 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
   _NavigationState _navigationState = const _NavIdle();
 
   bool _isInitialLoad = true;
+  bool _initialLoadStarted = false;
+  Animation<double>? _routeAnimation;
+
+  /// 用于取消已过期的首次分批渲染任务，避免会话切换后写回旧消息。
+  int _initialRenderGeneration = 0;
+  static const int _initialRenderBatchSize = 1;
 
   String? _highlightedMessageId;
 
@@ -263,7 +280,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
   TongueType _unreadTongueType = TongueType.none;
   int _initialUnreadCount = 0;
   int? _oldestUnreadMessageSeq;
-  bool _pendingUnreadCheck = false; // Defer tongue display until visibility check
+  bool _pendingUnreadCheck =
+      false; // Defer tongue display until visibility check
 
   // @mention tracking for sequential navigation
   List<GroupAtInfo> _remainingAtInfoList = [];
@@ -288,8 +306,9 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
   bool get isMultiSelectMode => _isMultiSelectMode;
 
   /// List of selected messages
-  List<MessageInfo> get selectedMessages => 
-      _messages.where((m) => m.msgID != null && _selectedMessageIDs.contains(m.msgID)).toList();
+  List<MessageInfo> get selectedMessages => _messages
+      .where((m) => m.msgID != null && _selectedMessageIDs.contains(m.msgID))
+      .toList();
 
   /// Number of selected messages
   int get selectedCount => _selectedMessageIDs.length;
@@ -308,20 +327,22 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
 
     _messageListStore =
         MessageListStore.create(conversationID: widget.conversationID);
-    _messageListStore.state.messageList.addListener(_messageListStateChangedListener);
-    _messageEventSubscription = _messageListStore.messageEventStream.listen(_onMessageEvent);
+    _messageListStore.state.messageList
+        .addListener(_messageListStateChangedListener);
+    _messageEventSubscription =
+        _messageListStore.messageEventStream.listen(_onMessageEvent);
     _itemPositionsListener.itemPositions.addListener(_scrollListenerCallback);
 
     if (widget.conversationID.startsWith(groupConversationIDPrefix)) {
       // Initial pull for call banner; subsequent attribute pushes arrive via
       // GroupStore.joinedGroupList (see _onJoinedGroupListChanged).
-      GroupStore.shared.state.joinedGroupList.addListener(_joinedGroupListChangedListener);
+      GroupStore.shared.state.joinedGroupList
+          .addListener(_joinedGroupListChangedListener);
       _loadGroupAttributes();
     }
 
     _initAtMentionTongue();
     _initUnreadTongue();
-    _loadInitialMessages();
   }
 
   Widget _buildTimeDivider(String timeString, SemanticColorScheme colorsTheme) {
@@ -347,11 +368,15 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
 
   @override
   void dispose() {
-    _messageListStore.state.messageList.removeListener(_messageListStateChangedListener);
+    _routeAnimation?.removeStatusListener(_onRouteAnimationStatusChanged);
+    _messageListStore.state.messageList
+        .removeListener(_messageListStateChangedListener);
     _messageEventSubscription?.cancel();
-    _itemPositionsListener.itemPositions.removeListener(_scrollListenerCallback);
+    _itemPositionsListener.itemPositions
+        .removeListener(_scrollListenerCallback);
     if (widget.conversationID.startsWith(groupConversationIDPrefix)) {
-      GroupStore.shared.state.joinedGroupList.removeListener(_joinedGroupListChangedListener);
+      GroupStore.shared.state.joinedGroupList
+          .removeListener(_joinedGroupListChangedListener);
     }
     _receiptTimer?.cancel();
     _asrDisplayManager.dispose();
@@ -458,11 +483,11 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
       // the threshold (atMention).  Keep newMessages and backToLatest tongue
       // visible: the user is NOT at bottom (handled above) so they should
       // still see the indicator to jump back to the latest position.
-      if (_tongueType != TongueType.none
-          && _tongueType != TongueType.newMessages
-          && _tongueType != TongueType.backToLatest
-          && _tongueType != TongueType.backToQuote
-          && _remainingAtInfoList.isEmpty) {
+      if (_tongueType != TongueType.none &&
+          _tongueType != TongueType.newMessages &&
+          _tongueType != TongueType.backToLatest &&
+          _tongueType != TongueType.backToQuote &&
+          _remainingAtInfoList.isEmpty) {
         setState(() {
           _tongueType = TongueType.none;
         });
@@ -471,7 +496,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
   }
 
   TongueType _computeTongueType() {
-    if (_remainingAtInfoList.isNotEmpty && _unreadTongueType == TongueType.none) return TongueType.atMention;
+    if (_remainingAtInfoList.isNotEmpty && _unreadTongueType == TongueType.none)
+      return TongueType.atMention;
     if (_newMessageCount > 0) return TongueType.newMessages;
     return TongueType.backToLatest;
   }
@@ -598,13 +624,22 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
         break;
     }
 
+    final nextMessages = state.messageList.value.reversed.toList();
+    if (_isInitialLoad &&
+        _messages.isEmpty &&
+        nextMessages.length > _initialRenderBatchSize) {
+      _renderInitialMessagesInBatches(nextMessages);
+      return;
+    }
+    _initialRenderGeneration++;
+
     final oldLength = _messages.length;
     // Remember the first message's ID to detect head-insertion (new messages)
     // vs tail-append (older history messages).
     final oldFirstMsgID = _messages.isNotEmpty ? _messages.first.msgID : null;
 
     setState(() {
-      _messages = state.messageList.value.reversed.toList();
+      _messages = nextMessages;
     });
 
     // Only compensate when new messages are inserted at the HEAD of the list
@@ -614,7 +649,9 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
     // no compensation is needed (existing item indices are unchanged).
     final insertedCount = _messages.length - oldLength;
     final newFirstMsgID = _messages.isNotEmpty ? _messages.first.msgID : null;
-    final isHeadInsertion = insertedCount > 0 && oldFirstMsgID != null && newFirstMsgID != oldFirstMsgID;
+    final isHeadInsertion = insertedCount > 0 &&
+        oldFirstMsgID != null &&
+        newFirstMsgID != oldFirstMsgID;
 
     // If the new head message is sent by self, auto-scroll to bottom.
     //
@@ -644,7 +681,10 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
     }
     // Skip compensation when _loadNewerMessages is in progress — it already
     // does its own jumpTo after the await returns.
-    else if (isHeadInsertion && !_isLoadingNewer && !_isUserAtBottom() && _itemScrollController.isAttached) {
+    else if (isHeadInsertion &&
+        !_isLoadingNewer &&
+        !_isUserAtBottom() &&
+        _itemScrollController.isAttached) {
       final positions = _itemPositionsListener.itemPositions.value;
       if (positions.isNotEmpty) {
         final anchor = positions.reduce(
@@ -665,6 +705,26 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
       _scrollToMessageAndHighlight(widget.locateMessage!.msgID!);
       return;
     }
+  }
+
+  /// 首次进入时分帧挂载消息，避免在路由动画期间集中构建全部消息组件。
+  void _renderInitialMessagesInBatches(List<MessageInfo> messages) {
+    final generation = ++_initialRenderGeneration;
+
+    void renderNextBatch() {
+      if (!mounted || generation != _initialRenderGeneration) return;
+      final nextLength = _messages.length + _initialRenderBatchSize;
+      final visibleLength =
+          nextLength < messages.length ? nextLength : messages.length;
+      setState(() {
+        _messages = messages.take(visibleLength).toList();
+      });
+      if (visibleLength < messages.length) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => renderNextBatch());
+      }
+    }
+
+    renderNextBatch();
   }
 
   void _onMessageEvent(MessageEvent event) {
@@ -737,7 +797,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
   }
 
   Future<void> _loadNewerMessages() async {
-    if (_isLoadingNewer || !_messageListStore.state.hasNewerMessages.value) return;
+    if (_isLoadingNewer || !_messageListStore.state.hasNewerMessages.value)
+      return;
 
     setState(() {
       _isLoadingNewer = true;
@@ -772,7 +833,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
 
       final targetIndex = _messages.indexWhere((m) => m.msgID == messageID);
       if (targetIndex != -1) {
-        debugPrint('messageList, _scrollToMessageAndHighlight, jumpToIndex:$targetIndex');
+        debugPrint(
+            'messageList, _scrollToMessageAndHighlight, jumpToIndex:$targetIndex');
 
         _itemScrollController.jumpTo(index: targetIndex);
 
@@ -790,15 +852,17 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
   Widget _renderItem(BuildContext context, int index) {
     if (index >= _messages.length) return Container();
     final message = _messages[index];
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
 
     final timeString = _getMessageTimeString(index);
-    final shouldShowTime = widget.config.isShowTimeMessage && timeString != null;
+    final shouldShowTime =
+        widget.config.isShowTimeMessage && timeString != null;
     Widget messageWidget = _buildMessageItem(message, colors);
 
     // Add spacing between messages
-    final spacing =
-        index < _messages.length - 1 ? SizedBox(height: widget.config.cellSpacing) : const SizedBox.shrink();
+    final spacing = index < _messages.length - 1
+        ? SizedBox(height: widget.config.cellSpacing)
+        : const SizedBox.shrink();
 
     // Loading indicator at the newest end (index 0 area in reverse list, visually at bottom)
     if (_isLoadingNewer && index == _messages.length - 1) {
@@ -828,7 +892,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
 
     final messageWidget = RepaintBoundary(
       child: ListenableBuilder(
-        listenable: Listenable.merge([_asrDisplayManager, _translationDisplayManager]),
+        listenable:
+            Listenable.merge([_asrDisplayManager, _translationDisplayManager]),
         builder: (context, child) {
           return MessageItem(
             key: ValueKey(_getMessageKey(message)),
@@ -839,7 +904,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
             messageListStore: _messageListStore,
             isHighlighted: _highlightedMessageId == message.msgID,
             onHighlightComplete: () {
-              debugPrint('messageList, onHighlightComplete, msgID: ${message.msgID}, sequence:${message.sequence}');
+              debugPrint(
+                  'messageList, onHighlightComplete, msgID: ${message.msgID}, sequence:${message.sequence}');
               if (_highlightedMessageId == message.msgID) {
                 _highlightedMessageId = null;
               }
@@ -852,7 +918,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
             isMultiSelectMode: _isMultiSelectMode,
             isSelected: isMessageSelected(message),
             onToggleSelection: () => toggleMessageSelection(message),
-            onEnterMultiSelectMode: () => enterMultiSelectMode(initialMessage: message),
+            onEnterMultiSelectMode: () =>
+                enterMultiSelectMode(initialMessage: message),
             asrDisplayManager: _asrDisplayManager,
             onAsrBubbleLongPress: _showAsrTextMenu,
             translationDisplayManager: _translationDisplayManager,
@@ -900,11 +967,11 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
   Widget build(BuildContext context) {
     // Super.build must be called; AutomaticKeepAliveClientMixin is required.
     super.build(context);
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     return Expanded(
       child: Container(
-        color: colorsTheme.bgColorOperate,
+        color: colorsTheme.bgColorDefault,
         child: Stack(
           children: [
             Positioned.fill(
@@ -919,7 +986,6 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
                   ),
                   child: ScrollablePositionedList.builder(
                     reverse: true,
-                    shrinkWrap: true,
                     physics: const AlwaysScrollableScrollPhysics(),
                     itemScrollController: _itemScrollController,
                     itemPositionsListener: _itemPositionsListener,
@@ -940,7 +1006,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
                 child: _callStatusWidget!,
               ),
             // Top-right unread messages tongue
-            if (widget.config.isSupportTongue && _unreadTongueType == TongueType.unreadMessages)
+            if (widget.config.isSupportTongue &&
+                _unreadTongueType == TongueType.unreadMessages)
               Positioned(
                 top: _callStatusWidget != null ? 78 : 16,
                 right: 16,
@@ -952,7 +1019,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
                   ),
                   onTap: _onUnreadTongueTap,
                   backToLatestText: _atomicLocale.backToLatest,
-                  newMessageCountText: (count) => _atomicLocale.newMessageCount(count),
+                  newMessageCountText: (count) =>
+                      _atomicLocale.newMessageCount(count),
                 ),
               ),
             // Bottom-right tongue (back to latest / new messages / @mention)
@@ -966,12 +1034,13 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
                     newMessageCount: _newMessageCount,
                     atMentionText: _atMentionText,
                     atMessageSeq: _atMessageSeq,
-                    isLoading: _navigationState is _NavToAtMention
-                        || _navigationState is _NavReloadingLatest,
+                    isLoading: _navigationState is _NavToAtMention ||
+                        _navigationState is _NavReloadingLatest,
                   ),
                   onTap: _onTongueTap,
                   backToLatestText: _atomicLocale.backToLatest,
-                  newMessageCountText: (count) => _atomicLocale.newMessageCount(count),
+                  newMessageCountText: (count) =>
+                      _atomicLocale.newMessageCount(count),
                   backToQuoteText: _atomicLocale.backToQuotePosition,
                 ),
               ),
@@ -982,8 +1051,10 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
   }
 
   void _clearUnreadCount() {
-    ConversationListStore conversationListStore = ConversationListStore.create();
-    conversationListStore.clearConversationUnreadCount(conversationID: widget.conversationID);
+    ConversationListStore conversationListStore =
+        ConversationListStore.create();
+    conversationListStore.clearConversationUnreadCount(
+        conversationID: widget.conversationID);
   }
 
   // ==================== Tongue (小舌头) ====================
@@ -1073,13 +1144,36 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _atomicLocale = AtomicLocalizations.of(context);
+    _atomicLocale = AppLocalization.of(context);
 
     // Resolve @mention text after locale is available
     if (_pendingAtType != null) {
       _atMentionText = _getAtMentionTextForType(_pendingAtType!);
       _pendingAtType = null;
     }
+
+    if (_initialLoadStarted) return;
+    final animation = ModalRoute.of(context)?.animation;
+    if (animation == null || animation.status == AnimationStatus.completed) {
+      _startInitialLoad();
+      return;
+    }
+    if (identical(_routeAnimation, animation)) return;
+    _routeAnimation?.removeStatusListener(_onRouteAnimationStatusChanged);
+    _routeAnimation = animation;
+    animation.addStatusListener(_onRouteAnimationStatusChanged);
+  }
+
+  void _onRouteAnimationStatusChanged(AnimationStatus status) {
+    if (status == AnimationStatus.completed) _startInitialLoad();
+  }
+
+  void _startInitialLoad() {
+    if (_initialLoadStarted) return;
+    _initialLoadStarted = true;
+    _routeAnimation?.removeStatusListener(_onRouteAnimationStatusChanged);
+    _routeAnimation = null;
+    _loadInitialMessages();
   }
 
   String _getAtMentionTextForType(GroupAtType atType) {
@@ -1294,7 +1388,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
     final targetMsgID = quoteInfo.msgID;
     final targetIndex = _messages.indexWhere((msg) => msg.msgID == targetMsgID);
 
-    debugPrint('messageList, _onQuotePreviewTap, sourceMsgID: ${message.msgID}, '
+    debugPrint(
+        'messageList, _onQuotePreviewTap, sourceMsgID: ${message.msgID}, '
         'sourceSequence: ${message.sequence}, targetMsgID: $targetMsgID, '
         'targetMsgSequence: ${quoteInfo.sequence}, '
         'targetIndex: $targetIndex, listSize: ${_messages.length}');
@@ -1441,8 +1536,7 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
       return;
     }
 
-    final returnIndex =
-        _messages.indexWhere((msg) => msg.msgID == returnMsgID);
+    final returnIndex = _messages.indexWhere((msg) => msg.msgID == returnMsgID);
     if (returnIndex != -1 && _itemScrollController.isAttached) {
       _itemScrollController.jumpTo(index: returnIndex, alignment: 0.3);
       // No highlight on the reverse leg — the user just left this exact
@@ -1519,7 +1613,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
     if (_atMessageSeq == null) return;
 
     final targetSeq = _atMessageSeq!;
-    debugPrint('messageList, _onAtMentionTongueTap, targetSeq: $targetSeq, messagesCount: ${_messages.length}');
+    debugPrint(
+        'messageList, _onAtMentionTongueTap, targetSeq: $targetSeq, messagesCount: ${_messages.length}');
 
     // Try to find the @message in the current list
     final targetIndex = _messages.indexWhere((m) {
@@ -1548,7 +1643,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
       // Message not in current list, reload around the target seq.
       // Enter _NavToAtMention(targetSeq) so the _onMessageListStateChanged
       // switch handles messages / scroll / highlight atomically.
-      debugPrint('messageList, _onAtMentionTongueTap, message NOT in list, will fetchMessageList for seq: $targetSeq');
+      debugPrint(
+          'messageList, _onAtMentionTongueTap, message NOT in list, will fetchMessageList for seq: $targetSeq');
       setState(() {
         _navigationState = _NavToAtMention(targetSeq);
         isLoading = true;
@@ -1608,7 +1704,7 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
   void toggleMessageSelection(MessageInfo message) {
     final msgID = message.msgID;
     if (msgID == null) return;
-    
+
     setState(() {
       if (_selectedMessageIDs.contains(msgID)) {
         _selectedMessageIDs.remove(msgID);
@@ -1626,8 +1722,9 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
 
   /// Notify multi-select mode change
   void _notifyMultiSelectModeChanged() {
-    widget.onMultiSelectModeChanged?.call(_isMultiSelectMode, _selectedMessageIDs.length);
-    
+    widget.onMultiSelectModeChanged
+        ?.call(_isMultiSelectMode, _selectedMessageIDs.length);
+
     // Notify full state
     if (_isMultiSelectMode) {
       widget.onMultiSelectStateChanged?.call(MultiSelectState(
@@ -1657,7 +1754,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
           type: TextColorPreset.red,
           onClick: () async {
             final messagesToDelete = selectedMessages;
-            await _messageListStore.deleteMessages(messageList: messagesToDelete);
+            await _messageListStore.deleteMessages(
+                messageList: messagesToDelete);
             exitMultiSelectMode();
           },
         ),
@@ -1672,11 +1770,14 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
     // Get selected messages in the order they appear in _messages.
     // _messages is reversed from messageListStore (newest first), so we need to reverse it back to get oldest first
     final messages = _messages.reversed
-        .where((message) => message.msgID != null && _selectedMessageIDs.contains(message.msgID))
+        .where((message) =>
+            message.msgID != null &&
+            _selectedMessageIDs.contains(message.msgID))
         .toList();
 
     // 1. Validate message status first (don't exit multi-select if failed)
-    final statusError = ForwardService.validateMessagesStatus(context, messages);
+    final statusError =
+        ForwardService.validateMessagesStatus(context, messages);
     if (statusError != null) {
       Toast.error(context, statusError);
       return;
@@ -1689,7 +1790,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
     }
 
     // 3. Validate separate forward limit (don't exit multi-select if failed)
-    final limitError = ForwardService.validateSeparateForwardLimit(context, messages, forwardType);
+    final limitError = ForwardService.validateSeparateForwardLimit(
+        context, messages, forwardType);
     if (limitError != null) {
       Toast.error(context, limitError);
       return;
@@ -1763,7 +1865,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
       return _getTimeString(message.timestamp ?? 0);
     }
 
-    final timeInterval = _getIntervalSeconds(message.timestamp!, prevMessage.timestamp!);
+    final timeInterval =
+        _getIntervalSeconds(message.timestamp!, prevMessage.timestamp!);
     if (timeInterval > _messageAggregationTime) {
       return _getTimeString(message.timestamp ?? 0);
     }
@@ -1798,7 +1901,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
     final int nowWeekIndex = (now.weekday + 6) % 7;
     final int dateWeekIndex = (date.weekday + 6) % 7;
     final DateTime nowWeekStart = today.subtract(Duration(days: nowWeekIndex));
-    final DateTime dateWeekStart = messageDay.subtract(Duration(days: dateWeekIndex));
+    final DateTime dateWeekStart =
+        messageDay.subtract(Duration(days: dateWeekIndex));
 
     if (now.year == date.year && nowWeekStart == dateWeekStart) {
       final weekdays = [
@@ -1821,7 +1925,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
   }
 
   Future<void> _loadGroupAttributes() async {
-    final groupId = widget.conversationID.replaceFirst(groupConversationIDPrefix, '');
+    final groupId =
+        widget.conversationID.replaceFirst(groupConversationIDPrefix, '');
     final result = await GroupStore.shared.getGroupInfo(groupID: groupId);
     if (result.isSuccess && result.groupInfo != null && mounted) {
       // Prefer the joinedGroupList entry (same instance attribute pushes mutate)
@@ -1845,7 +1950,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
   /// (e.g. in-group call start / end while this chat page is already open).
   void _onJoinedGroupListChanged() {
     if (!mounted) return;
-    final groupId = widget.conversationID.replaceFirst(groupConversationIDPrefix, '');
+    final groupId =
+        widget.conversationID.replaceFirst(groupConversationIDPrefix, '');
     final list = GroupStore.shared.state.joinedGroupList.value;
     GroupInfo? updated;
     for (final g in list) {
@@ -1862,12 +1968,14 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
   void _updateCallStatusWidget() {
     if (_groupInfo == null) return;
 
-    final groupId = widget.conversationID.replaceFirst(groupConversationIDPrefix, '');
+    final groupId =
+        widget.conversationID.replaceFirst(groupConversationIDPrefix, '');
     final groupAttributes = _groupInfo!.groupAttributes;
 
     debugPrint('_updateCallStatusWidget: $groupAttributes');
 
-    final callWidget = CallUIExtension.getJoinInGroupCallWidget(groupId, groupAttributes);
+    final callWidget =
+        CallUIExtension.getJoinInGroupCallWidget(groupId, groupAttributes);
 
     if (mounted) {
       setState(() {
@@ -1913,9 +2021,11 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
       return;
     }
 
-    debugPrint('messageList, _sendBatchReadReceipts: ${messagesToSend.length} messages');
+    debugPrint(
+        'messageList, _sendBatchReadReceipts: ${messagesToSend.length} messages');
 
-    final result = await _messageListStore.sendMessageReadReceipts(messageList: messagesToSend);
+    final result = await _messageListStore.sendMessageReadReceipts(
+        messageList: messagesToSend);
 
     if (result.isSuccess) {
       for (final message in messagesToSend) {
@@ -1934,7 +2044,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
 
   /// Show ASR text bubble long press menu (popup above the target)
   void _showAsrTextMenu(MessageInfo message, GlobalKey asrBubbleKey) {
-    final asrText = (message.messagePayload as AudioMessagePayload?)?.asrText ?? '';
+    final asrText =
+        (message.messagePayload as AudioMessagePayload?)?.asrText ?? '';
     if (asrText.isEmpty) return;
 
     showAsrPopupMenu(
@@ -1971,7 +2082,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
 
   /// Forward ASR text as text message
   void _forwardAsrText(MessageInfo message) {
-    final asrText = (message.messagePayload as AudioMessagePayload?)?.asrText ?? '';
+    final asrText =
+        (message.messagePayload as AudioMessagePayload?)?.asrText ?? '';
     if (asrText.isEmpty) return;
 
     ForwardService.forwardText(
@@ -1983,7 +2095,8 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
 
   /// Copy ASR text to clipboard
   void _copyAsrText(MessageInfo message) {
-    final asrText = (message.messagePayload as AudioMessagePayload?)?.asrText ?? '';
+    final asrText =
+        (message.messagePayload as AudioMessagePayload?)?.asrText ?? '';
     if (asrText.isEmpty) return;
 
     Clipboard.setData(ClipboardData(text: asrText));
@@ -1992,8 +2105,10 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
   // ==================== Translation text bubble menu ====================
 
   /// Show translation text bubble long press menu (popup above the target)
-  void _showTranslationTextMenu(MessageInfo message, GlobalKey translationBubbleKey) {
-    final translatedTextMap = (message.messagePayload as TextMessagePayload?)?.translatedText;
+  void _showTranslationTextMenu(
+      MessageInfo message, GlobalKey translationBubbleKey) {
+    final translatedTextMap =
+        (message.messagePayload as TextMessagePayload?)?.translatedText;
     if (translatedTextMap == null || translatedTextMap.isEmpty) return;
 
     showAsrPopupMenu(
@@ -2030,11 +2145,13 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
 
   /// Forward translated text as text message
   void _forwardTranslationText(MessageInfo message) {
-    final translatedTextMap = (message.messagePayload as TextMessagePayload?)?.translatedText;
+    final translatedTextMap =
+        (message.messagePayload as TextMessagePayload?)?.translatedText;
     if (translatedTextMap == null || translatedTextMap.isEmpty) return;
 
     // Build translated display text with emoji preserved (same as copy logic)
-    final originalText = (message.messagePayload as TextMessagePayload?)?.text ?? '';
+    final originalText =
+        (message.messagePayload as TextMessagePayload?)?.text ?? '';
     final translatedText = TranslationTextParser.buildTranslatedDisplayText(
       originalText,
       translatedTextMap,
@@ -2051,17 +2168,19 @@ class _MessageListState extends State<MessageList> with TickerProviderStateMixin
 
   /// Copy translated text to clipboard
   void _copyTranslationText(MessageInfo message) {
-    final translatedTextMap = (message.messagePayload as TextMessagePayload?)?.translatedText;
+    final translatedTextMap =
+        (message.messagePayload as TextMessagePayload?)?.translatedText;
     if (translatedTextMap == null || translatedTextMap.isEmpty) return;
 
     // Get the translated display text with emoji preserved (no need to fetch atUserNames)
-    final originalText = (message.messagePayload as TextMessagePayload?)?.text ?? '';
+    final originalText =
+        (message.messagePayload as TextMessagePayload?)?.text ?? '';
     final textToCopy = TranslationTextParser.buildTranslatedDisplayText(
       originalText,
       translatedTextMap,
       [],
     );
-    
+
     Clipboard.setData(ClipboardData(text: textToCopy));
   }
 }

@@ -1,7 +1,7 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/atomicx.dart';
 
 import '../../ai/tts/tts_text_sanitizer.dart';
-import '../../common/language/gen/chat_localizations.dart';
 
 /// A single unit of the "listen from here" playback queue.
 ///
@@ -39,7 +39,7 @@ String _speakerName(MessageSenderInfo from) {
 /// listener isn't told the same name repeatedly.
 List<ListenItem> buildListenPlan({
   required List<MessageInfo> messages,
-  required ChatLocalizations l,
+  required AppLocalizedText l,
 }) {
   final items = <ListenItem>[];
   String? lastSpeakerKey;

@@ -22,7 +22,6 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 
 class GenerateTestUserSig {
-
   /**
    * Signature validity period, which should not be set too short
    * <p>
@@ -48,7 +47,7 @@ class GenerateTestUserSig {
       currTime: currTime,
       expire: expireTime,
       sdkAppId: sdkAppId,
-      secretKey: secretKey
+      secretKey: secretKey,
     );
     sigDoc['TLS.sig'] = sig;
     String jsonStr = json.encode(sigDoc);
@@ -65,19 +64,22 @@ class GenerateTestUserSig {
     required int currTime,
     required int expire,
     required int sdkAppId,
-    required String secretKey
+    required String secretKey,
   }) {
     int sdkappid = sdkAppId;
     String contentToBeSigned =
         "TLS.identifier:$identifier\nTLS.sdkappid:$sdkappid\nTLS.time:$currTime\nTLS.expire:$expire\n";
     Hmac hmacSha256 = Hmac(sha256, utf8.encode(secretKey));
-    Digest hmacSha256Digest = hmacSha256.convert(utf8.encode(contentToBeSigned));
+    Digest hmacSha256Digest = hmacSha256.convert(
+      utf8.encode(contentToBeSigned),
+    );
     return base64.encode(hmacSha256Digest.bytes);
   }
 
-  static String _escape({
-    required String content,
-  }) {
-    return content.replaceAll('\+', '*').replaceAll('\/', '-').replaceAll('=', '_');
+  static String _escape({required String content}) {
+    return content
+        .replaceAll('\+', '*')
+        .replaceAll('\/', '-')
+        .replaceAll('=', '_');
   }
 }

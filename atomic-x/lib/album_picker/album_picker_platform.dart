@@ -91,13 +91,15 @@ class AlbumPickerPlatform {
           final sessionId = event['sessionId'] as String?;
 
           if (sessionId == null) {
-            debugPrint('AlbumPickerPlatform: event missing sessionId, type=$eventType');
+            debugPrint(
+                'AlbumPickerPlatform: event missing sessionId, type=$eventType');
             return;
           }
 
           final callbacks = _callbacksBySession[sessionId];
           if (callbacks == null) {
-            debugPrint('AlbumPickerPlatform: no callbacks for sessionId=$sessionId, type=$eventType');
+            debugPrint(
+                'AlbumPickerPlatform: no callbacks for sessionId=$sessionId, type=$eventType');
             return;
           }
 
@@ -156,7 +158,8 @@ class AlbumPickerPlatform {
     _ensureEventListenerSetup();
 
     // Generate unique sessionId and store callbacks.
-    final sessionId = 'ps_${++_sessionCounter}_${DateTime.now().millisecondsSinceEpoch}';
+    final sessionId =
+        'ps_${++_sessionCounter}_${DateTime.now().millisecondsSinceEpoch}';
     _callbacksBySession[sessionId] = _CallbackGroup(
       onPickConfirm: onPickConfirm,
       onMediaProcessing: onMediaProcessing,
@@ -175,9 +178,7 @@ class AlbumPickerPlatform {
           'maxCount': config?.maxSelectionCount,
           'gridCount': config?.itemsPerRow,
           'showsCameraItem': config?.showsCameraItem,
-          'style': config?.style != null
-              ? _convertStyle(config!.style!)
-              : null,
+          'style': config?.style != null ? _convertStyle(config!.style!) : null,
           'language': config?.language != null
               ? _convertLanguage(config!.language!)
               : null,

@@ -8,7 +8,7 @@ class AppLifecycle with WidgetsBindingObserver {
   static final AppLifecycle _instance = AppLifecycle._internal();
   final ValueNotifier<AppLifecycleState?> _currentState = ValueNotifier(null);
   static AppLifecycle instance = _instance;
-  
+
   final List<VoidCallback> _listeners = [];
 
   AppLifecycle._internal() {
@@ -18,9 +18,10 @@ class AppLifecycle with WidgetsBindingObserver {
 
   bool get isForeground => _currentState.value == AppLifecycleState.resumed;
 
-  bool get isBackground => _currentState.value == AppLifecycleState.paused
-      || _currentState.value == AppLifecycleState.inactive
-      || _currentState.value == AppLifecycleState.detached;
+  bool get isBackground =>
+      _currentState.value == AppLifecycleState.paused ||
+      _currentState.value == AppLifecycleState.inactive ||
+      _currentState.value == AppLifecycleState.detached;
 
   ValueListenable<AppLifecycleState?> get currentState => _currentState;
 
@@ -32,7 +33,8 @@ class AppLifecycle with WidgetsBindingObserver {
 
   @override
   Future<bool> didPopRoute() async {
-    CallPageType pageType = TUICallKitImpl.instance.pageRouter.getCurrentPageRoute();
+    CallPageType pageType = TUICallKitImpl.instance.pageRouter
+        .getCurrentPageRoute();
     if (pageType == CallPageType.calling || pageType == CallPageType.invite) {
       return true;
     }

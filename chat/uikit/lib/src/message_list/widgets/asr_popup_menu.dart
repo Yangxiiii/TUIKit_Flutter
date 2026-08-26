@@ -27,7 +27,7 @@ class AsrPopupMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
 
     return Material(
       color: Colors.transparent,
@@ -72,7 +72,7 @@ class _AsrPopupMenuItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
 
     return InkWell(
       onTap: onTap,
@@ -114,7 +114,8 @@ Future<void> showAsrPopupMenu({
   required List<AsrPopupMenuAction> actions,
   bool isSelf = false,
 }) async {
-  final RenderBox? renderBox = targetKey.currentContext?.findRenderObject() as RenderBox?;
+  final RenderBox? renderBox =
+      targetKey.currentContext?.findRenderObject() as RenderBox?;
   if (renderBox == null) return;
 
   final Offset targetPosition = renderBox.localToGlobal(Offset.zero);

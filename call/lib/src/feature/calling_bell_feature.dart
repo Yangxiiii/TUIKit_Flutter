@@ -118,8 +118,9 @@ class CallingBellFeature {
         return await getAssetsFilePath(customAssetName);
       }
 
-      final customFilePath =
-          await PreferenceUtils.getInstance().getString(_keyRingPath);
+      final customFilePath = await PreferenceUtils.getInstance().getString(
+        _keyRingPath,
+      );
       if (customFilePath.isNotEmpty) {
         return customFilePath;
       }
@@ -163,8 +164,11 @@ class CallingBellFeature {
     final trtcCloud = await TRTCCloud.sharedInstance();
     final audioEffectManager = trtcCloud.getAudioEffectManager();
 
-    final param =
-        AudioMusicParam(id: _musicId, path: filePath, loopCount: _loopCount);
+    final param = AudioMusicParam(
+      id: _musicId,
+      path: filePath,
+      loopCount: _loopCount,
+    );
     param.publish = false;
     audioEffectManager.startPlayMusic(param);
     audioEffectManager.setMusicPlayoutVolume(_musicId, _volume);

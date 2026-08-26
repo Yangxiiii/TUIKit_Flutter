@@ -19,10 +19,7 @@ class TRTCMetricsChannel {
         "version": Constants.pluginVersion,
       };
 
-      final jsonParams = {
-        "api": "KeyMetricsStats",
-        "params": paramsJson,
-      };
+      final jsonParams = {"api": "KeyMetricsStats", "params": paramsJson};
 
       trtcCloud.callExperimentalAPI(jsonEncode(jsonParams));
     } catch (e) {
@@ -40,10 +37,7 @@ class TRTCMetricsChannel {
         "report": "report",
       };
 
-      final jsonParams = {
-        "api": "KeyMetricsStats",
-        "params": paramsJson,
-      };
+      final jsonParams = {"api": "KeyMetricsStats", "params": paramsJson};
 
       trtcCloud.callExperimentalAPI(jsonEncode(jsonParams));
     } catch (e) {

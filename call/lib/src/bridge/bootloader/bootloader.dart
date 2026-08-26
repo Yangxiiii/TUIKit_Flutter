@@ -16,7 +16,11 @@ class Bootloader extends NavigatorObserver {
   }
 
   ITUINotificationCallback loginSuccessCallBack = (arg) {
-    TUICallKitImpl.instance.handleLoginSuccess(arg['sdkAppId'], arg['userId'], arg['userSig']);
+    TUICallKitImpl.instance.handleLoginSuccess(
+      arg['sdkAppId'],
+      arg['userId'],
+      arg['userSig'],
+    );
   };
 
   ITUINotificationCallback logoutSuccessCallBack = (arg) {
@@ -32,12 +36,21 @@ class Bootloader extends NavigatorObserver {
     EventBusHandler.instance;
     TUICallKitPlatform.instance;
 
-    TUICore.instance.registerService(TUICALLKIT_SERVICE_NAME, CallService.instance);
-    TUICore.instance.registerExtension(TUIExtensionID.joinInGroup, CallUIExtension.instance);
+    TUICore.instance.registerService(
+      TUICALLKIT_SERVICE_NAME,
+      CallService.instance,
+    );
+    TUICore.instance.registerExtension(
+      TUIExtensionID.joinInGroup,
+      CallUIExtension.instance,
+    );
 
     TUICore.instance.registerEvent(loginSuccessEvent, loginSuccessCallBack);
     TUICore.instance.registerEvent(logoutSuccessEvent, logoutSuccessCallBack);
 
-    TUICore.instance.registerEvent(imSDKInitSuccessEvent, imSDKInitSuccessCallBack);
+    TUICore.instance.registerEvent(
+      imSDKInitSuccessEvent,
+      imSDKInitSuccessCallBack,
+    );
   }
 }

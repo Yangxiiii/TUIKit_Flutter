@@ -20,6 +20,7 @@ class ImageMessageWidget extends StatefulWidget {
   final GlobalKey? bubbleKey;
   final MessageListConfigProtocol config;
   final bool isInMergedDetailView;
+
   /// When this widget is rendered inside a merged-message detail page,
   /// the conversation-backed [messageListStore] is empty and the image
   /// viewer cannot page over the live history. Pass the merged bundle's
@@ -48,7 +49,8 @@ class ImageMessageWidget extends StatefulWidget {
   State<ImageMessageWidget> createState() => _ImageMessageWidgetState();
 }
 
-class _ImageMessageWidgetState extends State<ImageMessageWidget> with MessageStatusMixin {
+class _ImageMessageWidgetState extends State<ImageMessageWidget>
+    with MessageStatusMixin {
   ImageViewerManager? _imageViewerManager;
 
   @override
@@ -76,7 +78,7 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget> with MessageSta
 
   @override
   Widget build(BuildContext context) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     final statusAndTimeWidgets = buildStatusAndTimeWidgets(
       message: widget.message,
@@ -105,7 +107,8 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget> with MessageSta
                 bottom: 8,
                 right: 8,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                   decoration: BoxDecoration(
                     color: colorsTheme.bgColorDefault,
                     borderRadius: BorderRadius.circular(4),
@@ -142,17 +145,21 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget> with MessageSta
     String? largeImageURL = imagePayload?.largeImageURL;
     String? originalImageURL = imagePayload?.originalImageURL;
 
-    final bool hasLocalPath = (originalImagePath != null && originalImagePath.isNotEmpty) ||
-        (largeImagePath != null && largeImagePath.isNotEmpty) ||
-        (thumbImagePath != null && thumbImagePath.isNotEmpty);
-    final bool hasRemoteURL = (thumbImageURL != null && thumbImageURL.isNotEmpty) ||
-        (largeImageURL != null && largeImageURL.isNotEmpty) ||
-        (originalImageURL != null && originalImageURL.isNotEmpty);
+    final bool hasLocalPath =
+        (originalImagePath != null && originalImagePath.isNotEmpty) ||
+            (largeImagePath != null && largeImagePath.isNotEmpty) ||
+            (thumbImagePath != null && thumbImagePath.isNotEmpty);
+    final bool hasRemoteURL =
+        (thumbImageURL != null && thumbImageURL.isNotEmpty) ||
+            (largeImageURL != null && largeImageURL.isNotEmpty) ||
+            (originalImageURL != null && originalImageURL.isNotEmpty);
 
     if (!hasLocalPath && !hasRemoteURL) {
-      if (widget.messageListStore != null && widget.message.rawMessage != null) {
+      if (widget.messageListStore != null &&
+          widget.message.rawMessage != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          MessageActionStore.create(widget.message).downloadMedia(quality: MediaQuality.thumbnail);
+          MessageActionStore.create(widget.message)
+              .downloadMedia(quality: MediaQuality.thumbnail);
         });
 
         return Container(
@@ -164,18 +171,29 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget> with MessageSta
           ),
           child: Center(
             child: CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(colorsTheme.buttonColorPrimaryDefault),
+              valueColor: AlwaysStoppedAnimation<Color>(
+                  colorsTheme.buttonColorPrimaryDefault),
             ),
           ),
         );
       }
     }
 
-    final double aspectRatio = (widget.message.messagePayload as ImageMessagePayload?)?.originalImageWidth != null &&
-            (widget.message.messagePayload as ImageMessagePayload?)?.originalImageHeight != null &&
-            (widget.message.messagePayload as ImageMessagePayload).originalImageHeight > 0
-        ? (widget.message.messagePayload as ImageMessagePayload).originalImageWidth / (widget.message.messagePayload as ImageMessagePayload).originalImageHeight
-        : 1.0;
+    final double aspectRatio =
+        (widget.message.messagePayload as ImageMessagePayload?)
+                        ?.originalImageWidth !=
+                    null &&
+                (widget.message.messagePayload as ImageMessagePayload?)
+                        ?.originalImageHeight !=
+                    null &&
+                (widget.message.messagePayload as ImageMessagePayload)
+                        .originalImageHeight >
+                    0
+            ? (widget.message.messagePayload as ImageMessagePayload)
+                    .originalImageWidth /
+                (widget.message.messagePayload as ImageMessagePayload)
+                    .originalImageHeight
+            : 1.0;
 
     double displayHeight = ImageMessageWidget.kImageFixedHeight;
     double displayWidth = displayHeight * aspectRatio;
@@ -217,7 +235,8 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget> with MessageSta
                   if (loadingProgress == null) return child;
                   return Center(
                     child: CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(colorsTheme.buttonColorPrimaryDefault),
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                          colorsTheme.buttonColorPrimaryDefault),
                     ),
                   );
                 },
@@ -225,7 +244,8 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget> with MessageSta
                   return Container(
                     color: colorsTheme.bgColorTopBar,
                     child: Center(
-                      child: Icon(Icons.broken_image, color: colorsTheme.textColorSecondary),
+                      child: Icon(Icons.broken_image,
+                          color: colorsTheme.textColorSecondary),
                     ),
                   );
                 },
@@ -240,7 +260,8 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget> with MessageSta
                   return Container(
                     color: colorsTheme.bgColorTopBar,
                     child: Center(
-                      child: Icon(Icons.broken_image, color: colorsTheme.textColorSecondary),
+                      child: Icon(Icons.broken_image,
+                          color: colorsTheme.textColorSecondary),
                     ),
                   );
                 },
@@ -250,7 +271,8 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget> with MessageSta
             return Container(
               color: colorsTheme.bgColorTopBar,
               child: Center(
-                child: Icon(Icons.broken_image, color: colorsTheme.textColorSecondary),
+                child: Icon(Icons.broken_image,
+                    color: colorsTheme.textColorSecondary),
               ),
             );
           }

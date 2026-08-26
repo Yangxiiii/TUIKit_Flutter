@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'dart:io';
 
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
@@ -31,7 +32,7 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
   bool _isLoadingRead = false;
   bool _isLoadingUnread = false;
 
-  late AtomicLocalizations _atomicLocale;
+  late AppLocalizedText _atomicLocale;
 
   @override
   void initState() {
@@ -43,7 +44,7 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _atomicLocale = AtomicLocalizations.of(context);
+    _atomicLocale = AppLocalization.of(context);
   }
 
   @override
@@ -110,7 +111,7 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
 
   @override
   Widget build(BuildContext context) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     return Scaffold(
       backgroundColor: colorsTheme.bgColorDefault,
@@ -120,7 +121,8 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
         leading: GestureDetector(
           onTap: () => Navigator.of(context).pop(),
           child: Center(
-            child: Icon(Icons.arrow_back_ios, color: colorsTheme.textColorPrimary),
+            child:
+                Icon(Icons.arrow_back_ios, color: colorsTheme.textColorPrimary),
           ),
         ),
         title: Text(
@@ -176,7 +178,8 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
   Widget _buildMessageContent(SemanticColorScheme colorsTheme) {
     final payload = widget.message.messagePayload;
     if (payload == null) {
-      return _buildDefaultMessagePreview(colorsTheme, '[${_atomicLocale.message}]');
+      return _buildDefaultMessagePreview(
+          colorsTheme, '[${_atomicLocale.message}]');
     }
 
     switch (payload) {
@@ -191,13 +194,16 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
       case FileMessagePayload p:
         return _buildFileMessagePayloadPreview(colorsTheme, p);
       default:
-        return _buildDefaultMessagePreview(colorsTheme, '[${_atomicLocale.message}]');
+        return _buildDefaultMessagePreview(
+            colorsTheme, '[${_atomicLocale.message}]');
     }
   }
 
-  Widget _buildTextMessagePayloadPreview(SemanticColorScheme colorsTheme, TextMessagePayload payload) {
+  Widget _buildTextMessagePayloadPreview(
+      SemanticColorScheme colorsTheme, TextMessagePayload payload) {
     return Container(
-      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+      constraints:
+          BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: colorsTheme.bgColorBubbleOwn,
@@ -217,8 +223,11 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
     );
   }
 
-  Widget _buildImageMessagePayloadPreview(SemanticColorScheme colorsTheme, ImageMessagePayload payload) {
-    String? imagePath = payload.originalImagePath ?? payload.largeImagePath ?? payload.thumbImagePath;
+  Widget _buildImageMessagePayloadPreview(
+      SemanticColorScheme colorsTheme, ImageMessagePayload payload) {
+    String? imagePath = payload.originalImagePath ??
+        payload.largeImagePath ??
+        payload.thumbImagePath;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
@@ -237,7 +246,8 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
     );
   }
 
-  Widget _buildVideoMessagePayloadPreview(SemanticColorScheme colorsTheme, VideoMessagePayload payload) {
+  Widget _buildVideoMessagePayloadPreview(
+      SemanticColorScheme colorsTheme, VideoMessagePayload payload) {
     String? snapshotPath = payload.videoSnapshotPath;
 
     return ClipRRect(
@@ -253,7 +263,8 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
                     : Image.file(File(snapshotPath), fit: BoxFit.cover))
                 : Container(
                     color: colorsTheme.bgColorTopBar,
-                    child: Icon(Icons.videocam, color: colorsTheme.textColorSecondary),
+                    child: Icon(Icons.videocam,
+                        color: colorsTheme.textColorSecondary),
                   ),
           ),
           Positioned.fill(
@@ -265,7 +276,8 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
                   color: Colors.black.withValues(alpha: 0.5),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.play_arrow, color: Colors.white, size: 24),
+                child:
+                    const Icon(Icons.play_arrow, color: Colors.white, size: 24),
               ),
             ),
           ),
@@ -274,7 +286,8 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
     );
   }
 
-  Widget _buildAudioMessagePayloadPreview(SemanticColorScheme colorsTheme, AudioMessagePayload payload) {
+  Widget _buildAudioMessagePayloadPreview(
+      SemanticColorScheme colorsTheme, AudioMessagePayload payload) {
     final duration = payload.audioDuration;
     final displayText = _formatDuration(duration);
 
@@ -301,7 +314,8 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
                 height: heights[index],
                 margin: const EdgeInsets.symmetric(horizontal: 1),
                 decoration: BoxDecoration(
-                  color: colorsTheme.textColorAntiPrimary.withValues(alpha: 0.6),
+                  color:
+                      colorsTheme.textColorAntiPrimary.withValues(alpha: 0.6),
                   borderRadius: BorderRadius.circular(1),
                 ),
               );
@@ -319,7 +333,8 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
     );
   }
 
-  Widget _buildFileMessagePayloadPreview(SemanticColorScheme colorsTheme, FileMessagePayload payload) {
+  Widget _buildFileMessagePayloadPreview(
+      SemanticColorScheme colorsTheme, FileMessagePayload payload) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -364,7 +379,8 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
     );
   }
 
-  Widget _buildDefaultMessagePreview(SemanticColorScheme colorsTheme, String text) {
+  Widget _buildDefaultMessagePreview(
+      SemanticColorScheme colorsTheme, String text) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
@@ -381,14 +397,16 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
   }
 
   Widget _buildReadSection(SemanticColorScheme colorsTheme) {
-    final readCount = widget.message.readReceiptInfo?.readCount ?? _readMemberList.length;
+    final readCount =
+        widget.message.readReceiptInfo?.readCount ?? _readMemberList.length;
     return Column(
       children: [
         _buildSectionHeader(
           title: '${_atomicLocale.groupReadBy} ($readCount)',
           iconName: 'read_receipt_check_all_highlight',
           isExpanded: _isReadSectionExpanded,
-          onTap: () => setState(() => _isReadSectionExpanded = !_isReadSectionExpanded),
+          onTap: () =>
+              setState(() => _isReadSectionExpanded = !_isReadSectionExpanded),
           colorsTheme: colorsTheme,
         ),
         if (_isReadSectionExpanded) ...[
@@ -399,7 +417,8 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
               child: CircularProgressIndicator(),
             )
           else ...[
-            ..._readMemberList.map((member) => _buildUserRow(member, colorsTheme)),
+            ..._readMemberList
+                .map((member) => _buildUserRow(member, colorsTheme)),
             if (_hasMoreReadMembers)
               _buildLoadMoreButton(
                 isRead: true,
@@ -412,14 +431,16 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
   }
 
   Widget _buildUnreadSection(SemanticColorScheme colorsTheme) {
-    final unreadCount = widget.message.readReceiptInfo?.unreadCount ?? _unReadMemberList.length;
+    final unreadCount =
+        widget.message.readReceiptInfo?.unreadCount ?? _unReadMemberList.length;
     return Column(
       children: [
         _buildSectionHeader(
           title: '${_atomicLocale.groupDeliveredTo} ($unreadCount)',
           iconName: 'read_receipt_check',
           isExpanded: _isUnreadSectionExpanded,
-          onTap: () => setState(() => _isUnreadSectionExpanded = !_isUnreadSectionExpanded),
+          onTap: () => setState(
+              () => _isUnreadSectionExpanded = !_isUnreadSectionExpanded),
           colorsTheme: colorsTheme,
         ),
         if (_isUnreadSectionExpanded) ...[
@@ -430,7 +451,8 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
               child: CircularProgressIndicator(),
             )
           else ...[
-            ..._unReadMemberList.map((member) => _buildUserRow(member, colorsTheme)),
+            ..._unReadMemberList
+                .map((member) => _buildUserRow(member, colorsTheme)),
             if (_hasMoreUnReadMembers)
               _buildLoadMoreButton(
                 isRead: false,
@@ -473,7 +495,8 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
                     'chat_assets/icon/$iconName.svg',
                     width: 14,
                     height: 14,
-                    colorFilter: ColorFilter.mode(colorsTheme.textColorPrimary, BlendMode.srcIn),
+                    colorFilter: ColorFilter.mode(
+                        colorsTheme.textColorPrimary, BlendMode.srcIn),
                     package: 'tencent_chat_uikit',
                     fit: BoxFit.contain,
                   ),
@@ -503,13 +526,17 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
         children: [
           Avatar.image(
             url: member.avatarURL,
-            name: (member.nickname?.isNotEmpty ?? false) ? member.nickname! : member.userID,
+            name: (member.nickname?.isNotEmpty ?? false)
+                ? member.nickname!
+                : member.userID,
             size: AvatarSize.s,
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              (member.nickname?.isNotEmpty ?? false) ? member.nickname! : member.userID,
+              (member.nickname?.isNotEmpty ?? false)
+                  ? member.nickname!
+                  : member.userID,
               style: FontScheme.caption2Medium.copyWith(
                 color: colorsTheme.textColorPrimary,
               ),

@@ -11,7 +11,6 @@ import 'package:url_launcher/url_launcher.dart';
 typedef BackgroundBuilder = Widget Function(Widget child);
 
 class TextMessageWidget extends StatefulWidget {
-
   final MessageInfo message;
   final bool isSelf;
   final double maxWidth;
@@ -41,7 +40,8 @@ class TextMessageWidget extends StatefulWidget {
   State<TextMessageWidget> createState() => _TextMessageWidgetState();
 }
 
-class _TextMessageWidgetState extends State<TextMessageWidget> with MessageStatusMixin {
+class _TextMessageWidgetState extends State<TextMessageWidget>
+    with MessageStatusMixin {
   // The translation bubble used to be rendered here as a sibling of the
   // text bubble inside a Column. That made the read-receipt and status
   // icon (placed by MessageItem with CrossAxisAlignment.end) drift to
@@ -53,7 +53,7 @@ class _TextMessageWidgetState extends State<TextMessageWidget> with MessageStatu
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
 
     final content = Container(
       key: widget.bubbleKey,
@@ -105,7 +105,8 @@ class _TextMessageWidgetState extends State<TextMessageWidget> with MessageStatu
   }
 
   Widget _buildTextContent(SemanticColorScheme colorsTheme) {
-    final text = (widget.message.messagePayload as TextMessagePayload?)?.text ?? '';
+    final text =
+        (widget.message.messagePayload as TextMessagePayload?)?.text ?? '';
 
     return ExtendedText(
       _getContentSpan(text, colorsTheme),
@@ -115,7 +116,9 @@ class _TextMessageWidgetState extends State<TextMessageWidget> with MessageStatu
         showAtBackground: true,
       ),
       style: FontScheme.caption1Regular.copyWith(
-        color: widget.isSelf ? colorsTheme.textColorAntiPrimary : colorsTheme.textColorPrimary,
+        color: widget.isSelf
+            ? colorsTheme.textColorAntiPrimary
+            : colorsTheme.textColorPrimary,
       ),
     );
   }

@@ -1,5 +1,7 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
+import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_utils.dart';
 import 'package:tencent_chat_uikit/src/search/utils/text_highlighter.dart';
@@ -35,7 +37,7 @@ class _SearchResultMorePageState extends State<SearchResultMorePage> {
   final FocusNode _focusNode = FocusNode();
   late SearchStore _searchStore;
   late SemanticColorScheme _colorScheme;
-  late AtomicLocalizations _atomicLocale;
+  late AppLocalizedText _atomicLocale;
   bool _isSearching = false;
   bool _isLoadingMore = false;
 
@@ -54,8 +56,8 @@ class _SearchResultMorePageState extends State<SearchResultMorePage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _colorScheme = BaseThemeProvider.colorsOf(context);
-    _atomicLocale = AtomicLocalizations.of(context);
+    _colorScheme = SemanticColorScheme.of(context);
+    _atomicLocale = AppLocalization.of(context);
   }
 
   @override
@@ -68,7 +70,9 @@ class _SearchResultMorePageState extends State<SearchResultMorePage> {
   }
 
   void _onScroll() {
-    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200 && !_isLoadingMore) {
+    if (_scrollController.position.pixels >=
+            _scrollController.position.maxScrollExtent - 200 &&
+        !_isLoadingMore) {
       if (!_searchStore.state.hasMoreMessageResults.value) return;
       setState(() {
         _isLoadingMore = true;
@@ -157,7 +161,8 @@ class _SearchResultMorePageState extends State<SearchResultMorePage> {
                 child: Row(
                   children: [
                     const SizedBox(width: 8),
-                    Icon(Icons.search, size: 20, color: _colorScheme.textColorSecondary),
+                    Icon(Icons.search,
+                        size: 20, color: _colorScheme.textColorSecondary),
                     const SizedBox(width: 4),
                     Expanded(
                       child: TextField(
@@ -230,21 +235,25 @@ class _SearchResultMorePageState extends State<SearchResultMorePage> {
 
     final displayName = friend.friendRemark?.isNotEmpty == true
         ? friend.friendRemark!
-        : (friend.userInfo?.nickname?.isNotEmpty == true ? friend.userInfo!.nickname! : friend.userID);
+        : (friend.userInfo?.nickname?.isNotEmpty == true
+            ? friend.userInfo!.nickname!
+            : friend.userID);
     final avatar = friend.userInfo?.avatarURL ?? '';
 
     return Column(
       children: [
         ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: leadingPadding),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: leadingPadding),
           leading: Avatar.image(
             name: displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
             url: avatar,
             size: AvatarSize.m,
           ),
-          title: TextHighlighter.buildHighlightedText(displayName, keyword, titleStyle, _colorScheme.textColorLink),
-          subtitle: TextHighlighter.buildHighlightedText(
-              'ID:${friend.userID}', keyword, subtitleStyle, _colorScheme.textColorLink),
+          title: TextHighlighter.buildHighlightedText(
+              displayName, keyword, titleStyle, _colorScheme.textColorLink),
+          subtitle: TextHighlighter.buildHighlightedText('ID:${friend.userID}',
+              keyword, subtitleStyle, _colorScheme.textColorLink),
           onTap: () {
             if (widget.onContactSelect != null) {
               widget.onContactSelect!(friend);
@@ -252,7 +261,8 @@ class _SearchResultMorePageState extends State<SearchResultMorePage> {
           },
         ),
         Padding(
-          padding: const EdgeInsets.only(left: avatarSize + leadingPadding + titleLeftPadding),
+          padding: const EdgeInsets.only(
+              left: avatarSize + leadingPadding + titleLeftPadding),
           child: Divider(
             height: 1,
             thickness: 0.5,
@@ -271,21 +281,28 @@ class _SearchResultMorePageState extends State<SearchResultMorePage> {
     final titleStyle = TextStyle(color: _colorScheme.textColorPrimary);
     final subtitleStyle = TextStyle(color: _colorScheme.textColorSecondary);
 
-    final displayName = (group.groupName?.isNotEmpty == true) ? group.groupName! : group.groupID;
+    final displayName = (group.groupName?.isNotEmpty == true)
+        ? group.groupName!
+        : group.groupID;
     final avatar = group.groupAvatarURL ?? '';
 
     return Column(
       children: [
         ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: leadingPadding),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: leadingPadding),
           leading: Avatar.image(
             name: displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
             url: avatar,
             size: AvatarSize.m,
           ),
-          title: TextHighlighter.buildHighlightedText(displayName, keyword, titleStyle, _colorScheme.textColorLink),
+          title: TextHighlighter.buildHighlightedText(
+              displayName, keyword, titleStyle, _colorScheme.textColorLink),
           subtitle: TextHighlighter.buildHighlightedText(
-              'groupID: ${group.groupID}', keyword, subtitleStyle, _colorScheme.textColorLink),
+              'groupID: ${group.groupID}',
+              keyword,
+              subtitleStyle,
+              _colorScheme.textColorLink),
           onTap: () {
             if (widget.onGroupSelect != null) {
               widget.onGroupSelect!(group);
@@ -293,7 +310,8 @@ class _SearchResultMorePageState extends State<SearchResultMorePage> {
           },
         ),
         Padding(
-          padding: const EdgeInsets.only(left: avatarSize + leadingPadding + titleLeftPadding),
+          padding: const EdgeInsets.only(
+              left: avatarSize + leadingPadding + titleLeftPadding),
           child: Divider(
             height: 1,
             thickness: 0.5,
@@ -304,7 +322,8 @@ class _SearchResultMorePageState extends State<SearchResultMorePage> {
     );
   }
 
-  Widget _buildMessageResultItem(BuildContext context, MessageSearchResultItem messageResult) {
+  Widget _buildMessageResultItem(
+      BuildContext context, MessageSearchResultItem messageResult) {
     const double avatarSize = 40.0;
     const double leadingPadding = 16.0;
     const double titleLeftPadding = 16.0;
@@ -319,7 +338,8 @@ class _SearchResultMorePageState extends State<SearchResultMorePage> {
     if (messageResult.messageCount > 1) {
       subtitle = _atomicLocale.chatRecords(messageResult.messageCount);
     } else if (messageResult.messageList.isNotEmpty) {
-      subtitle = MessageUtil.getMessageAbstract(messageResult.messageList.first, context);
+      subtitle = MessageUtil.getMessageAbstract(
+          messageResult.messageList.first, context);
     } else {
       subtitle = '';
     }
@@ -327,34 +347,35 @@ class _SearchResultMorePageState extends State<SearchResultMorePage> {
     return Column(
       children: [
         ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: leadingPadding),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: leadingPadding),
           leading: Avatar.image(
             name: displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
             url: avatar,
             size: AvatarSize.m,
           ),
-          title: TextHighlighter.buildHighlightedText(displayName, keyword, titleStyle, _colorScheme.textColorLink),
+          title: TextHighlighter.buildHighlightedText(
+              displayName, keyword, titleStyle, _colorScheme.textColorLink),
           subtitle: subtitle.isNotEmpty
-              ? TextHighlighter.buildHighlightedText(subtitle, keyword, subtitleStyle, _colorScheme.textColorLink)
+              ? TextHighlighter.buildHighlightedText(
+                  subtitle, keyword, subtitleStyle, _colorScheme.textColorLink)
               : null,
           onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => SearchMessageInConversationPage(
-                  conversationID: messageResult.conversationID,
-                  conversationName: messageResult.conversationShowName,
-                  conversationAvatar: messageResult.conversationAvatarURL ?? '',
-                  keyword: _textEditingController.text,
-                  onConversationSelect: widget.onConversationSelect,
-                  onMessageSelect: widget.onMessageSelect,
-                ),
+            context.pushChatUIKitPage(
+              SearchMessageInConversationPage(
+                conversationID: messageResult.conversationID,
+                conversationName: messageResult.conversationShowName,
+                conversationAvatar: messageResult.conversationAvatarURL ?? '',
+                keyword: _textEditingController.text,
+                onConversationSelect: widget.onConversationSelect,
+                onMessageSelect: widget.onMessageSelect,
               ),
             );
           },
         ),
         Padding(
-          padding: const EdgeInsets.only(left: avatarSize + leadingPadding + titleLeftPadding),
+          padding: const EdgeInsets.only(
+              left: avatarSize + leadingPadding + titleLeftPadding),
           child: Divider(
             height: 1,
             thickness: 0.5,

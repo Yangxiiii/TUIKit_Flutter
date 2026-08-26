@@ -28,8 +28,8 @@ class _VoiceMessageSettingsPageState extends State<VoiceMessageSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
-    final chatLocale = ChatLocalizations.of(context)!;
+    final colors = SemanticColorScheme.of(context);
+    final chatLocale = AppLocalization.of(context);
 
     return Scaffold(
       backgroundColor: colors.bgColorOperate,
@@ -64,7 +64,9 @@ class _VoiceMessageSettingsPageState extends State<VoiceMessageSettingsPage> {
                   onTap: () async {
                     await Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const VoiceSelectPage()),
+                      MaterialPageRoute(
+                        builder: (_) => const VoiceSelectPage(),
+                      ),
                     );
                     if (mounted) setState(() {});
                   },
@@ -77,7 +79,7 @@ class _VoiceMessageSettingsPageState extends State<VoiceMessageSettingsPage> {
     );
   }
 
-  String _selectedVoiceDisplayName(ChatLocalizations chatLocale) {
+  String _selectedVoiceDisplayName(AppLocalizedText chatLocale) {
     final name = VoiceMessageConfig.instance.selectedVoiceName;
     return name.isEmpty ? chatLocale.voiceDefault : name;
   }

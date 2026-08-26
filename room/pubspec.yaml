@@ -17,7 +17,7 @@ dependencies:
   plugin_platform_interface: ^2.0.2
   tuikit_atomic_x:
     path: ../atomic-x
-  atomic_x_core: ^4.1.0
+  atomic_x_core: ^5.0.2
   live_uikit_barrage: ^3.0.2
 
 dev_dependencies:

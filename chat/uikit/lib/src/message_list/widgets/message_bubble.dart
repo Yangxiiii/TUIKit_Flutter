@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart' hide AlertDialog;
 import 'package:flutter/services.dart';
@@ -11,7 +12,6 @@ import 'package:tencent_chat_uikit/src/message_list/utils/calling_message_data_p
 import 'package:tencent_chat_uikit/src/message_list/utils/recent_emoji_manager.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/translation_display_manager.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/translation_text_parser.dart';
-import 'package:tencent_chat_uikit/src/common/language/index.dart';
 import 'package:tencent_chat_uikit/src/message_list/listen/listen_from_here_controller.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/forward/forward_service.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_read_receipt_view.dart';
@@ -47,7 +47,8 @@ class DefaultMessageMenuCallbacks implements MessageMenuCallbacks {
 
   @override
   void onCopyMessage(MessageInfo message) {
-    Clipboard.setData(ClipboardData(text: (message.messagePayload as TextMessagePayload?)?.text ?? ""));
+    Clipboard.setData(ClipboardData(
+        text: (message.messagePayload as TextMessagePayload?)?.text ?? ""));
   }
 
   @override
@@ -63,7 +64,8 @@ class DefaultMessageMenuCallbacks implements MessageMenuCallbacks {
   @override
   void onForwardMessage(MessageInfo message) {
     // Validate message status first
-    final statusError = ForwardService.validateMessagesStatus(context, [message]);
+    final statusError =
+        ForwardService.validateMessagesStatus(context, [message]);
     if (statusError != null) {
       Toast.error(context, statusError);
       return;
@@ -108,15 +110,18 @@ class MessageBubble extends StatefulWidget {
   // ASR display manager for voice-to-text feature
   final AsrDisplayManager? asrDisplayManager;
   // Callback when ASR text bubble is long pressed, provides message and GlobalKey for positioning popup menu
-  final void Function(MessageInfo message, GlobalKey asrBubbleKey)? onAsrBubbleLongPress;
+  final void Function(MessageInfo message, GlobalKey asrBubbleKey)?
+      onAsrBubbleLongPress;
   // Translation display manager for text translation feature
   final TranslationDisplayManager? translationDisplayManager;
   // Callback when translation bubble is long pressed, provides message and GlobalKey for positioning popup menu
-  final void Function(MessageInfo message, GlobalKey translationBubbleKey)? onTranslationBubbleLongPress;
+  final void Function(MessageInfo message, GlobalKey translationBubbleKey)?
+      onTranslationBubbleLongPress;
   // Callback when call message is clicked in C2C conversation
   final void Function(String userID, bool isVideoCall)? onCallMessageClick;
   // Callback when quote preview is tapped (for navigation to quoted message)
   final void Function(MessageInfo message)? onQuotePreviewTap;
+
   /// In merged detail view: the bundle's full message list, used as the
   /// static data source for image / video viewers (the page's
   /// MessageListStore is empty in this mode).
@@ -148,14 +153,15 @@ class MessageBubble extends StatefulWidget {
   State<StatefulWidget> createState() => _MessageBubbleState();
 }
 
-class _MessageBubbleState extends State<MessageBubble> with SingleTickerProviderStateMixin {
+class _MessageBubbleState extends State<MessageBubble>
+    with SingleTickerProviderStateMixin {
   late MessageMenuCallbacks _menuCallbacks;
   final GlobalKey _messageKey = GlobalKey();
   SuperTooltip? tooltip;
 
   late AnimationController _highlightAnimationController;
 
-  late AtomicLocalizations atomicLocal;
+  late AppLocalizedText atomicLocal;
 
   @override
   void initState() {
@@ -175,7 +181,8 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
     );
 
     _highlightAnimationController.addStatusListener((status) {
-      if (status == AnimationStatus.completed && widget.onHighlightComplete != null) {
+      if (status == AnimationStatus.completed &&
+          widget.onHighlightComplete != null) {
         widget.onHighlightComplete!();
       }
     });
@@ -190,7 +197,7 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    atomicLocal = AtomicLocalizations.of(context);
+    atomicLocal = AppLocalization.of(context);
   }
 
   @override
@@ -235,7 +242,7 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
 
   @override
   Widget build(BuildContext context) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     Widget backgroundBuilder(Widget child) {
       if (widget.isHighlighted) {
@@ -259,7 +266,9 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
 
             return Container(
               decoration: BoxDecoration(
-                color: _highlightAnimationController.value <= 0.5 ? colorAnimation.value : reverseColorAnimation.value,
+                color: _highlightAnimationController.value <= 0.5
+                    ? colorAnimation.value
+                    : reverseColorAnimation.value,
                 borderRadius: _getBubbleBorderRadius(),
               ),
               child: animChild,
@@ -292,10 +301,15 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
           isSelf: widget.isSelf,
           maxWidth: widget.maxWidth,
           config: widget.config,
-          onLongPress: widget.message.quoteInfo != null ? null : _longPressCallback,
+          onLongPress:
+              widget.message.quoteInfo != null ? null : _longPressCallback,
           bubbleKey: widget.message.quoteInfo != null ? null : _messageKey,
-          backgroundBuilder: widget.message.quoteInfo != null ? (child) => child : backgroundBuilder,
-          onResendTap: widget.message.status == MessageStatus.sendFail ? _showResendConfirmDialog : null,
+          backgroundBuilder: widget.message.quoteInfo != null
+              ? (child) => child
+              : backgroundBuilder,
+          onResendTap: widget.message.status == MessageStatus.sendFail
+              ? _showResendConfirmDialog
+              : null,
           isInMergedDetailView: widget.isInMergedDetailView,
         );
         break;
@@ -407,7 +421,8 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
         break;
 
       case MessageType.custom:
-        CallingMessageDataProvider provider = CallingMessageDataProvider(widget.message, context);
+        CallingMessageDataProvider provider =
+            CallingMessageDataProvider(widget.message, context);
         if (provider.isCallingSignal) {
           messageWidget = CallMessageWidget(
             message: widget.message,
@@ -484,7 +499,7 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
             ? () => widget.onQuotePreviewTap!(widget.message)
             : null,
       );
-      final colorsTheme = BaseThemeProvider.colorsOf(context);
+      final colorsTheme = SemanticColorScheme.of(context);
       final columnChild = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -550,7 +565,8 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
   }
 
   /// Get long press callback - returns null if in merged detail view
-  VoidCallback? get _longPressCallback => widget.isInMergedDetailView ? null : _handleLongPress;
+  VoidCallback? get _longPressCallback =>
+      widget.isInMergedDetailView ? null : _handleLongPress;
 
   /// Compute animated bubble color for highlight effect (used by audio/file widgets)
   Color _animatedBubbleColor(SemanticColorScheme colorsTheme) {
@@ -560,11 +576,13 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
     if (t <= 0.5) {
       // 0.0 -> 0.4: ease in to highlight
       final progress = (t / 0.4).clamp(0.0, 1.0);
-      return Color.lerp(baseColor, highlightColor, Curves.easeIn.transform(progress))!;
+      return Color.lerp(
+          baseColor, highlightColor, Curves.easeIn.transform(progress))!;
     } else {
       // 0.6 -> 1.0: ease out back to base
       final progress = ((t - 0.6) / 0.4).clamp(0.0, 1.0);
-      return Color.lerp(highlightColor, baseColor, Curves.easeOut.transform(progress))!;
+      return Color.lerp(
+          highlightColor, baseColor, Curves.easeOut.transform(progress))!;
     }
   }
 
@@ -629,7 +647,7 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
     }
     tooltip = null;
 
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
     final isSelf = widget.isSelf;
 
     // Estimated menu height including reaction picker
@@ -646,7 +664,8 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
     bool hasArrow = true;
     Offset? customTargetCenter;
 
-    RenderBox? box = _messageKey.currentContext?.findRenderObject() as RenderBox?;
+    RenderBox? box =
+        _messageKey.currentContext?.findRenderObject() as RenderBox?;
     if (box != null) {
       double screenHeight = MediaQuery.of(context).size.height;
       Offset offset = box.localToGlobal(Offset.zero);
@@ -678,7 +697,8 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
       // - Space above bubble top: from minTopPadding to bubble top
       // - Space below bubble bottom: from bubble bottom to (screenHeight - minBottomPadding)
       double spaceAboveBubbleTop = bubbleTopY - minTopPadding;
-      double spaceBelowBubbleBottom = (screenHeight - minBottomPadding) - bubbleBottomY;
+      double spaceBelowBubbleBottom =
+          (screenHeight - minBottomPadding) - bubbleBottomY;
 
       // Priority 1: If there's enough space above the bubble top, show tooltip above
       if (spaceAboveBubbleTop >= estimatedMenuHeight) {
@@ -730,8 +750,12 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
         onCloseTooltip: () => tooltip?.close(),
         isSelf: isSelf,
         // Violation messages should not show reaction picker
-        showReactionPicker: widget.config.isSupportReaction && widget.message.status != MessageStatus.violation,
-        onReactionSelected: widget.config.isSupportReaction && widget.message.status != MessageStatus.violation ? _handleReactionSelected : null,
+        showReactionPicker: widget.config.isSupportReaction &&
+            widget.message.status != MessageStatus.violation,
+        onReactionSelected: widget.config.isSupportReaction &&
+                widget.message.status != MessageStatus.violation
+            ? _handleReactionSelected
+            : null,
       ),
     );
 
@@ -750,7 +774,7 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
         reactedByMyself: false,
       ),
     );
-    
+
     if (existingReaction.reactionID.isNotEmpty) {
       // Remove reaction
       messageActionStore.removeReaction(reactionID: emoji.name);
@@ -825,17 +849,22 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
 
     // Only for text messages
     if (widget.message.messageType != MessageType.text) return false;
-    
+
     // Only for successfully sent messages
     if (widget.message.status != MessageStatus.sendSuccess) return false;
-    
+
     // Violation messages cannot be translated
     if (widget.message.status == MessageStatus.violation) return false;
-    
-    final hasTranslation = (widget.message.messagePayload as TextMessagePayload?)?.translatedText?.isNotEmpty == true;
+
+    final hasTranslation =
+        (widget.message.messagePayload as TextMessagePayload?)
+                ?.translatedText
+                ?.isNotEmpty ==
+            true;
     final messageID = widget.message.msgID ?? '';
-    final isHidden = widget.translationDisplayManager?.isHidden(messageID) ?? false;
-    
+    final isHidden =
+        widget.translationDisplayManager?.isHidden(messageID) ?? false;
+
     // Show menu when: no translation OR translation is hidden
     return !hasTranslation || isHidden;
   }
@@ -843,66 +872,81 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
   /// Handle translate text action
   void _handleTranslateText() async {
     final messageID = widget.message.msgID ?? '';
-    final hasTranslation = (widget.message.messagePayload as TextMessagePayload?)?.translatedText?.isNotEmpty == true;
-    
+    final hasTranslation =
+        (widget.message.messagePayload as TextMessagePayload?)
+                ?.translatedText
+                ?.isNotEmpty ==
+            true;
+
     // Check if target language has changed
-    final cachedLanguage = (widget.message.messagePayload as TextMessagePayload?)?.translateLanguage;
-    final currentTargetLanguage = AppBuilder.getInstance().translateConfig.targetLanguage;
-    final languageChanged = hasTranslation && cachedLanguage != null && cachedLanguage != currentTargetLanguage;
-    
+    final cachedLanguage =
+        (widget.message.messagePayload as TextMessagePayload?)
+            ?.translateLanguage;
+    final currentTargetLanguage =
+        AppBuilder.getInstance().translateConfig.targetLanguage;
+    final languageChanged = hasTranslation &&
+        cachedLanguage != null &&
+        cachedLanguage != currentTargetLanguage;
+
     // If already has translation and language not changed, just show it again
     if (hasTranslation && !languageChanged) {
       widget.translationDisplayManager?.show(messageID);
       return;
     }
-    
+
     // Set translating state (this also removes from hidden set)
     widget.translationDisplayManager?.setTranslating(messageID, true);
-    
+
     // Get the text to translate
-    final text = (widget.message.messagePayload as TextMessagePayload?)?.text ?? '';
+    final text =
+        (widget.message.messagePayload as TextMessagePayload?)?.text ?? '';
     if (text.isEmpty) {
       widget.translationDisplayManager?.setTranslating(messageID, false);
       return;
     }
-    
+
     // Get @ user names first, then parse and translate
     final allMembersText = atomicLocal.messageInputAllMembers;
     final atUserNames = await TranslationTextParser.getAtUserNames(
       widget.message,
       allMembersText: allMembersText,
     );
-    
+
     _performTranslation(text: text, atUserNames: atUserNames);
   }
 
   /// Perform the actual translation
   void _performTranslation({required String text, List<String>? atUserNames}) {
     final messageID = widget.message.msgID ?? '';
-    
+
     // Parse text to separate emoji and @ from translatable text
     final splitResult = TranslationTextParser.splitTextByEmojiAndAtUsers(
       text,
       atUserNames: atUserNames,
     );
-    final textArray = (splitResult?[TranslationTextParser.kSplitStringTextKey] as List<String>?) ?? [];
-    
+    final textArray = (splitResult?[TranslationTextParser.kSplitStringTextKey]
+            as List<String>?) ??
+        [];
+
     // If nothing to translate (pure emoji/@ message), clear translating state
     if (textArray.isEmpty) {
       widget.translationDisplayManager?.setTranslating(messageID, false);
       return;
     }
-    
+
     // Call the API - use target language from AppBuilder settings
     final messageActionStore = MessageActionStore.create(widget.message);
-    final targetLanguage = AppBuilder.getInstance().translateConfig.targetLanguage;
-    messageActionStore.translateText(
+    final targetLanguage =
+        AppBuilder.getInstance().translateConfig.targetLanguage;
+    messageActionStore
+        .translateText(
       sourceTextList: textArray,
       targetLanguage: targetLanguage,
-    ).then((result) {
+    )
+        .then((result) {
       // Clear translating state
       widget.translationDisplayManager?.setTranslating(messageID, false);
-      
+
       if (!result.isSuccess) {
         // Show error toast using base_component Toast
         if (mounted) {
@@ -950,15 +994,18 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
   bool _shouldShowConvertToTextMenuItem() {
     // Only for sound messages
     if (widget.message.messageType != MessageType.audio) return false;
-    
+
     // Only for successfully sent messages
     if (widget.message.status != MessageStatus.sendSuccess) return false;
-    
+
     // If already converted and not hidden in this session, hide the menu item
-    final hasAsrText = (widget.message.messagePayload as AudioMessagePayload?)?.asrText?.isNotEmpty == true;
+    final hasAsrText = (widget.message.messagePayload as AudioMessagePayload?)
+            ?.asrText
+            ?.isNotEmpty ==
+        true;
     final messageID = widget.message.msgID ?? '';
     final isHidden = widget.asrDisplayManager?.isHidden(messageID) ?? false;
-    
+
     // Show menu when: no asrText OR asrText exists but hidden in this session
     return !hasAsrText || isHidden;
   }
@@ -966,23 +1013,26 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
   /// Handle convert voice to text action
   void _handleConvertVoiceToText() {
     final messageID = widget.message.msgID ?? '';
-    final hasAsrText = (widget.message.messagePayload as AudioMessagePayload?)?.asrText?.isNotEmpty == true;
-    
+    final hasAsrText = (widget.message.messagePayload as AudioMessagePayload?)
+            ?.asrText
+            ?.isNotEmpty ==
+        true;
+
     // If already has asrText but was hidden, just show it again
     if (hasAsrText) {
       widget.asrDisplayManager?.show(messageID);
       return;
     }
-    
+
     // Set converting state (this also removes from hidden set)`
     widget.asrDisplayManager?.setConverting(messageID, true);
-    
+
     // Call the API
     final messageActionStore = MessageActionStore.create(widget.message);
     messageActionStore.convertVoiceToText(language: '').then((result) async {
       // Clear converting state
       widget.asrDisplayManager?.setConverting(messageID, false);
-      
+
       if (!result.isSuccess) {
         // Show error toast
         if (mounted) {
@@ -992,15 +1042,17 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
         // Wait for next frame to ensure messageListStore has been updated via notificationCenter
         await Future.delayed(Duration.zero);
         if (!mounted) return;
-        
+
         // On success, check if asrText is empty from the latest state in messageListStore
         final messageList = widget.messageListStore.state.messageList.value;
         final updatedMessage = messageList.firstWhere(
           (msg) => msg.msgID == messageID,
           orElse: () => widget.message,
         );
-        final asrText = (updatedMessage.messagePayload as AudioMessagePayload?)?.asrText ?? '';
-        
+        final asrText =
+            (updatedMessage.messagePayload as AudioMessagePayload?)?.asrText ??
+                '';
+
         if (asrText.isEmpty) {
           // Voice message has no content, show error toast and collapse ASR bubble
           if (mounted) {
@@ -1075,7 +1127,9 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
 
     // Copy button (only for text messages)
     // Violation messages cannot be copied
-    if (includeCopy && widget.config.isSupportCopy && widget.message.status != MessageStatus.violation) {
+    if (includeCopy &&
+        widget.config.isSupportCopy &&
+        widget.message.status != MessageStatus.violation) {
       items.add(MessageMenuItem(
         title: atomicLocal.copy,
         assetName: 'chat_assets/icon/copy.svg',
@@ -1088,7 +1142,8 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
     // Recall button
     if (widget.config.isSupportRecall && widget.isSelf) {
       final now = DateTime.now().millisecondsSinceEpoch / 1000;
-      final isWithin2Minutes = (now - (widget.message.timestamp ?? 0)) <= 2 * 60;
+      final isWithin2Minutes =
+          (now - (widget.message.timestamp ?? 0)) <= 2 * 60;
       final isSentSuccess = widget.message.status == MessageStatus.sendSuccess;
       // Violation messages cannot be revoked
       final isNotViolation = widget.message.status != MessageStatus.violation;
@@ -1118,7 +1173,7 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
 
     // Listen-from-here button (all message types).
     items.add(MessageMenuItem(
-      title: ChatLocalizations.of(context)!.listenFromHere,
+      title: AppLocalization.of(context).listenFromHere,
       assetName: 'chat_assets/icon/listen_from_here.svg',
       package: 'tencent_chat_uikit',
       icon: Icons.headset_outlined,
@@ -1126,7 +1181,7 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
         ListenFromHereController.instance.start(
           messages: widget.messageListStore.state.messageList.value,
           fromMessageId: widget.message.msgID,
-          l: ChatLocalizations.of(context)!,
+          l: AppLocalization.of(context),
         );
       },
     ));
@@ -1135,7 +1190,8 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
     for (final customAction in widget.customActions) {
       items.add(MessageMenuItem(
         title: customAction.title,
-        assetName: customAction.assetName.isNotEmpty ? customAction.assetName : null,
+        assetName:
+            customAction.assetName.isNotEmpty ? customAction.assetName : null,
         package: customAction.package,
         icon: customAction.systemIconFallback,
         onTap: () => customAction.action(widget.message),
@@ -1150,7 +1206,7 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
   }
 
   Widget _buildUnsupportedMessage(BuildContext context) {
-    final colorsTheme = BaseThemeProvider.colorsOf(context);
+    final colorsTheme = SemanticColorScheme.of(context);
 
     return GestureDetector(
       onLongPress: _longPressCallback,
@@ -1161,7 +1217,9 @@ class _MessageBubbleState extends State<MessageBubble> with SingleTickerProvider
         ),
         margin: EdgeInsets.zero,
         decoration: BoxDecoration(
-          color: widget.isSelf ? colorsTheme.bgColorBubbleOwn : colorsTheme.bgColorBubbleReciprocal,
+          color: widget.isSelf
+              ? colorsTheme.bgColorBubbleOwn
+              : colorsTheme.bgColorBubbleReciprocal,
           borderRadius: _getBubbleBorderRadius(),
         ),
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),

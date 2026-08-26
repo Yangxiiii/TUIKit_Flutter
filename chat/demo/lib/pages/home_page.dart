@@ -12,7 +12,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   late ConversationListStore conversationListStore;
-  late AtomicLocalizations atomicLocale;
+  late AppLocalizedText atomicLocale;
   int _currentIndex = 0;
   late List<_NavItem> _navItems;
   int totalUnreadCount = 0;
@@ -27,12 +27,16 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     conversationListStore = ConversationListStore.create();
-    conversationListStore.state.totalUnreadCount.addListener(_onConversationListChanged);
+    conversationListStore.state.totalUnreadCount.addListener(
+      _onConversationListChanged,
+    );
   }
 
   @override
   void dispose() {
-    conversationListStore.state.totalUnreadCount.removeListener(_onConversationListChanged);
+    conversationListStore.state.totalUnreadCount.removeListener(
+      _onConversationListChanged,
+    );
     super.dispose();
   }
 
@@ -45,20 +49,11 @@ class _HomePageState extends State<HomePage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    atomicLocale = AtomicLocalizations.of(context);
+    atomicLocale = AppLocalization.of(context);
     _navItems = [
-      _NavItem(
-        iconType: TabIconType.chats,
-        label: atomicLocale.chat,
-      ),
-      _NavItem(
-        iconType: TabIconType.contact,
-        label: atomicLocale.contact,
-      ),
-      _NavItem(
-        iconType: TabIconType.settings,
-        label: atomicLocale.settings,
-      ),
+      _NavItem(iconType: TabIconType.chats, label: atomicLocale.chat),
+      _NavItem(iconType: TabIconType.contact, label: atomicLocale.contact),
+      _NavItem(iconType: TabIconType.settings, label: atomicLocale.settings),
     ];
   }
 
@@ -67,26 +62,20 @@ class _HomePageState extends State<HomePage> {
     return PopScope(
       canPop: false,
       child: Scaffold(
-        body: IndexedStack(
-          index: _currentIndex,
-          children: _pages,
-        ),
+        body: IndexedStack(index: _currentIndex, children: _pages),
         bottomNavigationBar: _buildBottomNavigationBar(),
       ),
     );
   }
 
   Widget _buildBottomNavigationBar() {
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
 
     return Container(
       decoration: BoxDecoration(
         color: colors.bgColorBottomBar,
         border: Border(
-          top: BorderSide(
-            color: colors.strokeColorPrimary,
-            width: 0.5,
-          ),
+          top: BorderSide(color: colors.strokeColorPrimary, width: 0.5),
         ),
       ),
       child: SafeArea(
@@ -113,13 +102,19 @@ class _HomePageState extends State<HomePage> {
             height: 1.4,
             letterSpacing: -0.24,
           ),
-          items: _navItems.map((item) => _buildNavItem(item, totalUnreadCount, colors)).toList(),
+          items: _navItems
+              .map((item) => _buildNavItem(item, totalUnreadCount, colors))
+              .toList(),
         ),
       ),
     );
   }
 
-  BottomNavigationBarItem _buildNavItem(_NavItem item, int unreadCount, SemanticColorScheme colors) {
+  BottomNavigationBarItem _buildNavItem(
+    _NavItem item,
+    int unreadCount,
+    SemanticColorScheme colors,
+  ) {
     final isActive = _navItems.indexOf(item) == _currentIndex;
 
     if (item.iconType == TabIconType.chats) {
@@ -173,10 +168,7 @@ class _NavItem {
   final TabIconType iconType;
   final String label;
 
-  _NavItem({
-    required this.iconType,
-    required this.label,
-  });
+  _NavItem({required this.iconType, required this.label});
 }
 
 class _KeepAlivePage extends StatefulWidget {
@@ -188,7 +180,8 @@ class _KeepAlivePage extends StatefulWidget {
   State<_KeepAlivePage> createState() => _KeepAlivePageState();
 }
 
-class _KeepAlivePageState extends State<_KeepAlivePage> with AutomaticKeepAliveClientMixin {
+class _KeepAlivePageState extends State<_KeepAlivePage>
+    with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
 

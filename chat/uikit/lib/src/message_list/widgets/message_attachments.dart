@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
@@ -53,9 +54,10 @@ class MessageAttachmentBuilder {
     if (messageID.isEmpty) return null;
 
     if (message.messageType == MessageType.audio) {
-      final hasAsr =
-          (message.messagePayload as AudioMessagePayload?)?.asrText?.isNotEmpty ==
-              true;
+      final hasAsr = (message.messagePayload as AudioMessagePayload?)
+              ?.asrText
+              ?.isNotEmpty ==
+          true;
       final isConverting = asrDisplayManager?.isConverting(messageID) ?? false;
       final isAsrHidden = asrDisplayManager?.isHidden(messageID) ?? false;
       final shouldShow = isConverting || (hasAsr && !isAsrHidden);
@@ -123,7 +125,7 @@ class _AsrAttachmentBubbleState extends State<AsrAttachmentBubble> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
+    final colors = SemanticColorScheme.of(context);
     return GestureDetector(
       onLongPress: widget.isConverting
           ? null
@@ -242,7 +244,7 @@ class _TranslationAttachmentBubbleState
     _isLoadingAtUserNames = true;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      final localizations = AtomicLocalizations.of(context);
+      final localizations = AppLocalization.of(context);
       final atUserNames = await TranslationTextParser.getAtUserNames(
         widget.message,
         allMembersText: localizations.messageInputAllMembers,
@@ -259,8 +261,8 @@ class _TranslationAttachmentBubbleState
 
   @override
   Widget build(BuildContext context) {
-    final colors = BaseThemeProvider.colorsOf(context);
-    final localizations = AtomicLocalizations.of(context);
+    final colors = SemanticColorScheme.of(context);
+    final localizations = AppLocalization.of(context);
     final translatedTextMap =
         (widget.message.messagePayload as TextMessagePayload?)?.translatedText;
 

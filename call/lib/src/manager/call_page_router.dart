@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:math';
 
-import 'package:tuikit_atomic_x/base_component/localizations/atomic_localizations.dart';
+import 'package:tuikit_atomic_x/base_component/base_component.dart'
+    show AppChatLocalizedText, AppLocalization, AppLocalizedText;
 import 'package:tuikit_atomic_x/permission/permission.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,21 +14,15 @@ import '../view/call_main_widget.dart';
 import '../view/component/incoming_banner/incoming_banner_widget.dart';
 import '../view/component/inviter/invite_user_widget.dart';
 
-enum CallPageType {
-  none,
-  calling,
-  floating,
-  invite,
-  banner,
-  pip,
-}
+enum CallPageType { none, calling, floating, invite, banner, pip }
 
 class CallPageCallbacks {
   final VoidCallback? onShowCalling;
   final VoidCallback? onShowFloating;
   final VoidCallback? onShowPip;
   final VoidCallback? onShowInvitePage;
-  final void Function(DragUpdateDetails details, Size screenSize)? onFloatDragUpdate;
+  final void Function(DragUpdateDetails details, Size screenSize)?
+  onFloatDragUpdate;
   final Size Function()? getOriginScreenSize;
   final void Function(Size size)? setOriginScreenSize;
 
@@ -45,16 +40,15 @@ class CallPageCallbacks {
 class InviteUserCallbacks {
   final VoidCallback? onShowCalling;
 
-  const InviteUserCallbacks({
-    this.onShowCalling,
-  });
+  const InviteUserCallbacks({this.onShowCalling});
 }
 
 class CallPageRouter {
-  final GlobalKey<NavigatorState> _callNavigatorKey = GlobalKey<NavigatorState>();
+  final GlobalKey<NavigatorState> _callNavigatorKey =
+      GlobalKey<NavigatorState>();
   final NavigatorState? Function() _navigatorGetter;
   final AndroidPipFeature pipController = AndroidPipFeature();
- 
+
   CallPageType _currentPageType = CallPageType.none;
   CallPageType getCurrentPageRoute() => _currentPageType;
 
@@ -80,12 +74,11 @@ class CallPageRouter {
   double _floatViewRight = 20.0;
 
   static const double _bannerContentHeight = 100.0;
-  
+
   NavigatorState? get callNavigator => _callNavigatorKey.currentState;
- 
-  CallPageRouter({
-    required NavigatorState? Function() navigatorGetter,
-  })  : _navigatorGetter = navigatorGetter;
+
+  CallPageRouter({required NavigatorState? Function() navigatorGetter})
+    : _navigatorGetter = navigatorGetter;
 
   void showCallingPage() {
     pipController.onEnterPip = () {
@@ -103,30 +96,32 @@ class CallPageRouter {
     pipController.enable();
     _showPage(CallPageType.calling, isManualSwitch: true);
   }
-  
-  void showFloatingPage() => _showPage(CallPageType.floating, isManualSwitch: true);
+
+  void showFloatingPage() =>
+      _showPage(CallPageType.floating, isManualSwitch: true);
   void showPipPage() => _showPage(CallPageType.pip, isManualSwitch: true);
   void showInvitePage() {
     _showPage(CallPageType.invite, isManualSwitch: true);
   }
+
   void showIncomingBanner() {
     if (_hasManuallyShownCalling) return;
     _showPage(CallPageType.banner, isManualSwitch: false);
   }
-  
+
   void closeCallingPage() => _hidePage(CallPageType.calling);
   void closeFloatingPage() => _hidePage(CallPageType.floating);
   void closeInvitePage() => _hidePage(CallPageType.invite);
   void closeIncomingBanner() => _hidePage(CallPageType.banner);
-  
+
   void closeAllPage() {
     pipController.onEnterPip = null;
     pipController.onLeavePip = null;
-    
+
     if (pipController.isInPipMode) {
       pipController.closePictureInPicture();
     }
-    
+
     pipController.disable();
     _removeCallOverlay();
     _hasManuallyShownCalling = false;
@@ -143,15 +138,16 @@ class CallPageRouter {
 
     final overlay = _navigatorGetter()?.overlay;
     if (overlay == null) return;
-    if (AppLifecycle.instance.currentState.value == AppLifecycleState.detached) return;
+    if (AppLifecycle.instance.currentState.value == AppLifecycleState.detached)
+      return;
 
-    if (isManualSwitch && 
-        (pageType == CallPageType.calling || 
-         pageType == CallPageType.floating || 
-         pageType == CallPageType.pip)) {
+    if (isManualSwitch &&
+        (pageType == CallPageType.calling ||
+            pageType == CallPageType.floating ||
+            pageType == CallPageType.pip)) {
       _hasManuallyShownCalling = true;
     }
-    
+
     if (_currentPageType == pageType && _callOverlayEntry != null) {
       _shouldAnimateRect = false;
       _callOverlayEntry?.markNeedsBuild();
@@ -171,8 +167,9 @@ class CallPageRouter {
 
     final previousPageType = _currentPageType;
     final targetPageType = pageType;
-    final isFromSmallToFull = _isSmallWindow(previousPageType) && !_isSmallWindow(targetPageType);
-    
+    final isFromSmallToFull =
+        _isSmallWindow(previousPageType) && !_isSmallWindow(targetPageType);
+
     if (isFromSmallToFull) {
       // Small window → Fullscreen:
       // Immediately update page type and rebuild overlay, then navigate route.
@@ -191,7 +188,8 @@ class CallPageRouter {
       // Fullscreen → Small window, or same-size switch:
       // Animate when at least one side is not a small window;
       // skip animation for small↔small transitions (e.g. floating → banner).
-      _shouldAnimateRect = !_isSmallWindow(previousPageType) || !_isSmallWindow(targetPageType);
+      _shouldAnimateRect =
+          !_isSmallWindow(previousPageType) || !_isSmallWindow(targetPageType);
       _currentPageType = targetPageType;
       _callOverlayEntry?.markNeedsBuild();
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -207,7 +205,7 @@ class CallPageRouter {
 
   void _hidePage(CallPageType type) {
     if (_currentPageType != type) return;
-    
+
     if (type == CallPageType.invite) {
       final navigator = _callNavigatorKey.currentState;
       if (navigator != null && navigator.canPop()) {
@@ -218,7 +216,7 @@ class CallPageRouter {
         return;
       }
     }
-    
+
     _removeCallOverlay();
   }
 
@@ -233,7 +231,7 @@ class CallPageRouter {
     if (navigator == null) return;
 
     final routeName = _getRouteName(pageType);
-    
+
     if (pageType == CallPageType.invite) {
       _pageTypeBeforeInvite = _currentPageType;
       navigator.pushNamed(routeName);
@@ -307,7 +305,9 @@ class CallPageRouter {
   }
 
   bool _isSmallWindow(CallPageType type) {
-    return type == CallPageType.floating || type == CallPageType.banner || type == CallPageType.pip;
+    return type == CallPageType.floating ||
+        type == CallPageType.banner ||
+        type == CallPageType.pip;
   }
 
   void updateFloatPosition(DragUpdateDetails details, Size screenSize) {
@@ -379,9 +379,9 @@ class CallPageRouter {
         page = const SizedBox.shrink();
     }
 
-    final bool noAnimation = settings.name == '/calling' ||
-                              settings.name == '/pip';
-    
+    final bool noAnimation =
+        settings.name == '/calling' || settings.name == '/pip';
+
     final bool isFloating = settings.name == '/floating';
 
     if (isFloating) {
@@ -428,7 +428,8 @@ class CallPageRouter {
       onShowFloating: () => showFloatingPage(),
       onShowPip: () => showPipPage(),
       onShowInvitePage: () => showInvitePage(),
-      onFloatDragUpdate: (details, screenSize) => updateFloatPosition(details, screenSize),
+      onFloatDragUpdate: (details, screenSize) =>
+          updateFloatPosition(details, screenSize),
       getOriginScreenSize: () => originScreenSize,
       setOriginScreenSize: (size) => setOriginScreenSize(size),
     );
@@ -457,7 +458,7 @@ class CallPageRouter {
 
     overlayEntry = OverlayEntry(
       builder: (context) {
-        final l10n = AtomicLocalizations.of(context);
+        final l10n = AppLocalization.of(context);
         return Material(
           color: Colors.black54,
           child: Center(
@@ -507,7 +508,6 @@ class CallPageRouter {
     overlay.insert(overlayEntry);
     return completer.future;
   }
-
 }
 
 class _CallOverlayLayout extends StatelessWidget {
@@ -543,10 +543,7 @@ class _CallOverlayLayout extends StatelessWidget {
           top: rect.top,
           width: rect.width,
           height: rect.height,
-          child: ClipRRect(
-            borderRadius: borderRadius,
-            child: child,
-          ),
+          child: ClipRRect(borderRadius: borderRadius, child: child),
         ),
       ],
     );

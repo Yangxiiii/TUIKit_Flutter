@@ -22,6 +22,7 @@ class AudioPlayerPlatform {
 
   /// Track the current playing file path to detect switching between different audio files.
   static String? _currentPlayingPath;
+
   /// Store the previous onComplete callback so we can notify the old widget when switching.
   static Function()? _previousOnComplete;
 
@@ -95,7 +96,8 @@ class AudioPlayerPlatform {
                 _onResume?.call();
                 break;
               case 'onError':
-                final errorMessage = event['errorMessage'] as String? ?? 'Unknown error';
+                final errorMessage =
+                    event['errorMessage'] as String? ?? 'Unknown error';
                 _onError?.call(errorMessage);
                 break;
             }

@@ -28,8 +28,12 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
+  app_ui:
+    path: ../../../../packages/app_ui
+  easy_localization: ^3.0.8
   flutter:
     sdk: flutter
+  flutter_riverpod: ^3.0.0
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
