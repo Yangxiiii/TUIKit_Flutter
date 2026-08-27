@@ -216,6 +216,7 @@ class _NavReloadingLatest extends _NavigationState {
   const _NavReloadingLatest();
 }
 
+/// 协调消息分页、可见性已读回执与列表内跳转状态。
 class _MessageListState extends State<MessageList>
     with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   late MessageListStore _messageListStore;
@@ -235,6 +236,7 @@ class _MessageListState extends State<MessageList>
   _NavigationState _navigationState = const _NavIdle();
 
   bool _isInitialLoad = true;
+  bool _isInitialRenderComplete = false;
   bool _initialLoadStarted = false;
   Animation<double>? _routeAnimation;
 
@@ -279,6 +281,7 @@ class _MessageListState extends State<MessageList>
   // Unread messages tongue (右上角未读消息小舌头) state
   TongueType _unreadTongueType = TongueType.none;
   int _initialUnreadCount = 0;
+  int _unreadTongueCount = 0;
   int? _oldestUnreadMessageSeq;
   bool _pendingUnreadCheck =
       false; // Defer tongue display until visibility check
@@ -517,17 +520,16 @@ class _MessageListState extends State<MessageList>
       await _loadLatestMessages();
     }
 
+    final initialRenderComplete =
+        _messages.length == _messageListStore.state.messageList.value.length;
     setState(() {
       isLoading = false;
       _isInitialLoad = false;
+      _isInitialRenderComplete = initialRenderComplete;
     });
 
-    if (_pendingUnreadCheck) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _checkUnreadTongueVisibility();
-        });
-      });
+    if (_pendingUnreadCheck && initialRenderComplete) {
+      _scheduleUnreadTongueVisibilityCheck();
     }
   }
 
@@ -716,11 +718,15 @@ class _MessageListState extends State<MessageList>
       final nextLength = _messages.length + _initialRenderBatchSize;
       final visibleLength =
           nextLength < messages.length ? nextLength : messages.length;
+      final isLastBatch = visibleLength == messages.length;
       setState(() {
         _messages = messages.take(visibleLength).toList();
+        _isInitialRenderComplete = isLastBatch;
       });
-      if (visibleLength < messages.length) {
+      if (!isLastBatch) {
         WidgetsBinding.instance.addPostFrameCallback((_) => renderNextBatch());
+      } else if (_pendingUnreadCheck) {
+        _scheduleUnreadTongueVisibilityCheck();
       }
     }
 
@@ -947,6 +953,9 @@ class _MessageListState extends State<MessageList>
   }
 
   bool _shouldTrackVisibility(MessageInfo message) {
+    // 分帧挂载会让尚未稳定定位的消息短暂进入布局，稳定后再启用已读检测。
+    if (!_isInitialRenderComplete) return false;
+
     if (message.isSentBySelf) return false;
 
     if (!message.needReadReceipt) return false;
@@ -1014,7 +1023,7 @@ class _MessageListState extends State<MessageList>
                 child: MessageTongueWidget(
                   tongueState: TongueState(
                     type: TongueType.unreadMessages,
-                    unreadCount: _initialUnreadCount,
+                    unreadCount: _unreadTongueCount,
                     isLoading: _navigationState is _NavToUnread,
                   ),
                   onTap: _onUnreadTongueTap,
@@ -1093,6 +1102,14 @@ class _MessageListState extends State<MessageList>
   /// Check if unread messages exceed visible count; if so, show unread tongue.
   /// Called after messages are loaded and layout is settled.
   /// Tongue is NOT shown until this check confirms it's needed (avoids flash).
+  void _scheduleUnreadTongueVisibilityCheck() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _checkUnreadTongueVisibility();
+      });
+    });
+  }
+
   void _checkUnreadTongueVisibility() {
     if (!_pendingUnreadCheck) return;
     _pendingUnreadCheck = false;
@@ -1101,26 +1118,31 @@ class _MessageListState extends State<MessageList>
     if (positions.isEmpty) {
       // Layout not ready yet — show tongue as fallback (unread count > 0)
       setState(() {
+        _unreadTongueCount = _initialUnreadCount;
         _unreadTongueType = TongueType.unreadMessages;
       });
       return;
     }
 
-    // Count visible message items on screen
-    int visibleMessageCount = 0;
+    // 只扣除未读区间内实际进入屏幕的消息，避免把可见的历史已读消息也算进去。
+    int visibleUnreadCount = 0;
     for (final pos in positions) {
-      if (pos.itemLeadingEdge < 1.0 && pos.itemTrailingEdge > 0.0) {
-        visibleMessageCount++;
+      if (pos.index < _initialUnreadCount &&
+          pos.itemLeadingEdge < 1.0 &&
+          pos.itemTrailingEdge > 0.0) {
+        visibleUnreadCount++;
       }
     }
+    final remainingUnreadCount = _initialUnreadCount - visibleUnreadCount;
 
-    if (_initialUnreadCount <= visibleMessageCount) {
+    if (remainingUnreadCount <= 0) {
       // All unread messages are visible, no need for the tongue
       // _unreadTongueType remains TongueType.none — tongue was never shown
       _activateAtMentionTongueIfNeeded();
     } else {
       // Unread messages exceed visible area, NOW show the tongue
       setState(() {
+        _unreadTongueCount = remainingUnreadCount;
         _unreadTongueType = TongueType.unreadMessages;
       });
       _computeOldestUnreadSeq();
