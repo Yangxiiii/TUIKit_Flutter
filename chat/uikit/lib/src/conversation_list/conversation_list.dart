@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'conversation_list_controller.dart';
 import 'conversation_list_config.dart';
 import 'widgets/conversation_item.dart';
 
@@ -19,7 +23,9 @@ class ConversationCustomAction {
 }
 
 /// 展示并管理 TUIKit 会话列表，宿主可选地筛选可见会话。
-class ConversationList extends StatefulWidget {
+class ConversationList extends ConsumerStatefulWidget {
+  /// 可选的会话 Store；调用方需要主动刷新或复用状态时传入同一实例。
+  final ConversationListStore? store;
   final Function(ConversationInfo)? onConversationClick;
   final List<ConversationCustomAction> customActions;
   final ConversationActionConfigProtocol config;
@@ -38,6 +44,7 @@ class ConversationList extends StatefulWidget {
 
   const ConversationList({
     super.key,
+    this.store,
     this.onConversationClick,
     this.customActions = const [],
     this.config = const ChatConversationActionConfig(),
@@ -48,143 +55,63 @@ class ConversationList extends StatefulWidget {
   });
 
   @override
-  State<ConversationList> createState() => _ConversationListState();
+  ConsumerState<ConversationList> createState() => _ConversationListState();
 }
 
-class _ConversationListState extends State<ConversationList> {
-  late ConversationListStore conversationListStore;
+/// 仅持有滚动控制器，业务列表状态由 Riverpod Controller 管理。
+class _ConversationListState extends ConsumerState<ConversationList> {
+  late final ConversationListStore conversationListStore;
   final ScrollController _scrollController = ScrollController();
-  List<ConversationInfo> conversations = [];
-  bool isLoading = false;
-  bool hasMoreConversations = true;
-
-  // Listener references for proper removal
-  late final VoidCallback _conversationListChangedListener;
-  late final VoidCallback _scrollListenerCallback;
 
   @override
   void initState() {
     super.initState();
-
-    // Initialize listener references
-    _conversationListChangedListener = _onConversationListChanged;
-    _scrollListenerCallback = _scrollListener;
-
-    conversationListStore = ConversationListStore.create();
-
-    conversationListStore.state.conversationList
-        .addListener(_conversationListChangedListener);
-
-    _scrollController.addListener(_scrollListenerCallback);
-
-    _loadConversations();
+    conversationListStore = widget.store ?? ConversationListStore.create();
+    _scrollController.addListener(_scrollListener);
   }
 
   @override
   void dispose() {
-    conversationListStore.state.conversationList
-        .removeListener(_conversationListChangedListener);
-    _scrollController.removeListener(_scrollListenerCallback);
+    _scrollController.removeListener(_scrollListener);
     _scrollController.dispose();
     super.dispose();
   }
 
-  void _onConversationListChanged() {
-    setState(() {
-      conversations =
-          conversationListStore.state.conversationList.value.toList();
-    });
-  }
-
   void _scrollListener() {
-    if (_scrollController.position.pixels ==
+    if (_scrollController.position.pixels !=
         _scrollController.position.maxScrollExtent) {
-      if (!isLoading && hasMoreConversations) {
-        _loadMoreConversations();
-      }
+      return;
     }
-  }
-
-  Future<void> _loadConversations() async {
-    if (isLoading) return;
-
-    setState(() {
-      isLoading = true;
-    });
-    final option = ConversationLoadOption();
-
-    final result =
-        await conversationListStore.loadConversations(option: option);
-    setState(() {
-      hasMoreConversations = result.isSuccess &&
-          conversationListStore.state.hasMoreConversations.value;
-      isLoading = false;
-    });
-  }
-
-  Future<void> _loadMoreConversations() async {
-    if (isLoading) return;
-
-    setState(() {
-      isLoading = true;
-    });
-    final result = await conversationListStore.loadMoreConversations();
-    setState(() {
-      hasMoreConversations = result.isSuccess &&
-          conversationListStore.state.hasMoreConversations.value;
-      isLoading = false;
-    });
-  }
-
-  void _handlePinConversation(ConversationInfo conversationInfo) async {
-    if (conversationInfo.isPinned) {
-      conversationListStore.pinConversation(
-          conversationID: conversationInfo.conversationID, pin: false);
-    } else {
-      conversationListStore.pinConversation(
-          conversationID: conversationInfo.conversationID, pin: true);
+    final provider = conversationListControllerProvider(conversationListStore);
+    final listState = ref.read(provider);
+    if (!listState.isLoading && listState.value?.hasMoreConversations == true) {
+      unawaited(ref.read(provider.notifier).loadMore());
     }
-  }
-
-  void _handleClearHistoryMessage(ConversationInfo conversationInfo) async {
-    conversationListStore.clearConversationMessages(
-        conversationID: conversationInfo.conversationID);
-  }
-
-  void _handleDeleteConversation(ConversationInfo conversationInfo) async {
-    conversationListStore.deleteConversation(
-        conversationID: conversationInfo.conversationID);
-  }
-
-  /// Marks a conversation as read by clearing unread count and removing unread mark.
-  void _handleMarkAsRead(ConversationInfo conversationInfo) async {
-    // Clear real unread count
-    conversationListStore.clearConversationUnreadCount(
-        conversationID: conversationInfo.conversationID);
-    // Remove unread mark from markList
-    conversationListStore.markConversation(
-      conversationIDList: [conversationInfo.conversationID],
-      markType: ConversationMarkType.unread,
-      enable: false,
-    );
-  }
-
-  /// Marks a conversation as unread by adding unread mark (does not affect unreadCount).
-  void _handleMarkAsUnread(ConversationInfo conversationInfo) async {
-    // Add unread mark to markList
-    conversationListStore.markConversation(
-      conversationIDList: [conversationInfo.conversationID],
-      markType: ConversationMarkType.unread,
-      enable: true,
-    );
   }
 
   @override
   Widget build(BuildContext context) {
     final colorsTheme = SemanticColorScheme.of(context);
-    final visibleConversations = widget.filter == null
-        ? conversations
-        : conversations.where(widget.filter!).toList();
+    final provider = conversationListControllerProvider(conversationListStore);
+    final layout = ref.watch(
+      provider.select((asyncState) {
+        final conversations = asyncState.value?.conversations ?? const [];
+        final visibleIDs = conversations
+            .where(widget.filter ?? (_) => true)
+            .map((item) => item.conversationID)
+            .join('\u0000');
+        return (
+          visibleIDs: visibleIDs,
+          isLoading: asyncState.isLoading,
+          hasMore: asyncState.value?.hasMoreConversations ?? false,
+          hasError: asyncState.hasError,
+          isEmpty: conversations.isEmpty,
+        );
+      }),
+    );
+    final visibleConversationIDs = layout.visibleIDs.isEmpty
+        ? const <String>[]
+        : layout.visibleIDs.split('\u0000');
 
     return Container(
       color: widget.backgroundColor ?? colorsTheme.bgColorOperate,
@@ -193,12 +120,12 @@ class _ConversationListState extends State<ConversationList> {
           ListView.builder(
             controller: _scrollController,
             padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: visibleConversations.length +
-                (isLoading && hasMoreConversations ? 1 : 0),
+            itemCount: visibleConversationIDs.length +
+                (layout.isLoading && layout.hasMore ? 1 : 0),
             itemBuilder: (context, index) {
-              if (isLoading &&
-                  hasMoreConversations &&
-                  index == visibleConversations.length) {
+              if (layout.isLoading &&
+                  layout.hasMore &&
+                  index == visibleConversationIDs.length) {
                 return Center(
                   child: Padding(
                     padding: const EdgeInsets.all(8.0),
@@ -211,50 +138,106 @@ class _ConversationListState extends State<ConversationList> {
                 );
               }
 
-              final conversation = visibleConversations[index];
-
-              return ConversationItem(
-                conversation: conversation,
-                backgroundColor: conversation.isPinned
-                    ? widget.pinnedItemBackgroundColor ??
-                        widget.itemBackgroundColor
-                    : widget.itemBackgroundColor,
-                onPinToggle: () {
-                  _handlePinConversation(conversation);
-                },
-                onDelete: () {
-                  _handleDeleteConversation(conversation);
-                },
-                onClearHistory: () {
-                  _handleClearHistoryMessage(conversation);
-                },
-                onMarkAsRead: () {
-                  _handleMarkAsRead(conversation);
-                },
-                onMarkAsUnread: () {
-                  _handleMarkAsUnread(conversation);
-                },
-                onTap: () {
-                  // Clear unread status before entering conversation (same as Swift implementation)
-                  _handleMarkAsRead(conversation);
-                  if (widget.onConversationClick != null) {
-                    widget.onConversationClick!(conversation);
-                  }
-                },
+              return _ConversationRow(
+                store: conversationListStore,
+                conversationID: visibleConversationIDs[index],
+                itemBackgroundColor: widget.itemBackgroundColor,
+                pinnedItemBackgroundColor: widget.pinnedItemBackgroundColor,
                 customActions: widget.customActions,
                 config: widget.config,
+                onConversationClick: widget.onConversationClick,
               );
             },
           ),
-          if (isLoading && conversations.isEmpty)
+          if (layout.isLoading && layout.isEmpty)
             Center(
               child: CircularProgressIndicator(
                 valueColor: AlwaysStoppedAnimation<Color>(
                     colorsTheme.buttonColorPrimaryDefault),
               ),
             ),
+          if (layout.hasError && layout.isEmpty)
+            Center(
+              child: TextButton(
+                onPressed: () => ref.invalidate(provider),
+                child: const Text('加载失败，点击重试'),
+              ),
+            ),
         ],
       ),
+    );
+  }
+}
+
+/// 仅订阅单个会话的可变字段，使 SDK 更新不会重建其他会话行。
+final class _ConversationRow extends ConsumerWidget {
+  const _ConversationRow({
+    required this.store,
+    required this.conversationID,
+    required this.itemBackgroundColor,
+    required this.pinnedItemBackgroundColor,
+    required this.customActions,
+    required this.config,
+    required this.onConversationClick,
+  });
+
+  final ConversationListStore store;
+  final String conversationID;
+  final Color? itemBackgroundColor;
+  final Color? pinnedItemBackgroundColor;
+  final List<ConversationCustomAction> customActions;
+  final ConversationActionConfigProtocol config;
+  final Function(ConversationInfo)? onConversationClick;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final provider = conversationListControllerProvider(store);
+    final row = ref.watch(
+      provider.select((asyncState) {
+        ConversationInfo? conversation;
+        for (final item in asyncState.value?.conversations ?? const []) {
+          if (item.conversationID == conversationID) {
+            conversation = item;
+            break;
+          }
+        }
+        if (conversation == null) return null;
+        return (
+          conversation: conversation,
+          title: conversation.title,
+          draft: conversation.draft,
+          unreadCount: conversation.unreadCount,
+          isPinned: conversation.isPinned,
+          receiveOption: conversation.receiveOption,
+          lastMessageID: conversation.lastMessage?.msgID,
+          lastMessageTime: conversation.lastMessage?.timestamp,
+          markTypes: conversation.conversationMarkList
+              .map((item) => item.rawValue)
+              .join(','),
+        );
+      }),
+    );
+    final conversation = row?.conversation;
+    if (conversation == null) return const SizedBox.shrink();
+    final controller = ref.read(provider.notifier);
+
+    return ConversationItem(
+      conversation: conversation,
+      backgroundColor: conversation.isPinned
+          ? pinnedItemBackgroundColor ?? itemBackgroundColor
+          : itemBackgroundColor,
+      onPinToggle: () => unawaited(controller.pin(conversation)),
+      onDelete: () => unawaited(controller.delete(conversation)),
+      onClearHistory: () => unawaited(controller.clearHistory(conversation)),
+      onMarkAsRead: () => unawaited(controller.markAsRead(conversation)),
+      onMarkAsUnread: () => unawaited(controller.markAsUnread(conversation)),
+      onTap: () {
+        // 进入会话前清除未读状态，保持与原生 UIKit 的交互一致。
+        unawaited(controller.markAsRead(conversation));
+        onConversationClick?.call(conversation);
+      },
+      customActions: customActions,
+      config: config,
     );
   }
 }
