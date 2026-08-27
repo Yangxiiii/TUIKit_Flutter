@@ -12,6 +12,8 @@ export 'src/audio_recoder/audio_recorder.dart';
 export 'src/chat_setting/chat_setting.dart';
 export 'src/chat_setting/widgets/setting_widgets.dart';
 export 'src/contact_list/contact_list.dart';
+export 'src/contact_list/pages/start_c2c_chat.dart';
+export 'src/contact_list/pages/start_group_chat.dart';
 export 'src/conversation_list/conversation_list.dart';
 export 'src/emoji_picker/emoji_manager.dart';
 export 'src/emoji_picker/emoji_picker.dart';
