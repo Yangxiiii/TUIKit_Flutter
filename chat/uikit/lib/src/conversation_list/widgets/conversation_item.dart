@@ -127,55 +127,60 @@ class _ConversationItemState extends State<ConversationItem> {
     String formatTime = TimeUtil.convertToFormatTime(
         widget.conversation.lastMessage?.timestamp ?? 0, context);
 
-    return InkWell(
-      onTap: widget.onTap,
-      onLongPress: widget.onLongPress,
-      child: Container(
-        decoration: BoxDecoration(color: backgroundColor),
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-        child: Row(
-          children: [
-            _buildAvatar(context),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          widget.conversation.title ?? '',
-                          style: FontScheme.caption1Medium.copyWith(
-                            color: colorsTheme.textColorPrimary,
+    final primary = Theme.of(context).colorScheme.primary;
+    return Material(
+      color: backgroundColor,
+      child: InkWell(
+        onTap: widget.onTap,
+        onLongPress: widget.onLongPress,
+        splashColor: primary.withValues(alpha: 0.12),
+        highlightColor: primary.withValues(alpha: 0.08),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          child: Row(
+            children: [
+              _buildAvatar(context),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            widget.conversation.title ?? '',
+                            style: FontScheme.caption1Medium.copyWith(
+                              color: colorsTheme.textColorPrimary,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                      _buildUnreadOrMuteIcon(),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildSubtitle(context, colorsTheme),
-                      ),
-                      const SizedBox(width: 8),
-                      _buildErrorStatusIcon(colorsTheme),
-                      Text(
-                        formatTime,
-                        style: FontScheme.caption3Regular.copyWith(
-                          color: colorsTheme.textColorTertiary,
+                        _buildUnreadOrMuteIcon(),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildSubtitle(context, colorsTheme),
                         ),
-                      ),
-                    ],
-                  ),
-                ],
+                        const SizedBox(width: 8),
+                        _buildErrorStatusIcon(colorsTheme),
+                        Text(
+                          formatTime,
+                          style: FontScheme.caption3Regular.copyWith(
+                            color: colorsTheme.textColorTertiary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
