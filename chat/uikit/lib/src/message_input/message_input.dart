@@ -1,8 +1,6 @@
 import 'package:app_ui/app_ui.dart';
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
-
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:atomic_x_core/impl/message/message_input_store_impl.dart';
 import 'package:atomic_x_core/impl/message/message_list_store_impl.dart';
@@ -1325,19 +1323,14 @@ class MessageInputState extends State<MessageInput>
       ));
     }
 
-    // HarmonyOS: CallKit (client_uikit/atomic-x/flutter/call) 暂未适配纯血鸿蒙,
-    // 底层 tencent_calls_uikit 在 ohos 上不可用,点了会 crash / no-op。
-    // 先在鸿蒙平台隐藏音视频通话入口;等 CallKit 拉出 ohos 分支后去掉这个判断即可。
-    final bool hideCallOnOhos = Platform.operatingSystem == 'ohos';
-
-    if (widget.config.isShowVideoCall && !hideCallOnOhos) {
+    if (widget.config.isShowVideoCall) {
       items.add(_MorePanelItem(
         icon: 'chat_assets/icon/video_call_action.svg',
         title: atomicLocale.videoCall,
         onTap: _onVideoCallTap,
       ));
     }
-    if (widget.config.isShowAudioCall && !hideCallOnOhos) {
+    if (widget.config.isShowAudioCall) {
       items.add(_MorePanelItem(
         icon: 'chat_assets/icon/audio_call_action.svg',
         title: atomicLocale.audioCall,

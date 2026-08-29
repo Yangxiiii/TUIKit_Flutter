@@ -54,6 +54,9 @@ flutter:
         pluginClass: TencentCallsUikitPlugin
       ios:
         pluginClass: TencentCallsUikitPlugin
+      ohos:
+        package: com.tencent.cloud.tuikit.flutter.tuicallkit
+        pluginClass: TencentCallsUikitPlugin
 
   assets:
     - assets/audios/

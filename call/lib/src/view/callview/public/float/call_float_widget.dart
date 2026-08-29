@@ -49,12 +49,19 @@ class _CallFloatWidgetState extends State<CallFloatWidget> {
     return ValueListenableBuilder(
       valueListenable: CallStore.shared.state.selfInfo,
       builder: (context, self, child) {
+        final isAudioCall = CallStore.shared.state.activeCall.value.mediaType ==
+            CallMediaType.audio;
         return Stack(
           children: [
-            CallCoreView(
-              controller: widget.controller,
-              defaultAvatar: Constants.defaultAvatarImage,
-            ),
+            if (isAudioCall)
+              const Positioned.fill(
+                child: ColoredBox(color: Color(0xFF2D2D2D)),
+              )
+            else
+              CallCoreView(
+                controller: widget.controller,
+                defaultAvatar: Constants.defaultAvatarImage,
+              ),
             _buildUserInfoWidget(context),
             Positioned(
               top: MediaQuery.of(context).size.height * 2 / 3,
@@ -64,8 +71,7 @@ class _CallFloatWidgetState extends State<CallFloatWidget> {
             Positioned(
               left: 0,
               right: 0,
-              bottom:
-                  40 +
+              bottom: 40 +
                   _controlsHeight +
                   8 +
                   MediaQuery.of(context).padding.bottom,
@@ -79,17 +85,14 @@ class _CallFloatWidgetState extends State<CallFloatWidget> {
                 ),
               ),
             ),
-
             if (widget.enableAITranscriber &&
                 self.status == CallParticipantStatus.accept)
               AITranscriberPanel(
-                bottomOffset:
-                    _controlsHeight +
+                bottomOffset: _controlsHeight +
                     48 +
                     MediaQuery.of(context).padding.bottom,
                 animationDuration: Duration.zero,
               ),
-
             Positioned(
               right: 0,
               left: 0,

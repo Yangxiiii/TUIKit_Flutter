@@ -155,6 +155,8 @@ class CallManager {
     );
     if (mediaType == CallMediaType.video) {
       await DeviceStore.shared.openLocalCamera(true);
+    } else {
+      await closeLocalCamera();
     }
   }
 
