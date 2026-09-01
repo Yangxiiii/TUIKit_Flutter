@@ -762,9 +762,10 @@ class _MessageBubbleState extends State<MessageBubble>
     tooltip?.show(context, targetCenter: customTargetCenter);
   }
 
-  void _handleReactionSelected(EmojiPickerModelItem emoji) {
+  /// 提交或撤销消息回应，SDK 拒绝操作时仅记录控制台日志。
+  Future<void> _handleReactionSelected(EmojiPickerModelItem emoji) async {
     final messageActionStore = MessageActionStore.create(widget.message);
-    // Check if already reacted with this emoji
+    // 已回应同一表情时再次点击表示撤销，否则新增回应。
     final existingReaction = widget.message.reactionList.firstWhere(
       (r) => r.reactionID == emoji.name && r.reactedByMyself,
       orElse: () => MessageReaction(
@@ -775,14 +776,22 @@ class _MessageBubbleState extends State<MessageBubble>
       ),
     );
 
-    if (existingReaction.reactionID.isNotEmpty) {
-      // Remove reaction
-      messageActionStore.removeReaction(reactionID: emoji.name);
-    } else {
-      // Add reaction
-      messageActionStore.addReaction(reactionID: emoji.name);
-      // Save to recent emojis
-      RecentEmojiManager.addRecentEmoji(emoji.name);
+    final isRemoving = existingReaction.reactionID.isNotEmpty;
+    final result = isRemoving
+        ? await messageActionStore.removeReaction(reactionID: emoji.name)
+        : await messageActionStore.addReaction(reactionID: emoji.name);
+    if (!mounted) return;
+
+    if (!result.isSuccess) {
+      debugPrint(
+        '消息回应失败：errorCode=${result.errorCode}, '
+        'errorMessage=${result.errorMessage}',
+      );
+      return;
+    }
+
+    if (!isRemoving) {
+      await RecentEmojiManager.addRecentEmoji(emoji.name);
     }
   }
 

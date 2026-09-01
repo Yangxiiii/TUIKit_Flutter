@@ -8,6 +8,7 @@ import 'package:flutter/material.dart' hide AlertDialog;
 import 'package:flutter/services.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_list/message_list_config.dart';
+import 'package:tencent_chat_uikit/src/message_list/utils/at_mention_utils.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/asr_display_manager.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/call_ui_extension.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_utils.dart';
@@ -240,10 +241,6 @@ class _MessageListState extends State<MessageList>
   bool _initialLoadStarted = false;
   Animation<double>? _routeAnimation;
 
-  /// 用于取消已过期的首次分批渲染任务，避免会话切换后写回旧消息。
-  int _initialRenderGeneration = 0;
-  static const int _initialRenderBatchSize = 1;
-
   String? _highlightedMessageId;
 
   /// The source message of an in-progress quote round-trip — i.e. the
@@ -274,6 +271,7 @@ class _MessageListState extends State<MessageList>
   // Tongue (小舌头) state
   TongueType _tongueType = TongueType.none;
   int _newMessageCount = 0;
+  final List<MessageInfo> _pendingNewMessages = [];
   String? _atMentionText;
   int? _atMessageSeq;
   static const int _tongueScrollThreshold = 15;
@@ -454,6 +452,7 @@ class _MessageListState extends State<MessageList>
       if (_tongueType != TongueType.none || _newMessageCount > 0) {
         setState(() {
           _newMessageCount = 0;
+          _pendingNewMessages.clear();
           if (_remainingAtInfoList.isEmpty) {
             // Only hide tongue when truly at the bottom of ALL messages.
             // If there are still newer messages to load, keep backToLatest
@@ -582,6 +581,7 @@ class _MessageListState extends State<MessageList>
           });
         }
         _remainingAtInfoList.removeWhere((info) => info.msgSeq == targetSeq);
+        _consumeNewMessagesThrough(targetSeq);
         // Mark this nav "processed" without leaving the 2-frame settle
         // window — a subsequent notifyListeners in this window will fall
         // through this switch to the default branch instead of
@@ -627,14 +627,6 @@ class _MessageListState extends State<MessageList>
     }
 
     final nextMessages = state.messageList.value.reversed.toList();
-    if (_isInitialLoad &&
-        _messages.isEmpty &&
-        nextMessages.length > _initialRenderBatchSize) {
-      _renderInitialMessagesInBatches(nextMessages);
-      return;
-    }
-    _initialRenderGeneration++;
-
     final oldLength = _messages.length;
     // Remember the first message's ID to detect head-insertion (new messages)
     // vs tail-append (older history messages).
@@ -709,40 +701,43 @@ class _MessageListState extends State<MessageList>
     }
   }
 
-  /// 首次进入时分帧挂载消息，避免在路由动画期间集中构建全部消息组件。
-  void _renderInitialMessagesInBatches(List<MessageInfo> messages) {
-    final generation = ++_initialRenderGeneration;
-
-    void renderNextBatch() {
-      if (!mounted || generation != _initialRenderGeneration) return;
-      final nextLength = _messages.length + _initialRenderBatchSize;
-      final visibleLength =
-          nextLength < messages.length ? nextLength : messages.length;
-      final isLastBatch = visibleLength == messages.length;
-      setState(() {
-        _messages = messages.take(visibleLength).toList();
-        _isInitialRenderComplete = isLastBatch;
-      });
-      if (!isLastBatch) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => renderNextBatch());
-      } else if (_pendingUnreadCheck) {
-        _scheduleUnreadTongueVisibilityCheck();
-      }
-    }
-
-    renderNextBatch();
-  }
-
   void _onMessageEvent(MessageEvent event) {
     switch (event) {
       case OnReceiveNewMessage(:final message):
         debugPrint('messageList, onReceiveNewMessage: ${message.msgID}');
         _clearUnreadCount();
-        if (!isLoading && _isUserAtBottom()) {
+        final isAtBottom = _isUserAtBottom();
+        if (!isLoading && isAtBottom) {
           _scrollToBottom();
-        } else if (!_isUserAtBottom() && widget.config.isSupportTongue) {
+        } else if (!isAtBottom && widget.config.isSupportTongue) {
+          final atType = message.conversationType == ConversationType.group &&
+                  !message.isSentBySelf
+              ? resolveGroupAtType(
+                  message.atUserList,
+                  LoginStore.shared.loginState.loginUserInfo?.userID,
+                )
+              : null;
           setState(() {
-            _newMessageCount++;
+            final sequence = message.sequence;
+            if (atType != null &&
+                sequence != null &&
+                sequence > 0 &&
+                !_remainingAtInfoList.any((info) => info.msgSeq == sequence)) {
+              // 实时到达的 @ 消息不会写回初始 groupAtInfoList，
+              // 因此在本地补入队列，确保历史位置也能直接跳转。
+              _remainingAtInfoList.add(
+                GroupAtInfo(msgSeq: sequence, atType: atType),
+              );
+              _remainingAtInfoList.sort((a, b) => a.msgSeq.compareTo(b.msgSeq));
+              final nextAt = _remainingAtInfoList.first;
+              _atMessageSeq = nextAt.msgSeq;
+              _atMentionText = _getAtMentionTextForType(nextAt.atType);
+            }
+            if (!_pendingNewMessages
+                .any((pending) => pending.msgID == message.msgID)) {
+              _pendingNewMessages.add(message);
+            }
+            _newMessageCount = _pendingNewMessages.length;
             _tongueType = _computeTongueType();
           });
         }
@@ -953,7 +948,7 @@ class _MessageListState extends State<MessageList>
   }
 
   bool _shouldTrackVisibility(MessageInfo message) {
-    // 分帧挂载会让尚未稳定定位的消息短暂进入布局，稳定后再启用已读检测。
+    // 首屏消息完成提交后再启用已读检测，避免加载期间误报可见状态。
     if (!_isInitialRenderComplete) return false;
 
     if (message.isSentBySelf) return false;
@@ -1380,6 +1375,7 @@ class _MessageListState extends State<MessageList>
       // _reloadLatestMessages AFTER scrollToBottom + layout settle.
       setState(() {
         _newMessageCount = 0;
+        _pendingNewMessages.clear();
         _navigationState = const _NavReloadingLatest();
       });
 
@@ -1388,6 +1384,7 @@ class _MessageListState extends State<MessageList>
       setState(() {
         _tongueType = TongueType.none;
         _newMessageCount = 0;
+        _pendingNewMessages.clear();
       });
       if (_itemScrollController.isAttached && _messages.isNotEmpty) {
         _itemScrollController.jumpTo(index: 0);
@@ -1660,6 +1657,7 @@ class _MessageListState extends State<MessageList>
       }
       // Mark this @message as consumed, activate next
       _remainingAtInfoList.removeWhere((info) => info.msgSeq == targetSeq);
+      _consumeNewMessagesThrough(targetSeq);
       _activateAtMentionTongueIfNeeded();
     } else {
       // Message not in current list, reload around the target seq.
@@ -1697,6 +1695,13 @@ class _MessageListState extends State<MessageList>
         }
       });
     });
+  }
+
+  /// 跳转后移除目标及其之前的新消息，保留下方尚未查看的数量。
+  void _consumeNewMessagesThrough(int targetSeq) {
+    _pendingNewMessages
+        .removeWhere((message) => !isMessageAfterSequence(message, targetSeq));
+    _newMessageCount = _pendingNewMessages.length;
   }
 
   // ==================== Multi-select mode ====================
