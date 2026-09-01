@@ -1,12 +1,6 @@
-// Background / lock-screen system notification for incoming calls. Fills the
-// gap that `IncomingBannerView` only covers when the host app is foreground.
-//
-// Foreground → no-op (in-app banner / call page already surfaces the call).
-// Background → SOCIAL_COMMUNICATION-slot notification with caller name,
-// media type, and Answer / Decline action buttons. Tapping a button launches
-// the host UIAbility with `parameters.callkitAction = 'accept' | 'reject'`,
-// which the host's `EntryAbility.onNewWant` is expected to forward to
-// `CallStore.shared().accept() / .reject()` (see README sample).
+// 前台由应用内横幅或通话页承接来电，后台和锁屏状态改用系统社交通信通知。
+// 通知动作携带 action 与 callId，宿主拉起后可校验目标通话再执行接听或拒绝，
+// 避免冷启动恢复期间误操作后续到达的另一通电话。
 
 import { common, wantAgent, WantAgent } from '@kit.AbilityKit';
 import { notificationManager } from '@kit.NotificationKit';
@@ -23,6 +17,7 @@ import { AppStateObserver } from './AppStateObserver';
 const NOTIFICATION_ID: number = 0xCA11_001;
 
 export const NOTIFICATION_CALL_ACTION_KEY: string = 'callkitAction';
+export const NOTIFICATION_CALL_ID_KEY: string = 'callkitCallId';
 export const NOTIFICATION_CALL_ACTION_ACCEPT: string = 'accept';
 export const NOTIFICATION_CALL_ACTION_REJECT: string = 'reject';
 
@@ -68,9 +63,17 @@ export class IncomingNotificationFeature {
     const tipKey: string = this.tipKey(activeCall);
 
     try {
-      const acceptAgent = await this.buildWantAgent(NOTIFICATION_CALL_ACTION_ACCEPT, 1);
-      const rejectAgent = await this.buildWantAgent(NOTIFICATION_CALL_ACTION_REJECT, 2);
-      const tapAgent = await this.buildWantAgent('', 0);
+      const acceptAgent = await this.buildWantAgent(
+        NOTIFICATION_CALL_ACTION_ACCEPT,
+        activeCall.callId,
+        1,
+      );
+      const rejectAgent = await this.buildWantAgent(
+        NOTIFICATION_CALL_ACTION_REJECT,
+        activeCall.callId,
+        2,
+      );
+      const tapAgent = await this.buildWantAgent('', activeCall.callId, 0);
       const largeIcon: image.PixelMap | undefined = await this.tryLoadAvatarPixelMap(caller?.avatarURL);
 
       const request: notificationManager.NotificationRequest = {
@@ -127,13 +130,14 @@ export class IncomingNotificationFeature {
       : 'TUICallKit.inviteToAudioCall';
   }
 
-  private async buildWantAgent(action: string, requestCode: number): Promise<WantAgent> {
+  private async buildWantAgent(action: string, callId: string, requestCode: number): Promise<WantAgent> {
     if (!this.context) {
       throw new Error('IncomingNotificationFeature: context not bound');
     }
     const parameters: Record<string, string> = {};
     if (action.length > 0) {
       parameters[NOTIFICATION_CALL_ACTION_KEY] = action;
+      parameters[NOTIFICATION_CALL_ID_KEY] = callId;
     }
     const info: wantAgent.WantAgentInfo = {
       wants: [{

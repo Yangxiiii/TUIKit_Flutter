@@ -17,7 +17,11 @@ import { RouterManager } from './manager/RouterManager';
 import { SubWindowManager } from './manager/SubWindowManager';
 import { CallingBellFeature } from './feature/CallingBellFeature';
 import { CallingVibratorFeature } from './feature/CallingVibratorFeature';
-import { IncomingNotificationFeature } from './feature/IncomingNotificationFeature';
+import {
+  IncomingNotificationFeature,
+  NOTIFICATION_CALL_ACTION_ACCEPT,
+  NOTIFICATION_CALL_ACTION_REJECT,
+} from './feature/IncomingNotificationFeature';
 import { NetworkQualityToastManager } from './manager/NetworkQualityToastManager';
 import { PipManager } from './manager/PipManager';
 import { ScreenStateManager } from './manager/ScreenStateManager';
@@ -68,6 +72,9 @@ export abstract class TUICallKit {
 
   abstract enableIncomingBanner(enable: boolean): void;
 
+  /** 处理系统来电通知动作；callId 不匹配时不会操作当前通话。 */
+  abstract handleNotificationAction(action: string, callId: string): void;
+
   /** v1 TODO: virtual background out of scope. */
   // abstract enableVirtualBackground(enable: boolean): void;
 
@@ -99,6 +106,16 @@ function formatError(e: object | Error | ErrorInfo | null | undefined): string {
   }
 }
 
+class PendingNotificationAction {
+  action: string;
+  callId: string;
+
+  constructor(action: string, callId: string) {
+    this.action = action;
+    this.callId = callId;
+  }
+}
+
 class TUICallKitImpl extends TUICallKit {
   private context: common.UIAbilityContext;
   private listener: CallEventListener | null = null;
@@ -107,6 +124,7 @@ class TUICallKitImpl extends TUICallKit {
    * not the SDK lifetime.
    */
   private avSessionManager: AVSessionManager = new AVSessionManager();
+  private pendingNotificationAction: PendingNotificationAction | null = null;
 
   constructor(context: common.UIAbilityContext) {
     super();
@@ -197,6 +215,26 @@ class TUICallKitImpl extends TUICallKit {
     GlobalState().enableIncomingBanner = enable;
   }
 
+  handleNotificationAction(action: string, callId: string): void {
+    if ((action !== NOTIFICATION_CALL_ACTION_ACCEPT && action !== NOTIFICATION_CALL_ACTION_REJECT)
+        || callId.length === 0) {
+      Logger.warn('handleNotificationAction: invalid parameters');
+      return;
+    }
+
+    const activeCallId = CallStore.shared().state.activeCall.callId;
+    if (activeCallId.length === 0) {
+      // 冷启动时 CallStore 可能尚未恢复邀请，暂存动作并在同一 callId 到达后执行。
+      this.pendingNotificationAction = new PendingNotificationAction(action, callId);
+      return;
+    }
+    if (activeCallId !== callId) {
+      Logger.warn('handleNotificationAction: stale call action ignored', callId);
+      return;
+    }
+    this.executeNotificationAction(action, callId);
+  }
+
   enableVirtualBackground(enable: boolean): void {
     // TODO: not implemented in v1.
     GlobalState().enableVirtualBackground = enable;
@@ -285,6 +323,12 @@ class TUICallKitImpl extends TUICallKit {
       RouterManager.showCallingView();
     }
     this.setFramework();
+
+    const pending = this.pendingNotificationAction;
+    this.pendingNotificationAction = null;
+    if (pending && pending.callId === callId) {
+      this.executeNotificationAction(pending.action, pending.callId);
+    }
   }
 
   private handleCallEnded(
@@ -301,6 +345,9 @@ class TUICallKitImpl extends TUICallKit {
     void IncomingNotificationFeature.shared().cancel();
     void ScreenStateManager().endCall();
     void this.avSessionManager.stop();
+    if (this.pendingNotificationAction?.callId === callId) {
+      this.pendingNotificationAction = null;
+    }
 
 
     const selfId = CallStore.shared().state.selfInfo.id;
@@ -318,6 +365,18 @@ class TUICallKitImpl extends TUICallKit {
       }
     }
     RouterManager.closeView();
+  }
+
+  /** 校验已由统一入口完成；动作失败只记录日志，不阻塞 Ability 恢复。 */
+  private executeNotificationAction(action: string, callId: string): void {
+    this.pendingNotificationAction = null;
+    void IncomingNotificationFeature.shared().cancel();
+    const operation = action === NOTIFICATION_CALL_ACTION_ACCEPT
+      ? CallStore.shared().accept()
+      : CallStore.shared().reject();
+    operation.catch((e: Object): void => {
+      Logger.warn('handleNotificationAction failed', callId, e);
+    });
   }
 
   private static endReasonToastKey(reason: CallEndReason): string {
