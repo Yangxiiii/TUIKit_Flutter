@@ -187,15 +187,21 @@ class _ConversationItemState extends State<ConversationItem> {
   }
 
   /// Build subtitle widget with draft support
+  ///
+  /// 构建带有草稿支持的副标题Widget。
   Widget _buildSubtitle(BuildContext context, SemanticColorScheme colorsTheme) {
     final draft = widget.conversation.draft;
 
     // Build @ mention prefix
+    //
+    // 构建 @ 提及前缀。
     String atPrefix = _buildAtMentionPrefix();
 
     // If there's a draft, show draft with red label
     if (draft != null && draft.isNotEmpty) {
       // Convert emoji codes to localized names for preview
+      //
+      // 将表情代码转换为本地化名称以供预览。
       String localizedDraft =
           EmojiManager.getEmojiMap(context).keys.fold(draft, (previous, key) {
         return previous.replaceAll(
@@ -203,9 +209,13 @@ class _ConversationItemState extends State<ConversationItem> {
       });
 
       // Replace newlines with spaces for single-line display
+      //
+      // 将换行符替换为空格以便单行显示。
       localizedDraft = localizedDraft.replaceAll('\n', ' ');
 
       // Build prefix for unread count (only when muted and unreadCount >= 2)
+      //
+      // 构建未读数前缀（仅在已静音且 unreadCount >= 2 时）。
       String unreadPrefix = '';
       if (widget.conversation.receiveOption == ReceiveMessageOption.notNotify &&
           widget.conversation.unreadCount >= 2) {
@@ -250,6 +260,8 @@ class _ConversationItemState extends State<ConversationItem> {
     }
 
     // No draft: show last message as before
+    //
+    // 无草稿：像以前一样显示最后一条消息。
     String replaceText = EmojiManager.getEmojiMap(context).keys.fold(
         MessageUtil.getMessageAbstract(
             widget.conversation.lastMessage, context), (previous, key) {
@@ -306,13 +318,19 @@ class _ConversationItemState extends State<ConversationItem> {
   }
 
   /// Build @ mention prefix based on groupAtInfoList
+  ///
+  /// 根据 groupAtInfoList 构建 @ 提及前缀。
   String _buildAtMentionPrefix() {
     // Only show @ tag when unreadCount > 0 and is group chat
+    //
+    // 仅当 unreadCount > 0 且为群聊时显示 @ 标签。
     if (widget.conversation.unreadCount <= 0) {
       return '';
     }
 
     // Check if it's a group chat
+    //
+    // 检查是否是群聊
     if (!widget.conversation.conversationID.startsWith('group_')) {
       return '';
     }
@@ -323,6 +341,8 @@ class _ConversationItemState extends State<ConversationItem> {
     }
 
     // Check for different @ types
+    //
+    // 检查不同类型的@提醒
     bool hasAtAll = false;
     bool hasAtMe = false;
 
@@ -343,6 +363,8 @@ class _ConversationItemState extends State<ConversationItem> {
 
     // Build prefix based on @ types
     // Priority: @All + @Me shows both tags, @Me shows [@Me], @All shows [@All]
+    //
+    // 根据@类型构建前缀 优先级：@All + @Me显示两个标签，@Me显示[@Me]，@All显示[@All]
     if (hasAtAll && hasAtMe) {
       return '${atomicLocale.conversationListAtAll} ${atomicLocale.conversationListAtMe} ';
     } else if (hasAtMe) {
@@ -356,9 +378,13 @@ class _ConversationItemState extends State<ConversationItem> {
 
   Widget _buildAvatar(BuildContext context) {
     // Show red dot for muted conversations with unread status
+    //
+    // 对已静音但有未读状态的对话显示红点
     bool hasDot = false;
     if (widget.conversation.receiveOption == ReceiveMessageOption.notNotify) {
       // Check both unreadCount and markList for unread status
+      //
+      // 检查unreadCount和markList是否有未读状态
       hasDot = widget.conversation.unreadCount > 0 ||
           widget.conversation.conversationMarkList
               .any((mark) => mark == ConversationMarkType.unread);
@@ -408,17 +434,23 @@ class _ConversationItemState extends State<ConversationItem> {
     }
 
     // Check for unread status: unreadCount > 0 OR marked as unread
+    //
+    // 检查未读状态：unreadCount > 0 或标记为未读
     final bool hasUnreadMark = widget.conversation.conversationMarkList
         .any((mark) => mark == ConversationMarkType.unread);
 
     if (widget.conversation.unreadCount > 0) {
       // Show real unread count
+      //
+      // 显示真实未读数
       return _buildUnreadBadge(
         _formatUnreadCount(widget.conversation.unreadCount),
         colorsTheme,
       );
     } else if (hasUnreadMark) {
       // Show virtual badge with "1" when marked as unread but unreadCount is 0
+      //
+      // 当标记为未读但unreadCount为0时显示虚拟徽章“1”
       return _buildUnreadBadge('1', colorsTheme);
     } else {
       return const SizedBox.shrink();
@@ -451,6 +483,8 @@ class _ConversationItemState extends State<ConversationItem> {
   }
 
   /// Build error status icon (sendFail or violation) - shown to the left of time
+  ///
+  /// 构建错误状态图标（发送失败或违规）- 显示在时间的左边
   Widget _buildErrorStatusIcon(SemanticColorScheme colorsTheme) {
     final lastMessage = widget.conversation.lastMessage;
     if (lastMessage != null &&

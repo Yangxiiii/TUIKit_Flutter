@@ -34,6 +34,8 @@ public class FilePicker: NSObject, UIDocumentPickerDelegate {
         self.currentConfig = config
         
         // Get root view controller - iOS 13+ compatible
+        //
+        // 获取根视图控制器 - 兼容 iOS 13+
         guard let rootViewController = getRootViewController() else {
             logger.error("No root view controller found")
             onCanceled?()
@@ -43,12 +45,16 @@ public class FilePicker: NSObject, UIDocumentPickerDelegate {
         self.presentingViewController = rootViewController
         
         // Create document picker
+        //
+        // 创建文档选择器
         let documentPicker: UIDocumentPickerViewController
         
         if #available(iOS 14.0, *) {
             let contentTypes = getContentTypes(from: config.allowedTypes)
             // Use asCopy: true to enable file selection and copy mode
             // Without asCopy: true, the picker opens files for viewing instead of selecting
+            //
+            // 使用 asCopy: true 启用文件选择和复制模式 没有 asCopy: true 时，选择器会打开文件进行查看，而不是选择
             documentPicker = UIDocumentPickerViewController(forOpeningContentTypes: contentTypes, asCopy: true)
         } else {
             let documentTypes = config.allowedTypes.isEmpty ? ["public.item"] : config.allowedTypes
@@ -59,6 +65,8 @@ public class FilePicker: NSObject, UIDocumentPickerDelegate {
         documentPicker.allowsMultipleSelection = config.maxCount > 1
         
         // Present on main thread
+        //
+        // 在主线程呈现
         DispatchQueue.main.async { [weak self] in
             self?.presentingViewController?.present(documentPicker, animated: true)
         }
@@ -80,6 +88,8 @@ public class FilePicker: NSObject, UIDocumentPickerDelegate {
             }
             
             // Copy file to app's documents directory
+            //
+            // 将文件复制到应用的文档目录
             if let copiedPath = copyFileToDocuments(url: url) {
                 filePaths.append(copiedPath)
             } else {
@@ -101,6 +111,8 @@ public class FilePicker: NSObject, UIDocumentPickerDelegate {
     }
     
     // MARK: - Helper Methods
+    //
+    // 标记: - 辅助方法
     
     private func getRootViewController() -> UIViewController? {
         var rootViewController: UIViewController?
@@ -113,6 +125,8 @@ public class FilePicker: NSObject, UIDocumentPickerDelegate {
                 rootViewController = keyWindow.rootViewController
             } else {
                 // Fallback to first window
+                //
+                // 回退到第一个窗口
                 rootViewController = UIApplication.shared.windows.first?.rootViewController
             }
         } else {
@@ -121,10 +135,14 @@ public class FilePicker: NSObject, UIDocumentPickerDelegate {
         }
         
         // Find the topmost presented view controller
+        //
+        // 找到最顶部的呈现视图控制器
         return getTopmostViewController(from: rootViewController)
     }
     
     /// Recursively find the topmost presented view controller
+    ///
+    /// 递归查找最顶部的呈现视图控制器
     private func getTopmostViewController(from viewController: UIViewController?) -> UIViewController? {
         guard let vc = viewController else { return nil }
         
@@ -152,6 +170,8 @@ public class FilePicker: NSObject, UIDocumentPickerDelegate {
         var contentTypes: [UTType] = []
         for typeString in allowedTypes {
             // Try to parse as UTType identifier
+            //
+            // 尝试解析为 UTType 标识符
             if let utType = UTType(typeString) {
                 contentTypes.append(utType)
             } else if let utType = UTType(filenameExtension: typeString.replacingOccurrences(of: ".", with: "")) {
@@ -169,22 +189,30 @@ public class FilePicker: NSObject, UIDocumentPickerDelegate {
             let filesDirectory = documentsDirectory.appendingPathComponent("files", isDirectory: true)
             
             // Create files directory if it doesn't exist
+            //
+            // 如果文件目录不存在则创建
             if !fileManager.fileExists(atPath: filesDirectory.path) {
                 try fileManager.createDirectory(at: filesDirectory, withIntermediateDirectories: true, attributes: nil)
             }
             
             // Generate unique filename
+            //
+            // 生成唯一文件名
             let timestamp = Int(Date().timeIntervalSince1970 * 1000)
             let fileName = url.lastPathComponent
             let uniqueFileName = "\(timestamp)_\(fileName)"
             let destinationURL = filesDirectory.appendingPathComponent(uniqueFileName)
             
             // Remove existing file if it exists
+            //
+            // 如果文件存在则删除
             if fileManager.fileExists(atPath: destinationURL.path) {
                 try fileManager.removeItem(at: destinationURL)
             }
             
             // Copy file
+            //
+            // 复制文件
             try fileManager.copyItem(at: url, to: destinationURL)
             
             logger.info("File copied to: \(destinationURL.path)")

@@ -33,6 +33,11 @@ import VideoRecorderHelper, {
  *     isSupportBeauty 等)当前全部忽略,只吃 recordMode + isDefaultFrontCamera
  *   - 权限:cameraPicker 是系统组件,拉起时自己会走 CAMERA/MIC 授权流程,
  *     加上 Dart 上层已经先 Permission.checkAndRequest([camera]),不用二次申请
+ *
+ * 方法通道 : 'tencent_chat_uikit/video_recorder' startRecord({录制模式, 视频质量, 最短时长毫秒, 最长时长毫秒, 是否默认前置摄像头, 支持编辑,
+ * 支持美颜, ..., 主色, 语言代码, 国家代码, 脚本代码})
+ *
+ * - 照片: { 类型: 'photo', 文件路径 } - 视频: { 类型: 'video', 文件路径, 时长毫秒, 缩略图路径 } - 取消: { 类型: 'video', 文件路径: '' }
  */
 export default class VideoRecorder implements MethodCallHandler, AbilityAware {
   private static readonly TAG = 'ChatUiKit.VideoRecorder';
@@ -53,6 +58,8 @@ export default class VideoRecorder implements MethodCallHandler, AbilityAware {
   }
 
   // ----- AbilityAware -----
+  //
+  // ----- 能力感知 -----
   onAttachedToAbility(binding: AbilityPluginBinding): void {
     this.uiAbilityContext = binding.getAbility().context;
   }
@@ -62,6 +69,8 @@ export default class VideoRecorder implements MethodCallHandler, AbilityAware {
   }
 
   // ----- MethodCallHandler -----
+  //
+  // ----- 方法调用处理器 -----
   onMethodCall(call: MethodCall, result: MethodResult): void {
     if (call.method === 'startRecord') {
       this.handleStartRecord(call, result);

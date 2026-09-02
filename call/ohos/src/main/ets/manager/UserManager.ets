@@ -1,5 +1,7 @@
 // v1: friend-info lookup by userID is NOT implemented (atomicxcore exposes
 // no equivalent API yet). Display name resolution is local-only.
+//
+// v1: 通过 userID 查找好友信息尚未实现（atomicxcore 还没有提供等效的 API）。显示名称解析仅限本地。
 
 import { CallParticipantInfo, LoginStore, UserProfile } from '@tencentcloud/atomicxcore';
 

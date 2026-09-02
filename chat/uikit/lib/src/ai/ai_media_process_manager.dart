@@ -5,6 +5,11 @@
 // capabilities. It deliberately does NOT use the message-bound
 // `MessageActionStore` — record-overlay translation happens before any message
 // exists.
+//
+// AiMediaProcessManager — 基于 AI 媒体实验 API 的聊天端外观。
+//
+// 架构说明（技术债务）：这个文件直接依赖 `tencent_cloud_chat_sdk`，因为 AtomicXCore 还没有暴露这些 AI 功能。它故意不使用绑定消息的
+// `MessageActionStore` — 记录覆盖翻译在任何消息之前进行。
 
 import 'dart:async';
 
@@ -15,19 +20,27 @@ import 'package:tencent_cloud_chat_sdk/tencent_im_sdk_plugin.dart';
 import 'tts/voice_item.dart';
 
 // MARK: - ASR (Automatic Speech Recognition) result types
+//
+// MARK: - ASR（自动语音识别）结果类型
 
 /// Result of an ASR (Automatic Speech Recognition) conversion.
+///
+/// ASR（自动语音识别）转换的结果。
 abstract class AiAsrResult {
   const AiAsrResult();
 }
 
 /// ASR succeeded with non-empty text.
+///
+/// ASR 成功，文本非空。
 class AiAsrSuccess extends AiAsrResult {
   const AiAsrSuccess(this.text);
   final String text;
 }
 
 /// ASR failed (upload error, recognize error, empty result, or timeout).
+///
+/// ASR 失败（上传错误、识别错误、结果为空或超时）。
 class AiAsrFailure extends AiAsrResult {
   const AiAsrFailure({
     required this.code,
@@ -41,6 +54,8 @@ class AiAsrFailure extends AiAsrResult {
 }
 
 // MARK: - AI result types
+//
+// MARK: - AI 结果类型
 
 class AiTtsResult {
   final bool success;
@@ -82,14 +97,20 @@ class AiVoiceListResult {
 }
 
 // MARK: - Injectable signatures
+//
+// MARK: - 可注入的签名
 
 /// Injectable signature for `callExperimentalAPI` (matches the SDK method).
+///
+/// `callExperimentalAPI` 的可注入签名（与 SDK 方法匹配）。
 typedef CallExperimentalApi = Future<V2TimValueCallback<dynamic>> Function({
   required String api,
   required Map<String, dynamic> param,
 });
 
 /// Injectable signature for the SDK message-manager `translateText`.
+///
+/// SDK 消息管理器 `translateText` 的可注入签名。
 typedef TranslateApi = Future<V2TimValueCallback<Map<String, String>>>
     Function({
   required List<String> texts,
@@ -98,6 +119,8 @@ typedef TranslateApi = Future<V2TimValueCallback<Map<String, String>>>
 });
 
 // MARK: - API / param / response keys
+//
+// MARK: - API / 参数 / 响应键
 
 const String _apiUploadFile = 'internal_operation_upload_file';
 const String _apiConvertVoiceToText =
@@ -138,8 +161,12 @@ class AiMediaProcessManager {
   final Duration _timeout;
 
   // MARK: ASR — speech to text (upload + recognize, with overall timeout)
+  //
+  // MARK: ASR — 语音转文字（上传 + 识别，带整体超时）
 
   /// Upload [filePath] then recognize the uploaded URL into text (ASR).
+  ///
+  /// 上传 [filePath] 然后将上传的 URL 识别为文本（ASR）。
   Future<AiAsrResult> convert(String filePath) async {
     try {
       return await _runAsrPipeline(filePath).timeout(
@@ -195,6 +222,8 @@ class AiMediaProcessManager {
         String? translated = result.data![text];
         // Fallback: if exact-key lookup misses but there is exactly one entry,
         // use it — the single input can only map to that single output.
+        //
+        // 回退：如果精确键查找失败但恰好有一个条目，则使用它 — 单个输入只能映射到那个单一输出。
         if ((translated == null || translated.isEmpty) &&
             result.data!.length == 1) {
           translated = result.data!.values.first;
@@ -211,6 +240,8 @@ class AiMediaProcessManager {
   }
 
   // MARK: Text to voice
+  //
+  // MARK: 文字转语音
 
   Future<AiTtsResult> convertTextToVoice({
     required String text,
@@ -257,6 +288,8 @@ class AiMediaProcessManager {
   }
 
   // MARK: Voice clone
+  //
+  // MARK: 语音克隆
 
   Future<AiVoiceCloneResult> voiceCloneFromFile({
     required String filePath,
@@ -289,6 +322,8 @@ class AiMediaProcessManager {
   }
 
   // MARK: Custom voice list
+  //
+  // MARK: 自定义语音列表
 
   Future<AiVoiceListResult> getCustomVoiceList() async {
     try {

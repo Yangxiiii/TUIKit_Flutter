@@ -1,5 +1,7 @@
 // Centralised symbolic-name → $r('app.media.xxx') mapping. ArkTS does not
 // allow dynamic `$r("app.media." + name)` so callers go through `imageMap`.
+//
+// 集中式符号名 → $r('app.media.xxx') 映射。ArkTS 不允许动态 `$r("app.media." + name)`，所以调用者需要通过 `imageMap`。
 
 export class CallKitBundle {
   static image(name: string): Resource {

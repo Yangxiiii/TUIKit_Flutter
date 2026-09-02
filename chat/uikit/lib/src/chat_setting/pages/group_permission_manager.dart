@@ -405,6 +405,8 @@ class GroupPermissionManager {
   };
 
   // MARK: - Public Methods
+  //
+  // 标记: - 公共方法
 
   static bool hasPermission({
     required GroupType groupType,

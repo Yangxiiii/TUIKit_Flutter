@@ -47,6 +47,8 @@ class AudioRecorderPlatform {
 
   /// HarmonyOS detection. `Platform.isOhos` only exists in the Flutter-OH SDK,
   /// so we compare the OS string to stay compilable under standard Flutter.
+  ///
+  /// HarmonyOS 检测。`Platform.isOhos` 仅在 Flutter-OH SDK 中存在，因此我们通过比较操作系统字符串来保持在标准 Flutter 下可编译。
   static bool get _isOhos => Platform.operatingSystem == 'ohos';
 
   static StreamSubscription? _eventSubscription;
@@ -54,6 +56,8 @@ class AudioRecorderPlatform {
   static Function(int powerLevel)? _onPowerLevel;
 
   /// Start recording with native implementation
+  ///
+  /// 使用本地实现开始录音
   static Future<AudioRecordResult> startRecordNative({
     required AudioRecorderConfig config,
   }) async {
@@ -64,6 +68,8 @@ class AudioRecorderPlatform {
 
     try {
       // Setup event channel for progress updates
+      //
+      // 设置事件通道以获取进度更新
       await _eventSubscription?.cancel();
 
       _eventSubscription = _eventChannel.receiveBroadcastStream().listen(
@@ -86,6 +92,8 @@ class AudioRecorderPlatform {
       );
 
       // Call native method to start recording
+      //
+      // 调用本地方法开始录音
       final result = await _methodChannel.invokeMethod(
         'startRecord',
         {
@@ -119,6 +127,8 @@ class AudioRecorderPlatform {
   }
 
   /// Stop recording
+  ///
+  /// 停止录音
   static Future<AudioRecordResult?> stopRecordNative() async {
     try {
       await _methodChannel.invokeMethod('stopRecord');
@@ -129,6 +139,8 @@ class AudioRecorderPlatform {
   }
 
   /// Cancel recording
+  ///
+  /// 取消录音
   static Future<void> cancelRecordNative() async {
     try {
       await _methodChannel.invokeMethod('cancelRecord');
@@ -138,16 +150,22 @@ class AudioRecorderPlatform {
   }
 
   /// Set callback for recording time updates
+  ///
+  /// 设置录音时间更新的回调
   static void setOnRecordTime(Function(int timeMs)? callback) {
     _onRecordTime = callback;
   }
 
   /// Set callback for power level updates
+  ///
+  /// 设置电量更新的回调
   static void setOnPowerLevel(Function(int powerLevel)? callback) {
     _onPowerLevel = callback;
   }
 
   /// Dispose resources
+  ///
+  /// 释放资源
   static Future<void> dispose() async {
     await _eventSubscription?.cancel();
     _eventSubscription = null;

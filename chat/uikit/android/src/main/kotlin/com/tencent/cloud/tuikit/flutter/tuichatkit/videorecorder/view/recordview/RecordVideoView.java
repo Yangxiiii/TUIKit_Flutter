@@ -56,6 +56,8 @@ public class RecordVideoView extends FrameLayout {
         mVideoView = findViewById(R.id.record_video_view);
         //setVideoViewSize(mRecordInfo.aspectRatio.get());
         // todo:Temporary adjustment fixed to 16:9 ratio
+        //
+        // 待办：临时调整固定为16:9比例
         setVideoViewSize(VideoRecordCoreConstant.VIDEO_ASPECT_RATIO_9_16);
         mRecordCore.startCameraPreview(mVideoView);
     }
@@ -63,11 +65,15 @@ public class RecordVideoView extends FrameLayout {
     public void addObserver() {
         // todo:Temporary adjustment fixed to 16:9 ratio
         //mRecordInfo.aspectRatio.observe(mAspectRatioObserver);
+        //
+        // 待办：临时调整固定为16:9比例
     }
 
     public void removeObserver() {
         // todo:Temporary adjustment fixed to 16:9 ratio
         //mRecordInfo.aspectRatio.removeObserver(mAspectRatioObserver);
+        //
+        // 待办：临时调整固定为16:9比例
     }
 
     private void setVideoViewSize(int aspectRatio) {

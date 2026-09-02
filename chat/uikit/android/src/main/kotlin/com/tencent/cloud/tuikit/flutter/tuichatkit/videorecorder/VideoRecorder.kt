@@ -10,6 +10,8 @@ object VideoRecorder {
      * @param listener Callback interface for receiving capture results, including:
      *                 - Photo capture success
      *                 - Video recording success
+     *
+     * 启动相机拍摄界面 @param config 拍摄配置设置 @param listener 接收拍摄结果的回调接口，包括：- 照片拍摄成功 - 视频录制成功
      */
     fun startRecord(config: VideoRecorderConfig = VideoRecorderConfig(), listener: VideoRecordListener) {
         instance.takeVideo(config, listener)

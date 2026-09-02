@@ -5,6 +5,8 @@ import 'package:tuikit_atomic_x/base_component/base_component.dart';
 
 mixin MessageStatusMixin {
   /// Check whether a read-receipt indicator should be displayed for [message].
+  ///
+  /// 检查是否应该为[消息]显示已读回执指示器。
   static bool shouldShowReadReceipt({
     required MessageInfo message,
     required bool enableReadReceipt,
@@ -21,6 +23,8 @@ mixin MessageStatusMixin {
 
   /// Build status indicator (sendFail, violation, or sending) - to be shown outside bubble
   /// Returns null if no status to show
+  ///
+  /// 构建状态指示器（发送失败、违规或发送中）——在气泡之外显示，如果没有状态可显示则返回 null
   Widget? buildOutsideBubbleStatusIndicator({
     required MessageInfo message,
     required SemanticColorScheme colorsTheme,
@@ -53,12 +57,16 @@ mixin MessageStatusMixin {
   }
 
   /// Check if message has error status (sendFail or violation)
+  ///
+  /// 检查消息是否有错误状态（发送失败或违规）
   bool hasErrorStatus(MessageInfo message) {
     return message.status == MessageStatus.sendFail ||
         message.status == MessageStatus.violation;
   }
 
   /// Check if message status should be shown outside bubble
+  ///
+  /// 检查消息状态是否应该显示在气泡之外
   bool shouldShowStatusOutsideBubble(MessageInfo message) {
     return message.status == MessageStatus.sendFail ||
         message.status == MessageStatus.violation ||
@@ -80,11 +88,15 @@ mixin MessageStatusMixin {
       case MessageStatus.sendSuccess:
         // Read receipt is now shown outside the bubble as a text label.
         // No in-bubble icon needed for sendSuccess anymore.
+        //
+        // 已读回执现在以文本标签的形式显示在气泡外。发送成功不再需要气泡内图标。
         return const SizedBox.shrink();
       case MessageStatus.sending:
       case MessageStatus.sendFail:
       case MessageStatus.violation:
         // These status icons are now shown outside the bubble in message_item.dart
+        //
+        // 这些状态图标现在在 message_item.dart 中显示在气泡外
         return const SizedBox.shrink();
       default:
         return const SizedBox.shrink();
@@ -171,6 +183,10 @@ mixin MessageStatusMixin {
   /// - Group: all read → gray "全部已读", partially read → primary color "N人已读",
   ///   no one read → primary color "未读".
   /// - Returns null when nothing should be shown.
+  ///
+  /// 构建已读回执文本标签，在气泡**外**显示（在左侧）。
+  ///
+  /// - 当没有内容需要显示时返回 null。
   Widget? buildOutsideReadReceiptLabel({
     required MessageInfo message,
     required SemanticColorScheme colorsTheme,
@@ -194,6 +210,8 @@ mixin MessageStatusMixin {
 
     if (!isGroup) {
       // C2C conversation
+      //
+      // C2C 会话
       if (message.readReceiptInfo?.isPeerRead == true) {
         text = locale.groupReadBy; // "已读"
         textColor = colorsTheme.textColorSecondary; // gray
@@ -204,21 +222,29 @@ mixin MessageStatusMixin {
       }
     } else {
       // Group conversation
+      //
+      // 群聊
       final readCount = message.readReceiptInfo?.readCount ?? 0;
       final unreadCount = message.readReceiptInfo?.unreadCount ?? 0;
       final totalCount = readCount + unreadCount;
 
       if (totalCount > 0 && readCount == totalCount) {
         // All read
+        //
+        // 全部已读
         text = locale.readReceiptAllRead; // "全部已读"
         textColor = colorsTheme.textColorSecondary; // gray
       } else if (readCount > 0) {
         // Partially read
+        //
+        // 部分已读
         text = locale.readReceiptNPersonRead(readCount); // "N人已读"
         textColor =
             colorsTheme.buttonColorPrimaryDefault; // primary/theme color
       } else {
         // No one read
+        //
+        // 无人已读
         text = locale.groupDeliveredTo; // "未读"
         textColor =
             colorsTheme.buttonColorPrimaryDefault; // primary/theme color
@@ -233,6 +259,8 @@ mixin MessageStatusMixin {
     );
 
     // Group messages: tappable to show read receipt detail
+    //
+    // 群消息：可点击显示已读详情
     if (isGroup && onTap != null) {
       return GestureDetector(
         onTap: onTap,

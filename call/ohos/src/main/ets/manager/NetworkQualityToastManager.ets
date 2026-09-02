@@ -3,6 +3,11 @@
 // atomicxcore exposes CallState as @Observed but ships no typed change
 // listener, so we poll `networkQualities` at 1 Hz. Each poll is
 // O(participants) and only allocates when crossing the "poor" threshold.
+//
+// 通过底部 Toast 提示临时网络降级通知。
+//
+// atomicxcore 将 CallState 以 @Observed 暴露，但没有提供类型化的变更监听器，所以我们以 1 Hz 的频率轮询 `networkQualities`。每次轮询时间复杂度为
+// O(参与者数量)，仅在达到“差”阈值时进行分配。
 
 import { CallStore, CallParticipantStatus, NetworkQuality } from '@tencentcloud/atomicxcore';
 import { Toast } from '../common/widgets/Toast';
@@ -40,6 +45,8 @@ export class NetworkQualityToastManager {
   private static tick(): void {
     const state = CallStore.shared().state;
     // waiting/none → no toast; only surface during accepted calls.
+    //
+    // 等待/无 → 不显示 Toast；仅在通话已接听时显示。
     if (state.selfInfo.status !== CallParticipantStatus.accept) {
       return;
     }
@@ -52,6 +59,8 @@ export class NetworkQualityToastManager {
     if (NetworkQualityToastManager.isPoor(selfQuality)) {
       NetworkQualityToastManager.fire(Channel.selfPoor, 'TUICallKit.Self.NetworkLowQuality');
       // Self-poor outranks peer-poor; skip peer scan to avoid back-to-back toasts.
+      //
+      // 自身网络差优先于对方网络差；跳过对方扫描以避免连续 Toast。
       return;
     }
     let peerPoor = false;

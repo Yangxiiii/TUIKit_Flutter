@@ -103,6 +103,8 @@ class TencentCallsUikitPlugin: FlutterPlugin, MethodCallHandler {
         channel?.invokeMethod(event, args)
       } catch (_: Throwable) {
         // swallow if channel not ready
+        //
+        // 如果通道未就绪则吞掉
       }
     }
   }

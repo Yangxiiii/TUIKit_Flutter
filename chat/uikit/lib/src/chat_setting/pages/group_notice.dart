@@ -95,6 +95,8 @@ class _GroupNoticeState extends State<GroupNotice> {
         // SizedBox.expand provides the bounded height that
         // `_buildEditingView`'s TextField(expands: true) requires; the
         // display view doesn't need it but it's harmless there.
+        //
+        // SizedBox.expand 提供了 `_buildEditingView` 的 TextField(expands: true) 所需的限定高度；显示视图不需要它，但放在那也无害。
         child: SizedBox.expand(
           child: _isEditing
               ? _buildEditingView()

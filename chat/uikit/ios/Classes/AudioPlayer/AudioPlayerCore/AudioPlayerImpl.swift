@@ -13,11 +13,15 @@ internal class AudioPlayerImpl: AudioPlayer, AVAudioPlayerDelegate {
 
     // Remote (http/https) playback uses AVPlayer because AVAudioPlayer cannot
     // stream remote URLs. Local files keep using AVAudioPlayer.
+    //
+    // 远程（http/https）播放使用AVPlayer，因为AVAudioPlayer不能播放远程URL。本地文件仍然使用AVAudioPlayer。
     private var remotePlayer: AVPlayer?
     private var remoteTimeObserver: Any?
     private var isRemote: Bool = false
 
     /// Whether the given path should be played as a streamed remote resource.
+    ///
+    /// 是否应将给定路径作为流媒体远程资源播放。
     private func isRemotePath(_ filePath: String) -> Bool {
         let lower = filePath.lowercased()
         return lower.hasPrefix("http://") || lower.hasPrefix("https://")

@@ -5,6 +5,11 @@
 //   [avatar 60][gap 12][flex Column(name/tip)][reject 36][gap 22][accept 36][inset 16]
 // Tapping the body opens the full call view; child Image taps consume
 // their own touches via onClick so Decline/Answer don't bubble.
+//
+// 顶部固定的来电横幅。
+//
+// 布局原语：行 + 弹性列显示姓名/提示 + 固定大小按钮。参考 iOS 的 IncomingBannerViewController：[头像 60][间隙 12][弹性列(姓名/提示)][拒接
+// 36][间隙 22][接听 36][内边距 16] 点击主体打开完整通话界面；子 Image 点击通过 onClick 消费自身触摸事件，所以拒接/接听不会冒泡。
 
 import {
   CallStore, CallParticipantInfo, CallInfo, CallMediaType,
@@ -51,6 +56,8 @@ export struct IncomingBannerView {
       this.avatarSlot();
 
       // Name + tip column (takes remaining space).
+      //
+      // 姓名 + 提示列（占用剩余空间）。
       Column() {
         Text(this.callerName())
           .fontColor(CallConstants.Color_OweWhite)
@@ -77,9 +84,15 @@ export struct IncomingBannerView {
       // The avatar is 60vp tall; name(~22) + 4 + tip(~17) ≈ 43vp leaves
       // ~(60-43)/2 = 8.5 above and below if centered. iOS uses asymmetric
       // 10/10, which we match by padding the column.
+      //
+      // 头像高 60vp；姓名(~22) + 4 + 提示(~17) ≈ 43vp 剩余
+      //
+      // 10/10，通过为列加内边距匹配。
       .padding({ left: NAME_LEADING_GAP, top: 10, bottom: 10, right: 8 });
 
       // Reject button.
+      //
+      // 拒接按钮。
       Image(CallKitBundle.imageMap('icon_hangup'))
         .width(BTN_SIZE)
         .height(BTN_SIZE)
@@ -87,6 +100,8 @@ export struct IncomingBannerView {
         .onClick((): void => {
           Logger.info('IncomingBanner: reject tapped');
           // Self-initiated reject → suppress the upcoming end-reason toast.
+          //
+          // 自发拒接 → 抑制即将显示的结束原因提示。
           CallEndedFlag().markSelfEnded();
           void CallStore.shared().reject()
             .then((): void => {
@@ -98,9 +113,13 @@ export struct IncomingBannerView {
         });
 
       // Gap between reject and accept.
+      //
+      // 拒接和接听之间的间隙。
       Column().width(BTN_GAP).height(1);
 
       // Accept button.
+      //
+      // 接听按钮。
       Image(this.answerIcon())
         .width(BTN_SIZE)
         .height(BTN_SIZE)
@@ -108,6 +127,8 @@ export struct IncomingBannerView {
         .onClick((): void => {
           Logger.info('IncomingBanner: accept tapped');
           // Hard-stop ringtone + vibrator immediately on tap.
+          //
+          // 点击时立即停止铃声 + 震动。
           CallingBellFeature.shared().stopAll();
           CallingVibratorFeature.shared().stop();
           void CallStore.shared().accept()

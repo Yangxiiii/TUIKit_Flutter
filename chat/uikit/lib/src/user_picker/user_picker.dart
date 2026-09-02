@@ -53,6 +53,8 @@ class UserPicker extends StatefulWidget {
   final Function(List<UserPickerData>)? onConfirm;
 
   /// Optional widget to display at the top of the list (before the sorted items)
+  ///
+  /// 可选Widget，显示在列表顶部（排序项目之前）
   final Widget? headerWidget;
 
   const UserPicker({
@@ -121,6 +123,8 @@ class _UserPickerState extends State<UserPicker> {
     final List<SelectableItemModel> showList = [];
 
     // Preserve currently selected items by key when dataSource updates
+    //
+    // 当数据源更新时，通过键保留当前选中的项目
     final previousSelectedKeys = _selectedItems.map((item) => item.key).toSet();
 
     _selectedItems = [];
@@ -163,6 +167,8 @@ class _UserPickerState extends State<UserPicker> {
       }
 
       // Restore previously selected items that exist in new dataSource
+      //
+      // 恢复在新数据源中存在的已选项目
       if (previousSelectedKeys.contains(item.key) &&
           !_selectedItems.any((selected) => selected.key == item.key)) {
         _selectedItems.add(item);

@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 
 /// Type of tongue display
+///
+/// 小舌头显示类型
 enum TongueType {
   none,
   backToLatest,
@@ -10,13 +12,19 @@ enum TongueType {
   atMention,
 
   /// Unread messages tongue shown at the top-right when entering a chat with unread messages
+  ///
+  /// 未读消息小舌头在进入有未读消息的聊天时显示在右上角
   unreadMessages,
 
   /// Back to quote position tongue shown after navigating to a quoted message
+  ///
+  /// 返回引用位置小舌头在导航到引用消息后显示
   backToQuote,
 }
 
 /// State data for the tongue widget
+///
+/// 小舌头控件状态数据
 class TongueState {
   final TongueType type;
   final int newMessageCount;
@@ -59,6 +67,9 @@ class TongueState {
 /// 2. "x new messages" - new message count indicator (bottom-right, double down arrow)
 /// 3. "@mention" - at-mention navigation (bottom-right, double down arrow)
 /// 4. "x unread messages" - unread messages on enter (top-right, double up arrow)
+///
+/// 消息列表中显示的浮动小舌头控件。支持多种显示模式：1. “返回最新” - 滚动到底部（右下角，双下箭头） 2. “x 条新消息” - 新消息数量提示（右下角，双下箭头） 3. “@提到” -
+/// @提到导航（右下角，双下箭头） 4. “x 条未读消息” - 进入时未读消息（右上角，双上箭头）
 class MessageTongueWidget extends StatelessWidget {
   final TongueState tongueState;
   final VoidCallback onTap;
@@ -76,6 +87,8 @@ class MessageTongueWidget extends StatelessWidget {
   });
 
   /// Whether the arrow should point upward (for unread messages tongue at top)
+  ///
+  /// 箭头是否应指向上方（用于顶部未读消息小舌头）
   bool get _isUpDirection => tongueState.type == TongueType.unreadMessages;
 
   @override
@@ -124,6 +137,8 @@ class MessageTongueWidget extends StatelessWidget {
   }
 
   /// Build leading icon: loading spinner or double arrow
+  ///
+  /// 构建前导图标：加载旋转图标或双箭头
   Widget _buildLeadingIcon(SemanticColorScheme colorsTheme) {
     if (tongueState.isLoading) {
       return const CupertinoActivityIndicator(radius: 8);
@@ -132,6 +147,8 @@ class MessageTongueWidget extends StatelessWidget {
   }
 
   /// Build double arrow icon (chevron) pointing up or down
+  ///
+  /// 构建双箭头图标（箭头符号），指向上或下
   Widget _buildDoubleArrow(SemanticColorScheme colorsTheme) {
     final color = colorsTheme.buttonColorPrimaryDefault;
     final icon = _isUpDirection

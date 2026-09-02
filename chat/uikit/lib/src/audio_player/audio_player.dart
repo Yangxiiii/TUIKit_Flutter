@@ -4,6 +4,8 @@ import 'package:flutter/cupertino.dart';
 import 'audio_player_platform.dart';
 
 /// Audio player listener interface
+///
+/// 音频播放器监听器接口。
 abstract class AudioPlayerListener {
   void onPlay() {}
   void onPause() {}
@@ -26,6 +28,8 @@ class AudioPlayer {
 
   /// HarmonyOS detection. `Platform.isOhos` only exists in the Flutter-OH SDK,
   /// so we compare the OS string to stay compilable under standard Flutter.
+  ///
+  /// HarmonyOS 检测。`Platform.isOhos` 仅存在于 Flutter-OH SDK 中，因此我们通过比较操作系统字符串来保持在标准 Flutter 下可编译。
   static bool get _isOhos => Platform.operatingSystem == 'ohos';
 
   AudioPlayer._();
@@ -35,6 +39,8 @@ class AudioPlayer {
   }
 
   /// Set listener for audio player events
+  ///
+  /// 设置音频播放器事件的监听器
   AudioPlayer setListener(AudioPlayerListener? listener) {
     _listener = listener;
     return this;
@@ -55,6 +61,8 @@ class AudioPlayer {
       _currentPath = filePath;
 
       // Use native implementation on mobile platforms
+      //
+      // 在移动平台上使用原生实现
       if (Platform.isAndroid || Platform.isIOS || _isOhos) {
         await AudioPlayerPlatform.play(
           filePath: filePath,

@@ -73,6 +73,8 @@ class _AddGroupState extends State<AddGroup> {
 
     // Note: isInGroup check is handled via getGroupInfo result
     // For now, we always show join detail since GroupInfo doesn't have isInGroup
+    //
+    // 注意：isInGroup 检查是通过 getGroupInfo 的结果处理的
     setState(() {
       _showJoinGroupDetail = true;
     });

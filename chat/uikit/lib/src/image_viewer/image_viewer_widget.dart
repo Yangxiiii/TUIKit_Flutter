@@ -15,6 +15,8 @@ typedef EventHandler = void Function(
     Map<String, dynamic> eventData, Function(dynamic) callback);
 
 /// Play button overlay for videos that need to be downloaded
+///
+/// 需要下载的视频的播放按钮覆盖
 class _PlayButtonView extends StatelessWidget {
   final ImageElement element;
   final bool isDownloading;
@@ -67,6 +69,8 @@ class _PlayButtonView extends StatelessWidget {
 }
 
 /// Image item view (for images only) with pinch-to-zoom and double-tap-to-zoom
+///
+/// 图像项目视图（仅限图片）支持捏合缩放和双击缩放
 class _ImageItemView extends StatefulWidget {
   final ImageElement element;
   final VoidCallback onTap;
@@ -87,22 +91,32 @@ class _ImageItemViewState extends State<_ImageItemView>
   late AnimationController _animationController;
 
   // Current committed scale & offset (updated on gesture end / animation)
+  //
+  // 当前已提交的缩放比例和偏移量（在手势结束/动画更新时）
   double _scale = 1.0;
   Offset _offset = Offset.zero;
 
   // Whether currently zoomed in (for notifying parent)
+  //
+  // 是否当前已放大（用于通知父组件）
   bool _isZoomed = false;
 
   // Tracking values during an active gesture
+  //
+  // 在活动手势中跟踪的数值
   double _gestureStartScale = 1.0;
   Offset _gestureStartOffset = Offset.zero;
   Offset? _scaleStartFocalPoint;
 
   // Double tap
+  //
+  // 双击
   TapDownDetails? _doubleTapDetails;
   Size _viewportSize = Size.zero;
 
   // Actual image intrinsic size (loaded asynchronously)
+  //
+  // 实际图像的固有尺寸（异步加载）
   Size? _imageSize;
 
   // Animation
@@ -117,6 +131,8 @@ class _ImageItemViewState extends State<_ImageItemView>
 
   /// Elastic resistance factor for overscroll drag (0.0 ~ 1.0).
   /// Smaller = more resistance. 0.35 gives a natural rubber-band feel.
+  ///
+  /// 超出滚动拖动的弹性阻力系数（0.0 ~ 1.0）
   static const double _elasticFactor = 0.35;
 
   @override
@@ -131,6 +147,8 @@ class _ImageItemViewState extends State<_ImageItemView>
 
   /// Load the intrinsic image dimensions so we can correctly calculate
   /// how much room the image actually occupies inside the viewport (BoxFit.contain).
+  ///
+  /// 加载图像的固有尺寸，这样我们可以正确计算图像在视口中实际占据的空间（BoxFit.contain）
   void _loadImageSize() {
     final file = File(widget.element.imagePath);
     if (!file.existsSync()) return;
@@ -156,6 +174,8 @@ class _ImageItemViewState extends State<_ImageItemView>
   }
 
   /// Notify parent when zoomed state changes
+  ///
+  /// 当缩放状态变化时通知父组件
   void _updateZoomState(bool zoomed) {
     if (_isZoomed != zoomed) {
       _isZoomed = zoomed;
@@ -164,6 +184,8 @@ class _ImageItemViewState extends State<_ImageItemView>
   }
 
   // ─── Animation ───
+  //
+  // ─── 动画 ───
 
   void _onAnimate() {
     final t = Curves.easeInOut.transform(_animationController.value);
@@ -185,12 +207,18 @@ class _ImageItemViewState extends State<_ImageItemView>
   }
 
   // ─── Offset clamping ───
+  //
+  // ─── 偏移量限制 ───
 
   /// Compute the fitted image size under BoxFit.contain.
   /// Returns the actual display size of the image at scale=1.0 within the viewport.
+  ///
+  /// 计算 BoxFit.contain 下的适配图像尺寸。返回图像在 scale=1.0 时在视口中的实际显示大小。
   Size _fittedImageSize() {
     if (_imageSize == null || _viewportSize == Size.zero) {
       // Fallback: assume image fills viewport
+      //
+      // 后备方案：假设图像填满视口
       return _viewportSize;
     }
     final double imgW = _imageSize!.width;
@@ -216,6 +244,13 @@ class _ImageItemViewState extends State<_ImageItemView>
   /// - scale > 1.0: for each axis, if scaled content > viewport → clamp so
   ///                image edges stay outside viewport edges;
   ///                if scaled content <= viewport → center on that axis.
+  ///
+  /// 硬性限制：偏移量确保缩放后的图像永远不会离开视口。使用实际适配的图像尺寸（BoxFit.contain）来正确计算边界。
+  ///
+  /// Transform 对一个视口大小的容器进行缩放。图像（BoxFit.contain）居中在该容器内。因此缩放后，图像占据 `fitted * scale` 像素，居中在 `viewport *
+  /// scale` 的盒子内。我们应用的偏移量是作用在该盒子上的平移。我们需要确保**图像边缘**（而不是盒子边缘）永远不会退回到视口内。
+  ///
+  /// - scale <= 1.0：图像居中，偏移量强制为居中位置。- scale > 1.0：对于每个轴，如果缩放后的内容大于视口 → 限制以保证
   Offset _clampOffset(Offset offset, double scale) {
     if (_viewportSize == Size.zero) return offset;
     final double viewW = _viewportSize.width;
@@ -223,6 +258,8 @@ class _ImageItemViewState extends State<_ImageItemView>
 
     if (scale <= 1.0) {
       // Center the scaled-down image
+      //
+      // 将缩小的图像居中
       return Offset(
         (viewW - viewW * scale) / 2,
         (viewH - viewH * scale) / 2,
@@ -230,6 +267,8 @@ class _ImageItemViewState extends State<_ImageItemView>
     }
 
     // Use actual fitted image dimensions
+    //
+    // 使用实际适配的图像尺寸
     final fitted = _fittedImageSize();
     final double contentW = fitted.width * scale;
     final double contentH = fitted.height * scale;
@@ -250,11 +289,18 @@ class _ImageItemViewState extends State<_ImageItemView>
     //   let padX = (scaledBoxW - contentW) / 2
     //   maxDx = -padX
     //   minDx = viewW - contentW - padX = -(contentW - viewW) - padX
+    //
+    // 缩放后的容器是视口 * 缩放比例。图片在里面居中，所以图片在缩放后的容器中的起始位置是 (scaledBox - content) / 2。在视口坐标下，图片的左上角位置是：
+    //
+    // 我们希望：imageLeft <= 0（图片左边缘在视口左边缘或更左） imageLeft + contentW >= viewW（图片右边缘在视口右边缘或更右） 这给出：offset.dx <=
+    // -(scaledBoxW - contentW) / 2 offset.dx >= viewW - contentW - (scaledBoxW - contentW) / 2
 
     double dx;
     double dy;
 
     // Horizontal axis
+    //
+    // 水平方向
     if (contentW > viewW) {
       final double scaledBoxW = viewW * scale;
       final double padX = (scaledBoxW - contentW) / 2;
@@ -263,11 +309,15 @@ class _ImageItemViewState extends State<_ImageItemView>
       dx = offset.dx.clamp(minDx, maxDx);
     } else {
       // Image narrower than or equal to viewport after scaling: center horizontally
+      //
+      // 图片缩放后比视口窄或一样宽：水平居中
       final double scaledBoxW = viewW * scale;
       dx = (viewW - scaledBoxW) / 2;
     }
 
     // Vertical axis
+    //
+    // 垂直方向
     if (contentH > viewH) {
       final double scaledBoxH = viewH * scale;
       final double padY = (scaledBoxH - contentH) / 2;
@@ -276,6 +326,8 @@ class _ImageItemViewState extends State<_ImageItemView>
       dy = offset.dy.clamp(minDy, maxDy);
     } else {
       // Image shorter than viewport after scaling: center vertically
+      //
+      // 图片缩放后比视口矮：垂直居中
       final double scaledBoxH = viewH * scale;
       dy = (viewH - scaledBoxH) / 2;
     }
@@ -286,6 +338,8 @@ class _ImageItemViewState extends State<_ImageItemView>
   /// Elastic offset: allows overscroll with rubber-band resistance.
   /// Returns the raw offset with elastic damping applied to the out-of-bounds portion.
   /// The boundary calculation must mirror [_clampOffset] exactly.
+  ///
+  /// 弹性偏移：允许带弹性阻力的超滚动。返回对越界部分应用弹性阻尼后的原始偏移。边界计算必须与 [_clampOffset] 完全一致。
   Offset _elasticOffset(Offset rawOffset, double scale) {
     if (_viewportSize == Size.zero || scale <= 1.0) {
       return _clampOffset(rawOffset, scale);
@@ -301,6 +355,8 @@ class _ImageItemViewState extends State<_ImageItemView>
     double dy = rawOffset.dy;
 
     // Horizontal axis
+    //
+    // 水平轴
     if (contentW > viewW) {
       final double scaledBoxW = viewW * scale;
       final double padX = (scaledBoxW - contentW) / 2;
@@ -313,6 +369,8 @@ class _ImageItemViewState extends State<_ImageItemView>
       }
     } else {
       // Content narrower than viewport: center with elastic
+      //
+      // 内容比视口窄：居中并带弹性
       final double scaledBoxW = viewW * scale;
       final double center = (viewW - scaledBoxW) / 2;
       if (dx != center) {
@@ -321,6 +379,8 @@ class _ImageItemViewState extends State<_ImageItemView>
     }
 
     // Vertical axis
+    //
+    // 垂直轴
     if (contentH > viewH) {
       final double scaledBoxH = viewH * scale;
       final double padY = (scaledBoxH - contentH) / 2;
@@ -333,6 +393,8 @@ class _ImageItemViewState extends State<_ImageItemView>
       }
     } else {
       // Content shorter than viewport: center with elastic
+      //
+      // 内容比视口短：居中并带弹性
       final double scaledBoxH = viewH * scale;
       final double center = (viewH - scaledBoxH) / 2;
       if (dy != center) {
@@ -344,6 +406,8 @@ class _ImageItemViewState extends State<_ImageItemView>
   }
 
   // ─── Gesture handlers ───
+  //
+  // ─── 手势处理器 ───
 
   void _onScaleStart(ScaleStartDetails details) {
     _animationController.stop();
@@ -355,6 +419,8 @@ class _ImageItemViewState extends State<_ImageItemView>
   void _onScaleUpdate(ScaleUpdateDetails details) {
     setState(() {
       // New scale
+      //
+      // 新缩放
       double newScale =
           (_gestureStartScale * details.scale).clamp(_minScale, _maxScale);
 
@@ -362,15 +428,21 @@ class _ImageItemViewState extends State<_ImageItemView>
 
       if (details.scale == 1.0 && _gestureStartScale <= 1.0) {
         // Single-finger pan at original size → do nothing (no pan allowed)
+        //
+        // 单指平移在原始大小下 → 不做任何操作（不允许平移）
         return;
       }
 
       // Focal point delta for panning
+      //
+      // 平移的焦点点增量
       final Offset focalDelta = details.focalPoint - _scaleStartFocalPoint!;
 
       Offset newOffset;
       if (details.pointerCount >= 2) {
         // Pinch: scale around the focal point on screen
+        //
+        // 捏合手势：围绕屏幕上的焦点进行缩放
         final double scaleChange = newScale / _gestureStartScale;
         newOffset = Offset(
           _scaleStartFocalPoint!.dx -
@@ -383,13 +455,19 @@ class _ImageItemViewState extends State<_ImageItemView>
               focalDelta.dy,
         );
         // Pinch zoom: hard clamp (no elastic needed)
+        //
+        // 捏合缩放：硬限制（不需要弹性）
         _scale = newScale;
         _offset = _clampOffset(newOffset, newScale);
       } else {
         // Single-finger pan (only when zoomed in)
+        //
+        // 单指平移（仅在放大时）
         newOffset = _gestureStartOffset + focalDelta;
         _scale = newScale;
         // Allow elastic overscroll on single-finger drag when zoomed in
+        //
+        // 放大时单指拖动允许弹性超滚动
         _offset = _elasticOffset(newOffset, newScale);
       }
 
@@ -400,10 +478,14 @@ class _ImageItemViewState extends State<_ImageItemView>
   void _onScaleEnd(ScaleEndDetails details) {
     if (_scale < 1.0) {
       // Snap back to original size, centered
+      //
+      // 弹回到原始大小并居中
       _animateTo(1.0, Offset.zero);
       _updateZoomState(false);
     } else if (_scale <= 1.01) {
       // Ensure offset is zero at original scale
+      //
+      // 确保在原始缩放下偏移为零
       if (_offset != Offset.zero) {
         _animateTo(1.0, Offset.zero);
       }
@@ -412,6 +494,8 @@ class _ImageItemViewState extends State<_ImageItemView>
       // Zoomed in: always snap back to clamped position.
       // Use distance threshold instead of exact equality to handle floating-point
       // precision issues from elastic offset calculations.
+      //
+      // 放大时：总是回弹到限制位置。使用距离阈值而不是精确相等来处理弹性偏移计算中的浮点精度问题。
       final clamped = _clampOffset(_offset, _scale);
       final double dist = (_offset - clamped).distance;
       if (dist > 0.5) {
@@ -421,18 +505,26 @@ class _ImageItemViewState extends State<_ImageItemView>
   }
 
   // ─── Double tap ───
+  //
+  // ─── 双击 ───
 
   void _handleDoubleTap() {
     if (_scale > 1.0 + 0.1) {
       // Currently zoomed in → reset to original
+      //
+      // 当前已放大 → 重置为原始状态
       _animateTo(1.0, Offset.zero);
       _updateZoomState(false);
     } else {
       // Zoom to 2.5x at tap position
+      //
+      // 在点击位置放大到2.5倍
       final position = _doubleTapDetails?.localPosition ?? Offset.zero;
       const double targetScale = _doubleTapZoomScale;
 
       // Calculate offset so the tapped point stays in the same position
+      //
+      // 计算偏移，使点击点保持在同一位置
       Offset targetOffset = Offset(
         position.dx - position.dx * targetScale,
         position.dy - position.dy * targetScale,
@@ -460,6 +552,8 @@ class _ImageItemViewState extends State<_ImageItemView>
             onDoubleTap: _handleDoubleTap,
             onTap: () {
               // Only allow tap-to-close when at original scale
+              //
+              // 仅在原始缩放下允许点击关闭
               if (_scale <= 1.0 + 0.1) {
                 widget.onTap();
               }
@@ -510,6 +604,8 @@ class _ImageItemViewState extends State<_ImageItemView>
 }
 
 /// Video item view using VideoPlayerWidget
+///
+/// 使用 VideoPlayerWidget 的视频项视图
 class _VideoItemView extends StatelessWidget {
   final ImageElement element;
   final bool isDownloading;
@@ -542,6 +638,8 @@ class _VideoItemView extends StatelessWidget {
     }
 
     // Video file exists - use VideoPlayerWidget
+    //
+    // 视频文件存在 - 使用 VideoPlayerWidget
     return VideoPlayerWidget(
       video: VideoData(
         localPath: element.videoPath,
@@ -721,6 +819,8 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
 
   /// Whether the current image is zoomed in (scale > 1.0).
   /// When true, PageView scrolling is disabled so the user can pan the image.
+  ///
+  /// 当前图片是否已放大（缩放 > 1.0）。为真时禁用 PageView 滚动，以便用户平移图片。
   bool _isImageZoomed = false;
 
   @override
@@ -978,6 +1078,8 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
             ),
 
           // Loading indicator
+          //
+          // 加载指示器
           Center(
             child: _LoadingIndicatorView(isShowing: _showLoadingIndicator),
           ),

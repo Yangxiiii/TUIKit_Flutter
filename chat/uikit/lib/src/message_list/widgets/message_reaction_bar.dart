@@ -4,9 +4,13 @@ import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/recent_emoji_manager.dart';
 
 /// Maximum number of reactions to display before showing "..."
+///
+/// 在显示“...”之前显示的最大反应数量
 const int _maxDisplayReactions = 5;
 
 /// Bar displaying message reactions below the message bubble
+///
+/// 在消息气泡下方显示消息反应的栏
 class MessageReactionBar extends StatelessWidget {
   final List<MessageReaction> reactionList;
   final bool isLeft;

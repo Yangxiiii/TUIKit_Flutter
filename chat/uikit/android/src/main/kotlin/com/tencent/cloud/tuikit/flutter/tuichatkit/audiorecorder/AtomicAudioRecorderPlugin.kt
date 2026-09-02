@@ -27,6 +27,8 @@ class AtomicAudioRecorderPlugin(flutterPluginBinding: FlutterPlugin.FlutterPlugi
 
     init {
         // Note: Activity will be set when available through ActivityAware
+        //
+        // 注意：Activity 会在通过 ActivityAware 可用时设置。
         Log.d(TAG, "AtomicAudioRecorderPlugin initialized")
     }
 

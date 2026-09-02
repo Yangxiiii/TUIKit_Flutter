@@ -26,6 +26,8 @@ class ImageMessageWidget extends StatefulWidget {
   /// viewer cannot page over the live history. Pass the merged bundle's
   /// own message list here so the viewer can render images / videos
   /// from the bundle directly.
+  ///
+  /// 当这个组件在合并消息详情页中渲染时，基于会话的 [messageListStore] 是空的，图片查看器无法浏览实时历史记录。将合并包自身的消息列表传入，以便查看器可以直接渲染包中的图片/视频。
   final List<MessageInfo>? mergedMediaMessages;
 
   static const double kImageFixedHeight = 160.0;
@@ -141,6 +143,9 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget>
     // may be gone the second time, so we must be able to render straight from
     // the server URL instead of getting stuck on the loading spinner
     // (bug#161210776). Local path always wins when present.
+    //
+    // 远程 URL 回退。在合并转发的详情视图中，每次打开都会重新下载 bundle，本地缩略图文件是临时的／第二次可能已经不存在，所以我们必须能够直接从服务器 URL
+    // 渲染，而不是卡在加载动画上（bug#161210776）。本地路径存在时总是优先。
     String? thumbImageURL = imagePayload?.thumbImageURL;
     String? largeImageURL = imagePayload?.largeImageURL;
     String? originalImageURL = imagePayload?.originalImageURL;
@@ -209,6 +214,8 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget>
         height: displayHeight,
         child: (() {
           // Prefer any available local file, then fall back to a remote URL.
+          //
+          // 优先使用任何可用的本地文件，然后才回退到远程 URL。
           String? displayPath;
           if (originalImagePath != null && originalImagePath.isNotEmpty) {
             displayPath = originalImagePath;

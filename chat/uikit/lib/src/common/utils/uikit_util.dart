@@ -6,6 +6,8 @@ class UIKitUtil {
       r"([hH][tT]{2}[pP]:\/\/|[hH][tT]{2}[pP][sS]:\/\/|[wW]{3}.|[wW][aA][pP].|[fF][tT][pP].|[fF][iI][lL][eE].)[-A-Za-z0-9+&@#/%?=~_|!:,.;]+[-A-Za-z0-9+&@#/%=~_|]");
 
   /// Group member display name priority: nameCard > friendRemark > nickname > userID
+  ///
+  /// 群成员显示名称优先级：nameCard > friendRemark > nickname > userID
   static String memberDisplayName(GroupMember member) {
     if (member.nameCard != null && member.nameCard!.isNotEmpty)
       return member.nameCard!;

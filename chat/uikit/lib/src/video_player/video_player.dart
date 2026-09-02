@@ -24,18 +24,26 @@ class VideoData {
   });
 
   /// Get the video path (prefer local path over URL)
+  ///
+  /// 获取视频路径（优先本地路径而非URL）
   String? get videoPath => localPath ?? url;
 
   /// Get the snapshot path (prefer local path over URL)
+  ///
+  /// 获取快照路径（优先本地路径而非URL）
   String? get snapshotPath => snapshotLocalPath ?? snapshotUrl;
 
   /// Check if video file exists locally
+  ///
+  /// 检查视频文件是否存在于本地
   bool get hasLocalFile =>
       localPath != null &&
       localPath!.isNotEmpty &&
       File(localPath!).existsSync();
 
   /// Check if snapshot file exists locally
+  ///
+  /// 检查快照文件是否存在于本地
   bool get hasSnapshotFile =>
       snapshotLocalPath != null &&
       snapshotLocalPath!.isNotEmpty &&
@@ -60,6 +68,13 @@ class VideoPlayer {
   ///   ),
   /// );
   /// ```
+  ///
+  /// 在基于Flutter的全屏播放器中播放视频并带控件
+  ///
+  /// 此方法使用InlineVideoPlayer启动全屏视频播放器，支持Flutter控件覆盖、缩略图和返回按钮。
+  ///
+  /// 视频: VideoData( localPath: '/path/to/video.mp4', snapshotLocalPath: '/path/to/thumbnail.jpg', width:
+  /// 1920, height: 1080,
   static Future<void> play(
     BuildContext context, {
     required VideoData video,

@@ -80,6 +80,8 @@ internal class AudioRecorderTXUGC: AudioRecorderInternalProtocol {
         
         // Note: WindowToastManager is not available in Flutter plugin
         // For debugging, check logs instead
+        //
+        // 注意：Flutter 插件中不可用 WindowToastManager
         #if DEBUG
           logger.warning("AI DeNoise license verification failed. Falling back to standard recording.")
         #endif

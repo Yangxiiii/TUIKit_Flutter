@@ -1,5 +1,7 @@
 // CAMERA / MICROPHONE runtime permission check + request, with permanent-denial
 // fallback dialog guiding the user to system Settings.
+//
+// CAMERA / MICROPHONE 运行时权限检查+请求，如果永久拒绝会弹出引导用户前往系统设置的对话框。
 
 import { abilityAccessCtrl, common, bundleManager, Permissions } from '@kit.AbilityKit';
 import { CallStore, CallMediaType, CallParticipantStatus } from '@tencentcloud/atomicxcore';
@@ -18,6 +20,8 @@ enum DeniedKind {
 
 export class Permission {
   /** audio → mic; video → mic + camera. Returns true when all required perms are granted. */
+
+  /* audio → 麦克风；video → 麦克风 + 摄像头。当所有必需权限都被授予时返回 true。 */
   static async hasPermission(
     context: common.UIAbilityContext,
     mediaType: CallMediaType,
@@ -58,6 +62,8 @@ export class Permission {
       }
       // Permanent denial → settings-guidance dialog.
       // Prefer audio over video when both are denied (matches iOS behavior).
+      //
+      // 永久拒绝 → 弹出设置引导对话框。当音频和视频都被拒绝时优先考虑音频（和 iOS 行为一致）。
       const deniedKind = Permission.resolveDeniedKind(required, result.authResults);
       void Permission.showSettingsAlert(context, deniedKind);
       return false;

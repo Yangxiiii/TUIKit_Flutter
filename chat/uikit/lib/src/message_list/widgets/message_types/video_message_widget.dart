@@ -24,6 +24,8 @@ class VideoMessageWidget extends StatefulWidget {
   final bool isInMergedDetailView;
 
   /// See [ImageMessageWidget.mergedMediaMessages].
+  ///
+  /// 参见 [ImageMessageWidget.mergedMediaMessages]。
   final List<MessageInfo>? mergedMediaMessages;
 
   static const double kVideoFixedHeight = 160.0;
@@ -60,6 +62,9 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
   /// the send completes. Reading the thumbnail file itself guarantees
   /// the rendered aspect ratio matches the actual image bytes, so the
   /// sending bubble looks identical to the sent bubble.
+  ///
+  /// 本地快照文件解码后的原始像素尺寸。我们更信任这个值，而不是 `payload.videoSnapshotWidth/Height`，因为 SDK
+  /// 报告的宽高来自视频的元数据（会应用旋转变换），而磁盘上的缩略图可能是按照视频的原生传感器方向写入的——这会导致发送完成瞬间出现“缩略图从横屏跳到竖屏”的情况。直接读取缩略图文件可以保证渲染出来的宽高比例和实际图像字节一致，因此发送气泡和已发送气泡看起来一模一样。
   Size? _localSnapshotSize;
   String? _resolvedSnapshotPath;
 
@@ -71,6 +76,10 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
   // build, racing the SDK against itself and dramatically widening
   // the partial-write window during which `Image.file` can read a
   // half-flushed snapshot file.
+  //
+  // 跟踪在这个状态生命周期内我们已经请求商店下载快照的 msgID。一个Widget的 `build`
+  // 可能会针对同一条消息运行很多次（父列表重建、滚动、负载变更事件、状态变化……）；如果不去重，我们会在每次构建时调用 `MessageActionStore.downloadMedia`，让 SDK
+  // 自己和自己竞争，并大大增加 `Image.file` 可能读取到半刷新快照文件的窗口。
   String? _downloadRequestedForMsgID;
 
   // Image.file decode failures are cached by Flutter's app-wide
@@ -82,6 +91,10 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
   // evict-and-retry exactly once per path: the now-complete file
   // gets a fresh decode, and we avoid an evict ↔ rebuild loop if
   // the file is genuinely corrupt.
+  //
+  // Flutter 的全应用 ImageCache 会缓存 Image.file 的解码失败，缓存的 key 是
+  // FileImage(path)。当部分写入竞争导致快照路径的缓存被污染时，即使文件在磁盘上变完整了，每次后续的重建都会永远命中这个缓存的失败，封面会一直空白，直到应用重启。我们会跟踪已经重试过的路径，这样每个路径只会被驱逐并重试一次：现在完整的文件会重新解码，并且如果文件确实损坏，我们也能避免出现驱逐
+  // ↔ 重建的循环。
   final Set<String> _retriedFailedFilePaths = {};
 
   // Bumped after we evict a failed cache entry so the Image.file
@@ -89,6 +102,9 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
   // Without that, the existing Image widget holds onto its prior
   // failed ImageStream and never re-resolves the (now evicted)
   // cache entry.
+  //
+  // 在我们驱逐一个失败的缓存条目后，会把下面的 Image.file widget 提升（bump）一下，这样它就会有一个新的 ValueKey，Flutter 会重新创建它。如果不这样做，现有的
+  // Image widget 会继续持有之前失败的 ImageStream，从而永远不会重新解析（现在已经被驱逐的）缓存条目。
   int _imageGeneration = 0;
 
   @override
@@ -106,6 +122,8 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
     // same slot is bound to a different message). Reset the per-
     // message dedup/retry bookkeeping so the new message is treated
     // as fresh.
+    //
+    // Flutter 的元素重用可以让一个 widget 实例在多条消息间循环使用（最常见的情况是列表重新排序或同一个位置绑定到不同的消息）。重置每条消息的去重/重试记录，这样新消息会被当作全新处理。
     if (oldWidget.message.msgID != widget.message.msgID) {
       _downloadRequestedForMsgID = null;
       _retriedFailedFilePaths.clear();
@@ -114,6 +132,8 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
     // The snapshot path may change as the SDK downloads a remote
     // thumbnail or replaces a sending placeholder; re-decode when it
     // does.
+    //
+    // 快照路径可能会在 SDK 下载远程缩略图或替换发送占位符时改变；路径变化时需要重新解码。
     _loadLocalSnapshotSize();
   }
 
@@ -133,6 +153,8 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
     if (path == _resolvedSnapshotPath) return;
     // Only handle on-disk paths; remote URLs are left to the network
     // image renderer's intrinsic sizing.
+    //
+    // 只处理本地磁盘路径；远程 URL 留给网络图片渲染器的内置尺寸处理。
     if (path.startsWith('http')) return;
 
     _resolvedSnapshotPath = path;
@@ -226,6 +248,9 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
     // synchronously (before the post-frame callback runs) so that
     // back-to-back rebuilds inside the same frame can't queue
     // duplicate triggers either.
+    //
+    // 对于每个 (State, msgID) 只执行一次快照下载：SDK 在后台会对缩略图下载进行序列化，所以如果每次重建都重试，会增加读取半写入文件时 `Image.file` 出错的风险。我们同步标记
+    // msgID（在 post-frame 回调运行前），这样即使同一帧内连续重建，也不会排队重复触发。
     final needsDownload =
         (videoSnapshotPath == null || videoSnapshotPath.isEmpty) &&
             widget.messageListStore != null &&
@@ -246,6 +271,9 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
     //      actually sees rendered, so sending → sent is seamless), then
     //   2) the SDK-reported snapshot dimensions on the payload, then
     //   3) the fixed 240x160 fallback.
+    //
+    // 选择最权威的快照宽高比来源：1）本地解码的缩略图像素（匹配用户实际看到的渲染效果，这样发送 → 已发送是无缝的），然后 2）SDK payload 报告的快照尺寸，再 3）固定的 240x160
+    // 作为备选。
     double? snapWidth;
     double? snapHeight;
     if (_localSnapshotSize != null && _localSnapshotSize!.height > 0) {
@@ -328,6 +356,9 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
     // large covers (e.g. iOS-sender 1MB native-resolution snapshots),
     // and dangerous because once a partial-write race poisons the
     // ImageCache for the local path the cover never recovers.
+    //
+    // 还没有本地路径：在 Store 端下载进行中时，直接从 CDN URL 渲染。如果不这样做，整个下载期间封面都会保持空白——对于大封面尤其痛苦（例如 iOS 发送者 1MB
+    // 原生分辨率快照），而且很危险，因为一旦部分写入竞争破坏了本地图像缓存，封面永远无法恢复。
     if (imagePath == null || imagePath.isEmpty) {
       if (remoteURL != null && remoteURL.isNotEmpty) {
         return _buildNetworkImage(
@@ -347,6 +378,9 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
       // entry. Without a changing key, Flutter would reuse the
       // existing Image's already-failed ImageStream and never
       // re-resolve through ImageCache, defeating the evict.
+      //
+      // 在驱逐被搞坏的缓存条目后强制使用一个新的 Image 元素。如果没有改变 key，Flutter 会复用已有的、已经失败的 ImageStream，而永远不会通过 ImageCache
+      // 重新解析，从而使驱逐失效。
       key: ValueKey('$imagePath#$_imageGeneration'),
       width: width,
       height: height,
@@ -366,6 +400,14 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
         //   2) Second failure: the file is genuinely bad (truncated,
         //      wrong format, gone). Stop retrying so we don't loop,
         //      and render from the CDN URL if available.
+        //
+        // 这里有两种失败模式，通过我们是否已经在这个 State 上重试过这个精确路径来区分：
+        //
+        // 1）第一次失败：最可能是问题里描述的部分写入竞争——Image.file 解码了文件
+        //
+        // 缓存条目中毒，提升 _imageGeneration 以强制生成新的 Image 元素，让下一次构建重新尝试。等到那个构建运行时，SDK 下载通常已经完成。
+        //
+        // 第二次失败：文件确实有问题（被截断、格式错误或已丢失）。停止重试以避免循环，如果可用，则从 CDN URL 渲染。
         if (!_retriedFailedFilePaths.contains(imagePath)) {
           _retriedFailedFilePaths.add(imagePath);
           WidgetsBinding.instance.addPostFrameCallback((_) {

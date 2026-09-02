@@ -44,6 +44,8 @@ class FilePicker {
 
   /// HarmonyOS detection. `Platform.isOhos` only exists in the Flutter-OH SDK,
   /// so we compare the OS string to stay compilable under standard Flutter.
+  ///
+  /// HarmonyOS 检测。`Platform.isOhos` 仅存在于 Flutter-OH SDK 中，所以我们比较操作系统字符串，以保证在标准 Flutter 下可编译
   static bool get _isOhos => Platform.operatingSystem == 'ohos';
 
   static Future<List<PickerResult>> pickFiles({
@@ -53,6 +55,8 @@ class FilePicker {
     try {
       // FilePicker uses SAF (Storage Access Framework) which doesn't require permissions
       // The system handles permission through the document picker UI
+      //
+      // FilePicker 使用 SAF（存储访问框架），不需要权限，系统通过文档选择器 UI 处理权限
       if (!await _checkAndRequestPermission(context)) {
         return [];
       }
@@ -116,6 +120,11 @@ class FilePicker {
   /// On Android, uses Intent.ACTION_VIEW to open the file.
   /// On iOS, uses UIDocumentInteractionController to open the file.
   /// On HarmonyOS, uses startAbility with implicit want (viewData).
+  ///
+  /// 用系统默认应用打开文件
+  ///
+  /// 如果文件成功打开返回 true，否则返回 false。在 Android 上，使用 Intent.ACTION_VIEW 打开文件。在 iOS 上，使用
+  /// UIDocumentInteractionController 打开文件。在 HarmonyOS 上，使用带有隐式 want（viewData）的 startAbility。
   static Future<bool> openFile(String filePath) async {
     try {
       if (!Platform.isAndroid && !Platform.isIOS && !_isOhos) {
@@ -128,6 +137,9 @@ class FilePicker {
       // a `file://docs/...` URI returned by DocumentViewPicker — dart:io File
       // cannot resolve such URIs, so we skip the check and let the native layer
       // decide.
+      //
+      // 在 Android/iOS 上，`filePath` 是绝对沙箱路径，所以 dart:io File 可以廉价地预验证文件是否存在。在 HarmonyOS 上，`filePath` 通常是由
+      // DocumentViewPicker 返回的 `file://docs/...` URI — dart:io File 无法解析这样的 URI，因此我们跳过检查，让原生层处理。
       if (!_isOhos) {
         final file = File(filePath);
         if (!file.existsSync()) {

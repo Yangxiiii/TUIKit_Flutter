@@ -56,6 +56,8 @@ export struct MultiCallControlsView {
   }
 
   /** Flutter `_buildWaitingFunctionView`: Row(spaceEvenly){ reject, accept } + 40vp gap. */
+
+  /* Flutter `_buildWaitingFunctionView`：Row(spaceEvenly){ 拒绝, 接受 } + 40vp间隙。 */
   @Builder
   waitingLayout() {
     Column() {
@@ -85,6 +87,10 @@ export struct MultiCallControlsView {
       // Bottom gap = (BOTTOM_EDGE | COLLAPSED_BOTTOM_EDGE) + bottomExtension
       // + BUTTON_LIFT — the LIFT lifts the whole row above Flutter's literal
       // baseline to compensate for HarmonyOS' nav indicator geometry.
+      //
+      // 麦克风 — 展开 W/4，折叠 W*2/6。
+      //
+      // + BUTTON_LIFT — LIFT 会把整行提升到 Flutter 的字面基线之上，以补偿 HarmonyOS 导航指示器的几何布局。
       Column() { this.muteBtn(); }
         .width(BTN_WRAP)
         .position({
@@ -97,6 +103,8 @@ export struct MultiCallControlsView {
         });
 
       // speaker — expanded W/2, collapsed W*3/6 (= W/2).
+      //
+      // 扬声器 — 展开 W/2，折叠 W*3/6 (= W/2)。
       Column() { this.audioRouteBtn(); }
         .width(BTN_WRAP)
         .position({
@@ -109,6 +117,8 @@ export struct MultiCallControlsView {
         });
 
       // camera — expanded 3W/4, collapsed W*4/6.
+      //
+      // 摄像头 — 展开状态 3W/4，收起状态 W*4/6。
       Column() { this.cameraBtn(); }
         .width(BTN_WRAP)
         .position({
@@ -121,6 +131,8 @@ export struct MultiCallControlsView {
         });
 
       // hangup — expanded W/2 (own row), collapsed W*5/6 (same row).
+      //
+      // 挂断 — 展开状态 W/2（独占一行），收起状态 W*5/6（同一行）。
       Column() { this.hangupBtn(); }
         .width(BTN_WRAP)
         .position({
@@ -137,6 +149,12 @@ export struct MultiCallControlsView {
       // iOS canonical (VideoCallerAndCalleeAcceptedView.swift:222):
       //   matchBtn.centerY = hangup.centerY (in BOTH expanded + collapsed)
       // We apply the same rule + the BUTTON_LIFT so it tracks hangup.
+      //
+      // 箭头位于 W/6。
+      //
+      // iOS 标准（VideoCallerAndCalleeAcceptedView.swift:222）：
+      //
+      // 我们应用相同规则 + BUTTON_LIFT 来追踪挂断。
       Image(CallKitBundle.imageMap('icon_match'))
         .width(BTN_SMALL)
         .height(BTN_SMALL)
@@ -159,6 +177,8 @@ export struct MultiCallControlsView {
       // Flutter: 28vp glyph at left = W*3/4 - 14 (after imgOffsetX:-16),
       // bottom = bottomEdge + smallBtn/4 expanded | bottomEdge + 35 collapsed.
       // Plus BUTTON_LIFT to track the rest of the row.
+      //
+      // 再加 BUTTON_LIFT 来追踪整行的其他部分。
       if (this.deviceState.cameraStatus === DeviceStatus.on) {
         Image(CallKitBundle.imageMap('switch_camera'))
           .width(BTN_SMALL_GLYPH)
@@ -223,6 +243,8 @@ export struct MultiCallControlsView {
   }
 
   // ---- Buttons ----
+  //
+  // ---- 按钮 ----
 
   @Builder
   declineBtn() {

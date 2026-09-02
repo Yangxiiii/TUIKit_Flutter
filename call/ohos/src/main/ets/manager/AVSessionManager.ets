@@ -3,6 +3,9 @@
 // the process or mute mic/speaker. The background task is re-asserted on
 // every onApplicationBackground transition since the OS may reclaim the slot
 // after a few foreground/background flips.
+//
+// 保持 AVSession 活动，并在每次调用期间保持长时间运行的后台任务活跃，这样将应用切到后台不会冻结进程或静音麦克风/扬声器。由于操作系统可能在几次前台/后台切换后回收后台任务位，所以每次
+// onApplicationBackground 转换时都重新确认后台任务。
 
 import avSession from '@ohos.multimedia.avsession';
 import { BusinessError } from '@ohos.base';

@@ -30,6 +30,8 @@ export class SubWindowManager {
   /**
    * Bind the host's WindowStage so subsequent route transitions can spawn
    * SubWindows on demand. Idempotent.
+   *
+   * 绑定主机的 WindowStage，这样后续路由转换就可以按需生成 SubWindows。幂等操作。
    */
   attach(windowStage: window.WindowStage): void {
     if (this._windowStage !== null) {
@@ -40,12 +42,16 @@ export class SubWindowManager {
 
     // Subscribe to ViewState.router changes via RouterManager (the single
     // mutator). RouterManager forwards every transition to us.
+    //
+    // 通过 RouterManager（唯一变更者）订阅 ViewState.router 的变化。RouterManager 会把每次转换转发给我们。
     RouterManager.bindRouteListener((next: CallRoute): void => {
       this.applyRoute(next);
     });
 
     // Replay any in-flight route (e.g. cold-start dispatched a banner before
     // attach finished).
+    //
+    // 回放任何正在进行中的路由（例如冷启动时在附加完成前就调度了横幅）。
     const r = ViewState().router;
     if (r !== CallRoute.none) {
       this.applyRoute(r);
@@ -55,6 +61,8 @@ export class SubWindowManager {
   }
 
   /** Must be called from `onWindowStageDestroy`. */
+
+  /* 必须从 `onWindowStageDestroy` 调用。 */
   detach(): void {
     RouterManager.bindRouteListener(null);
     this.applyRoute(CallRoute.none);
@@ -64,6 +72,8 @@ export class SubWindowManager {
 
   /**
    * Apply a new route. Each branch is idempotent.
+   *
+   * 应用一个新路由。每个分支都是幂等的。
    */
   private applyRoute(next: CallRoute): void {
     if (next === this._currentRoute && this._subWindow !== null) {
@@ -83,6 +93,8 @@ export class SubWindowManager {
       }
       // Re-check the current route — ensureSubWindow is async; the user may
       // have transitioned again (e.g. banner → none on auto-reject).
+      //
+      // 重新检查当前路由 —— ensureSubWindow 是异步的；用户可能已经再次切换（例如横幅 → 自动拒绝时无）。
       if (this._currentRoute === CallRoute.banner) {
         this.applyBannerGeometry(win);
       } else if (this._currentRoute === CallRoute.fullView) {
@@ -119,6 +131,8 @@ export class SubWindowManager {
     try {
       // HAR packages can't register pages via main_pages.json, but they CAN
       // expose @Entry({ routeName }) entries that the host loads by name.
+      //
+      // HAR 包不能通过 main_pages.json 注册页面，但它们可以暴露 @Entry({ routeName }) 条目，宿主按名称加载。
       await subWin.loadContentByName(TUI_CALLKIT_OVERLAY_ROUTE_NAME);
     } catch (e) {
       Logger.error('SubWindowManager.ensureSubWindow: loadContentByName failed', e);
@@ -191,6 +205,8 @@ export class SubWindowManager {
     }
 
     // Reset injected safe-area state so a future re-attach starts clean.
+    //
+    // 重置注入的安全区状态，这样未来重新附加时是干净的。
     const vs = ViewState();
     vs.statusBarHeight = 0;
     vs.navBarHeight = 0;
@@ -239,6 +255,8 @@ export class SubWindowManager {
    * FullView geometry: cover the entire screen, immersive (extends behind
    * status bar + navigation indicator). iOS analogue:
    *   window.frame = currentScreenFrame; backgroundColor = .black.
+   *
+   * FullView 几何：覆盖整个屏幕，沉浸式（延伸到状态栏和导航指示器背后）。iOS 对应方式：
    */
   private applyFullViewGeometry(subWin: window.Window): void {
     try {

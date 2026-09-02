@@ -21,6 +21,8 @@ import io.flutter.plugin.platform.PlatformViewFactory
 /**
  * Factory for creating inline video player views
  * This player only renders video - controls are handled by Flutter
+ *
+ * 用于创建内联视频播放器视图的工厂，该播放器仅渲染视频 - 控件由 Flutter 处理
  */
 class InlineVideoPlayerViewFactory : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
     override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
@@ -32,6 +34,8 @@ class InlineVideoPlayerViewFactory : PlatformViewFactory(StandardMessageCodec.IN
 /**
  * Inline video player that only renders video without any controls
  * All playback control is done via MethodChannel from Flutter
+ *
+ * 仅渲染视频而无任何控件的内联视频播放器，所有播放控制通过 Flutter 的 MethodChannel 完成
  */
 class InlineVideoPlayerPlatformView(
     private val context: Context,
@@ -49,6 +53,8 @@ class InlineVideoPlayerPlatformView(
     private var isDisposed = false
     
     // Video dimensions for aspect ratio calculation
+    //
+    // 视频尺寸用于计算宽高比
     private var videoWidth = 0
     private var videoHeight = 0
 
@@ -57,15 +63,21 @@ class InlineVideoPlayerPlatformView(
         val videoUri = Uri.parse("file://$videoPath")
 
         // Create container with black background
+        //
+        // 创建黑色背景的容器
         containerView = FrameLayout(context).apply {
             setBackgroundColor(Color.BLACK)
         }
         
         // Create TextureView for video rendering (avoids SurfaceView buffer conflicts)
+        //
+        // 创建用于视频渲染的 TextureView（避免 SurfaceView 缓冲冲突）
         textureView = TextureView(context)
         containerView.addView(textureView)
 
         // Create ExoPlayer
+        //
+        // 创建 ExoPlayer
         player = ExoPlayer.Builder(context).build().apply {
             setVideoTextureView(textureView)
             setMediaItem(MediaItem.fromUri(videoUri))
@@ -116,6 +128,8 @@ class InlineVideoPlayerPlatformView(
     
     /**
      * Update TextureView size to maintain aspect ratio
+     *
+     * 更新 TextureView 尺寸以保持宽高比
      */
     private fun updateTextureViewSize() {
         if (videoWidth <= 0 || videoHeight <= 0) return
@@ -131,9 +145,13 @@ class InlineVideoPlayerPlatformView(
             
             val (targetWidth, targetHeight) = if (videoAspect > containerAspect) {
                 // Video is wider - fit to width
+                //
+                // 视频较宽 - 适应宽度
                 containerWidth to (containerWidth / videoAspect).toInt()
             } else {
                 // Video is taller - fit to height
+                //
+                // 视频较高 - 适应高度
                 (containerHeight * videoAspect).toInt() to containerHeight
             }
             

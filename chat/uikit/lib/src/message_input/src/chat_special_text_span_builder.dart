@@ -16,6 +16,8 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
   });
 
   /// whether show background for @somebody
+  ///
+  /// 是否为 @某人 显示背景
   final bool showAtBackground;
 
   @override
@@ -28,6 +30,8 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
     }
 
     ///index is end index of start flag, so text start index should be index-(flag.length-1)
+    ///
+    /// index 是起始标记的结束索引，因此文本起始索引应为 index-(flag.length-1)
     if (isStart(flag, HttpText.flag)) {
       return HttpText(
           colorScheme: colorScheme,
@@ -102,6 +106,8 @@ class HttpText extends SpecialText {
             start: start!,
 
             ///caret can move into special text
+            ///
+            /// 光标可以移动到特殊文本中
             deleteAll: true,
             style: TextStyle(color: colorScheme.textColorLink),
             recognizer: TapGestureRecognizer()

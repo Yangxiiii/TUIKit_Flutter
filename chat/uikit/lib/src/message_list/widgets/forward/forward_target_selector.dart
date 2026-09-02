@@ -6,6 +6,8 @@ import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_checkbox.dart';
 
 /// Forward target selection result
+///
+/// 转发目标选择结果
 class ForwardTargetSelectResult {
   final List<String> conversationIDs;
   final List<ConversationInfo> conversations;
@@ -17,6 +19,8 @@ class ForwardTargetSelectResult {
 }
 
 /// Forward target selector page
+///
+/// 转发目标选择器页面
 class ForwardTargetSelectorPage extends StatefulWidget {
   final bool allowMultiSelect;
   final int maxSelectCount;
@@ -34,6 +38,8 @@ class ForwardTargetSelectorPage extends StatefulWidget {
       _ForwardTargetSelectorPageState();
 
   /// Show forward target selector
+  ///
+  /// 显示转发目标选择器
   static Future<ForwardTargetSelectResult?> show(
     BuildContext context, {
     bool allowMultiSelect = true,
@@ -193,6 +199,8 @@ class _ForwardTargetSelectorPageState extends State<ForwardTargetSelectorPage> {
           _toggleSelection(conversation);
         } else {
           // Single select mode, return directly
+          //
+          // 单选模式，直接返回
           Navigator.of(context).pop(ForwardTargetSelectResult(
             conversationIDs: [conversation.conversationID],
             conversations: [conversation],
@@ -222,6 +230,8 @@ class _ForwardTargetSelectorPageState extends State<ForwardTargetSelectorPage> {
             ),
             const SizedBox(width: 12),
             // Conversation info
+            //
+            // 会话信息
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

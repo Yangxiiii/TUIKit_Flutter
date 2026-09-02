@@ -43,6 +43,8 @@ extension EventIdExt on EventId {
 
 class MetricsJsonKeys {
   // Event Payload Keys
+  //
+  // 事件负载键
   static const String eventId = "event_id";
   static const String eventCode = "event_code";
   static const String eventResult = "event_result";
@@ -55,12 +57,16 @@ class MetricsJsonKeys {
   static const String platformInfo = "platformInfo";
 
   // Basic Info Keys
+  //
+  // 基本信息键
   static const String callId = "callId";
   static const String intRoomId = "intRoomId";
   static const String strRoomId = "strRoomId";
   static const String uiKitVersion = "uiKitVersion";
 
   // Platform Info Keys
+  //
+  // 平台信息键
   static const String platform = "platform";
   static const String framework = "framework";
   static const String deviceBrand = "deviceBrand";

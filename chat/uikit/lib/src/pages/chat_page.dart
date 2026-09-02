@@ -127,9 +127,13 @@ class _ChatPageState extends State<ChatPage> {
   late SemanticColorScheme colorsTheme;
 
   // Multi-select mode state
+  //
+  // 多选模式状态
   MultiSelectState? _multiSelectState;
 
   // MessageInput key for @ mention feature
+  //
+  // 用于 @ 提及功能的消息输入键
   final GlobalKey<MessageInputState> _messageInputKey = GlobalKey();
 
   @override
@@ -317,6 +321,10 @@ class _ChatPageState extends State<ChatPage> {
           // message list (only visible while listening). Fills the area so the
           // expanded state can show a full-screen tap-to-collapse barrier;
           // collapsed/inactive states don't intercept taps on the chat.
+          //
+          // 浮动“从这里听”状态栏 — 在消息列表的中右方悬停（仅在聆听时可见）。填充区域，因此
+          //
+          // 收起/不活跃状态不会拦截聊天点击。
           const Positioned.fill(child: ListenPlaybackBar()),
         ],
       ),

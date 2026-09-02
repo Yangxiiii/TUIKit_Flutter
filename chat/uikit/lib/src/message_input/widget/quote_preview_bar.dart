@@ -8,6 +8,8 @@ import 'package:tencent_chat_uikit/src/third_party/extended_text/extended_text.d
 
 /// A preview bar displayed below the message input when quoting a message.
 /// Shows sender name + content preview (text / thumbnail / icon) + close button.
+///
+/// 引用消息时在消息输入框下显示的预览栏。显示发送者姓名 + 内容预览（文本/缩略图/图标）+ 关闭按钮。
 class QuotePreviewBar extends StatelessWidget {
   final MessageInfo quotedMessage;
   final VoidCallback onClose;
@@ -38,13 +40,19 @@ class QuotePreviewBar extends StatelessWidget {
         children: [
           const SizedBox(width: 4),
           // Content area - single line: "sender: content"
+          //
+          // 内容区 - 单行：“发送者：内容”
           Expanded(
             child: _buildSingleLineContent(colors, locale, senderName),
           ),
           // Thumbnail (for image/video)
+          //
+          // 缩略图（针对图片/视频）
           _buildThumbnail(colors),
           const SizedBox(width: 8),
           // Close button
+          //
+          // 关闭按钮
           GestureDetector(
             onTap: onClose,
             child: Icon(
@@ -67,6 +75,8 @@ class QuotePreviewBar extends StatelessWidget {
     final prefix = senderName.isNotEmpty ? '$senderName：' : '';
 
     // Audio and file use Icon prefix
+    //
+    // 音频和文件使用图标前缀
     if (payload is AudioMessagePayload) {
       final duration = payload.audioDuration;
       final minutes = duration ~/ 60;
@@ -113,6 +123,8 @@ class QuotePreviewBar extends StatelessWidget {
     // Use ExtendedText so [TUIEmoji_*] tokens in the quoted text render as
     // inline emoji images instead of literal text, matching the message
     // bubble's quote preview.
+    //
+    // 使用扩展文本，这样被引用文本中的[TUIEmoji_*]标记会呈现为行内表情图片，而不是文本，匹配消息气泡的引用预览。
     return ExtendedText(
       displayText,
       specialTextSpanBuilder: ChatSpecialTextSpanBuilder(

@@ -8,6 +8,8 @@ abstract class MessageInputConfigProtocol {
   bool get enableVoiceToTextOnRecord;
 
   /// More panel items (order matches the more panel UI)
+  ///
+  /// 更多面板项（顺序与更多面板 UI 一致）
   bool get isShowAlbum;
   bool get isShowPhotoTaker;
   bool get isShowVideoRecorder;

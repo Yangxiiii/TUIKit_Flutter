@@ -1,5 +1,7 @@
 // Wraps @ohos.data.preferences. Getters return defaults synchronously before
 // the one-time async init() resolves.
+//
+// 封装 @ohos.data.preferences。获取器在一次性异步 init() 完成前会同步返回默认值。
 
 import preferences from '@ohos.data.preferences';
 import { common } from '@kit.AbilityKit';

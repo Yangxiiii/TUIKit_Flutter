@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 
 /// Checkbox component for message multi-select mode
+///
+/// 消息多选模式的复选框组件
 class MessageCheckbox extends StatelessWidget {
   final bool isSelected;
   final bool isEnabled;

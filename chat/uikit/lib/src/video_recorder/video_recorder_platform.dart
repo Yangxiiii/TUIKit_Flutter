@@ -10,6 +10,8 @@ class VideoRecorderPlatform {
 
   /// HarmonyOS detection. `Platform.isOhos` only exists in the Flutter-OH SDK,
   /// so we compare the OS string to stay compilable under standard Flutter.
+  ///
+  /// HarmonyOS 检测。`Platform.isOhos` 仅存在于 Flutter-OH SDK 中，所以我们比较 OS 字符串以确保在标准 Flutter 下可编译。
   static bool get _isOhos => Platform.operatingSystem == 'ohos';
 
   static Future<VideoRecorderResult> startRecordNative({

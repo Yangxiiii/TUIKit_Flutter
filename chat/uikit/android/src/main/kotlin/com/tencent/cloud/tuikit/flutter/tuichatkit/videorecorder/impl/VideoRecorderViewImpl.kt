@@ -29,6 +29,8 @@ class VideoRecorderViewImpl {
      *                 - Photo capture success
      *                 - Video recording success
      *                 - Error events
+     *
+     * 启动相机拍摄界面 @param config 拍摄配置设置 @param callback 接收拍摄结果的回调接口，包括：- 照片拍摄成功 - 视频录制成功 - 错误事件
      */
     fun takeVideo(config: VideoRecorderConfig?, callback: VideoRecordListener?) {
         val context = ContextProvider.appContext

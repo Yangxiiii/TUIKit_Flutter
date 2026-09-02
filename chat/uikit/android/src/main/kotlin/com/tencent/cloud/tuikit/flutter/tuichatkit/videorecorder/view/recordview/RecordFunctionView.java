@@ -129,6 +129,8 @@ public class RecordFunctionView extends LinearLayout {
 //        }
 
          // todo:Temporary adjustment fixed to 16:9 ratio
+         //
+         // 待办：临时调整固定为16:9比例
          int viewHeight = screenSize.y - screenSize.x * 16 / 9 + VideoRecorderResourceUtils
                 .dip2px(mContext, DEFAULT_OPERATION_TIPS_VIEW_HEIGHT_DP);
 

@@ -7,6 +7,10 @@ import '../../ai/tts/tts_text_sanitizer.dart';
 ///
 /// [speechText] is synthesized via TTS. For voice messages [audioPath] is the
 /// original audio to play right after the spoken prefix; null otherwise.
+///
+/// “从这里开始听”的播放队列中的单个单位。
+///
+/// [speechText] 通过 TTS 合成。对于语音消息，[audioPath] 是需在语音前缀后直接播放的原始音频；否则为 null。
 class ListenItem {
   final String speechText;
   final String? audioPath;
@@ -15,6 +19,8 @@ class ListenItem {
 }
 
 /// Resolve a non-self speaker's display name (remark > nameCard > nickname > id).
+///
+/// 解析非本人发言者的显示名称（备注 > 名片 > 昵称 > id）。
 String _speakerName(MessageSenderInfo from) {
   for (final candidate in [
     from.friendRemark,
@@ -37,6 +43,14 @@ String _speakerName(MessageSenderInfo from) {
 /// When the spoken message has the same sender as the previously spoken one,
 /// the speaker announcement ("{name}说" / name on media) is omitted so the
 /// listener isn't told the same name repeatedly.
+///
+/// 从 [messages] 构建有序播放计划（按时间顺序从最旧到最新）。
+///
+/// - 图片/视频/文件：读作“{prefix} 发送了一张图片/视频/文件”。- 音频：先读作“{prefix}”，然后播放原始音频。- 其他类型和空文本则跳过。
+///
+/// 当语音消息的发送者和上一个语音消息相同时，
+///
+/// 不会重复告诉听者相同的名字。
 List<ListenItem> buildListenPlan({
   required List<MessageInfo> messages,
   required AppLocalizedText l,
@@ -52,6 +66,8 @@ List<ListenItem> buildListenPlan({
       case MessageType.text:
         final raw = (m.messagePayload as TextMessagePayload?)?.text ?? '';
         // Strip emoji so they aren't spoken; skip emoji-only messages.
+        //
+        // 去掉表情符号，这样它们不会被朗读；跳过只有表情符号的消息。
         final content = sanitizeTextForTts(raw);
         if (content.isEmpty) continue;
         items.add(ListenItem(
@@ -95,6 +111,8 @@ List<ListenItem> buildListenPlan({
             : (payload?.audioURL ?? '');
         items.add(ListenItem(
           // Same sender: skip the spoken prefix, just play the audio.
+          //
+          // 同样的发送者：跳过语音前缀，直接播放音频。
           speechText: sameAsPrev ? '' : l.listenSays(speaker),
           audioPath: path.isEmpty ? null : path,
         ));

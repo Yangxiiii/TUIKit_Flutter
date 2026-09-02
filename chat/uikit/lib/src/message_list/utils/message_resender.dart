@@ -22,6 +22,20 @@ import 'package:atomic_x_core/atomicxcore.dart';
 /// the main one — we only have [MessageQuoteInfo], not the original
 /// quoted [MessageInfo]). This matches Kotlin behaviour for the
 /// payload-based resend path.
+///
+/// 重新发送之前发送失败的消息。
+///
+/// MessageInputStore 的公开 API 只接受 [SendMessagePayload]，所以简单地“再次发送原始负载”会生成一个全新的 V2TimMessage 并带上一个新的
+/// msgID——导致失败的那行保留在新发送行旁边，因为 MessageListStore 是根据 msgID 来进行键的对比。双方同意的跨平台解决方案（与 Kotlin 团队一致）是
+///
+/// 1. 先通过 [MessageActionStore.delete] 删除失败行，这样本地 IM SDK 存储里就不会再有旧条目，消息也消失了。
+///
+/// 2. 然后用原始负载构建一个新的消息进行发送。
+///
+/// 这样就能恢复想要的用户体验（失败行被新的发送行替代），同时不需要修改 [MessageInputStore] 接口。
+///
+/// 注意：那些无法通过 [SendMessagePayload] / [SendMessageOption] 完整传递的字段，在重发时肯定会丢失（引用指针是主要的——我们只有
+/// [MessageQuoteInfo]，没有原始引用的 [MessageInfo]）。这和 Kotlin 的基于 payload 的重发路径行为一致。
 class MessageResender {
   static Future<void> resend({
     required MessageInfo message,

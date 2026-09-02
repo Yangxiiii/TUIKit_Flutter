@@ -15,123 +15,183 @@ typedef OutSideTapHandler = void Function();
 /// Super flexible Tooltip class that allows you to show any content
 /// inside a Tooltip in the overlay of the screen.
 ///
+///
+/// 超灵活的 Tooltip 类，允许你在屏幕的覆盖层中显示任意内容。
 class SuperTooltip {
   /// Allows to accedd the closebutton for UI Testing
+  ///
+  /// 允许访问关闭按钮以进行 UI 测试
   static Key closeButtonKey = const Key("CloseButtonKey");
 
   /// Signals if the Tooltip is visible at the moment
+  ///
+  /// 指示 Tooltip 当前是否可见
   bool isOpen = false;
 
   ///
   /// The content of the Tooltip
+  ///
+  /// Tooltip 的内容
   final Widget content;
 
   ///
   /// The direcion in which the tooltip should open
+  ///
+  /// Tooltip 打开的方向
   TooltipDirection popupDirection;
 
   ///
   /// optional handler that gets called when the Tooltip is closed
+  ///
+  /// 可选的处理函数，当 Tooltip 关闭时会被调用
   final OutSideTapHandler? onClose;
 
   ///
   /// [minWidth], [minHeight], [maxWidth], [maxHeight] optional size constraints.
   /// If a constraint is not set the size will ajust to the content
+  ///
+  /// [minWidth]、[minHeight]、[maxWidth]、[maxHeight] 可选的尺寸限制
   double? minWidth, minHeight, maxWidth, maxHeight;
 
   ///
   /// The minium padding from the Tooltip to the screen limits
+  ///
+  /// Tooltip 到屏幕边缘的最小间距
   final double minimumOutSidePadding;
 
   ///
   /// If [snapsFarAwayVertically== true] the bigger free space above or below the target will be
   /// covered completely by the ToolTip. All other dimension or position constraints get overwritten
+  ///
+  /// 完全被 Tooltip 覆盖。所有其他尺寸或位置限制会被覆盖
   final bool snapsFarAwayVertically;
 
   ///
   /// If [snapsFarAwayHorizontally== true] the bigger free space left or right of the target will be
   /// covered completely by the ToolTip. All other dimension or position constraints get overwritten
+  ///
+  /// 完全被 Tooltip 覆盖。所有其他尺寸或位置限制会被覆盖
   final bool snapsFarAwayHorizontally;
 
   /// [top], [right], [bottom], [left] position the Tooltip absolute relative to the whole screen
+  ///
+  /// [top]、[right]、[bottom]、[left] 相对于整个屏幕绝对定位 Tooltip
   double? top, right, bottom, left;
 
   ///
   /// A Tooltip can have none, an inside or an outside close icon
+  ///
+  /// Tooltip可以没有关闭图标，也可以在内部或外部有关闭图标
   final ShowCloseButton showCloseButton;
 
   ///
   /// [hasShadow] defines if the tooltip should have a shadow
+  ///
+  /// [hasShadow] 定义Tooltip是否应该有阴影
   final bool hasShadow;
 
   ///
   /// The shadow color.
+  ///
+  /// 阴影颜色
   final Color shadowColor;
 
   ///
   /// The shadow offset
+  ///
+  /// 阴影偏移量
   final Offset? shadowOffset;
 
   ///
   /// The shadow blur radius.
+  ///
+  /// 阴影模糊半径
   final double shadowBlurRadius;
 
   ///
   /// The shadow spread radius.
+  ///
+  /// 阴影扩展半径
   final double shadowSpreadRadius;
 
   ///
   /// the stroke width of the border
+  ///
+  /// 边框的描边宽度
   final double borderWidth;
 
   ///
   /// The corder radii of the border
+  ///
+  /// 边框的圆角半径
   final double borderRadius;
 
   ///
   /// The color of the border
+  ///
+  /// 边框颜色
   final Color borderColor;
 
   ///
   /// The color of the close icon
+  ///
+  /// 关闭图标的颜色
   final Color closeButtonColor;
 
   ///
   /// The size of the close button
+  ///
+  /// 关闭按钮的大小
   final double closeButtonSize;
 
   ///
   /// The icon for the close button
+  ///
+  /// 关闭按钮的图标
   final IconData closeButtonIcon;
 
   ///
   /// The length of the Arrow
+  ///
+  /// 箭头的长度
   final double arrowLength;
 
   ///
   /// The width of the arrow at its base
+  ///
+  /// 箭头底部的宽度
   final double arrowBaseWidth;
 
   ///
   /// The distance of the tip of the arrow's tip to the center of the target
+  ///
+  /// 箭头尖端到目标中心的距离
   final double arrowTipDistance;
 
   ///
   /// The backgroundcolor of the Tooltip
+  ///
+  /// Tooltip的背景颜色
   final Color backgroundColor;
 
   /// The color of the rest of the overlay surrounding the Tooltip.
   /// typically a translucent color.
+  ///
+  /// Tooltip周围其余覆盖层的颜色，通常是半透明颜色。
   final Color outsideBackgroundColor;
 
   ///
   /// By default touching the surrounding of the Tooltip closes the tooltip.
   /// you can define a rectangle area where the background is completely transparent
   /// and the widgets below react to touch
+  ///
+  /// 默认情况下，触摸 Tooltip 周围会关闭 Tooltip。你可以定义一个矩形区域，使背景完全透明，并且下面的控件可以响应触摸。
   final Rect? touchThrougArea;
 
   ///
   /// The shape of the [touchThrougArea].
+  ///
+  /// [touchThrougArea] 的形状。
   final ClipAreaShape touchThroughAreaShape;
 
   ///
@@ -144,26 +204,38 @@ class SuperTooltip {
 
   ///
   /// Allow the tooltip to be dismissed tapping outside
+  ///
+  /// 允许通过点击外部来关闭 Tooltip。
   final bool dismissOnTapOutside;
 
   ///
   /// Block pointer actions or pass them through background
+  ///
+  /// 阻止指针操作或让它们穿过背景。
   final bool blockOutsidePointerEvents;
 
   ///
   /// Enable background overlay
+  ///
+  /// 启用背景覆盖。
   final bool containsBackgroundOverlay;
 
   ///
   /// The parameter chooses popupDirection automatically by axis Y
+  ///
+  /// 该参数通过 Y 轴自动选择弹出方向。
   final bool automaticallyVerticalDirection;
 
   ///
   /// The parameter enable pop title
+  ///
+  /// 该参数启用弹出标题。
   final bool enableTitle;
 
   ///
   /// The parameter show the title in the tooltip
+  ///
+  /// 该参数在 Tooltip 中显示标题。
   final String title;
 
   final bool hasArrow;
@@ -220,6 +292,8 @@ class SuperTooltip {
 
   ///
   /// Removes the Tooltip from the overlay
+  ///
+  /// 从覆盖层中移除 Tooltip。
   void close() {
     if (onClose != null) {
       onClose!();
@@ -235,6 +309,10 @@ class SuperTooltip {
   /// The center of [targetContext] is used as target of the arrow
   ///
   /// Uses [overlay] to show tooltip or [targetContext]'s overlay if [overlay] is null
+  ///
+  /// 显示 Tooltip，使用 [targetContext] 的中心作为箭头目标。
+  ///
+  /// 使用 [overlay] 显示 Tooltip，或者如果 [overlay] 为 null，则使用 [targetContext] 的覆盖层。
   void show(BuildContext targetContext,
       {OverlayState? overlay, Offset? targetCenter}) {
     final renderBox = targetContext.findRenderObject() as RenderBox;
@@ -246,6 +324,8 @@ class SuperTooltip {
             ancestor: overlayRenderBox);
 
     // Create the background below the popup including the clipArea.
+    //
+    // 在弹出下方创建背景，包括裁剪区域 (clipArea)。
     if (containsBackgroundOverlay) {
       late Widget background;
 
@@ -301,6 +381,8 @@ class SuperTooltip {
     }
 
     /// Handling snap far away feature.
+    ///
+    /// 处理远距离吸附功能。
     if (snapsFarAwayVertically) {
       maxHeight = null;
       left = 0.0;
@@ -437,6 +519,8 @@ class SuperTooltip {
     switch (popupDirection) {
       //
       // LEFT: -------------------------------------
+      //
+      // 左侧: -------------------------------------
       case TooltipDirection.left:
         right = arrowLength + arrowTipDistance + 3.0;
         if (showCloseButton == ShowCloseButton.inside) {
@@ -448,6 +532,8 @@ class SuperTooltip {
         break;
 
       // RIGHT/UP: ---------------------------------
+      //
+      // 右侧/上: ---------------------------------
       case TooltipDirection.right:
       case TooltipDirection.up:
         right = 5.0;
@@ -460,9 +546,13 @@ class SuperTooltip {
         break;
 
       // DOWN: -------------------------------------
+      //
+      // 下: -------------------------------------
       case TooltipDirection.down:
         // If this value gets negative the Shadow gets clipped. The problem occurs is arrowlength + arrowTipDistance
         // is smaller than _outSideCloseButtonPadding which would mean arrowLength would need to be increased if the button is ouside.
+        //
+        // 小于 _outSideCloseButtonPadding，这意味着如果按钮在外面，arrowLength 需要增加。
         right = 2.0;
         if (showCloseButton == ShowCloseButton.inside) {
           top = arrowLength + arrowTipDistance + 2.0;
@@ -650,6 +740,8 @@ class _PopupBallonLayoutDelegate extends SingleChildLayoutDelegate {
       } else if ((_left != null && _right == null) ||
           (_left == null && _right != null)) {
         // make sure that the sum of left, right + maxwidth isn't bigger than the screen width.
+        //
+        // 确保左、右 + 最大宽度之和不超过屏幕宽度。
         var sideDelta = (_left ?? 0.0) + (_right ?? 0.0) + _outSidePadding!;
         if (calcMaxWidth > constraints.maxWidth - sideDelta) {
           calcMaxWidth = constraints.maxWidth - sideDelta;
@@ -667,6 +759,8 @@ class _PopupBallonLayoutDelegate extends SingleChildLayoutDelegate {
       } else if ((_top != null && _bottom == null) ||
           (_top == null && _bottom != null)) {
         // make sure that the sum of top, bottom + maxHeight isn't bigger than the screen Height.
+        //
+        // 确保上、下 + 最大高度之和不超过屏幕高度。
         var sideDelta = (_top ?? 0.0) + (_bottom ?? 0.0) + _outSidePadding!;
         if (calcMaxHeight > constraints.maxHeight - sideDelta) {
           calcMaxHeight = constraints.maxHeight - sideDelta;
@@ -859,9 +953,13 @@ class _BubbleShape extends ShapeBorder {
               rect.bottom)
 
           // up to arrow tip   \
+          //
+          // 直到箭头尖端
           ..lineTo(targetCenter!.dx, targetCenter!.dy - arrowTipDistance)
 
           //  down /
+          //
+          // 向下 /
           ..lineTo(
               max(
                   min(targetCenter!.dx - arrowBaseWidth / 2,
@@ -886,6 +984,8 @@ class _BubbleShape extends ShapeBorder {
           ..lineTo(targetCenter!.dx - arrowTipDistance,
               targetCenter!.dy) // right to arrow tip   \
           //  left /
+          //
+          // 向左 /
           ..lineTo(
               rect.right,
               min(targetCenter!.dy + arrowBaseWidth / 2,
@@ -910,9 +1010,13 @@ class _BubbleShape extends ShapeBorder {
                   rect.top + topLeftRadius))
 
           //left to arrow tip   /
+          //
+          // 左至箭头尖端 /
           ..lineTo(targetCenter!.dx + arrowTipDistance, targetCenter!.dy)
 
           //  right \
+          //
+          // 右
           ..lineTo(
               rect.left,
               min(targetCenter!.dy + arrowBaseWidth / 2,

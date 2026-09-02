@@ -70,6 +70,8 @@ class _CreateGroupState extends State<CreateGroup> {
   }
 
   /// Cap default group name length so it doesn't overflow the input field.
+  ///
+  /// 限制默认群名称长度，以防输入框溢出。
   static const int _defaultGroupNameMaxLength = 30;
 
   void _initGroupName() {

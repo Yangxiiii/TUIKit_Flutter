@@ -93,6 +93,8 @@ class AudioRecorder {
       onStateChanged?.call(_isRecording);
 
       // Set up callbacks for native platform
+      //
+      // 为本地平台设置回调
       AudioRecorderPlatform.setOnRecordTime((timeMs) {
         _recordingDuration = timeMs;
         onProgressUpdate?.call(_recordingDuration, recordingProgress);
@@ -103,6 +105,8 @@ class AudioRecorder {
       });
 
       // Start native recording asynchronously
+      //
+      // 异步开始本地录音
       _startNativeRecording(
         filePath: filePath,
         onComplete: onComplete,

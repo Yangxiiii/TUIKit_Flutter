@@ -4,6 +4,8 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 
 /// Bottom action bar for multi-select mode
+///
+/// 多选模式下的底部操作栏
 class MultiSelectBottomBar extends StatelessWidget {
   final int selectedCount;
   final VoidCallback onCancel;
@@ -47,6 +49,8 @@ class MultiSelectBottomBar extends StatelessWidget {
       child: Row(
         children: [
           // Left action buttons
+          //
+          // 左侧操作按钮
           Padding(
             padding: const EdgeInsets.only(left: 16),
             child: Row(
@@ -70,6 +74,8 @@ class MultiSelectBottomBar extends StatelessWidget {
           const Spacer(),
 
           // Selected count in center
+          //
+          // 中间的选中计数
           Text(
             _getSelectedCountText(locale),
             style: FontScheme.caption2Regular.copyWith(
@@ -80,6 +86,8 @@ class MultiSelectBottomBar extends StatelessWidget {
           const Spacer(),
 
           // Cancel button on right
+          //
+          // 右侧的取消按钮
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: TextButton(

@@ -93,6 +93,8 @@ internal class AudioRecorderImpl: AudioRecorder {
 //        let sdkAppId = NSNumber(value: LoginStore.shared.sdkAppID).stringValue
 //        AuidoRecordSignatureChecker.shareInstance().setSignatureToSDK(sdkAppId)
 //        recorder?.enableAIDeNoise(enable)
+        //
+        // logger.info("此接口暂不支持") logger.info("启用 AI 降噪。启用：(enable)")
     }
     
     private func startRecordInternal(_ filepath: String? = nil){

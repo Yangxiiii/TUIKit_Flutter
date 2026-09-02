@@ -7,12 +7,16 @@ import { AudioRouteManager } from '../../../../../manager/AudioRouteManager';
 
 // HarmonyOS has no AVRoutePickerView equivalent. v1 simply toggles
 // speaker / earpiece via AudioRouteManager.
+//
+// HarmonyOS 没有 AVRoutePickerView 的对应组件。v1 只是通过 AudioRouteManager 切换扬声器/听筒。
 
 @Component
 export struct CallViewAudioRoutePicker {
   @ObjectLink deviceState: DeviceState;
 
   /** Forwarded to ControlsButton — used by MultiCallControlsView to fade the title in/out as the panel collapses. */
+
+  /* 转发给 ControlsButton — MultiCallControlsView 用它在面板折叠时淡入/淡出标题。 */
   titleAlpha: number = 1;
   titleTranslateY: number = 0;
 

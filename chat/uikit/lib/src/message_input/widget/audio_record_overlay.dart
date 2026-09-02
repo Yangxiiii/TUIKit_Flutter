@@ -21,6 +21,12 @@ import 'package:tencent_chat_uikit/src/ai/tts/voice_message_config.dart';
 ///   three buttons (cancel / send original / send text).
 /// - [error]: conversion failed (or returned empty / timed out). Red bubble
 ///   with localized error text. Any tap on the overlay closes it.
+///
+/// [AudioRecordOverlay] 的状态机。
+///
+/// - [recording]：覆盖层显示时的默认状态。显示波形 + 取消按钮（可选转换按钮）+ 释放执行提示。-
+/// [converting]：语音转文字中。蓝色气泡中的三个点动画。底部按钮保持可见，但点击无效。- [editing]：转换成功。可编辑的文本框显示转换后的文字 + 三个按钮（取消 / 发送原始语音 /
+/// 发送文字）。- [error]：转换失败（或返回空 / 超时）。红色气泡显示本地化错误信息。点按覆盖层的任何位置都会关闭它。
 enum _OverlayState { recording, converting, editing, error }
 
 /// Audio recording overlay widget that follows WeChat-style recording UI.
@@ -35,32 +41,52 @@ enum _OverlayState { recording, converting, editing, error }
 ///    releaseToConvert.
 /// 4. Countdown: last 10s shows recordCountdownTips hint.
 /// 5. Converting / Editing / Error: see [_OverlayState].
+///
+/// 音频录音覆盖控件，跟随微信风格的录音 UI。
+///
+/// 设计状态（来自 Figma）：1. 录音：渐变覆盖 + 波形 + 释放发送提示 + 居中取消按钮（以及可选的转换按钮，当 [enableVoiceToText] 启用时）。
+///
+/// 2. 取消悬停：取消按钮高亮（红色），提示变为释放取消，波形变红。3. 转换悬停：转换按钮高亮（蓝色），提示变为...
+///
+/// 4. 倒计时：最后 10 秒显示 recordCountdownTips 提示。5. 转换 / 编辑 / 错误：见 [_OverlayState]。
 class AudioRecordOverlay extends StatefulWidget {
   /// Fired when recording finishes successfully and the original audio is to
   /// be sent (default release-to-send, OR user pressed "send original voice"
   /// in editing state).
+  ///
+  /// 当录音成功完成并且原始音频要发送时触发（默认释放发送，或用户在编辑状态下按了“发送原始语音”）。
   final ValueChanged<RecordInfo> onRecordFinish;
 
   /// Fired when the recording is cancelled (user dragged to cancel button,
   /// pressed cancel in editing state, or tapped the error bubble).
+  ///
+  /// 当录音被取消时触发（用户拖到取消按钮，在编辑状态下按取消，或点击错误气泡）。
   final VoidCallback onRecordCancelled;
 
   /// Fired when the user accepts the converted text (and optionally edits it)
   /// and presses "send" in editing state. Required when [enableVoiceToText]
   /// is true and the user reaches the editing state.
+  ///
+  /// 当用户在编辑状态下接受转换后的文本（并可选择编辑）后按下“发送”时触发。当[enableVoiceToText]为真且用户进入编辑状态时必需。
   final ValueChanged<String>? onSendText;
 
   /// When true, recording state shows an additional convert-to-text button
   /// next to cancel; releasing on it triggers voice-to-text conversion.
+  ///
+  /// 为真时，录音状态会在取消按钮旁显示一个额外的转换为文本按钮；松手时会触发语音转文本。
   final bool enableVoiceToText;
 
   /// Manager that performs upload + voice-to-text conversion. Defaults to a
   /// real [AiMediaProcessManager] backed by SDK experimental APIs; tests can
   /// inject a fake.
+  ///
+  /// 管理器，用于执行上传 + 语音转文本转换。默认使用由 SDK 实验 API 支持的真实[AiMediaProcessManager]；测试时可以注入假的。
   final AiMediaProcessManager? mediaProcessManager;
 
   /// Optional: provide these when the overlay lives inside an [OverlayEntry],
   /// where the normal InheritedWidget lookup would fail.
+  ///
+  /// 可选：当覆盖层位于［OverlayEntry］内时提供这些，因为普通的 InheritedWidget 查找会失败。
   final SemanticColorScheme? colorScheme;
   final AppLocalizedText? atomicLocalizations;
 
@@ -95,39 +121,57 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   /// File path of the recorded audio file. Captured when [stopRecordAndConvert]
   /// finishes the recording so we can later "send original voice" from the
   /// editing state without re-recording.
+  ///
+  /// 录音音频文件的文件路径。在[stopRecordAndConvert]完成录音时捕获，这样我们以后可以在编辑状态下“不重新录音”发送原始语音。
   String? _capturedRecordPath;
   int _capturedRecordDurationSec = 0;
 
   /// Editing-state text controller. Created lazily when entering editing.
+  ///
+  /// 编辑状态文本控制器。进入编辑时会懒加载创建。
   TextEditingController? _editingController;
 
   /// Editing-state focus node. Initially does NOT request focus (so the
   /// keyboard stays hidden in the preview sub-state). When the user taps
   /// the text bubble, focus is requested and the bubble switches to its
   /// "active editing" appearance (blue bg + white text + waveform hidden).
+  ///
+  /// 编辑状态焦点节点。初始时不会请求焦点（所以在预览子状态下键盘保持隐藏）。当用户点击文本气泡时，会请求焦点，气泡切换到“活跃编辑”状态（蓝色背景 + 白色文字 + 隐藏波形）。
   FocusNode? _editingFocusNode;
 
   /// First ASR transcription text — the immutable source for translation.
   /// Switching languages always translates from this, never from a prior
   /// translation, to avoid cumulative information loss.
+  ///
+  /// 第一次 ASR 转录文本——翻译的不可变来源。切换语言总是以此为基础翻译，从不使用之前的翻译，以避免信息累积损失。
   String _asrOriginalText = '';
 
   /// Current translated text; null when not translated (or translation undone).
+  ///
+  /// 当前翻译文本；未翻译（或撤销翻译）时为 null。
   String? _translatedText;
 
   /// True while a translate request is in flight.
+  ///
+  /// 如果翻译请求正在进行中，则为 true。
   bool _isTranslating = false;
 
   /// True while the editing-state "read aloud" TTS playback is active.
+  ///
+  /// 如果编辑状态下“朗读” TTS 播放处于激活状态，则为 true。
   bool _isPlayingTts = false;
 
   /// Lazily-created TTS helper, reusing [_mediaProcessManager].
+  ///
+  /// 懒加载创建的 TTS 辅助工具，复用 [_mediaProcessManager]。
   TtsPlaybackHelper? _ttsHelper;
 
   /// Translate target languages offered in the record-translation selector.
   /// Codes must match the IMSDK text-translation backend contract. Notably
   /// Traditional Chinese is `zh-TR`, NOT the more common BCP-47 `zh-TW` —
   /// the latter is rejected by the backend.
+  ///
+  /// 翻译记录选择器中提供的目标语言。代码必须与IMSDK文本翻译后台的契约匹配。特别注意，繁体中文是`zh-TR`，而不是更常见的BCP-47 `zh-TW` —— 后者会被后台拒绝。
   static const List<Map<String, String>> _translateLanguageOptions = [
     {"code": "zh", "name": "简体中文"},
     {"code": "zh-TR", "name": "繁體中文"},
@@ -148,18 +192,26 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   ];
 
   /// Max recording duration in seconds
+  ///
+  /// 最大录音时长（秒）
   static const int _maxDurationSec = 60;
 
   /// Countdown threshold in seconds (show countdown in last N seconds)
+  ///
+  /// 倒计时阈值（秒）（在最后N秒显示倒计时）
   static const int _countdownThresholdSec = 10;
 
   /// Horizontal padding for the converting / editing / error panel content.
   /// Larger than the recording-state padding to give the bubble + buttons
   /// some breathing room near the screen edges.
+  ///
+  /// 转换/编辑/错误面板内容的水平内边距。比录音状态的内边距大，为气泡+按钮在屏幕边缘留出一些空间。
   static const double _kPanelHPadding = 40.0;
 
   /// Vertical gap between the bubble (text/dots/error) and the three-button
   /// row in the converting / editing / error states.
+  ///
+  /// 转换/编辑/错误状态下，气泡（文本/点/错误）与三按钮行之间的垂直间隙。
   static const double _kBubbleToButtonsGap = 40.0;
 
   /// Distance from the right edge of the panel content (i.e., from the
@@ -168,12 +220,17 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   /// Used to position the bubble's downward arrow so it points at the
   /// send button's circle. Send circle is 70 wide → its center sits at
   /// 35px from the row's right edge.
+  ///
+  /// 从面板内容的右边缘（即气泡的右边缘——由于使用相同的水平内边距，所以它们对齐）到“发送”按钮水平中心的距离。用于定位气泡向下的箭头，使其指向发送按钮的圆。发送按钮圆宽度为70 →
+  /// 其中心位于行的右边缘35px处。
   static const double _kSendButtonCenterFromRight = 35.0;
 
   final GlobalKey _cancelButtonKey = GlobalKey();
   final GlobalKey _convertButtonKey = GlobalKey();
 
   // Random wave heights for animation
+  //
+  // 动画用的随机波高
   final List<double> _waveHeights = List.generate(20, (_) => 0.5);
   final Random _random = Random();
 
@@ -186,6 +243,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
     )..addListener(_updateWaveHeights);
 
     // Three-dot pulse: 1.2s loop is comfortable.
+    //
+    // 三点脉冲：1.2秒循环比较舒适。
     _dotsAnimationController = AnimationController(
       duration: const Duration(milliseconds: 1200),
       vsync: this,
@@ -219,6 +278,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
     setState(() {
       for (int i = 0; i < _waveHeights.length; i++) {
         // Smoothly interpolate toward new random target
+        //
+        // 平滑地插值到新的随机目标
         final target = 0.2 + _random.nextDouble() * 0.8;
         _waveHeights[i] = _waveHeights[i] + (target - _waveHeights[i]) * 0.3;
       }
@@ -251,6 +312,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   // ---------------------------------------------------------------------------
   // Public API consumed by the parent MessageInput
   // ---------------------------------------------------------------------------
+  //
+  // 父级 MessageInput 使用的公共 API
 
   Future<void> startRecord({required String filePath}) async {
     await _audioRecorder.startRecord(
@@ -279,6 +342,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
 
   /// Stop recording and send the audio as a voice message (legacy
   /// release-to-send path).
+  ///
+  /// 停止录音并将音频作为语音消息发送（旧版释放发送路径）。
   void stopRecord() {
     _audioRecorder.stopRecord();
   }
@@ -290,6 +355,10 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   /// true`, and when the user releases on the convert button, calls
   /// `_audioRecorder.stopRecord` then routes the resulting [RecordInfo] here
   /// instead of sending it as a voice message.
+  ///
+  /// 生产入口点：父组件拦截记录完成的回调，并调用这个方法，把抓取到的文件路径和时长传进去，以驱动转换状态机。实现细节（见 design.md）：父组件 `MessageInput` 会显示带
+  /// `enableVoiceToText: true` 的覆盖层，当用户松开转换按钮时，会调用 `_audioRecorder.stopRecord`，然后把生成的 [RecordInfo]
+  /// 传到这里，而不是作为语音消息发送。
   void enterConverting(String filePath, int durationSec) {
     if (!mounted) return;
     _capturedRecordPath = filePath;
@@ -303,6 +372,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
 
   /// Test-only convenience: same as [enterConverting] but with a default
   /// duration. Tests use this to skip the actual recording lifecycle.
+  ///
+  /// 仅测试用便捷方法：功能和 [enterConverting] 一样，但有默认时长。测试使用它来跳过实际的录音生命周期。
   @visibleForTesting
   void enterConvertingForTest(String filePath) {
     enterConverting(filePath, 1);
@@ -315,6 +386,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
     if (result is AiAsrSuccess && result.text.isNotEmpty) {
       // Cache the original transcription and reset translation/TTS state for
       // this new editing session.
+      //
+      // 缓存原始转录内容，并为这个新的编辑会话重置翻译/TTS 状态。
       _asrOriginalText = result.text;
       _translatedText = null;
       _isTranslating = false;
@@ -327,6 +400,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
       // FocusNode is initially NOT focused: editing state opens in
       // "preview" sub-state (gray bubble, no keyboard, waveform visible).
       // The user must tap the text bubble to start editing.
+      //
+      // FocusNode 初始不聚焦：编辑状态会在“预览”子状态下打开（灰色气泡，无键盘，可见波形）。用户必须点击文本气泡才能开始编辑。
       _editingFocusNode?.dispose();
       final focusNode = FocusNode()..addListener(_onEditingFocusChanged);
       _editingFocusNode = focusNode;
@@ -337,6 +412,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
       _dotsAnimationController.reset();
       // Force a rebuild so listeners on the controller update the
       // send-button enabled state.
+      //
+      // 强制重建，这样控制器上的监听器会更新发送按钮的可用状态。
       controller.addListener(_onEditingTextChanged);
     } else {
       setState(() {
@@ -354,6 +431,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   /// Triggered whenever the editing TextField gains/loses focus. We listen
   /// to it so the parent panel can re-layout (`AnimatedPadding`) when the
   /// keyboard pops up / is dismissed.
+  ///
+  /// 每当编辑的文本框获得/失去焦点时触发。我们监听它，以便父面板可以在键盘弹出/收起时重新布局（`AnimatedPadding`）。
   void _onEditingFocusChanged() {
     if (mounted) setState(() {});
   }
@@ -364,6 +443,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   }
 
   /// Reset recording state to initial values
+  ///
+  /// 将录音状态重置为初始值。
   void resetRecordingState() {
     if (mounted) {
       setState(() {
@@ -389,6 +470,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   }
 
   /// Check if a global position is over the cancel button
+  ///
+  /// 检查一个全局位置是否在取消按钮上。
   bool isPointerOverCancelButton(Offset globalPosition) {
     return _isPointerOverButton(_cancelButtonKey, globalPosition);
   }
@@ -396,6 +479,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   /// Check if a global position is over the convert-to-text button.
   /// Always returns false when [AudioRecordOverlay.enableVoiceToText] is false
   /// or the convert button hasn't been laid out yet.
+  ///
+  /// 检查一个全局位置是否在转换为文本按钮上。当 [AudioRecordOverlay.enableVoiceToText] 为 false 或转换按钮还没有布局时，总是返回 false。
   bool isPointerOverConvertButton(Offset globalPosition) {
     if (!widget.enableVoiceToText) return false;
     return _isPointerOverButton(_convertButtonKey, globalPosition);
@@ -408,6 +493,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
     final localPos = renderBox.globalToLocal(globalPosition);
     final size = renderBox.size;
     // Expand hit area a bit for easier targeting
+    //
+    // 略微扩大命中区域，更容易点击。
     const expandPx = 20.0;
     return localPos.dx >= -expandPx &&
         localPos.dx <= size.width + expandPx &&
@@ -418,11 +505,15 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   /// Update finger position (called from parent's pointer move handler).
   /// Updates both cancel and convert hover flags. Only effective in the
   /// recording state (after recording finishes, the gesture is over).
+  ///
+  /// 更新手指位置（由父级的指针移动处理器调用）。会更新取消和转换按钮的悬停标志。只在录音状态下有效（录音结束后，手势结束）。
   void updatePointerPosition(Offset globalPosition) {
     if (!_isRecording || _state != _OverlayState.recording) return;
     final isOverCancel = isPointerOverCancelButton(globalPosition);
     // Cancel and convert are mutually exclusive (can't be on both at once),
     // and cancel takes precedence if buttons accidentally overlap.
+    //
+    // 取消和转换是互斥的（不能同时选择），如果按钮意外重叠，取消优先。
     final isOverConvert =
         !isOverCancel && isPointerOverConvertButton(globalPosition);
     if (isOverCancel != _isFingerOverCancel ||
@@ -456,6 +547,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
       children: [
         // Semi-transparent top area: tap-through gradient that fades into
         // the solid bottom panel, allowing the message list to remain visible.
+        //
+        // 半透明顶部区域：可点击穿透的渐变，渐变到实心底部面板，使消息列表保持可见。
         Positioned.fill(
           child: IgnorePointer(
             child: DecoratedBox(
@@ -476,6 +569,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
         ),
 
         // Bottom-aligned content panel — content varies by state.
+        //
+        // 底部对齐的内容面板——内容根据状态变化。
         Positioned(
           left: 0,
           right: 0,
@@ -484,6 +579,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
         ),
 
         // Error state overlays a tap-anywhere catcher across the full screen.
+        //
+        // 错误状态在整个屏幕上覆盖一个点击捕捉层。
         if (_state == _OverlayState.error) _buildErrorTapCatcher(),
       ],
     );
@@ -496,6 +593,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
     // viewInsets.bottom > 0 means the soft keyboard is up. Lift the entire
     // overlay panel above the keyboard so the bubble + buttons remain
     // visible while the user edits the converted text.
+    //
+    // viewInsets.bottom > 0 表示软键盘已弹出。将整个覆盖面板抬到键盘上方，这样在用户编辑转换文本时，气泡和按钮仍然可见。
     final keyboardInset = mediaQuery.viewInsets.bottom;
     final liftedAboveKeyboard = keyboardInset > 0;
     Widget content;
@@ -517,6 +616,9 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
     // updated continuously by the framework in sync with the system keyboard
     // animation (iOS in particular). Layering an AnimatedPadding on top adds
     // a second easing curve, making the panel visibly lag behind the keyboard.
+    //
+    // 注意：不要使用 AnimatedPadding 包裹——`viewInsets.bottom` 已经会随着系统键盘动画（尤其是 iOS）由框架持续更新。在上面再套一层 AnimatedPadding
+    // 会增加第二个缓动曲线，使面板明显落后于键盘。
     return Padding(
       padding: EdgeInsets.only(bottom: keyboardInset),
       child: Container(
@@ -524,6 +626,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
         padding: EdgeInsets.only(
           // When keyboard is up the safe-area is irrelevant (keyboard already
           // covers it), so collapse padding to 0 to avoid extra empty space.
+          //
+          // 当键盘弹出时，安全区域无关紧要（键盘已经覆盖了它），所以将内边距缩到 0，避免额外的空白。
           bottom: liftedAboveKeyboard ? 0 : bottomPadding,
         ),
         child: content,
@@ -534,6 +638,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   // ---------------------------------------------------------------------------
   // recording state
   // ---------------------------------------------------------------------------
+  //
+  // 录制状态
 
   Widget _buildRecording(
       SemanticColorScheme colorScheme, AppLocalizedText atomicLocale) {
@@ -556,6 +662,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
     final cancelBtn = _buildCancelButton(colorScheme, atomicLocale);
     if (!widget.enableVoiceToText) {
       // Single button centered (legacy behavior).
+      //
+      // 单个按钮居中（旧版行为）。
       return Center(child: cancelBtn);
     }
     final convertBtn = _buildConvertButton(colorScheme, atomicLocale);
@@ -567,6 +675,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
 
   /// Full-width rounded waveform bar at the bottom of the overlay.
   /// Normal: blue/primary background. Cancel hover: red background.
+  ///
+  /// 覆盖层底部的全宽圆角波形条。正常：蓝色/主色背景。取消悬停：红色背景。
   Widget _buildWaveformBar(SemanticColorScheme colorScheme) {
     final barColor = _isFingerOverCancel
         ? colorScheme.textColorError
@@ -585,6 +695,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
           crossAxisAlignment: CrossAxisAlignment.center,
           children: List.generate(_waveHeights.length, (index) {
             // Varied base heights for visual rhythm
+            //
+            // 不同的基础高度以维持视觉节奏
             const baseHeights = [
               6.0,
               8.0,
@@ -646,6 +758,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   /// Circular cancel button.
   /// Normal: light gray bg + dark text, no border.
   /// Cancel hover: red bg + white text.
+  ///
+  /// 圆形取消按钮。正常：浅灰色背景 + 深色文字，无边框。取消悬停：红色背景 + 白色文字。
   Widget _buildCancelButton(
       SemanticColorScheme colorScheme, AppLocalizedText atomicLocale) {
     final isHover = _isFingerOverCancel;
@@ -680,6 +794,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   /// Circular convert-to-text button.
   /// Normal: light gray bg + dark text.
   /// Hover: primary bg + white text.
+  ///
+  /// 循环转换为文本按钮。正常：浅灰色背景 + 深色文字。悬停：主色背景 + 白色文字。
   Widget _buildConvertButton(
       SemanticColorScheme colorScheme, AppLocalizedText atomicLocale) {
     final isHover = _isFingerOverConvert;
@@ -715,6 +831,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   // ---------------------------------------------------------------------------
   // converting state
   // ---------------------------------------------------------------------------
+  //
+  // 转换中状态
 
   Widget _buildConverting(
       SemanticColorScheme colorScheme, AppLocalizedText atomicLocale) {
@@ -736,6 +854,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
         ),
         const SizedBox(height: _kBubbleToButtonsGap),
         // Buttons remain visible (Figma 1826-5936) but ignore taps.
+        //
+        // 按钮保持可见（Figma 1826-5936），但忽略点击。
         IgnorePointer(
           child: _buildEditingButtonsRow(
             colorScheme,
@@ -747,6 +867,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
         // The static gray waveform bar is shown from the moment conversion
         // starts and stays through the editing state, providing visual
         // continuity with the recording state.
+        //
+        // 从转换开始就显示静态灰色波形条，并在编辑状态中保持，提供与录音状态的视觉连续性。
         _buildPreviewWaveformBar(colorScheme),
         const SizedBox(height: 8),
       ],
@@ -756,6 +878,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   // ---------------------------------------------------------------------------
   // editing state
   // ---------------------------------------------------------------------------
+  //
+  // 编辑状态
 
   Widget _buildEditing(
       SemanticColorScheme colorScheme, AppLocalizedText atomicLocale) {
@@ -763,6 +887,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
     final focusNode = _editingFocusNode!;
     // Per Figma: bubble is ALWAYS blue with white text (independent of focus
     // state). The only thing focus changes is whether the keyboard is up.
+    //
+    // 根据 Figma：气泡始终是蓝色，文字白色（与焦点状态无关）。焦点唯一改变的是键盘是否弹出。
     final bubbleColor = colorScheme.buttonColorPrimaryDefault;
     final textColor = colorScheme.textColorButton;
     return Column(
@@ -779,6 +905,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               // Tapping anywhere on the bubble (including padding) requests
               // focus, which raises the keyboard.
+              //
+              // 点击气泡的任何地方（包括内边距）都会请求焦点，从而弹出键盘。
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () {
@@ -791,6 +919,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
                 // selection highlight all stay visible on the blue bubble
                 // background (default handle color comes from the app's
                 // primary color, which is the same blue as the bubble).
+                //
+                // 覆盖继承的TextSelectionTheme，使光标、iOS风格的水滴选择手柄和选择高亮都保持在蓝色气泡背景上（默认手柄颜色来自应用的主色，与气泡相同）。
                 child: Theme(
                   data: Theme.of(context).copyWith(
                     textSelectionTheme: TextSelectionThemeData(
@@ -805,6 +935,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
                     focusNode: focusNode,
                     // Do NOT autofocus: editing opens with the keyboard hidden.
                     // User taps the bubble to start editing.
+                    //
+                    // 请勿自动对焦：编辑在键盘隐藏状态下打开。用户点击气泡即可开始编辑。
                     autofocus: false,
                     maxLines: null,
                     keyboardType: TextInputType.multiline,
@@ -818,6 +950,9 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
                     // controls return SizedBox.shrink() for collapsed so
                     // only the white caret line stays. Long-press text
                     // selection still draws normal left/right handles.
+                    //
+                    // 完全抑制折叠状态手柄。Material 在水源头下方画一个旋转45°的方形（看起来像水滴/菱形），iOS 画出一个真正的椭圆形水滴——这两点在蓝色气泡中视觉上都很分散注意力。自定义控件返回
+                    // SsizeBox.shrink（） 表示折叠，所以只有白色插入线保持。长按文本选择仍然显示正常的左右手柄。
                     selectionControls:
                         _NoCollapsedHandleSelectionControls.instance,
                     // Disable the iOS-style magnifier (floating lens that
@@ -825,6 +960,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
                     // caret). It also looks like a "water-drop" on the
                     // bubble, and the user wants the editing area to show
                     // only a plain caret line.
+                    //
+                    // 禁用 iOS 风格的放大镜（在点击/拖动光标时出现在手指下方的浮动镜头）。它在气泡上看起来像“水滴”，用户希望编辑区只显示普通的光标线。
                     magnifierConfiguration: TextMagnifierConfiguration.disabled,
                     style: FontScheme.caption1Regular.copyWith(
                       color: textColor,
@@ -850,6 +987,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
         // keyboard pops up — the parent's AnimatedPadding lifts the entire
         // panel above the keyboard, so the bar stays visible at the bottom
         // of the panel rather than being hidden.
+        //
+        // 在键盘弹出前后都会显示静态灰色波形条——父层的 AnimatedPadding 会将整个面板抬高到键盘上方，所以波形条会保持在面板底部可见，而不会被隐藏。
         _buildPreviewWaveformBar(colorScheme),
         const SizedBox(height: 8),
       ],
@@ -860,6 +999,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   /// sub-state. Per Figma: equal-height short vertical bars in a neutral
   /// gray color on a light gray rounded-rectangle background. Not animated
   /// since recording is over.
+  ///
+  /// 编辑预览子状态下显示静态、大小一致的波形条。根据 Figma：浅灰色圆角矩形背景上的等高短垂直条，颜色为中性灰。录制结束后不再动画。
   Widget _buildPreviewWaveformBar(SemanticColorScheme colorScheme) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -878,6 +1019,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
               child: Container(
                 width: 3,
                 // Equal-height bars per Figma 1783-12707 design.
+                //
+                // 根据 Figma 1783-12707 设计显示等高条。
                 height: 5,
                 decoration: BoxDecoration(
                   color: colorScheme.textColorTertiary,
@@ -894,10 +1037,14 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   // ---------------------------------------------------------------------------
   // editing state — translate / read-aloud chip row
   // ---------------------------------------------------------------------------
+  //
+  // 编辑状态——翻译/朗读功能的芯片行
 
   /// Row of action chips shown between the text bubble and the three buttons.
   /// Before translation: a single "Translate" chip. After translation:
   /// "Undo Translation" / "Switch Language" / "Read Aloud" (or "Stop").
+  ///
+  /// 在文字气泡和三个按钮之间显示一排操作芯片。翻译前：单个“翻译”芯片。翻译后：“撤销翻译”/“切换语言”/“朗读”（或“停止”）。
   Widget _buildTranslateChipRow(SemanticColorScheme colorScheme) {
     final chatLocale = AppLocalization.of(context);
     final List<Widget> children;
@@ -973,6 +1120,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
     final config = VoiceMessageConfig.instance;
     // Refresh from local storage so a previously saved language survives an
     // app restart (the singleton's in-memory cache starts empty).
+    //
+    // 从本地存储刷新，以便之前保存的语言在应用重启后仍然存在（单例的内存缓存初始为空）。
     await config.load();
     var lang = config.recordTranslateTargetLanguage;
     if (lang.isEmpty) {
@@ -992,6 +1141,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   }
 
   /// Always translates from [_asrOriginalText] (never from a prior translation).
+  ///
+  /// 始终从 [_asrOriginalText] 翻译（从不使用之前的翻译）。
   Future<void> _translateTo(String languageCode) async {
     if (!mounted) return;
     setState(() => _isTranslating = true);
@@ -1030,9 +1181,13 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
       return;
     }
     // Strip emoji so they aren't spoken.
+    //
+    // 去掉表情符号，这样它们不会被朗读。
     final text = sanitizeTextForTts(_editingController?.text ?? '');
     if (text.isEmpty) return;
     // Refresh selected voice from local storage (survives app restart).
+    //
+    // 从本地存储刷新所选语音（重启应用后仍然有效）。
     await VoiceMessageConfig.instance.load();
     _ttsHelper ??= TtsPlaybackHelper(service: _mediaProcessManager);
     setState(() => _isPlayingTts = true);
@@ -1055,6 +1210,9 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   /// record overlay (which itself lives in an OverlayEntry). A modal bottom
   /// sheet would be a Navigator route and appear behind the record panel.
   /// Returns the selected language code, or null when dismissed.
+  ///
+  /// 语言选择器显示为 [OverlayEntry]，因此可以渲染在音频录制覆盖层之上（录音面板本身也在 OverlayEntry 中）。模态底部表单会作为 Navigator
+  /// 路由出现，并显示在录音面板后面。返回所选语言代码，或在取消时返回 null。
   Future<String?> _showLanguageSelector() async {
     final overlay = Overlay.of(context);
     final colorScheme = widget.colorScheme ?? SemanticColorScheme.of(context);
@@ -1076,6 +1234,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
         return Stack(
           children: [
             // Dimming barrier; tap to dismiss.
+            //
+            // 调暗遮罩；点击即可关闭。
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
@@ -1169,6 +1329,10 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
     // - The send button's vertical center aligns with the small icon-circles'
     //   vertical centers (24px from the row top): 70/2 - 48/2 = 11px upward
     //   translation.
+    //
+    // - 外部水平内边距 `_kPanelHPadding` 保持行距离屏幕边缘一定距离。- 三个按钮通过 `MainAxisAlignment.spaceBetween`
+    // 均匀分布，所以取消↔发送原文的间距和发送原文↔发送的间距相同。- 发送按钮固定在右边缘（与气泡相同的水平内边距），保持气泡下箭头与其中心对齐
+    // (`_kSendButtonCenterFromRight`)。- 发送按钮的垂直中心与小图标圈对齐。
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: _kPanelHPadding),
       child: Row(
@@ -1231,6 +1395,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   // ---------------------------------------------------------------------------
   // error state
   // ---------------------------------------------------------------------------
+  //
+  // 错误状态
 
   Widget _buildError(
       SemanticColorScheme colorScheme, AppLocalizedText atomicLocale) {
@@ -1260,6 +1426,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
         ),
         const SizedBox(height: _kBubbleToButtonsGap),
         // Buttons present but inert.
+        //
+        // 按钮存在但无反应。
         IgnorePointer(
           child: _buildEditingButtonsRow(
             colorScheme,
@@ -1270,6 +1438,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
         const SizedBox(height: 16),
         // Match editing/converting: keep the gray waveform visible so the
         // overall layout remains consistent across the three end-states.
+        //
+        // 匹配编辑/转换：保持灰色波形可见，以便在三种最终状态下整体布局保持一致。
         _buildPreviewWaveformBar(colorScheme),
         const SizedBox(height: 8),
       ],
@@ -1277,6 +1447,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   }
 
   /// Full-screen tap catcher in error state. Any tap closes the overlay.
+  ///
+  /// 错误状态下的全屏点击捕获器。任何点击都会关闭覆盖层。
   Widget _buildErrorTapCatcher() {
     return Positioned.fill(
       child: GestureDetector(
@@ -1295,6 +1467,8 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
 /// the bottom edge. The tail is positioned via [arrowRightOffset] which
 /// measures the distance from the bubble's RIGHT edge to the tail's
 /// horizontal center — used to make the tail point at the send button.
+///
+/// 带有向下三角形尾巴的圆角矩形“气泡”，尾巴位于底边。尾巴的位置通过 [arrowRightOffset] 来控制，它测量从气泡右边缘到尾巴水平中心的距离——用于让尾巴指向发送按钮。
 class _BubbleWithArrow extends StatelessWidget {
   const _BubbleWithArrow({
     super.key,
@@ -1317,6 +1491,8 @@ class _BubbleWithArrow extends StatelessWidget {
       clipBehavior: Clip.none,
       children: [
         // Bubble body.
+        //
+        // 气泡主体。
         Container(
           decoration: BoxDecoration(
             color: color,
@@ -1327,6 +1503,8 @@ class _BubbleWithArrow extends StatelessWidget {
         // Downward triangle tail. `bottom: -arrowHeight` makes the tail
         // protrude below the bubble. `right` positions its center along
         // the bubble's bottom edge.
+        //
+        // 向下的三角形尾巴。`bottom: -arrowHeight` 让尾巴伸出气泡底部。`right` 设置其在气泡底边的中心位置。
         Positioned(
           right: arrowRightOffset - _kArrowWidth / 2,
           bottom: -_kArrowHeight + 0.5, // 0.5px overlap to avoid hairline gap
@@ -1367,6 +1545,8 @@ class _BubbleArrowPainter extends CustomPainter {
 /// pulses out of phase, producing a smooth left-to-right shimmer.
 /// Wrapped in a [_BubbleWithArrow] by the caller so the bubble shape +
 /// downward arrow are consistent with the editing/error bubbles.
+///
+/// 用于转换状态的三点动画内容。每个点错开脉冲，产生平滑的从左到右闪烁效果。主叫方会用 [_BubbleWithArrow] 将其包装起来，使气泡形状和向下箭头与编辑/错误气泡保持一致。
 class _ConvertingBubbleContent extends StatelessWidget {
   const _ConvertingBubbleContent({
     super.key,
@@ -1380,6 +1560,8 @@ class _ConvertingBubbleContent extends StatelessWidget {
   /// by a staggered brightness value to produce the shimmer effect.
   /// Caller passes `colorScheme.textColorButton` (white) so the dots stay
   /// theme-aware on the bubble's primary background.
+  ///
+  /// 三个跳动点的基础颜色。每个点的透明度都会乘以一个错开的亮度值来产生闪烁效果。调用方传入 `colorScheme.textColorButton`（白色），这样点在气泡的主背景上仍然会保持主题感。
   final Color dotColor;
 
   @override
@@ -1395,6 +1577,8 @@ class _ConvertingBubbleContent extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: List.generate(3, (i) {
               // Stagger each dot's brightness by 1/3 cycle.
+              //
+              // 让每个点的亮度错开 1/3 个周期。
               final phase = (controller.value + i / 3) % 1.0;
               final brightness = 0.3 + 0.7 * (1 - (phase * 2 - 1).abs());
               return Padding(
@@ -1419,6 +1603,8 @@ class _ConvertingBubbleContent extends StatelessWidget {
 /// Small circular button used for cancel / send-original in editing state.
 /// 48x48 light-gray background with a centered SVG icon (20x20) and a
 /// caption label rendered below the circle. Disabled when [onTap] is null.
+///
+/// 编辑状态下用于取消/发送原始内容的小圆按钮。48x48 的浅灰色背景，中心有一个 20x20 的 SVG 图标，下方渲染有标题标签。[onTap] 为 null 时禁用。
 class _SmallActionButton extends StatelessWidget {
   const _SmallActionButton({
     super.key,
@@ -1462,6 +1648,8 @@ class _SmallActionButton extends StatelessWidget {
               // Force-tint the icon so it's always visible regardless of
               // the SVG's intrinsic fill color (works around cases where
               // some SVG fills don't render reliably under OverlayEntry).
+              //
+              // 强制给图标着色，使其始终可见，无论 SVG 的内在填充颜色如何（解决某些 SVG 填充在 OverlayEntry 下渲染不可靠的问题）。
               colorFilter: ColorFilter.mode(iconColor, BlendMode.srcIn),
             ),
           ),
@@ -1485,6 +1673,8 @@ class _SmallActionButton extends StatelessWidget {
 /// Primary "send" button used in editing state. Sized so its bottom edge
 /// aligns with the bottom of the small-action buttons' label text — i.e.,
 /// total height matches `48 (circle) + 5 (gap) + ~17 (label) = 70`.
+///
+/// 编辑状态下的主要“发送”按钮。大小设计使其下边缘与小动作按钮标签文字的下边缘对齐，也就是
 class _SendTextButton extends StatelessWidget {
   const _SendTextButton({
     super.key,
@@ -1538,6 +1728,12 @@ class _SendTextButton extends StatelessWidget {
 ///   that visually reads as a diamond / water-drop too.
 /// Both look distracting on top of the editing bubble's blue background,
 /// so we suppress them while keeping long-press selection fully usable.
+///
+/// 选择控件，左/右（活动选择）手柄的行为像
+/// [MaterialTextSelectionControls]，但在折叠（无选择）手柄时什么都不显示——也就是说，当光标只是点击后闪烁时，不会在下面显示钻石/水滴形状。
+///
+/// - 在 iOS 上，[CupertinoTextSelectionControls] 会在折叠状态下在光标下画一个椭圆形“水滴”手柄。- 在
+/// Android（Material）上，折叠手柄是一个旋转45°的方形，从视觉上也像钻石/水滴。两者放在编辑气泡的蓝色背景上都很显眼，所以我们隐藏它们，同时保持长按选择功能可用。
 class _NoCollapsedHandleSelectionControls
     extends MaterialTextSelectionControls {
   _NoCollapsedHandleSelectionControls._();

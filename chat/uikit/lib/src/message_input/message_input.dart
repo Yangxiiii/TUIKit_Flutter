@@ -41,6 +41,10 @@ export 'message_input_config.dart';
 /// - [idle]: Default state on chat entry. Shows hint "发消息或按住说话...", mic icon, keyboard not shown.
 /// - [text]: Text input active. Keyboard shown, mic icon on left.
 /// - [voice]: Voice recording mode. Shows "Hold to talk" button, keyboard icon on left.
+///
+/// 消息输入栏的三态输入模式。
+///
+/// - [文本]: 文本输入激活。显示键盘，左侧为麦克风图标。- [语音]: 语音录制模式。显示“按住说话”按钮，左侧为键盘图标。
 enum _InputMode { idle, text, voice }
 
 class MessageInput extends StatefulWidget {
@@ -60,6 +64,8 @@ class MessageInput extends StatefulWidget {
 class MessageInputState extends State<MessageInput>
     with TickerProviderStateMixin {
   /// Group conversation ID prefix
+  ///
+  /// 群聊 ID 前缀。
   static const String _groupConversationIDPrefix = 'group_';
 
   late MessageInputStore _messageInputStore;
@@ -77,6 +83,8 @@ class MessageInputState extends State<MessageInput>
   /// Timer for distinguishing tap vs long-press in idle mode.
   /// If the pointer is lifted before this fires, it's a tap (→ text mode).
   /// If the timer fires while the pointer is still down, it's a long-press (→ start recording).
+  ///
+  /// 空闲模式下区分轻触和长按的计时器。
   Timer? _idleLongPressTimer;
   bool _isIdleLongPressing = false;
 
@@ -84,6 +92,8 @@ class MessageInputState extends State<MessageInput>
   /// Used to suppress the synthetic GestureDetector.onTap that Flutter still
   /// emits after a long press, so we don't accidentally switch into text mode
   /// and pop up the keyboard right after the user just sent a voice message.
+  ///
+  /// 当空闲长按计时器触发（即开始录音）时设置。用于抑制 Flutter 在长按后仍然发送的合成 GestureDetector.onTap，避免在用户刚发送语音消息后不小心切换到文本模式并弹出键盘。
   bool _idleLongPressHandled = false;
   bool _showEmojiPanel = false;
   bool _showMorePanel = false;
@@ -96,35 +106,50 @@ class MessageInputState extends State<MessageInput>
   /// sent as a voice message. Set to `true` by [_onStopRecording] when the
   /// user released on the convert-to-text button, and reset back to `false`
   /// inside the overlay callback or when the overlay is cancelled.
+  ///
+  /// 当为 `true` 时，下一次 [AudioRecordOverlay.onRecordFinish] 回调应路由到覆盖层的语音转文本状态机，而不是作为语音消息发送。当用户在转换为文本按钮上释放时，由
+  /// [_onStopRecording] 设置为 `true`，并在覆盖层回调或取消覆盖层时重置为 `false`。
   bool _pendingConvertRecord = false;
 
   double _bottomPadding = 0.0;
 
   /// Flag to indicate we are actively switching to emoji/more panel.
   /// When true, _onFocusChanged should NOT collapse panels.
+  ///
+  /// 标志，用于指示我们正在主动切换到表情/更多面板。当为 true 时，_onFocusChanged 不应收起面板。
   bool _isSwitchingPanel = false;
 
   final GlobalKey<TooltipState> _micTooltipKey = GlobalKey<TooltipState>();
 
   /// Current input mode: idle (default), text (keyboard shown), or voice (hold-to-talk).
+  ///
+  /// 当前输入模式：空闲（默认），文本（显示键盘），或语音（按住说话）。
   _InputMode _inputMode = _InputMode.idle;
 
   // Draft related state
+  //
+  // 草稿相关状态
   Timer? _draftSaveTimer;
   bool _isLoadingDraft = false;
   static const _draftSaveDelay = Duration(milliseconds: 800);
 
   // @ mention related state
+  //
+  // @ 提及相关状态
   String? _groupID;
   int _previousTextLength = 0;
   bool _isMentionPickerShowing = false;
 
   // Conversation info for offline push
+  //
+  // 离线推送的会话信息
   ConversationInfo? _conversationInfo;
 
   late final _AlbumPickerMediaSendListenerImpl _albumPickerListener;
 
   // Quote reply state
+  //
+  // 引用回复状态
   MessageInfo? _quotedMessage;
 
   @override
@@ -146,6 +171,8 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// Extract groupID from conversationID for group chats
+  ///
+  /// 从 conversationID 中提取 groupID 用于群聊
   void _extractGroupID() {
     String groupID = ChatUtil.getGroupID(widget.conversationID);
     _groupID = groupID.isEmpty ? null : groupID;
@@ -163,6 +190,8 @@ class MessageInputState extends State<MessageInput>
       // While the @ mention picker is being shown, focus loss is caused by the
       // route push, not by the user dismissing the input. Keep the current
       // text mode so we can resume editing after picker returns.
+      //
+      // 路由跳转，不是用户主动取消输入。保持当前文本模式，以便在选择器返回后继续编辑。
       if (_isMentionPickerShowing) {
         return;
       }
@@ -170,6 +199,8 @@ class MessageInputState extends State<MessageInput>
       // Only fall back to idle when the input is empty; if the user has typed
       // anything (including @ mentions), keep text mode so the entered content
       // remains visible after the keyboard collapses.
+      //
+      // 当焦点真正丢失时（例如，点击外部区域），收起表情和更多面板。仅在输入为空时回到空闲状态；如果用户已经输入了内容（包括@提及），保持文本模式，以便键盘收起后已输入的内容仍可见。
       bool needsRebuild = false;
       if (_showEmojiPanel || _showMorePanel) {
         _showEmojiPanel = false;
@@ -191,6 +222,8 @@ class MessageInputState extends State<MessageInput>
   /// In text mode, dismisses the keyboard. Only falls back to idle when the input
   /// is empty, so any already-entered text (including @ mentions) stays visible
   /// after the keyboard collapses. Voice mode is unaffected.
+  ///
+  /// 收起所有面板（表情、更多）。用户点击空白区域时会从外部调用。在文本模式下，会收起键盘。只有在输入为空时才回到空闲状态，因此已输入的文字（包括@提及）在键盘收起后仍然可见。语音模式不受影响。
   void collapseAllPanels() {
     bool needsRebuild = false;
     if (_showEmojiPanel) {
@@ -215,10 +248,14 @@ class MessageInputState extends State<MessageInput>
 
   /// Insert a mention into the input field from external source (e.g., long press on avatar)
   /// This is called when user long presses on another member's avatar in the message list
+  ///
+  /// 从外部源在输入框中插入提及（例如，长按头像）。当用户在消息列表中长按其他成员的头像时会调用这个功能。
   void insertMention({required String userID, required String displayName}) {
     if (!_isGroupChat) return;
 
     // Don't allow mentioning self
+    //
+    // 不允许提及自己
     final currentUserID = LoginStore.shared.loginState.loginUserInfo?.userID;
     if (userID == currentUserID) return;
 
@@ -227,6 +264,8 @@ class MessageInputState extends State<MessageInput>
     final insertPos = cursorPos < 0 ? text.length : cursorPos;
 
     // Create mention info
+    //
+    // 创建提及信息
     final mention = MentionInfo(
       userID: userID,
       displayName: displayName,
@@ -235,12 +274,16 @@ class MessageInputState extends State<MessageInput>
     final mentionText = mention.mentionText; // "@displayName "
 
     // Build new text
+    //
+    // 构建新文本
     final beforeCursor = text.substring(0, insertPos);
     final afterCursor = text.substring(insertPos);
     final newText = '$beforeCursor$mentionText$afterCursor';
     final newCursorPos = insertPos + mentionText.length;
 
     // Update mention positions for existing mentions after insert position
+    //
+    // 在插入位置后更新现有提及的位置
     for (final m in _textEditingController._mentions) {
       if (m.startIndex >= insertPos) {
         m.startIndex += mentionText.length;
@@ -248,9 +291,13 @@ class MessageInputState extends State<MessageInput>
     }
 
     // Add the new mention
+    //
+    // 添加新的提及
     _textEditingController.addMention(mention);
 
     // Update text field
+    //
+    // 更新文本字段
     _textEditingController.removeListener(_onTextChanged);
     _textEditingController._isInternalUpdate = true;
     _textEditingController.value = TextEditingValue(
@@ -262,9 +309,13 @@ class MessageInputState extends State<MessageInput>
     _textEditingController.addListener(_onTextChanged);
 
     // Request focus on the input field
+    //
+    // 请求输入框获取焦点
     _textEditingFocusNode.requestFocus();
 
     // Update send button state and switch to text mode
+    //
+    // 更新发送按钮状态并切换到文本模式
     setState(() {
       _showSendButton = newText.trim().isNotEmpty;
       _inputMode = _InputMode.text;
@@ -274,6 +325,8 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// Set a message to be quoted. Shows the quote preview bar and raises keyboard.
+  ///
+  /// 设置要引用的消息。显示引用预览栏并弹出键盘。
   void setQuotedMessage(MessageInfo message) {
     setState(() {
       _quotedMessage = message;
@@ -281,6 +334,8 @@ class MessageInputState extends State<MessageInput>
       // Collapse the more / emoji panels so they don't stay layered under
       // the keyboard and obscure the message list once the user enters
       // quote-reply mode (TAPD bug 1020398462158964479).
+      //
+      // 收起更多/表情面板，以免在用户进入引用回复模式后被键盘覆盖并遮挡消息列表（TAPD bug 1020398462158964479）。
       _showEmojiPanel = false;
       _showMorePanel = false;
     });
@@ -288,6 +343,8 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// Clear the quoted message.
+  ///
+  /// 清除引用消息。
   void clearQuotedMessage() {
     setState(() {
       _quotedMessage = null;
@@ -302,12 +359,16 @@ class MessageInputState extends State<MessageInput>
     _textEditingFocusNode.removeListener(_onFocusChanged);
     _draftSaveTimer?.cancel();
     // Save draft immediately on dispose (fallback mechanism)
+    //
+    // 在销毁时立即保存草稿（备用机制）
     _saveDraftImmediately();
     _textEditingController.dispose();
     super.dispose();
   }
 
   /// Load draft from IM SDK when entering conversation
+  ///
+  /// 进入会话时从 IM SDK 加载草稿
   Future<void> _loadDraft() async {
     _isLoadingDraft = true;
     final result = await _conversationListStore.getConversationInfo(
@@ -324,9 +385,13 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// Set draft content to input field
+  ///
+  /// 将草稿内容设置到输入框
   void _setDraftToInput(String draft) {
     _textEditingController.text = draft;
     // Position cursor at the end
+    //
+    // 将光标定位到末尾
     _textEditingController.selection = TextSelection.fromPosition(
       TextPosition(offset: draft.length),
     );
@@ -334,6 +399,10 @@ class MessageInputState extends State<MessageInput>
     // draft load renders the input field with the draft content, instead of
     // briefly showing the idle placeholder "发消息或按住说话..." until the
     // keyboard pops up and triggers a rebuild via viewInsets changes.
+    //
+    // 草稿加载时会在输入框中显示草稿内容，而不是
+    //
+    // 弹出键盘并通过 viewInsets 变化触发重建。
     if (mounted) {
       setState(() {
         _inputMode = _InputMode.text;
@@ -342,6 +411,8 @@ class MessageInputState extends State<MessageInput>
       _inputMode = _InputMode.text;
     }
     // Auto focus after frame is built (keyboard pop-up requires post-frame).
+    //
+    // 构建完成后自动聚焦（键盘弹出需要在帧后处理）。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _textEditingFocusNode.requestFocus();
@@ -350,6 +421,8 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// Save draft with debounce
+  ///
+  /// 防抖保存草稿
   void _scheduleDraftSave() {
     if (_isLoadingDraft) return;
 
@@ -360,6 +433,8 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// Save draft immediately (for dispose fallback)
+  ///
+  /// 立即保存草稿（用于 dispose 回退）
   void _saveDraftImmediately() {
     final draftText = _textEditingController.text;
     _conversationListStore.setConversationDraft(
@@ -369,6 +444,8 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// Clear draft (called before sending message)
+  ///
+  /// 清除草稿（发送消息前调用）
   void _clearDraft() {
     _draftSaveTimer?.cancel();
     _conversationListStore.setConversationDraft(
@@ -385,13 +462,19 @@ class MessageInputState extends State<MessageInput>
       });
     }
     // Schedule draft save with debounce
+    //
+    // 使用防抖计划保存草稿
     _scheduleDraftSave();
 
     // Handle @ mention detection
+    //
+    // 处理 @ 提及检测
     _handleMentionDetection();
   }
 
   /// Detect @ input and show member picker
+  ///
+  /// 检测 @ 输入并显示成员选择器
   void _handleMentionDetection() {
     if (!widget.config.enableMention) return;
     if (_isMentionPickerShowing) return;
@@ -400,11 +483,15 @@ class MessageInputState extends State<MessageInput>
     final currentLength = text.length;
 
     // Only trigger when adding a single '@' or '＠' character
+    //
+    // 仅在添加单个 '@' 或 '＠' 字符时触发
     if (currentLength == _previousTextLength + 1 && _isGroupChat) {
       final cursorPos = _textEditingController.selection.baseOffset;
       if (cursorPos > 0) {
         final lastChar = text[cursorPos - 1];
         // Support both half-width '@' and full-width '＠'
+        //
+        // 支持半角 '@' 和全角 '＠'
         if (lastChar == '@' || lastChar == '＠') {
           _showMentionPicker();
         }
@@ -415,6 +502,8 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// Show the mention member picker
+  ///
+  /// 显示提及成员选择器
   void _showMentionPicker() {
     if (_groupID == null) return;
     _isMentionPickerShowing = true;
@@ -428,6 +517,8 @@ class MessageInputState extends State<MessageInput>
           _isMentionPickerShowing = false;
           // Keep the '@' character when cancelled (per spec requirement)
           // No action needed - '@' remains in input
+          //
+          // 取消时保留 '@' 字符（根据规范要求）无需操作 - '@' 保留在输入框中
         },
       ),
     )
@@ -436,6 +527,8 @@ class MessageInputState extends State<MessageInput>
       // After the picker route pops (whether by selecting members or by
       // cancelling), restore the input state so the typed text is visible
       // and the keyboard pops back up for continued editing.
+      //
+      // 在选择器弹出后（无论是通过选择成员还是取消），恢复输入状态，使已输入的文字可见，并弹出键盘以继续编辑。
       if (!mounted) return;
       if (_textEditingController.text.isNotEmpty &&
           _inputMode != _InputMode.voice) {
@@ -450,12 +543,16 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// Handle selected members from picker
+  ///
+  /// 处理从选择器中选中的成员
   void _onMembersSelected(List<MentionInfo> mentions) {
     Navigator.of(context).pop();
     _isMentionPickerShowing = false;
 
     if (mentions.isEmpty) {
       // Keep the '@' character when no member selected (per spec requirement)
+      //
+      // 未选择成员时保留 '@' 字符（根据规范要求）
       return;
     }
 
@@ -463,11 +560,15 @@ class MessageInputState extends State<MessageInput>
     final cursorPos = _textEditingController.selection.baseOffset;
 
     // Find the position of the '@' or '＠' that triggered the picker
+    //
+    // 查找触发选择器的 '@' 或 '＠' 的位置
     int atPos = cursorPos - 1;
     bool isAtSymbol(String char) => char == '@' || char == '＠';
 
     if (atPos < 0 || !isAtSymbol(text[atPos])) {
       // '@' not found at expected position, try to find it
+      //
+      // 在预期位置未找到 '@'，尝试查找它
       for (int i = cursorPos - 1; i >= 0; i--) {
         if (isAtSymbol(text[i])) {
           atPos = i;
@@ -477,11 +578,15 @@ class MessageInputState extends State<MessageInput>
     }
 
     // Remove the triggering '@' character - use atPos + 1 to skip the '@'
+    //
+    // 删除触发的 '@' 字符 - 使用 atPos + 1 跳过 '@'
     final beforeAt = text.substring(0, atPos);
     final afterAt =
         text.substring(atPos + 1); // Skip the '@' that triggered the picker
 
     // Build the mention text to insert (each mention includes its own '@')
+    //
+    // 构建要插入的提及文本（每个提及都包含自己的 '@'）
     final StringBuffer mentionBuffer = StringBuffer();
     int currentPos = atPos;
 
@@ -491,6 +596,8 @@ class MessageInputState extends State<MessageInput>
       mentionBuffer.write(mentionText);
 
       // Update mention with correct position and add to controller
+      //
+      // 更新提及的正确位置并添加到控制器
       final updatedMention = mention.copyWith(startIndex: currentPos);
       _textEditingController.addMention(updatedMention);
       currentPos += mentionText.length;
@@ -500,6 +607,8 @@ class MessageInputState extends State<MessageInput>
 
     // Temporarily disable listener and mark as internal update to prevent
     // the value setter from incorrectly adjusting mention positions
+    //
+    // 临时禁用监听器并标记为内部更新，以防值设置器错误调整提及位置
     _textEditingController.removeListener(_onTextChanged);
     _textEditingController._isInternalUpdate = true;
     _textEditingController.value = TextEditingValue(
@@ -513,6 +622,8 @@ class MessageInputState extends State<MessageInput>
     // Explicitly switch back to text mode so the input field renders the
     // mention text instead of the idle hint. Defensive: even if focus state
     // gets out of sync, the UI will still show the typed content.
+    //
+    // 显式切回文本模式，这样输入框会显示提及的文本而不是空闲提示。防御性处理：即使焦点状态不同步，界面仍会显示已输入的内容。
     setState(() {
       _inputMode = _InputMode.text;
       _showSendButton = newText.trim().isNotEmpty;
@@ -543,18 +654,24 @@ class MessageInputState extends State<MessageInput>
     final targetPos = cursorPos == -1 ? text.length : cursorPos;
 
     // First check if we're deleting a mention (cursor at end or inside)
+    //
+    // 先检查是否在删除提及（光标在末尾或内部）
     MentionInfo? mentionToDelete =
         _textEditingController.getMentionEndingAt(targetPos);
     mentionToDelete ??= _textEditingController.getMentionAt(targetPos);
 
     if (mentionToDelete != null) {
       // Delete the entire mention
+      //
+      // 删除整个提及
       _textEditingController._isInternalUpdate = true;
       final newText = text.substring(0, mentionToDelete.startIndex) +
           text.substring(mentionToDelete.endIndex);
       _textEditingController._mentions.remove(mentionToDelete);
 
       // Update positions of mentions after the removed one
+      //
+      // 更新被删除提及之后的提及位置
       final removedLength = mentionToDelete.length;
       for (final m in _textEditingController._mentions) {
         if (m.startIndex > mentionToDelete.startIndex) {
@@ -608,11 +725,15 @@ class MessageInputState extends State<MessageInput>
   void _toggleMorePanel() {
     if (_showMorePanel) {
       // Closing more panel
+      //
+      // 关闭更多面板
       setState(() {
         _showMorePanel = false;
       });
     } else {
       // Opening more panel: hide keyboard and emoji panel
+      //
+      // 打开更多面板：隐藏键盘和表情面板
       _isSwitchingPanel = true;
       _textEditingFocusNode.unfocus();
       setState(() {
@@ -623,6 +744,8 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// Handle sending text message from input field or emoji panel
+  ///
+  /// 处理从输入框或表情面板发送文本消息
   Future<void> _handleTextSendMessagePayload() async {
     final text = _textEditingController.text.trim();
     if (text.isEmpty) return;
@@ -632,14 +755,20 @@ class MessageInputState extends State<MessageInput>
     messageInfo.messagePayload = TextMessagePayload(text: text);
 
     // Add @ mention info to message
+    //
+    // 给消息添加@提及信息
     final mentionList = _textEditingController.mentionList;
     if (mentionList.isNotEmpty) {
       // Add all mentioned user IDs (including AT_ALL_USER_ID if present)
+      //
+      // 添加所有被提及的用户ID（如果存在包括AT_ALL_USER_ID）
       messageInfo.atUserList = mentionList.map((m) => m.userID).toList();
     }
 
     // Clear draft and mentions BEFORE sending (not dependent on send result)
     // Must clear mentions first to prevent value setter from incorrectly handling the clear operation
+    //
+    // 在发送前清空草稿和提及（不依赖发送结果）必须先清空提及以防止值设置器错误处理清空操作
     _textEditingController.clearMentions();
     _textEditingController._isInternalUpdate = true;
     _textEditingController.clear();
@@ -730,6 +859,8 @@ class MessageInputState extends State<MessageInput>
       }
     } else {
       // Clear quoted message after successful send
+      //
+      // 成功发送后清除引用消息
       clearQuotedMessage();
     }
 
@@ -794,8 +925,12 @@ class MessageInputState extends State<MessageInput>
   }
 
   // ==================== Offline Push Info ====================
+  //
+  // ==================== 离线推送信息 ====================
 
   /// Create offline push info for a message
+  ///
+  /// 为消息创建离线推送信息
   OfflinePushInfo _createOfflinePushInfo(MessageInfo message) {
     final conversationID = widget.conversationID;
     final isGroup = conversationID.startsWith(_groupConversationIDPrefix);
@@ -843,11 +978,15 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// Create offline push description for a message
+  ///
+  /// 为消息创建离线推送描述
   String _createOfflinePushDescription(MessageInfo message) {
     String content;
     switch (message.messageType) {
       case MessageType.text:
         // Convert emoji codes to localized names
+        //
+        // 将表情代码转换为本地化名称
         content = EmojiManager.createLocalizedStringFromEmojiCodes(context,
             (message.messagePayload as TextMessagePayload?)?.text ?? '');
         break;
@@ -876,6 +1015,8 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// Trim push description to max length
+  ///
+  /// 将推送描述截取到最大长度
   String _trimPushDescription(String text, {int maxLength = 50}) {
     final normalized = text.trim().replaceAll('\n', ' ').replaceAll('\r', ' ');
     if (normalized.length <= maxLength) {
@@ -885,6 +1026,8 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// Create offline push ext JSON string (same as Swift's createOfflinePushExtJson)
+  ///
+  /// 创建离线推送扩展 JSON 字符串（和 Swift 的 createOfflinePushExtJson 一样）
   String _createOfflinePushExtJson({
     required bool isGroup,
     required String senderId,
@@ -967,6 +1110,8 @@ class MessageInputState extends State<MessageInput>
 
     if (!isGroup) {
       // c2c — single peer derived from the conversationID.
+      //
+      // c2c — 单个对等者，从 conversationID 得出。
       participantIds = [ChatUtil.getUserID(widget.conversationID)];
     } else {
       chatGroupId = groupID;
@@ -976,6 +1121,8 @@ class MessageInputState extends State<MessageInput>
       );
       if (selectedMembers == null || selectedMembers.isEmpty) {
         // User cancelled the picker — abort the call.
+        //
+        // 用户取消了选择器 — 中止调用。
         return;
       }
       participantIds = selectedMembers.map((member) => member.key).toList();
@@ -1074,6 +1221,8 @@ class MessageInputState extends State<MessageInput>
     // Capture inherited dependencies from current context before creating
     // the OverlayEntry, since the overlay lives in a different widget subtree
     // and cannot look up these InheritedWidgets.
+    //
+    // 在创建 OverlayEntry 之前捕获当前上下文继承的依赖，因为 overlay 存在于不同的 widget 子树中，无法查找这些 InheritedWidgets。
     final colorScheme = SemanticColorScheme.of(context);
     final atomicLocalizations = AppLocalization.of(context);
     final overlay = Overlay.of(context);
@@ -1092,6 +1241,8 @@ class MessageInputState extends State<MessageInput>
               // When the user released on the convert button, we DO NOT close
               // the overlay or send the audio: instead, hand the captured
               // file path to the overlay's converting state machine.
+              //
+              // 当用户在转换按钮上松开时，我们不会关闭 overlay 或发送音频：相反，将捕获的文件路径交给 overlay 的转换状态机。
               if (_pendingConvertRecord) {
                 _pendingConvertRecord = false;
                 if (recordInfo.errorCode == AudioRecordResultCode.success ||
@@ -1103,6 +1254,8 @@ class MessageInputState extends State<MessageInput>
                 }
                 // Recording too short / failed: fall through to default
                 // close-and-toast behavior (legacy path).
+                //
+                // 录音太短/失败：回退到默认关闭并显示提示的行为（旧路径）。
               }
               _removeRecordOverlay();
               _onAudioRecorderFinished(recordInfo);
@@ -1151,6 +1304,8 @@ class MessageInputState extends State<MessageInput>
 
   /// Send a plain-text message constructed from voice-to-text conversion.
   /// Used by [AudioRecordOverlay]'s editing-state "send" button.
+  ///
+  /// 发送由语音转文字生成的纯文本消息。由[AudioRecordOverlay]的编辑状态“发送”按钮使用。
   void _sendTextMessageFromVoice(String text) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
@@ -1170,6 +1325,8 @@ class MessageInputState extends State<MessageInput>
 
     // Set flag BEFORE async permission check so that _onStopRecording
     // can correctly cancel if the user lifts their finger during the await.
+    //
+    // 在异步权限检查前设置标志，以便如果用户在等待过程中抬起手指，_onStopRecording可以正确取消。
     _recordingStarter?.cancel();
     _isWaitingToStartRecord = true;
 
@@ -1177,6 +1334,8 @@ class MessageInputState extends State<MessageInput>
     if (micStatus != PermissionStatus.granted) {
       // If PointerUp already fired during await, _isWaitingToStartRecord
       // was reset — no further cleanup needed.
+      //
+      // 已重置——不需要进一步清理。
       if (_isWaitingToStartRecord) {
         _isWaitingToStartRecord = false;
       }
@@ -1187,12 +1346,18 @@ class MessageInputState extends State<MessageInput>
       // *next* PointerDown as a duplicate — the long-press right after granting
       // does nothing, and only the one after that works. Nothing in the Dart or
       // ArkTS layer can reset that state; it needs a flutter_ohos fix.
+      //
+      // [bug#161275344] 在 HarmonyOS 上已知的问题：这里手指还按着，权限对话框是系统的 UIExtension 窗口，叠加在我们之上，所以它收到的是 PointerUp
+      // 而不是我们。OhosTouchProcessor（在 libflutter.so 里）从未看到序列关闭，并且把下一个 PointerDown
+      // 当作重复事件丢弃——在授权后紧接的长按不起作用，只有下一个才有效。Dart 或 ArkTS 层都无法重置这个状态；需要 flutter_ohos 修复。
       await Permission.checkAndRequest(context, [PermissionType.microphone]);
       return;
     }
 
     // If PointerUp fired during the await above, abort — recording was
     // already cancelled by _onStopRecording.
+    //
+    // 已被 _onStopRecording 取消。
     if (!_isWaitingToStartRecord) {
       return;
     }
@@ -1208,6 +1373,11 @@ class MessageInputState extends State<MessageInput>
     // until the 100ms starter fires means PointerUp during the "waiting" window
     // still reaches _onStopRecording and correctly cancels via the
     // _isWaitingToStartRecord branch.
+    //
+    // [bug#161275344] 推迟覆盖层的插入，直到录制实际上开始为止。原因：覆盖层是一个全屏透明的 Material，一旦插入就会抢走所有指针事件。当 _onStartRecording 由
+    // 200ms 的长按空闲计时器触发（见 _buildIdleInputArea）时，用户可能很快就会抬起手指；如果此时覆盖层已经出现，产生的 PointerUp 会被路由到覆盖层（而那里没有匹配的
+    // PointerDown），原本在 Listener 上的 _onStopRecording 就永远不会被调用，导致录制界面卡住。在 100ms 启动器触发前保持覆盖层关闭，意味着“等待”窗口期间的
+    // PointerUp 仍然能到达 _onStopRecording，并通过 _isWaitingToStartRecord 分支正确取消。
     _recordingStarter = Timer(const Duration(milliseconds: 100), () {
       if (!_isWaitingToStartRecord) return;
       _isWaitingToStartRecord = false;
@@ -1215,6 +1385,8 @@ class MessageInputState extends State<MessageInput>
       _showRecordOverlay();
 
       // Overlay's State needs a frame to be constructed before we can drive it.
+      //
+      // 覆盖层的状态需要一帧时间来构建，然后我们才能操作它。
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final overlayState = _recordOverlayKey.currentState;
         if (overlayState == null) return;
@@ -1254,16 +1426,22 @@ class MessageInputState extends State<MessageInput>
       switch (action) {
         case RecordPointerUpAction.cancel:
           // cancelRecord callback will call _removeRecordOverlay.
+          //
+          // cancelRecord 回调会调用 _removeRecordOverlay。
           overlayState?.cancelRecord();
           break;
         case RecordPointerUpAction.convert:
           // Stop recording; the captured file is routed to the overlay's
           // converting state machine in the onRecordFinish handler.
+          //
+          // 停止录制；捕获到的文件会在 onRecordFinish 处理器里送到 overlay 的转换状态机。
           _pendingConvertRecord = true;
           overlayState?.stopRecord();
           break;
         case RecordPointerUpAction.send:
           // stopRecord callback will call _removeRecordOverlay via onRecordFinish.
+          //
+          // stopRecord 回调会通过 onRecordFinish 调用 _removeRecordOverlay。
           overlayState?.stopRecord();
           break;
       }
@@ -1274,6 +1452,8 @@ class MessageInputState extends State<MessageInput>
   /// such as edge-swipe for payment shortcuts or back navigation).
   /// When the system steals the pointer, we need to gracefully stop/cancel
   /// the ongoing recording to avoid leaving it in a stuck state.
+  ///
+  /// 处理指针取消事件（例如 Android 上的系统手势拦截，比如边缘滑动启动支付快捷方式或返回导航）。当系统抢占指针时，我们需要优雅地停止/取消正在进行的录制，以避免录制卡住。
   void _onRecordingPointerCancel(PointerCancelEvent event) {
     if (_isWaitingToStartRecord) {
       _recordingStarter?.cancel();
@@ -1284,6 +1464,8 @@ class MessageInputState extends State<MessageInput>
       // System cancelled the gesture — treat as user cancellation
       // (don't send the recording) since the pointer position is unreliable.
       // cancelRecord's callback (onRecordCancelled) will call _removeRecordOverlay.
+      //
+      // 系统取消了手势——当作用户取消处理（不发送录制内容），因为指针位置不可靠。cancelRecord 的回调（onRecordCancelled）会调用 _removeRecordOverlay。
       _recordOverlayKey.currentState?.cancelRecord();
     }
   }
@@ -1390,6 +1572,8 @@ class MessageInputState extends State<MessageInput>
                   ),
           ),
           // Page indicator dots — always reserve space, hide when only 1 page
+          //
+          // 页面指示点——始终保留空间，当只有 1 页时隐藏。
           Opacity(
             opacity: pageCount > 1 ? 1.0 : 0.0,
             child: Padding(
@@ -1418,10 +1602,14 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// Build a single page of the more panel grid (up to 2 rows × 4 columns)
+  ///
+  /// 在更多面板网格中构建单页（最多 2 行 × 4 列）
   Widget _buildMorePanelPage(
       List<_MorePanelItem> pageItems, SemanticColorScheme colorsTheme) {
     const int columns = 4;
     // Split items into rows of 4
+    //
+    // 将项目拆分为每行 4 个
     final List<List<_MorePanelItem>> rows = [];
     for (int i = 0; i < pageItems.length; i += columns) {
       rows.add(pageItems.sublist(i, (i + columns).clamp(0, pageItems.length)));
@@ -1453,6 +1641,8 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// Build a single action item widget in the more panel
+  ///
+  /// 在更多面板中构建单个操作项Widget
   Widget _buildMorePanelItemWidget(
       _MorePanelItem item, SemanticColorScheme colorsTheme) {
     return GestureDetector(
@@ -1568,6 +1758,8 @@ class MessageInputState extends State<MessageInput>
               // Left: Voice / Keyboard toggle button (28×28pt icon)
               // SizedBox height matches input field minHeight so button is
               // vertically centered when single-line, and stays at bottom when multi-line.
+              //
+              // 左侧：语音/键盘切换按钮（28×28pt 图标） SizedBox 高度匹配输入框最小高度，这样单行时按钮垂直居中，多行时保持在底部。
               if (widget.config.isShowAudioRecorder)
                 SizedBox(
                   height: 34,
@@ -1599,9 +1791,13 @@ class MessageInputState extends State<MessageInput>
                   ),
                 ),
               // Gap: 10pt between voice icon and input field
+              //
+              // 间距：语音图标和输入框之间 10pt
               const SizedBox(width: 10),
 
               // Middle: Input field or "Hold to talk" button
+              //
+              // 中间：输入框或“按住说话”按钮
               Expanded(
                 child: _inputMode == _InputMode.voice
                     ? _buildHoldToTalkButton(colorsTheme)
@@ -1619,9 +1815,13 @@ class MessageInputState extends State<MessageInput>
               ),
 
               // Gap: 10pt between input field and emoji icon
+              //
+              // 间距：输入框和表情图标之间 10pt
               const SizedBox(width: 10),
 
               // Right: Emoji button (28×28pt icon)
+              //
+              // 右侧：表情按钮（28×28pt 图标）
               SizedBox(
                 height: 34,
                 child: Center(
@@ -1653,9 +1853,13 @@ class MessageInputState extends State<MessageInput>
               ),
 
               // Gap: 10pt between emoji and more/send
+              //
+              // 间距：表情和更多/发送按钮之间 10pt
               const SizedBox(width: 10),
 
               // Right: More button or Send button (28×28pt icon)
+              //
+              // 右侧：更多按钮或发送按钮（28×28pt 图标）
               SizedBox(
                 height: 34,
                 child: Center(
@@ -1688,16 +1892,22 @@ class MessageInputState extends State<MessageInput>
   /// Toggle between voice mode and text input mode.
   /// From text/idle → voice: dismiss keyboard and panels.
   /// From voice → text: show keyboard.
+  ///
+  /// 在语音模式和文本输入模式之间切换。从文本/空闲 → 语音：收起键盘和面板。从语音 → 文本：显示键盘。
   void _toggleVoiceMode() {
     setState(() {
       if (_inputMode != _InputMode.voice) {
         // Switching to voice mode: hide keyboard and panels
+        //
+        // 切换到语音模式：隐藏键盘和面板
         _inputMode = _InputMode.voice;
         _textEditingFocusNode.unfocus();
         _showEmojiPanel = false;
         _showMorePanel = false;
       } else {
         // Switching back to text mode: show keyboard
+        //
+        // 切回文本模式：显示键盘
         _inputMode = _InputMode.text;
         _textEditingFocusNode.requestFocus();
       }
@@ -1705,9 +1915,13 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// Toggle emoji panel
+  ///
+  /// 切换表情面板
   void _toggleEmojiPanel() {
     if (!_showEmojiPanel) {
       // Opening emoji panel: hide keyboard
+      //
+      // 打开表情面板：隐藏键盘
       _isSwitchingPanel = true;
       _textEditingFocusNode.unfocus();
       setState(() {
@@ -1717,6 +1931,8 @@ class MessageInputState extends State<MessageInput>
       });
     } else {
       // Closing emoji panel: show keyboard
+      //
+      // 关闭表情面板：显示键盘
       setState(() {
         _showEmojiPanel = false;
       });
@@ -1756,6 +1972,8 @@ class MessageInputState extends State<MessageInput>
     return GestureDetector(
       onTap: () {
         // Cancel any pending long-press timer
+        //
+        // 取消任何待处理的长按计时器
         _idleLongPressTimer?.cancel();
         _idleLongPressTimer = null;
         // Flutter's TapGestureRecognizer has no time upper bound, so a long
@@ -1763,6 +1981,9 @@ class MessageInputState extends State<MessageInput>
         // the pointer is released. Detect that here and stay in idle mode,
         // otherwise we'd switch to text mode + pop the keyboard right after
         // the user sent a voice message.
+        //
+        // Flutter 的 TapGestureRecognizer 没有时间上限，所以已经触发录音的长按在指针释放时仍然会触发
+        // onTap。在这里检测并保持空闲模式，否则用户发送语音消息后，我们会立即切换到文本模式并弹出键盘。
         if (_idleLongPressHandled) {
           _idleLongPressHandled = false;
           return;
@@ -1797,6 +2018,8 @@ class MessageInputState extends State<MessageInput>
           // Tap case is handled by GestureDetector.onTap above; the
           // _idleLongPressHandled flag tells onTap whether to suppress
           // the mode switch (long-press → recording path).
+          //
+          // 点击情况由上面的 GestureDetector.onTap 处理；_idleLongPressHandled 标志告诉 onTap 是否抑制模式切换（长按 → 录音路径）。
         },
         onPointerCancel: (PointerCancelEvent event) {
           if (_isIdleLongPressing) {
@@ -1882,6 +2105,8 @@ class MessageInputState extends State<MessageInput>
 }
 
 /// Custom TextEditingController that manages mention ranges
+///
+/// 管理提及范围的自定义 TextEditingController
 class _MentionTextEditingController extends TextEditingController {
   final List<MentionInfo> _mentions = [];
   bool _isInternalUpdate = false;
@@ -1896,6 +2121,8 @@ class _MentionTextEditingController extends TextEditingController {
   void removeMention(MentionInfo mention) {
     _mentions.remove(mention);
     // Update positions of mentions after the removed one
+    //
+    // 移除某个提及后更新其他提及的位置
     final removedLength = mention.length;
     for (final m in _mentions) {
       if (m.startIndex > mention.startIndex) {
@@ -1909,6 +2136,8 @@ class _MentionTextEditingController extends TextEditingController {
   }
 
   /// Get mention that ends at the given position
+  ///
+  /// 获取在指定位置结束的提及
   MentionInfo? getMentionEndingAt(int position) {
     for (final mention in _mentions) {
       if (mention.endIndex == position) {
@@ -1919,6 +2148,8 @@ class _MentionTextEditingController extends TextEditingController {
   }
 
   /// Get mention that contains the given position (exclusive of boundaries)
+  ///
+  /// 获取包含给定位置的提及（不包括边界）
   MentionInfo? getMentionContaining(int position) {
     for (final mention in _mentions) {
       if (position > mention.startIndex && position < mention.endIndex) {
@@ -1929,6 +2160,8 @@ class _MentionTextEditingController extends TextEditingController {
   }
 
   /// Get mention that the position is at or inside (for deletion detection)
+  ///
+  /// 获取位置处于或包含在内的提及（用于删除检测）
   MentionInfo? getMentionAt(int position) {
     for (final mention in _mentions) {
       if (position > mention.startIndex && position <= mention.endIndex) {
@@ -1939,6 +2172,8 @@ class _MentionTextEditingController extends TextEditingController {
   }
 
   /// Get the anchor position for a mention (jump to nearest boundary)
+  ///
+  /// 获取提及的锚点位置（跳到最近的边界）
   int getAnchorPosition(MentionInfo mention, int position) {
     final distanceToStart = position - mention.startIndex;
     final distanceToEnd = mention.endIndex - position;
@@ -1958,6 +2193,8 @@ class _MentionTextEditingController extends TextEditingController {
     final newText = newValue.text;
 
     // Skip if no text change
+    //
+    // 如果文本没有变化则跳过
     if (oldText == newText) {
       super.value = newValue;
       return;
@@ -1966,17 +2203,25 @@ class _MentionTextEditingController extends TextEditingController {
     final delta = newText.length - oldText.length;
 
     // Handle deletion
+    //
+    // 处理删除
     if (delta < 0) {
       final cursorPos = newValue.selection.baseOffset;
       // The deletion happened at cursorPos, and deleted (-delta) characters
+      //
+      // 删除发生在 cursorPos，删除了 (-delta) 个字符
       final deleteStart = cursorPos;
       final deleteEnd = cursorPos - delta; // This is the position in old text
 
       // Check if the deletion affects any mention
       // We need to find if any mention overlaps with [deleteStart, deleteEnd) in old text
+      //
+      // 检查删除是否影响任何提及 我们需要找出是否有任何提及与旧文本中的 [deleteStart, deleteEnd) 重叠
       MentionInfo? affectedMention;
       for (final mention in _mentions) {
         // Check if the deletion overlaps with this mention
+        //
+        // 检查删除是否与该提及重叠
         if (deleteStart < mention.endIndex && deleteEnd > mention.startIndex) {
           affectedMention = mention;
           break;
@@ -1985,6 +2230,8 @@ class _MentionTextEditingController extends TextEditingController {
 
       if (affectedMention != null) {
         // Delete the entire mention
+        //
+        // 删除整条提及
         _isInternalUpdate = true;
 
         final beforeMention = oldText.substring(0, affectedMention.startIndex);
@@ -1992,9 +2239,13 @@ class _MentionTextEditingController extends TextEditingController {
         final updatedText = '$beforeMention$afterMention';
 
         // Remove the mention from list
+        //
+        // 从列表中移除提及
         _mentions.remove(affectedMention);
 
         // Update positions of mentions after the removed one
+        //
+        // 更新被移除提及之后的提及位置
         final removedLength = affectedMention.length;
         for (final m in _mentions) {
           if (m.startIndex > affectedMention.startIndex) {
@@ -2013,6 +2264,8 @@ class _MentionTextEditingController extends TextEditingController {
       }
 
       // No mention affected, update mention positions normally
+      //
+      // 没有提及受影响，正常更新提及位置
       for (final mention in _mentions) {
         if (mention.startIndex >= deleteEnd) {
           mention.startIndex += delta;
@@ -2020,6 +2273,8 @@ class _MentionTextEditingController extends TextEditingController {
       }
     } else if (delta > 0) {
       // Handle insertion - update mention positions
+      //
+      // 处理插入 - 更新提及位置
       final insertPos = newValue.selection.baseOffset - delta;
       for (final mention in _mentions) {
         if (mention.startIndex >= insertPos) {
@@ -2033,6 +2288,8 @@ class _MentionTextEditingController extends TextEditingController {
 }
 
 /// Custom TextField that handles mention selection and cursor movement
+///
+/// 自定义 TextField，处理提及选择和光标移动
 class _MentionTextField extends StatefulWidget {
   final _MentionTextEditingController controller;
   final FocusNode focusNode;
@@ -2077,18 +2334,28 @@ class _MentionTextFieldState extends State<_MentionTextField> {
     final selEnd = selection.end;
 
     // Check if cursor is inside a mention
+    //
+    // 检查光标是否在提及内容内
     if (selStart == selEnd) {
       // Single cursor
+      //
+      // 单一光标
       final mention = widget.controller.getMentionContaining(selStart);
       if (mention != null) {
         // Jump to nearest boundary
+        //
+        // 跳到最近的边界
         final anchorPos =
             widget.controller.getAnchorPosition(mention, selStart);
 
         // Only adjust if cursor is actually inside the mention (not at boundary)
+        //
+        // 只有当光标确实在提及内容内（而不是在边界）时才调整
         if (selStart != anchorPos) {
           _isAdjustingSelection = true;
           // Use microtask to ensure adjustment happens immediately but after current event
+          //
+          // 使用微任务确保调整立即发生，但在当前事件之后
           Future.microtask(() {
             if (mounted) {
               widget.controller.selection =
@@ -2100,6 +2367,8 @@ class _MentionTextFieldState extends State<_MentionTextField> {
       }
     } else {
       // Selection range - expand to include full mentions
+      //
+      // 选择范围 - 扩展以包含完整的提及内容
       int newStart = selStart;
       int newEnd = selEnd;
       bool needsUpdate = false;
@@ -2162,6 +2431,8 @@ class _MentionTextFieldState extends State<_MentionTextField> {
 }
 
 /// Data model for a "more" panel grid item
+///
+/// “更多”面板网格项的数据模型
 class _MorePanelItem {
   final String icon;
   final String title;
@@ -2175,6 +2446,8 @@ class _MorePanelItem {
 }
 
 // MARK: - AlbumPickerMediaSendListener Implementation
+//
+// MARK: - AlbumPickerMediaSendListener 实现
 
 class _AlbumPickerMediaSendListenerImpl
     implements AlbumPickerMediaSendListener {

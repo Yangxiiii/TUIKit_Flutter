@@ -5,6 +5,8 @@ import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/recent_emoji_manager.dart';
 
 /// Bottom sheet showing reaction details with user list
+///
+/// 底部弹出显示带有用户列表的点赞详情
 class ReactionDetailSheet extends StatefulWidget {
   final List<MessageReaction> reactionList;
   final String? currentUserID;
@@ -14,6 +16,8 @@ class ReactionDetailSheet extends StatefulWidget {
 
   /// Whether to allow removing reactions (default: true)
   /// Set to false in merged message detail view
+  ///
+  /// 是否允许移除表情（默认：true），在合并消息详情视图中设置为 false
   final bool allowRemove;
 
   const ReactionDetailSheet({
@@ -30,6 +34,8 @@ class ReactionDetailSheet extends StatefulWidget {
   State<ReactionDetailSheet> createState() => _ReactionDetailSheetState();
 
   /// Show the reaction detail sheet
+  ///
+  /// 显示表情详情面板
   static Future<void> show({
     required BuildContext context,
     required List<MessageReaction> reactionList,
@@ -39,6 +45,8 @@ class ReactionDetailSheet extends StatefulWidget {
     bool allowRemove = true,
   }) {
     // Unfocus and clear primary focus to prevent keyboard from popping up when sheet closes
+    //
+    // 取消焦点并清除主焦点，以防面板关闭时键盘弹出
     final currentFocus = FocusScope.of(context);
     if (!currentFocus.hasPrimaryFocus && currentFocus.focusedChild != null) {
       FocusManager.instance.primaryFocus?.unfocus();
@@ -53,6 +61,8 @@ class ReactionDetailSheet extends StatefulWidget {
       builder: (sheetContext) => GestureDetector(
         onTap: () {
           // Ensure focus is cleared before closing
+          //
+          // 在关闭前确保焦点已清除
           FocusManager.instance.primaryFocus?.unfocus();
           Navigator.of(sheetContext).pop();
         },
@@ -104,6 +114,8 @@ class _ReactionDetailSheetState extends State<ReactionDetailSheet> {
       child: Column(
         children: [
           // Drag handle
+          //
+          // 拖拽手柄
           Container(
             margin: const EdgeInsets.only(top: 8),
             width: 40,
@@ -114,6 +126,8 @@ class _ReactionDetailSheetState extends State<ReactionDetailSheet> {
             ),
           ),
           // Reaction tabs
+          //
+          // 表情标签页
           if (widget.reactionList.isNotEmpty)
             Align(
               alignment: Alignment.centerLeft,
@@ -132,6 +146,8 @@ class _ReactionDetailSheetState extends State<ReactionDetailSheet> {
               ),
             ),
           // User list
+          //
+          // 用户列表
           Expanded(
             child: _buildUserList(),
           ),
@@ -292,6 +308,8 @@ class _ReactionUserList extends StatelessWidget {
         final user = sortedUsers[index];
         final isSelf = user.userID == currentUserID && reaction.reactedByMyself;
         // Only allow tap to remove if allowRemove is true
+        //
+        // 仅当 allowRemove 为 true 时才能点击移除
         final canRemove = isSelf && allowRemove;
 
         return _ReactionUserItem(
@@ -307,6 +325,8 @@ class _ReactionUserList extends StatelessWidget {
     final users = List<UserProfile>.from(reaction.partialUserList);
 
     // Move current user to the front if they reacted
+    //
+    // 如果当前用户有反应，将其移动到最前面
     if (reaction.reactedByMyself && currentUserID != null) {
       final selfIndex = users.indexWhere((u) => u.userID == currentUserID);
       if (selfIndex > 0) {

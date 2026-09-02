@@ -142,6 +142,8 @@ class _GroupApplicationListState extends State<GroupApplicationList> {
                     // Text widget would still reserve a line of height,
                     // leaving an awkward gap between the nickname and the
                     // Group ID line.
+                    //
+                    // 当没有请求消息/邀请信息时，完全隐藏加入内容行，否则空的 Text Widget仍会占用一行高度，导致昵称和群号行之间出现尴尬的空隙。
                     if (joinContent.isNotEmpty) ...[
                       Text(
                         joinContent,
@@ -190,6 +192,8 @@ class _GroupApplicationListState extends State<GroupApplicationList> {
     }
     // Use ?? to avoid the literal string "null" leaking into the UI when
     // requestMsg is missing.
+    //
+    // 使用 ?? 避免在 requestMsg 缺失时字面字符串“null”泄露到 UI 中。
     return application.requestMsg ?? '';
   }
 

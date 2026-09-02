@@ -9,9 +9,13 @@ class FilePickerPlatform {
 
   /// HarmonyOS detection. `Platform.isOhos` only exists in the Flutter-OH SDK,
   /// so we compare the OS string to stay compilable under standard Flutter.
+  ///
+  /// HarmonyOS 检测。`Platform.isOhos` 只存在于 Flutter-OH SDK 中，所以我们通过比较 OS 字符串来保持在标准 Flutter 下可编译。
   static bool get _isOhos => Platform.operatingSystem == 'ohos';
 
   /// Pick files using native implementation
+  ///
+  /// 使用原生实现选择文件
   static Future<List<PickerResult>> pickFiles({
     int maxCount = 1,
     List<String> allowedMimeTypes = const [],
@@ -51,6 +55,8 @@ class FilePickerPlatform {
   }
 
   /// Open file with system default application
+  ///
+  /// 使用系统默认应用打开文件
   static Future<bool> openFile(String filePath) async {
     if (!Platform.isAndroid && !Platform.isIOS && !_isOhos) {
       throw UnsupportedError(

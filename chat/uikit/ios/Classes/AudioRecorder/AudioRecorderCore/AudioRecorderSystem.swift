@@ -96,6 +96,8 @@ internal class AudioRecorderSystem: AudioRecorderInternalProtocol {
         
         // Note: WindowToastManager is not available in Flutter plugin
         // System audio recorder does not support AI denoising
+        //
+        // 注意：Flutter 插件中不可用 WindowToastManager 系统音频录音器不支持 AI 降噪
         logger.error("system audio record do not support ai de noise");
         #if DEBUG
           logger.warning("AI DeNoise is not supported by system audio recorder.")

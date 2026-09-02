@@ -5,6 +5,10 @@
 // the app is in the background, AVPlayer may be denied audio focus. We mark
 // `pendingRing` and re-fire on the next foreground transition (only if the
 // call is still in `waiting`).
+//
+// 通过 @ohos.multimedia.media 的 AVPlayer 播放拨号 / 响铃 / 挂断音，每个 AVPlayer 实例只能播放一次，每次播放都会重新创建。
+//
+// 后台铃声延迟：当应用在后台时请求被叫铃声，AVPlayer 可能无法获取音频焦点。我们会标记 `pendingRing` 并在下次切到前台时重新触发（仅当通话仍处于 `waiting` 状态）。
 
 import { media } from '@kit.MediaKit';
 import { common } from '@kit.AbilityKit';
@@ -54,6 +58,8 @@ export class CallingBellFeature {
     // (call accepted / rejected / cancelled / remote hung up before pickup).
     // atomicxcore exposes no typed listener for status changes — this bridge
     // is the only event source.
+    //
+    // 本地用户一旦离开 `waiting`（通话被接听/拒绝/取消/远端挂机未接听），就立即停止拨号和响铃。atomicxcore 没有提供类型化的状态监听器——这个桥接是唯一的事件来源。
     CallStatusObserver().addListener((status: CallParticipantStatus): void => {
       if (status === CallParticipantStatus.waiting) {
         return;
@@ -72,6 +78,8 @@ export class CallingBellFeature {
   }
 
   /** Skipped in mute mode; deferred to foreground when app is currently background. */
+
+  /* 静音模式下跳过；如果应用当前在后台，则延迟到前台再播放。 */
   startRinging(): void {
     if (GlobalState().enableMuteMode) {
       Logger.info('CallingBellFeature: mute mode enabled, skip ringing');
@@ -123,6 +131,8 @@ export class CallingBellFeature {
       // Foreground transition. Only re-fire if still pending and the call is
       // still in `waiting` (user might have answered / rejected via the
       // system notification while we were backgrounded).
+      //
+      // 前台切换。仅在仍处于待处理且通话仍在 `waiting` 状态时重新触发（用户可能在我们后台时通过系统通知已接听/拒绝）。
       if (!this.pendingRing) {
         this.unsubscribeAppState();
         return;
@@ -171,6 +181,10 @@ export class CallingBellFeature {
     //            `setAudioSessionForRingtone()` + `overrideOutputAudioPort(.speaker)`
     //            to make the incoming ringtone audible regardless of the
     //            currently-selected device).
+    //
+    // 在 play() 之前强制音频路由，这样铃声就不会从听筒漏出来。与 iOS 一致：拨号 → mediaType.audio ⇒ 听筒，mediaType.video ⇒ 扬声器，铃声 →
+    // 扬声器（始终如此——iOS 使用 `setAudioSessionForRingtone()` + `overrideOutputAudioPort(.speaker)`
+    // 来让来电铃声无论当前选中设备都是可听的）。
     CallingBellFeature.applyAudioRouteFor(kind);
 
     try {

@@ -13,6 +13,16 @@
 // and recompute every 1Hz tick. The 1Hz pulse is delivered by mutating
 // `@State refreshTick`, which marks this component dirty and re-runs build()
 // → displayText().
+//
+// 显示“等待”提示或 HMS 格式的通话时长。
+//
+// 可见性规则：
+//
+// 1:1 等待 → 隐藏，多方被叫等待 → 隐藏，多方主叫等待 → 显示“等待”
+//
+// 为什么用本地时钟（而不是 `activeCall.duration`）：atomicxcore 的 `CallInfo.duration` 文档里说会每秒自增，但在 HarmonyOS 上没有实现
+// —— 这个字段从接听到挂断一直是 0。我们在第一次 `accept` 转换时捕获 `Date.now()`，并每秒重新计算一次。每秒脉冲是通过修改 `@State refreshTick`
+// 触发的，它会标记这个组件为脏并重新运行 build() → displayText()。
 
 import { CallParticipantInfo, CallInfo, CallParticipantStatus } from '@tencentcloud/atomicxcore';
 import { TimerUtil } from '../../../../common/utils/TimerUtil';
@@ -25,6 +35,8 @@ export struct TimerView {
   @ObjectLink activeCall: CallInfo;
 
   /** Numeric value is irrelevant — only the mutation matters for ArkUI's @State change-tracking. */
+
+  /* 数值本身无关紧要 —— 关键是 ArkUI 的 @State 变更追踪机制会根据变化来处理。 */
   @State private refreshTick: number = 0;
 
   /** 0 = "not started yet". Never reset once set; the next call gets a fresh component instance. */
@@ -49,6 +61,8 @@ export struct TimerView {
     // ArkUI's @Component build() requires exactly one root *container* node
     // and disallows free statements alongside it; the ensureStartTime()
     // side-effect lives inside displayText() instead.
+    //
+    // ArkUI 的 @Component build() 需要恰好一个根 *容器* 节点，并且不允许在旁边写自由语句；ensureStartTime() 的副作用改放在 displayText() 里面。
     Column() {
       Text(this.displayText())
         .fontColor(CallConstants.Color_White)
@@ -73,6 +87,8 @@ export struct TimerView {
     // Read refreshTick so this method's call-site (build()) registers a
     // dependency on it — ArkUI's tracker only counts *reads* during build,
     // not writes.
+    //
+    // 读取 refreshTick，这样这个方法的调用点 (build()) 会注册对它的依赖 — ArkUI 的追踪器只在构建期间统计 *读取*，不统计写入。
     const _tick: number = this.refreshTick;
     void _tick;
 

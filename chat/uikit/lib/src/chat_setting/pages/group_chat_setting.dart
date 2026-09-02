@@ -74,6 +74,14 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
   /// let the listener short-circuit when it's true — the explicit
   /// flow owns the navigation. External "kicked out / group
   /// dismissed elsewhere" still goes through the listener as before.
+  ///
+  /// 当我们从这个页面驱动显式退出/解散流程时为 true。
+  ///
+  /// `quitGroup` / `dismissGroup` 同步成功，SDK 会立即修改 `joinedGroupList`，这会在 `await` 仍在返回 `_onDeleteAndQuit` /
+  /// `_onDismissGroup` 时触发 `_onJoinedGroupListChanged`。两个代码路径随后争先恐后地弹出 ChatSettingPage + ChatPage，最终在 3
+  /// 路由栈上弹出 4 个路由，使导航器为空（黑屏）。在 `await` 之前设置为 true，失败时清除，并且
+  ///
+  /// 流程拥有导航。外部“被踢出/群聊在其他地方被解散”仍然会像以前一样通过监听器处理。
   bool _isHandlingPopExplicitly = false;
 
   @override
@@ -106,6 +114,9 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
   ///      _hasPermission() recomputes against the latest selfRole.
   ///   2. Group removed (only after we've already loaded once) → it has been
   ///      dismissed / we were kicked / we quit elsewhere. Pop this page.
+  ///
+  /// 对全局 joinedGroupList 的变化做出反应。有两种情况：1. 群组仍然存在 → 同步 _groupInfo + _currentUserRole，这样 _hasPermission()
+  /// 会根据最新的 selfRole 重新计算。2. 群组被移除（只在我们已经加载过一次之后）→ 群组被解散 / 我们被踢 / 我们在其他地方退出。弹出这个页面。
   void _onJoinedGroupListChanged() {
     if (!mounted) return;
     final list = GroupStore.shared.state.joinedGroupList.value;
@@ -121,6 +132,8 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
       // unwinding the stack — see `_isHandlingPopExplicitly`. Without
       // this guard the explicit flow and this listener both pop twice
       // and we drain the navigator empty.
+      //
+      // 当我们自己的退出/解散处理器已经在回溯堆栈时，跳过自动弹出 — 见 `_isHandlingPopExplicitly`。没有这个保护，显式流程和这个监听器都会弹出两次，导致导航器被清空。
       if (_groupInfo != null && !_isHandlingPopExplicitly) {
         widget.onGroupDelete?.call();
         Navigator.of(context).maybePop();
@@ -486,6 +499,8 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
     }
 
     // Show first 3 members
+    //
+    // 显示前 3 个成员
     return ValueListenableBuilder<List<GroupMember>>(
       valueListenable: _memberStore.state.memberList,
       builder: (context, members, child) {
@@ -613,6 +628,8 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
           GroupInfo(groupID: widget.groupID, avatarURL: result);
       // UI refresh is driven by GroupStore.joinedGroupList listener
       // (see _onJoinedGroupListChanged); no manual reload needed here.
+      //
+      // UI 刷新由 GroupStore.joinedGroupList 的监听器驱动（见 _onJoinedGroupListChanged）；这里不需要手动重新加载。
       await GroupStore.shared.updateProfile(groupInfo: updatedGroupInfo);
     }
   }
@@ -641,6 +658,8 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
       type: GroupMethodType.join,
       onSelected: (option) async {
         // UI refresh is driven by GroupStore.joinedGroupList listener.
+        //
+        // UI 刷新由 GroupStore.joinedGroupList 的监听器驱动。
         await GroupStore.shared
             .setJoinOption(groupID: widget.groupID, option: option);
       },
@@ -651,6 +670,8 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
     final config = _getMethodSheetConfig(GroupMethodType.invite);
     // UI refresh after each setInviteOption is driven by
     // GroupStore.joinedGroupList listener (_onJoinedGroupListChanged).
+    //
+    // 每次 setInviteOption 后的 UI 刷新是由 GroupStore.joinedGroupList 监听器 (_onJoinedGroupListChanged) 驱动的。
     ActionSheet.show(
       context,
       actions: [
@@ -859,6 +880,8 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
       final updatedGroupInfo =
           GroupInfo(groupID: widget.groupID, groupName: result);
       // UI refresh is driven by GroupStore.joinedGroupList listener.
+      //
+      // UI 刷新是由 GroupStore.joinedGroupList 监听器驱动的。
       await GroupStore.shared.updateProfile(groupInfo: updatedGroupInfo);
     }
   }

@@ -75,6 +75,8 @@ class MediaAudioPlayer : AudioPlayer() {
                 setDataSource(filePath)
                 // Remote sources must be prepared asynchronously; local files
                 // can prepare synchronously. onPrepared fires for both.
+                //
+                // 远程资源必须异步准备；本地文件可以同步准备。onPrepared 会对两者触发。
                 if (isRemote) {
                     prepareAsync()
                 } else {

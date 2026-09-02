@@ -286,6 +286,8 @@ class EmojiPickerContentState extends State<EmojiPickerContent> {
                               )
                               .toList(),
                           // Add blank lines to avoid button obstruction
+                          //
+                          // 添加空行以避免按钮遮挡
                           ...List.generate(
                               crossAxisCount, (index) => const SizedBox()),
                         ],

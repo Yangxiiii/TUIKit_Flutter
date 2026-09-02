@@ -18,6 +18,10 @@ export struct HintView {
    *
    * `needShowAcceptHint` initial value depends on the mount-time status so
    * a floating window resume doesn't re-fire the toast.
+   *
+   * 仅针对呼叫方的“已连接”吐司控制。在第一次切换到 `accept` 时，显示“已连接” 1 秒，然后清除，并且在本次通话中不再显示。
+   *
+   * `needShowAcceptHint` 的初始值取决于挂载时的状态，因此悬浮窗口恢复不会重新触发吐司。
    */
   @State private needShowAcceptHint: boolean = true;
   @State private hasShownAcceptHint: boolean = false;
@@ -45,6 +49,8 @@ export struct HintView {
   private displayText(): string {
     // Multi-party + accept → blank. Avoids leaking the "Connected" toast
     // into the multi-call ACK state.
+    //
+    // 多方通话 + 接听 → 空白。避免“已连接”吐司泄露到多方通话确认状态中。
     if (this.selfInfo.status === CallParticipantStatus.accept && this.isMultiParty()) {
       return '';
     }
@@ -83,6 +89,8 @@ export struct HintView {
   }
 
   /** Called from displayText() during build; guarded by `hasShownAcceptHint`. */
+
+  /* 在构建期间从 displayText() 调用；由 `hasShownAcceptHint` 进行保护。 */
   private scheduleAcceptHintDismiss(): void {
     if (this.hasShownAcceptHint) {
       return;

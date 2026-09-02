@@ -31,6 +31,10 @@ import AudioPlayerHelper, { AudioPlayerListener } from './AudioPlayerHelper';
  *     { type: 'onError', errorMessage }
  *
  * AudioPlayerHelper 是进程单例,handler 只做转发。
+ *
+ * pause() -> null resume() -> null stop() -> null getCurrentPosition() -> int(毫秒) getDuration() ->
+ * int(毫秒) isPlaying() -> bool isPaused() -> bool EventChannel：'tencent_chat_uikit/audio_player_events'
+ * { type: 'onPlay' } { type: 'onPause' } { type: 'onResume' }
  */
 export default class AudioPlayer implements MethodCallHandler, StreamHandler, AudioPlayerListener {
   private static readonly TAG = 'ChatUiKit.AudioPlayer';

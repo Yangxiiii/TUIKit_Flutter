@@ -50,6 +50,10 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
   // `MessageAttachmentBuilder` and rendered by `MessageItem` *outside*
   // the row that holds the receipt — see
   // `lib/src/message_list/widgets/message_attachments.dart`.
+  //
+  // 翻译气泡以前是在 Column 里的文本气泡的同级中渲染的。这会导致已读回执和状态图标（由带 CrossAxisAlignment.end 的 MessageItem
+  // 放置）在翻译扩展时漂到列的底部，见 Bug-956459。现在翻译气泡是由 `MessageAttachmentBuilder` 构建，并由 `MessageItem` 渲染在放置回执的行的*外面*
+  // —— 参见 `lib/src/message_list/widgets/message_attachments.dart`。
 
   @override
   Widget build(BuildContext context) {

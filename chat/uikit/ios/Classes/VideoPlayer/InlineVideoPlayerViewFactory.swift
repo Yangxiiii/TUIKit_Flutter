@@ -4,6 +4,8 @@ import AVKit
 
 /// Factory for creating inline video player views
 /// This player only renders video - controls are handled by Flutter
+///
+/// 创建内嵌视频播放器视图的工厂。该播放器只渲染视频——控件由 Flutter 处理
 class InlineVideoPlayerViewFactory: NSObject, FlutterPlatformViewFactory {
     private var messenger: FlutterBinaryMessenger
     
@@ -31,6 +33,8 @@ class InlineVideoPlayerViewFactory: NSObject, FlutterPlatformViewFactory {
 }
 
 /// Custom UIView that automatically updates AVPlayerLayer frame on layout changes
+///
+/// 自定义 UIView，在布局变化时自动更新 AVPlayerLayer 帧
 class PlayerContainerView: UIView {
     override class var layerClass: AnyClass {
         return AVPlayerLayer.self
@@ -48,6 +52,8 @@ class PlayerContainerView: UIView {
 
 /// Inline video player that only renders video without any controls
 /// All playback control is done via MethodChannel from Flutter
+///
+/// 只渲染视频的内嵌视频播放器，没有任何控件。所有播放控制都通过 Flutter 的 MethodChannel 完成
 class InlineVideoPlayerPlatformView: NSObject, FlutterPlatformView {
     private var containerView: PlayerContainerView
     private var player: AVPlayer?
@@ -58,6 +64,8 @@ class InlineVideoPlayerPlatformView: NSObject, FlutterPlatformView {
     private var isDisposed = false
     
     // Video dimensions for aspect ratio calculation
+    //
+    // 视频尺寸，用于计算宽高比
     private var videoWidth: Int = 0
     private var videoHeight: Int = 0
     
@@ -78,6 +86,8 @@ class InlineVideoPlayerPlatformView: NSObject, FlutterPlatformView {
         }
         
         // Setup method channel for Flutter communication
+        //
+        // 设置 Flutter 通信的 MethodChannel
         if let messenger = messenger {
             methodChannel = FlutterMethodChannel(
                 name: "tencent_chat_uikit/inline_video_player_\(viewId)",
@@ -89,15 +99,21 @@ class InlineVideoPlayerPlatformView: NSObject, FlutterPlatformView {
         }
         
         // Create player
+        //
+        // 创建播放器
         let url = URL(fileURLWithPath: videoPath)
         let asset = AVURLAsset(url: url)
         playerItem = AVPlayerItem(asset: asset)
         player = AVPlayer(playerItem: playerItem)
         
         // Set player to container view (uses AVPlayerLayer as backing layer)
+        //
+        // 将播放器设置到容器视图（使用 AVPlayerLayer 作为底层图层）
         containerView.setPlayer(player)
         
         // Setup observers
+        //
+        // 设置观察者
         setupObservers()
     }
     
@@ -109,12 +125,18 @@ class InlineVideoPlayerPlatformView: NSObject, FlutterPlatformView {
         guard let player = player, let playerItem = playerItem else { return }
         
         // Observe player item status
+        //
+        // 观察播放器项目状态
         playerItem.addObserver(self, forKeyPath: "status", options: [.new], context: nil)
         
         // Observe video size
+        //
+        // 观察视频尺寸
         playerItem.addObserver(self, forKeyPath: "presentationSize", options: [.new], context: nil)
         
         // Observe playback completion
+        //
+        // 观察播放完成情况
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(playerDidFinishPlaying),
@@ -123,9 +145,13 @@ class InlineVideoPlayerPlatformView: NSObject, FlutterPlatformView {
         )
         
         // Observe rate changes for play/pause state
+        //
+        // 观察播放/暂停状态的速率变化
         player.addObserver(self, forKeyPath: "rate", options: [.new], context: nil)
         
         // Add periodic time observer for position updates
+        //
+        // 添加定期时间观察器以更新位置
         let interval = CMTime(seconds: 0.1, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
         timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self = self, !self.isDisposed else { return }
@@ -239,26 +265,36 @@ class InlineVideoPlayerPlatformView: NSObject, FlutterPlatformView {
         isDisposed = true
         
         // Remove time observer
+        //
+        // 移除时间观察器
         if let timeObserver = timeObserver, let player = player {
             player.removeTimeObserver(timeObserver)
         }
         timeObserver = nil
         
         // Remove KVO observers
+        //
+        // 移除KVO观察器
         playerItem?.removeObserver(self, forKeyPath: "status")
         playerItem?.removeObserver(self, forKeyPath: "presentationSize")
         player?.removeObserver(self, forKeyPath: "rate")
         
         // Remove notification observer
+        //
+        // 移除通知观察器
         NotificationCenter.default.removeObserver(self)
         
         // Stop and release player
+        //
+        // 停止并释放播放器
         player?.pause()
         containerView.setPlayer(nil)
         player = nil
         playerItem = nil
         
         // Clear method channel
+        //
+        // 清除方法通道
         methodChannel?.setMethodCallHandler(nil)
         methodChannel = nil
     }

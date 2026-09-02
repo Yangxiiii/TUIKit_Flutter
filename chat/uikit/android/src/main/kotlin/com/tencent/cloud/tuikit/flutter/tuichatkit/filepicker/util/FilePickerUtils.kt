@@ -84,6 +84,8 @@ object FilePickerUtils {
         }
         
         // Generate unique filename with timestamp
+        //
+        // 使用时间戳生成唯一文件名
         val timestamp = System.currentTimeMillis()
         val uniqueFileName = "${timestamp}_$fileName"
         val targetFile = File(targetDir, uniqueFileName)

@@ -17,6 +17,19 @@
 //   - video_waiting_caller: switchCamera / hangup(cancel) / camera
 //   - video_waiting_called: reject / accept
 //   - video_accept:         row1 [mic / speaker / camera] + row2 [_, hangup, switchCamera-small]
+//
+// 1 对 1 通话的底部控制面板。布局完全镜像 Flutter 的 SingleCallControlsWidget：
+//
+// Flutter Positioned 包裹：bottom: 40 + safeArea.bottom  Flutter 内部布局：Row(spaceEvenly) [+ Column 用于视频]
+//
+// 这个视图将相同的基于流的布局移植到 ArkUI：一个单独的 Column
+//
+// `justifyContent(SpaceEvenly)`。系统导航栏的 inset 由 PARENT（CallView 的 controls Column）添加，所以此视图只处理 Flutter
+// 字面上的 `40` 基线。
+//
+// 五种布局（对应 Flutter 的 `_viewStrategies`）：- audio_waiting_caller：麦克风 / 挂断（取消） / 扬声器-
+// audio_waiting_called：拒接 / 接听- audio_accept：麦克风 / 挂断 / 扬声器- video_waiting_caller：切换摄像头 / 挂断（取消） /
+// 摄像头- video_waiting_called：拒接 / 接听- video_accept：第一行 [麦克风 / 扬声器 / 摄像头] + 第二行 [_, 挂断, 小切换摄像头]
 
 import {
   CallStore, DeviceStore, CallParticipantInfo, DeviceState, CallMediaType,
@@ -41,17 +54,25 @@ enum Layout {
 }
 
 /** Big button image (60vp) — matches Flutter `imgHeight: 60`. */
+
+/* 大按钮图片（60vp）— 对应 Flutter 的 `imgHeight: 60`。 */
 const BTN_LARGE: number = 60;
 /** Small button image (28vp) — matches Flutter switchCameraSmall `imgHeight: 28`. */
+
+/* 小按钮图片（28vp）— 对应 Flutter 的 switchCameraSmall `imgHeight: 28`。 */
 const BTN_SMALL: number = 28;
 
 /**
  * Bottom inset before the system nav indicator. Matches
  * `Flutter Positioned(bottom: 40 + MediaQuery.padding.bottom)`.
+ *
+ * 系统导航栏指示器前的底部间距。对应 `Flutter Positioned(bottom: 40 + MediaQuery.padding.bottom)`。
  */
 const BOTTOM_INSET: number = 40;
 
 /** Vertical gap between the primary row and the hangup row in video_accept. */
+
+/* video_accept 中主行和挂断行之间的垂直间距。 */
 const ROW_GAP: number = 20;
 
 @Component
@@ -66,6 +87,9 @@ export struct SingleCallControlsView {
    * Bottom safe-area inset (≈ navBarHeight). Added to BOTTOM_INSET so the
    * total bottom padding is `40 + safe`, exactly matching Flutter
    * `Positioned(bottom: 40 + MediaQuery.padding.bottom)`.
+   *
+   * 底部安全区域插入（≈导航栏高度）。添加到 BOTTOM_INSET，因此底部总内边距为 `40 + safe`，完全匹配 Flutter 的 `Positioned(bottom: 40 +
+   * MediaQuery.padding.bottom)`。
    */
   bottomSafeInset: number = 0;
 
@@ -93,6 +117,8 @@ export struct SingleCallControlsView {
   }
 
   /** Flutter `_buildAudioAndVideoCalleeWaitingView`: Row(spaceEvenly){ reject, accept }. */
+
+  /* Flutter `_buildAudioAndVideoCalleeWaitingView`：Row(spaceEvenly){ 拒绝, 接受 }。 */
   @Builder
   layoutCalleeWaiting() {
     Row() {
@@ -107,6 +133,9 @@ export struct SingleCallControlsView {
    * Flutter `_buildAudioAcceptedView` and `_buildAudioCallerWaitingView`:
    * Row(spaceEvenly){ mic, hangup, speaker }. Hangup tip differs (cancel vs
    * hangup) which is handled by `hangupBtn(titleOverride)`.
+   *
+   * Flutter `_buildAudioAcceptedView` 和 `_buildAudioCallerWaitingView`：Row(spaceEvenly){ 麦克风, 挂断, 扬声器
+   * }。挂断提示不同（取消 vs 挂断），由 `hangupBtn(titleOverride)` 处理。
    */
   @Builder
   layoutAudio() {
@@ -120,6 +149,8 @@ export struct SingleCallControlsView {
   }
 
   /** Flutter `_buildVideoCallerWaitingView`: Row(spaceEvenly){ switchCamera, hangup(cancel), camera }. */
+
+  /* Flutter `_buildVideoCallerWaitingView`：Row(spaceEvenly){ 切换摄像头, 挂断(取消), 摄像头 }。 */
   @Builder
   layoutVideoWaitingCaller() {
     Row() {
@@ -138,6 +169,9 @@ export struct SingleCallControlsView {
    *     SizedBox(height: 20),
    *     Row(spaceEvenly){ SizedBox(100), hangup, cameraStatus.on ? switchCameraSmall : SizedBox(100) }
    *   }
+   *
+   * Row(spaceEvenly){ 麦克风, 扬声器, 摄像头 }, SizedBox(height: 20), Row(spaceEvenly){ SizedBox(100), 挂断,
+   * cameraStatus.on ? 小切换摄像头 : SizedBox(100) }
    */
   @Builder
   layoutVideoAccept() {
@@ -151,15 +185,21 @@ export struct SingleCallControlsView {
       .justifyContent(FlexAlign.SpaceEvenly);
 
       // Flutter SizedBox(height: 20) between primary row and hangup row.
+      //
+      // Flutter 在主行和挂断行之间使用 SizedBox(height: 20)。
       Blank().height(ROW_GAP);
 
       Row() {
         // Left placeholder — matches Flutter `SizedBox(width: 100)`.
+        //
+        // 左侧占位符 — 对应 Flutter 的 `SizedBox(width: 100)`。
         Column().width(100).height(BTN_LARGE);
 
         this.hangupBtn('');
 
         // Right slot: small switch-camera when camera is on, else placeholder.
+        //
+        // 右侧插槽：摄像头开启时显示小型切换摄像头按钮，否则显示占位符。
         if (this.deviceState.cameraStatus === DeviceStatus.on) {
           this.switchCameraSmallBtn();
         } else {
@@ -174,15 +214,21 @@ export struct SingleCallControlsView {
 
   private currentLayout(): Layout {
     // Callee in waiting state — same UI for audio + video.
+    //
+    // 被叫处于等待状态 — 音频和视频界面一致。
     if (this.selfInfo.status === CallParticipantStatus.waiting && !this.isCaller) {
       return Layout.calleeWaiting;
     }
     if (this.mediaType === CallMediaType.audio) {
       // audio_waiting_caller and audio_accept share the same Row layout
       // (only the hangup tip changes — handled by hangupBtn).
+      //
+      // audio_waiting_caller 和 audio_accept 使用相同的 Row 布局（只有挂断提示不同 — 由 hangupBtn 处理）。
       return Layout.audio;
     }
     // Video, caller side.
+    //
+    // 视频，主叫端。
     if (this.selfInfo.status !== CallParticipantStatus.accept) {
       return Layout.videoWaitingCaller;
     }
@@ -194,6 +240,8 @@ export struct SingleCallControlsView {
   }
 
   // ---- Buttons ----
+  //
+  // ---- 按钮 ----
 
   @Builder
   declineBtn() {
@@ -204,6 +252,8 @@ export struct SingleCallControlsView {
       imageSize: BTN_LARGE,
       onTap: (): void => {
         // See markSelfEnded rationale in CallEndedFlag.
+        //
+        // 查看 CallEndedFlag 中 markSelfEnded 的理由。
         CallEndedFlag().markSelfEnded();
         CallingBellFeature.shared().stopAll();
         CallingVibratorFeature.shared().stop();
@@ -238,6 +288,9 @@ export struct SingleCallControlsView {
    *   undefined → `TUICallKit.hangup`     (audio default)
    *   'cancel'  → `TUICallKit.cancel`     (caller waiting / outgoing)
    *   ''        → icon-only               (video accepted in-call)
+   *
+   * `titleOverride`：undefined → `TUICallKit.hangup`（音频默认）'cancel' → `TUICallKit.cancel`（主叫等待 / 外呼）'' →
+   * 仅图标（视频接通中）
    */
   @Builder
   hangupBtn(titleOverride?: string) {
@@ -307,6 +360,8 @@ export struct SingleCallControlsView {
   }
 
   /** Flutter `_getSwitchCameraButton` — large 60vp icon, used in videoWaitingCaller. */
+
+  /* Flutter `_getSwitchCameraButton` — 大号 60vp 图标，用于 videoWaitingCaller。 */
   @Builder
   switchCameraLargeBtn() {
     ControlsButton({
@@ -321,6 +376,8 @@ export struct SingleCallControlsView {
   }
 
   /** Flutter `_getSwitchCameraSmallButton` — 28vp icon, no title. Used in videoAccept. */
+
+  /* Flutter `_getSwitchCameraSmallButton` — 28vp 图标，无标题。在 videoAccept 中使用。 */
   @Builder
   switchCameraSmallBtn() {
     ControlsButton({

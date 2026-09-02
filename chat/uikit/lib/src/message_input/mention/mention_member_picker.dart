@@ -11,6 +11,8 @@ import 'mention_info.dart';
 
 /// MentionMemberPicker allows users to select group members to mention.
 /// It uses UserPicker with a headerWidget for the @All option.
+///
+/// MentionMemberPicker 允许用户选择群成员进行 @ 提及。它使用带 headerWidget 的 UserPicker 来显示 @所有人 选项。
 class MentionMemberPicker extends StatefulWidget {
   final String groupID;
   final Function(List<MentionInfo>) onMembersSelected;

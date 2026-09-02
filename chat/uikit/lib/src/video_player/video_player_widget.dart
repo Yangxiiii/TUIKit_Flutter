@@ -8,11 +8,17 @@ import 'video_player.dart';
 ///
 /// This widget uses InlineVideoPlayer with Flutter controls overlay,
 /// thumbnail support, and back button.
+///
+/// 带控件的全屏视频播放器控件
+///
+/// 这个Widget使用带有 Flutter 控件覆盖的 InlineVideoPlayer，支持缩略图和返回按钮。
 class VideoPlayerWidget extends StatefulWidget {
   final VideoData video;
   final VoidCallback? onClose;
 
   /// Whether to show the close button (default: true)
+  ///
+  /// 是否显示关闭按钮（默认：true）
   final bool showCloseButton;
 
   const VideoPlayerWidget({
@@ -56,11 +62,15 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 
     setState(() {
       // Hide thumbnail when playing, show when paused/completed
+      //
+      // 播放时隐藏缩略图，暂停/播放完成时显示
       if (_controller.isPlaying) {
         _showThumbnail = false;
       } else if (_controller.position == Duration.zero &&
           !_controller.isPlaying) {
         // Show thumbnail when at start and not playing (completed or initial state)
+        //
+        // 在开始且未播放时显示缩略图（完成或初始状态）
         _showThumbnail = true;
       }
     });
@@ -129,6 +139,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
         fit: StackFit.expand,
         children: [
           // Video player - centered with padding for controls
+          //
+          // 视频播放器 - 居中并为控件留有内边距
           Positioned.fill(
             child: Padding(
               padding: EdgeInsets.only(
@@ -141,6 +153,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
           ),
 
           // Thumbnail overlay (shown before playing and after completion)
+          //
+          // 缩略图覆盖层（播放前和播放完成后显示）
           if (_showThumbnail)
             Positioned.fill(
               child: Padding(
@@ -153,9 +167,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
             ),
 
           // Controls overlay - handles its own tap events
+          //
+          // 控件覆盖层 - 自行处理点击事件
           if (_showControls) Positioned.fill(child: _buildControlsOverlay()),
 
           // Tap area when controls are hidden
+          //
+          // 控件隐藏时的点击区域
           if (!_showControls)
             Positioned.fill(
               child: GestureDetector(
@@ -166,6 +184,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
             ),
 
           // Close button overlay (conditionally visible)
+          //
+          // 关闭按钮覆盖层（有条件显示）
           if (widget.showCloseButton)
             Positioned(
               top: MediaQuery.of(context).padding.top + 8,
@@ -194,6 +214,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 
   Widget _buildThumbnail() {
     // Prefer snapshot file if available
+    //
+    // 优先使用快照文件（如果可用）
     if (widget.video.hasSnapshotFile) {
       return Image.file(
         File(widget.video.snapshotLocalPath!),
@@ -229,6 +251,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
             const SizedBox(height: 50),
 
             // Center play/pause button
+            //
+            // 播放/暂停按钮居中
             GestureDetector(
               onTap: _togglePlayPause,
               child: Container(
@@ -247,6 +271,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
             ),
 
             // Bottom controls
+            //
+            // 底部控件
             _buildBottomControls(),
           ],
         ),
@@ -264,6 +290,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
           child: Row(
             children: [
               // Play/Pause button
+              //
+              // 播放/暂停按钮
               GestureDetector(
                 onTap: _togglePlayPause,
                 child: Container(
@@ -283,6 +311,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
               const SizedBox(width: 8),
 
               // Current time
+              //
+              // 当前时间
               Text(
                 _formatDuration(_controller.position),
                 style: const TextStyle(color: Colors.white, fontSize: 12),
@@ -290,12 +320,16 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
               const SizedBox(width: 8),
 
               // Progress bar
+              //
+              // 进度条
               Expanded(
                 child: _buildProgressBar(),
               ),
               const SizedBox(width: 8),
 
               // Total time
+              //
+              // 总时间
               Text(
                 _formatDuration(_controller.duration),
                 style: const TextStyle(color: Colors.white, fontSize: 12),
@@ -330,6 +364,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
               alignment: Alignment.centerLeft,
               children: [
                 // Background track
+                //
+                // 背景轨道
                 Container(
                   height: 4,
                   decoration: BoxDecoration(
@@ -338,6 +374,8 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
                   ),
                 ),
                 // Progress track
+                //
+                // 进度轨道
                 Container(
                   height: 4,
                   width: thumbPosition,

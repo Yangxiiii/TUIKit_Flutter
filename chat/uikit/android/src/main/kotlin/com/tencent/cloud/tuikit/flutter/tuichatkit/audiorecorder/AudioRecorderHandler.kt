@@ -60,6 +60,8 @@ class AudioRecorderHandler(
             val maxDurationMs = call.argument<Int>("maxDurationMs") ?: 60000
 
             // Start recording with listener for completion
+            //
+            // 带完成监听器开始录制。
             var completionCalled = false
             AudioRecorder.startRecord(
                 filepath = filepath,

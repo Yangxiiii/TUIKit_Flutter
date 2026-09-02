@@ -4,6 +4,8 @@ import 'package:tencent_chat_uikit/src/emoji_picker/emoji_picker_model.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/recent_emoji_manager.dart';
 
 /// Quick emoji picker for message reactions (6 emojis + expand button)
+///
+/// 消息反应的快捷表情选择器（6 个表情 + 展开按钮）
 class ReactionEmojiPicker extends StatefulWidget {
   final void Function(EmojiPickerModelItem emoji) onEmojiClick;
   final VoidCallback onExpandClick;
@@ -124,6 +126,8 @@ class _ReactionEmojiItem extends StatelessWidget {
 }
 
 /// Full emoji picker sheet for reactions
+///
+/// 消息反应的完整表情选择面板
 class ReactionEmojiPickerSheet extends StatelessWidget {
   final void Function(EmojiPickerModelItem emoji) onEmojiClick;
 
@@ -146,6 +150,8 @@ class ReactionEmojiPickerSheet extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           // Drag handle
+          //
+          // 拖拽手柄
           Container(
             margin: const EdgeInsets.only(top: 8),
             width: 40,
@@ -156,6 +162,8 @@ class ReactionEmojiPickerSheet extends StatelessWidget {
             ),
           ),
           // Emoji grid
+          //
+          // 表情网格
           Expanded(
             child: GridView.builder(
               padding: const EdgeInsets.all(16),
@@ -189,8 +197,12 @@ class ReactionEmojiPickerSheet extends StatelessWidget {
   }
 
   /// Show the full emoji picker as a bottom sheet
+  ///
+  /// 以底部面板显示完整表情选择器
   static Future<EmojiPickerModelItem?> show(BuildContext context) {
     // Unfocus and clear primary focus to prevent keyboard from popping up when sheet closes
+    //
+    // 取消焦点并清除主焦点，以防面板关闭时键盘弹出
     final currentFocus = FocusScope.of(context);
     if (!currentFocus.hasPrimaryFocus && currentFocus.focusedChild != null) {
       FocusManager.instance.primaryFocus?.unfocus();
@@ -205,6 +217,8 @@ class ReactionEmojiPickerSheet extends StatelessWidget {
       builder: (sheetContext) => GestureDetector(
         onTap: () {
           // Ensure focus is cleared before closing
+          //
+          // 在关闭前确保焦点已清除
           FocusManager.instance.primaryFocus?.unfocus();
           Navigator.of(sheetContext).pop();
         },

@@ -74,6 +74,8 @@ class EmojiManager {
 
   /// Convert emoji codes in text to localized names
   /// e.g., "abc[TUIEmoji_Smile]def" -> "abc[微笑]def" (Chinese) or "abc[Smile]def" (English)
+  ///
+  /// 将文本中的表情代码转换为本地化名称
   static String createLocalizedStringFromEmojiCodes(
       BuildContext context, String text) {
     if (text.isEmpty) {
@@ -84,6 +86,8 @@ class EmojiManager {
     String result = text;
 
     // Sort by key length descending to handle longer keys first
+    //
+    // 按键长度降序排序，优先处理较长的键
     final sortedKeys = emojiMap.keys.toList()
       ..sort((a, b) => b.length.compareTo(a.length));
 
@@ -103,6 +107,8 @@ class EmojiManager {
 
     List<String> emojiKeyList = [];
     // TUIKit custom emoji.
+    //
+    // TUIKit自定义表情
     String regexOfCustomEmoji = "\\[(\\S+?)\\]";
     Pattern patternOfCustomEmoji = RegExp(regexOfCustomEmoji);
     Iterable<Match> matcherOfCustomEmoji =
@@ -116,6 +122,8 @@ class EmojiManager {
     }
 
     // Universal standard emoji.
+    //
+    // 通用标准表情
     RegExp patternOfUniversalEmoji = getUniversalEmojiRegex();
     Iterable<Match> matcherOfUniversalEmoji =
         patternOfUniversalEmoji.allMatches(text);
@@ -133,9 +141,13 @@ class EmojiManager {
   static String getRegexOfUniversalEmoji() {
     // Note: Dart uses \u{XXXX} syntax for Unicode code points, not \UXXXXXXXX like Java.
     // For code points > 0xFFFF, use \u{1XXXX} format.
+    //
+    // 注意：Dart使用u{XXXX}语法表示Unicode码点，而不是像Java的UXXXXXXXX
     String ri = "[\\u{1F1E6}-\\u{1F1FF}]";
 
     // Standard emoji that can stand alone or with modifiers
+    //
+    // 标准表情符号，可以单独使用或搭配修饰符
     String support =
         "\\u{A9}|\\u{AE}|\\u203C|\\u2049|\\u2122|\\u2139|[\\u2194-\\u2199]|[\\u21A9-\\u21AA]"
         "|[\\u231A-\\u231B]|\\u2328|\\u23CF|[\\u23E9-\\u23EF]|[\\u23F0-\\u23F3]|[\\u23F8-\\u23FA]|\\u24C2"
@@ -181,9 +193,13 @@ class EmojiManager {
     // Keycap base characters: #, *, 0-9
     // These ONLY form emoji when followed by \uFE0F\u20E3 (variation selector + keycap combining mark)
     // e.g., #️⃣ = # + \uFE0F + \u20E3
+    //
+    // 按键基字符：#、*、0-9 仅在后跟️⃣（变体选择符 + 按键组合标记）时才形成表情符号
     String keycapBase = "[\\u0023\\u002A\\u0030-\\u0039]";
 
     // Construct regex of emoji by the rules above.
+    //
+    // 根据上述规则构建表情符号的正则表达式
     String eMod = "[\\u{1F3FB}-\\u{1F3FF}]";
 
     String variationSelector = "\\uFE0F";
@@ -195,13 +211,19 @@ class EmojiManager {
     String risequence = "$ri$ri";
 
     // Keycap emoji: base character + optional variation selector + keycap combining mark
+    //
+    // 按键表情符号：基字符 + 可选变体选择符 + 按键组合标记
     String keycapEmoji = "$keycapBase$variationSelector?$keycap";
 
     // Standard emoji element with optional modifiers
+    //
+    // 带可选修饰符的标准表情符号元素
     String element =
         "(?:$support)(?:$eMod|$variationSelector|$tags+$termTag?)?";
 
     // Full regex: keycap emoji | RI sequence | standard emoji (with ZWJ sequences)
+    //
+    // 完整正则表达式：按键表情符号 | RI 序列 | 标准表情符号（带 ZWJ 序列）
     String regexEmoji =
         "$keycapEmoji|$risequence|$element(?:$zwj(?:$risequence|$element))*";
 

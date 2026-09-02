@@ -19,6 +19,8 @@ export struct CallMainPage {
   @ObjectLink deviceState: DeviceState;
 
   /** True while the host ability is in system PiP. Hides the top action bar. */
+
+  /* 当主能力在系统 PiP 时为 true。隐藏顶部操作栏。 */
   @State private isInPipMode: boolean = false;
 
   private pipUnsubscribe: (() => void) | null = null;
@@ -63,6 +65,8 @@ export struct CallMainPage {
 
   private isGroupCall(): boolean {
     // Aligned with iOS CallView.swift:73.
+    //
+    // 与 iOS 的 CallView.swift:73 对齐。
     return (this.callState_activeCall.chatGroupId?.length ?? 0) > 0
       || (this.callState_activeCall.inviteeIds?.length ?? 0) > 1;
   }
@@ -71,6 +75,9 @@ export struct CallMainPage {
    * Stricter than isGroupCall(): only true when this call is bound to an IM
    * group (has chatGroupId). iOS CallMainView.swift:36 hides the invite
    * button for ad-hoc multi-party calls without a group.
+   *
+   * 比 isGroupCall() 更严格：只有当该通话绑定到 IM 群组（有 chatGroupId）时才为 true。iOS CallMainView.swift:36
+   * 会隐藏临时多方通话的邀请按钮，如果没有群组的话。
    */
   private isChatGroupCall(): boolean {
     return (this.callState_activeCall.chatGroupId?.length ?? 0) > 0;
@@ -84,6 +91,10 @@ export struct CallMainPage {
    *
    * Fire-and-forget: any failure is logged but the page still renders so the
    * user can retry / open Settings via the in-call buttons.
+   *
+   * 进入通话页面的一次性初始化：1) 权限检查 + 拒绝时自动拒接（被叫路径）。2) 默认音频路由（视频 → 扬声器，音频 → 听筒）。3) 打开麦克风 + （如果有视频）前置摄像头。
+   *
+   * 即发即忘：任何失败都会被记录，但页面仍会渲染，所以用户可以重试或通过通话中的按钮打开设置。
    */
   private bootstrapMediaForCall(): void {
     const mediaType = this.callState_activeCall.mediaType;

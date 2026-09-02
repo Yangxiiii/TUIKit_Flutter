@@ -6,6 +6,9 @@ import UIKit
 /// Hosts the chat-business native handlers that previously lived in
 /// AtomicXPlugin. Module/handler ownership matches the Dart-side migration:
 ///   audio_player, audio_recoder, file_picker, video_player, video_recorder.
+///
+/// 托管之前在 AtomicXPlugin 中的聊天业务原生处理程序。模块/处理程序的归属与 Dart
+/// 端迁移一致：audio_player、audio_recoder、file_picker、video_player、video_recorder。
 public class TencentChatUikitPlugin: NSObject, FlutterPlugin {
   private var videoRecorder: AtomicVideoRecorderPlugin?
   private var audioRecorder: AtomicAudioRecorderPlugin?

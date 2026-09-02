@@ -14,6 +14,9 @@ import com.tencent.cloud.tuikit.flutter.tuichatkit.videorecorder.AtomicVideoReco
  * Hosts the chat-business native handlers that were previously bundled inside
  * AtomicXPlugin. Module/handler ownership matches the Dart-side migration:
  *   audio_player, audio_recoder, file_picker, video_player, video_recorder.
+ *
+ * 托管之前包含在 AtomicXPlugin 里的聊天业务原生处理器。模块/处理器的归属对应 Dart
+ * 端的迁移：audio_player、audio_recorder、file_picker、video_player、video_recorder。
  */
 class TencentChatUikitPlugin : FlutterPlugin, ActivityAware {
   companion object {

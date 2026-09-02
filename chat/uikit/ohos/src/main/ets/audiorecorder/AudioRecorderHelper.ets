@@ -169,6 +169,8 @@ export default class AudioRecorderHelper {
   }
 
   // ---- private ----
+  //
+  // ---- 私有 ----
 
   /**
    * 收尾流程:stop AVRecorder + 判定 min duration + 触发 completion。

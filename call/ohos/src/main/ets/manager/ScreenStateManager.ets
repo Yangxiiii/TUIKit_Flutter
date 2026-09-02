@@ -3,6 +3,11 @@
 // Lock-screen wake-up is NOT handled here — HarmonyOS NEXT does not expose a
 // public `setShowOnLockScreen` on `window.Window`; that path is delegated to
 // the SOCIAL_COMMUNICATION notification slot via `IncomingNotificationFeature`.
+//
+// 在调用生命周期中翻转 `setWindowKeepScreenOn`。
+//
+// 锁屏唤醒在这里不处理——HarmonyOS NEXT 不在 `window.Window` 上提供公共的 `setShowOnLockScreen`；这个流程交给
+// SOCIAL_COMMUNICATION 通知槽，通过 `IncomingNotificationFeature` 处理。
 
 import { common } from '@kit.AbilityKit';
 import window from '@ohos.window';
@@ -56,6 +61,8 @@ class ScreenStateManagerImpl {
     } catch (e) {
       // May throw on devices without SystemCapability.Window.SessionManager;
       // never block the call flow.
+      //
+      // 永远不要阻塞通话流程。
       Logger.warn('ScreenStateManager.applyFlags: setWindowKeepScreenOn failed', on, e);
     }
   }

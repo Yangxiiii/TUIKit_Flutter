@@ -62,6 +62,8 @@ class CallPageRouter {
   Size get originScreenSize => _originScreenSize;
   void setOriginScreenSize(Size size) {
     // Only grow, never shrink — prevents small-window constraints from polluting the value.
+    //
+    // 只增长，绝不缩小——防止小窗口限制污染数值。
     _originScreenSize = Size(
       max(size.width, _originScreenSize.width),
       max(size.height, _originScreenSize.height),
@@ -173,6 +175,8 @@ class CallPageRouter {
     if (isFromSmallToFull) {
       // Small window → Fullscreen:
       // Immediately update page type and rebuild overlay, then navigate route.
+      //
+      // 小窗口 → 全屏：立即更新页面类型并重建覆盖层，然后导航路由。
       _shouldAnimateRect = true;
       _currentPageType = targetPageType;
       _callOverlayEntry?.markNeedsBuild();
@@ -181,6 +185,8 @@ class CallPageRouter {
       });
       // Reset after AnimatedPositioned finishes (250ms), so subsequent
       // rebuilds (e.g. drag updates) use Duration.zero instead of animating.
+      //
+      // AnimatedPositioned 完成后重置（250毫秒），这样后续重建（例如拖动更新）使用 Duration.zero 而不是动画。
       Future.delayed(const Duration(milliseconds: 250), () {
         _shouldAnimateRect = false;
       });
@@ -188,6 +194,10 @@ class CallPageRouter {
       // Fullscreen → Small window, or same-size switch:
       // Animate when at least one side is not a small window;
       // skip animation for small↔small transitions (e.g. floating → banner).
+      //
+      // 全屏 → 小窗口，或同尺寸切换：
+      //
+      // 跳过小↔小过渡动画（例如浮动 → 横幅）。
       _shouldAnimateRect =
           !_isSmallWindow(previousPageType) || !_isSmallWindow(targetPageType);
       _currentPageType = targetPageType;

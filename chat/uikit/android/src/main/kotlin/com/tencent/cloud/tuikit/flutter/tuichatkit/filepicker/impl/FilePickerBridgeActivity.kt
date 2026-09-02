@@ -23,20 +23,28 @@ class FilePickerBridgeActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         // Set transparent theme
+        //
+        // 设置透明主题
         setTheme(android.R.style.Theme_Translucent_NoTitleBar)
 
         // Check if config and listener are available
+        //
+        // 检查配置和监听器是否可用
         if (SystemFilePicker.filePickerConfig == null || SystemFilePicker.filePickerListener == null) {
             finish()
             return
         }
 
         // Register activity result launcher
+        //
+        // 注册活动结果启动器
         filePickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK && result.data != null) {
                 val selectedFiles = mutableListOf<FilePickerResult>()
 
                 // Handle multiple files
+                //
+                // 处理多个文件
                 val clipData: ClipData? = result.data?.clipData
                 if (clipData != null) {
                     val maxSelection = SystemFilePicker.filePickerConfig?.maxCount ?: Int.MAX_VALUE
@@ -48,6 +56,8 @@ class FilePickerBridgeActivity : ComponentActivity() {
                     }
                 } else {
                     // Handle single file
+                    //
+                    // 处理单个文件
                     val uri = result.data?.data
                     if (uri != null) {
                         processUri(uri)?.let { selectedFiles.add(it) }
@@ -55,6 +65,8 @@ class FilePickerBridgeActivity : ComponentActivity() {
                 }
 
                 // Callback with results
+                //
+                // 结果回调
                 if (selectedFiles.isNotEmpty()) {
                     SystemFilePicker.filePickerListener?.onPicked(selectedFiles)
                 } else {
@@ -62,18 +74,26 @@ class FilePickerBridgeActivity : ComponentActivity() {
                 }
             } else {
                 // User canceled
+                //
+                // 用户已取消
                 SystemFilePicker.filePickerListener?.onCanceled()
             }
 
             // Clean up
+            //
+            // 清理
             SystemFilePicker.filePickerListener = null
             SystemFilePicker.filePickerConfig = null
 
             // Finish activity
+            //
+            // 结束活动
             finish()
         }
 
         // Launch file picker
+        //
+        // 启动文件选择器
         launchFilePicker()
     }
 
@@ -82,6 +102,8 @@ class FilePickerBridgeActivity : ComponentActivity() {
 
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             // Set MIME type
+            //
+            // 设置 MIME 类型
             if (config.allowedMimeTypes.isNotEmpty()) {
                 type = config.allowedMimeTypes.first()
                 if (config.allowedMimeTypes.size > 1) {
@@ -94,9 +116,13 @@ class FilePickerBridgeActivity : ComponentActivity() {
             addCategory(Intent.CATEGORY_OPENABLE)
 
             // Allow multiple selection
+            //
+            // 允许多选
             putExtra(Intent.EXTRA_ALLOW_MULTIPLE, config.maxCount > 1)
 
             // Grant read permission
+            //
+            // 授予读取权限
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
 
@@ -117,6 +143,8 @@ class FilePickerBridgeActivity : ComponentActivity() {
         }
 
         // Copy file to app directory
+        //
+        // 复制文件到应用目录
         val copiedFile = FilePickerUtils.copyFileToAppDir(this, uri)
         if (copiedFile == null) {
             Log.e(TAG, "Failed to copy file")

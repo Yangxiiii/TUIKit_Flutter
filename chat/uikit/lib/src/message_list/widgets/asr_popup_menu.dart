@@ -3,6 +3,8 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 
 /// Menu action for ASR text bubble
+///
+/// ASR文本气泡的菜单操作
 class AsrPopupMenuAction {
   final String label;
   final String iconAsset;
@@ -17,6 +19,8 @@ class AsrPopupMenuAction {
 
 /// A popup menu widget for ASR text bubble, displayed above the target widget
 /// Similar to Android's AuxiliaryTextPopupMenu
+///
+/// ASR文本气泡的弹出菜单Widget，显示在目标Widget上方，类似于Android的AuxiliaryTextPopupMenu
 class AsrPopupMenu extends StatelessWidget {
   final List<AsrPopupMenuAction> actions;
 
@@ -108,6 +112,8 @@ class _AsrPopupMenuItem extends StatelessWidget {
 
 /// Show ASR popup menu above the target widget
 /// Returns when the menu is dismissed
+///
+/// 在目标Widget上方显示ASR弹出菜单，菜单关闭时返回
 Future<void> showAsrPopupMenu({
   required BuildContext context,
   required GlobalKey targetKey,
@@ -125,6 +131,8 @@ Future<void> showAsrPopupMenu({
   // Calculate menu position (above the target)
   // Menu width estimation: ~3 items * 60px each = ~180px
   // Menu height: icon(20) + spacing(4) + text(~12) + padding(8*2) = ~52px
+  //
+  // 计算菜单位置（目标上方）
   const double menuWidth = 180;
   const double menuHeight = 52;
   const double verticalOffset = 4;
@@ -139,12 +147,16 @@ Future<void> showAsrPopupMenu({
   }
 
   // Ensure menu stays within screen bounds
+  //
+  // 确保菜单在屏幕范围内
   if (left < 8) left = 8;
   if (left + menuWidth > screenSize.width - 8) {
     left = screenSize.width - menuWidth - 8;
   }
 
   // Position above the target
+  //
+  // 目标上方的位置
   double top = targetPosition.dy - menuHeight - verticalOffset;
   // If not enough space above, show below
   if (top < MediaQuery.of(context).padding.top + 8) {
@@ -159,6 +171,8 @@ Future<void> showAsrPopupMenu({
       return Stack(
         children: [
           // Transparent barrier to dismiss menu
+          //
+          // 透明屏障用于关闭菜单
           Positioned.fill(
             child: GestureDetector(
               onTap: () => overlayEntry.remove(),

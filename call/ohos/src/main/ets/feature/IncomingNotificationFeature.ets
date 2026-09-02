@@ -14,6 +14,8 @@ import { AppStateObserver } from './AppStateObserver';
 
 // Constant id keeps cancel() stateless and lets a fresh `publish()` update in
 // place rather than stacking.
+//
+// 常量 id 保持 cancel() 无状态，并允许新的 `publish()` 就地更新而不是堆叠。
 const NOTIFICATION_ID: number = 0xCA11_001;
 
 export const NOTIFICATION_CALL_ACTION_KEY: string = 'callkitAction';
@@ -42,6 +44,8 @@ export class IncomingNotificationFeature {
   }
 
   /** No-op pre-init or when foreground. Avatar fetch is best-effort. */
+
+  /* 在预初始化或前台时无操作。头像获取是尽力而为的。 */
   async publish(): Promise<void> {
     if (!this.context) {
       Logger.warn('IncomingNotificationFeature.publish: not initialized');
@@ -82,6 +86,8 @@ export class IncomingNotificationFeature {
         wantAgent: tapAgent,
         // SOCIAL_COMMUNICATION already provides heads-up + sound by default;
         // there is no public `fullScreenIntentWantAgent` field on the surface.
+        //
+        // 在界面上没有公共的 `fullScreenIntentWantAgent` 字段。
         content: {
           notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
           normal: {
@@ -153,6 +159,8 @@ export class IncomingNotificationFeature {
   }
 
   /** Returns undefined on any failure; the notification will fall back to the bundle's default icon. */
+
+  /* 任何失败都会返回 undefined；通知将回退到应用包的默认图标。 */
   private async tryLoadAvatarPixelMap(url: string | undefined): Promise<image.PixelMap | undefined> {
     if (!url || url.length === 0 || !url.startsWith('http')) {
       return undefined;

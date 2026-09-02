@@ -33,6 +33,8 @@ import AudioRecorderHelper, {
  * 需要 UIAbilityContext:麦克风权限 checkAccessToken 不需要,但 helper 保留了
  * requestPermissionsFromUser 的可能性,先把 context 传下去。
  * ApplicationContext.cacheDir 用作默认录音存放目录。
+ *
+ * 事件通道 : 'tencent_chat_uikit/audio_recorder_events' {类型: 'recordTime', 时间毫秒: int}
  */
 export default class AudioRecorder implements
   MethodCallHandler,
@@ -74,6 +76,8 @@ export default class AudioRecorder implements
   }
 
   // ----- StreamHandler -----
+  //
+  // ----- 流处理器 -----
   onListen(args: ESObject, events: EventSink): void {
     this.eventSink = events;
   }
@@ -103,6 +107,8 @@ export default class AudioRecorder implements
   }
 
   // ----- MethodCallHandler -----
+  //
+  // ----- 方法调用处理器 -----
   onMethodCall(call: MethodCall, result: MethodResult): void {
     switch (call.method) {
       case 'startRecord':

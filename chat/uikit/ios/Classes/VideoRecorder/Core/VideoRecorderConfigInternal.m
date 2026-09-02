@@ -102,6 +102,8 @@
 }
 
 // record mode. 0:mixed, 1:onlyPhoto 2:onlyVideo
+//
+// 录制模式。0:混合, 1:仅照片, 2:仅视频
 - (int) getRecordeMode {
     return [self getIntFromDic:@"record_mode" defaultValue:0];
 }

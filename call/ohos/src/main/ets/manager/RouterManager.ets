@@ -16,6 +16,8 @@ export class RouterManager {
   }
 
   /** Falls back to fullView when the host has disabled the incoming banner. */
+
+  /* 当主机禁用了来电横幅时，回退到全屏视图。 */
   static showBannerView(): void {
     if (!GlobalState().enableIncomingBanner) {
       RouterManager.showCallingView();
@@ -40,6 +42,9 @@ export class RouterManager {
    * Subscribe (or unsubscribe with `null`) to route transitions. Owned by
    * SubWindowManager so the SubWindow can be created / resized / destroyed
    * in lockstep with the route — same pattern as iOS WindowManager.
+   *
+   * 订阅（或用 `null` 取消订阅）路由转换。由 SubWindowManager 拥有，所以 SubWindow 可以与路由同步创建/调整大小/销毁——和 iOS 的 WindowManager
+   * 模式一样。
    */
   static bindRouteListener(listener: RouteListener | null): void {
     _routeListener = listener;

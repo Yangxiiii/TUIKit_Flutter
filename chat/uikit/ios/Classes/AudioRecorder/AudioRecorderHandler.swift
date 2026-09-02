@@ -27,6 +27,8 @@ class AudioRecorderHandler: NSObject, FlutterStreamHandler {
             
             // Return result to Flutter through method channel result
             // Note: This will be handled in the startRecord method
+            //
+            // 注意：这将在 startRecord 方法中处理
         }
         
         AudioRecorder.shared.onRecordTime = { [weak self] timeMs in
@@ -69,6 +71,8 @@ class AudioRecorderHandler: NSObject, FlutterStreamHandler {
         let maxDurationMs = args["maxDurationMs"] as? Int ?? 60000
         
         // Setup completion handler
+        //
+        // 设置完成处理器
         var completionCalled = false
         AudioRecorder.shared.onRecordingComplete = { [weak self] resultCode, filePath, durationMs in
             guard !completionCalled else { return }
@@ -86,6 +90,8 @@ class AudioRecorderHandler: NSObject, FlutterStreamHandler {
         }
         
         // Start recording
+        //
+        // 开始录音
         AudioRecorder.shared.startRecord(
             filepath: filepath,
             enableAIDeNoise: enableAIDeNoise,

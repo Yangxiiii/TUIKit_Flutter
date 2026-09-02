@@ -177,6 +177,8 @@
     }
 
     // Remove `#` and `0x`
+    //
+    // 移除 `#` 和 `0x`
     if ([hex hasPrefix:@"#"]) {
         hex = [hex substringFromIndex:1];
     } else if ([hex hasPrefix:@"0x"]) {
@@ -184,12 +186,16 @@
     }
 
     // Invalid if not 3, 6, or 8 characters
+    //
+    // 如果不是3、6或8个字符则无效
     NSUInteger length = [hex length];
     if (length != 3 && length != 6 && length != 8) {
         return [[UIColor alloc] init];
     }
 
     // Make the string 8 characters long for easier parsing
+    //
+    // 将字符串做成8个字符长以便于解析
     if (length == 3) {
         NSString *r = [hex substringWithRange:NSMakeRange(0, 1)];
         NSString *g = [hex substringWithRange:NSMakeRange(1, 1)];
@@ -218,15 +224,21 @@
     }
 
     // Follow system changes by default
+    //
+    // 默认跟随系统变化
     NSString *language = [NSLocale preferredLanguages].firstObject;
     if ([language hasPrefix:@"en"]) {
         language = @"en";
     } else if ([language hasPrefix:@"zh"]) {
         if ([language rangeOfString:@"Hans"].location != NSNotFound) {
             // Simplified Chinese
+            //
+            // 简体中文
             language = @"zh-Hans";
         } else {
             // Traditional Chinese
+            //
+            // 繁体中文
             language = @"zh-Hant";
         }
     } else if ([language hasPrefix:@"ar"]) {

@@ -99,6 +99,8 @@ export struct CallView {
             enableVirtualBackground: true,
             // Single has no card background; it just adds the safe-area
             // inset to its own bottom padding.
+            //
+            // 单人没有卡片背景；它只是在自身底部填充中添加安全区域插入。
             bottomSafeInset: this.viewState.navBarHeight,
           });
         }
@@ -167,6 +169,8 @@ export struct CallView {
 
   /** Foreground peer avatar shown during 1:1 waiting (rounded square, not a circle). */
 
+  /* 一对一等待时显示前景对方头像（圆角方形，不是圆形）。 */
+
   private isCaller(): boolean {
     return this.callState_activeCall.inviterId === this.callState_selfInfo.id;
   }
@@ -175,6 +179,9 @@ export struct CallView {
     // Aligned with iOS CallView.swift:73 — chatGroupId non-empty OR more
     // than one invitee (covers a 2-participant group call where
     // allParticipants.length === 2 would otherwise be misclassified as 1:1).
+    //
+    // 与 iOS 的 CallView.swift:73 对齐 —— chatGroupId 非空或受邀者多于一个（覆盖 2 人参与群组通话的情况，否则 allParticipants.length ===
+    // 2 会被错误分类为一对一）。
     return (this.callState_activeCall.chatGroupId?.length ?? 0) > 0
       || (this.callState_activeCall.inviteeIds?.length ?? 0) > 1;
   }

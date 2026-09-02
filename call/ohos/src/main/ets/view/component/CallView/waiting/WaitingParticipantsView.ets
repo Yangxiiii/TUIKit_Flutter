@@ -66,6 +66,8 @@ export struct WaitingParticipantsView {
   }
 
   /** All participants other than the caller and self, capped at MAX_PARTICIPANT. */
+
+  /* 除了主叫方和自己以外的所有参与者，人数上限为 MAX_PARTICIPANT。 */
   private otherParticipants(): CallParticipantInfo[] {
     const inviterId = this.activeCall.inviterId;
     const filtered = this.allParticipants.filter((p: CallParticipantInfo): boolean => {

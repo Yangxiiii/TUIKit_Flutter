@@ -88,6 +88,8 @@ class _CallMessageWidgetState extends State<CallMessageWidget>
             provider.streamMediaType == CallStreamMediaType.video;
 
         // Get the userID of the other party from the message
+        //
+        // 从消息中获取对方的 userID
         final userID = widget.message.isSentBySelf
             ? widget.message.rawMessage?.userID ?? ''
             : widget.message.rawMessage?.sender ?? '';

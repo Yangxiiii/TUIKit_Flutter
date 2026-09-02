@@ -91,6 +91,8 @@ class _GroupListState extends State<GroupList> {
               onItemClick: (item) {
                 if (widget.onGroupClick != null) {
                   // Convert GroupInfo back to ContactInfo for backward compatibility with OnGroupClick callback
+                  //
+                  // 将 GroupInfo 转回 ContactInfo，以兼容 OnGroupClick 回调。
                   ContactInfo contactInfo = ContactInfo(
                     userID: item.key,
                     nickname: item.label,

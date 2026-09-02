@@ -27,6 +27,8 @@ class AtomicVideoRecorderPlugin: NSObject {
 extension AtomicVideoRecorderPlugin: FlutterPlugin {
     static func register(with registrar: FlutterPluginRegistrar) {
         // This is handled in the main plugin
+        //
+        // 这在主插件中处理
     }
 }
 

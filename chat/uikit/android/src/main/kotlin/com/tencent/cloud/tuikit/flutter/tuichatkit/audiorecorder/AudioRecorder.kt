@@ -30,6 +30,9 @@ object AudioRecorder {
     // To use AI noise reduction, the app must depend on LiteAVSDK_Professional v12.7+ and have the feature enabled.
     // Dependency: Add to app module's build.gradle dependencies: implementation("com.tencent.liteav:LiteAVSDK_Professional:12.7.0.xxxxx")
     // For enabling permissions, see documentation: https://cloud.tencent.com/document/product/269/113290
+    //
+    // 要使用 AI 降噪，应用必须依赖 LiteAVSDK_Professional v12.7+ 并启用该功能。依赖：在 app 模块的 build.gradle dependencies
+    // 中添加：implementation("com.tencent.liteav:LiteAVSDK_Professional:12.7.0.xxxxx")
     fun startRecord(
         filepath: String? = null,
         enableAIDeNoise: Boolean = false,

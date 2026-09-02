@@ -83,6 +83,8 @@ class MessageTooltipState extends State<MessageTooltip> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Reaction emoji picker
+            //
+            // 表情反应选择器
             if (widget.showReactionPicker && widget.onReactionSelected != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -103,6 +105,8 @@ class MessageTooltipState extends State<MessageTooltip> {
                 ),
               ),
             // Menu items
+            //
+            // 菜单项
             Wrap(
               alignment: WrapAlignment.start,
               spacing: 4,
@@ -160,6 +164,8 @@ class MessageTooltipState extends State<MessageTooltip> {
     // 图标色跟随当前 app_ui 主题，确保在不同背景上保持可见。
     // both light and dark modes; destructive actions (e.g. delete) use the
     // error color to match their label.
+    //
+    // 支持灯光和暗黑模式；破坏性操作（如删除）使用错误颜色以匹配其标签。
     final color = item.isDestructive
         ? colorTheme.textColorError
         : colorTheme.textColorPrimary;

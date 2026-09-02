@@ -23,6 +23,8 @@ class FileMessageWidget extends StatefulWidget {
   final bool isInMergedDetailView;
 
   /// Optional override for bubble background color (used for highlight animation)
+  ///
+  /// 可选覆盖气泡背景颜色（用于高亮动画）
   final Color? bubbleColor;
 
   const FileMessageWidget({
@@ -156,6 +158,8 @@ class _FileMessageWidgetState extends State<FileMessageWidget>
   }
 
   /// Show error dialog
+  ///
+  /// 显示错误对话框
   void _showErrorDialog(BuildContext context, String message) {
     AppLocalizedText atomicLocal = AppLocalization.of(context);
     showDialog(

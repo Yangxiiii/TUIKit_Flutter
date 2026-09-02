@@ -20,6 +20,8 @@ class SoundMessageWidget extends StatefulWidget {
   final bool isInMergedDetailView;
 
   /// Optional override for bubble background color (used for highlight animation)
+  ///
+  /// 气泡背景颜色的可选覆盖（用于高亮动画）
   final Color? bubbleColor;
 
   const SoundMessageWidget({
@@ -107,6 +109,10 @@ class _SoundMessageWidgetState extends State<SoundMessageWidget>
     // built by `MessageAttachmentBuilder` and rendered by `MessageItem`
     // *outside* the row that holds the receipt — see
     // `lib/src/message_list/widgets/message_attachments.dart`.
+    //
+    // ASR（语音→文字）气泡以前是在 Column 内作为语音气泡的兄弟元素渲染的。那样的话，每当 ASR 气泡出现时，由 MessageItem 使用 CrossAxisAlignment.end
+    // 放置的已读回执和状态图标会漂移到列的底部，见 Bug-956459。ASR 气泡现在由 `MessageAttachmentBuilder` 构建，并由 `MessageItem` 渲染在放置回执的行
+    // *外部* —— 参见 `lib/src/message_list/widgets/message_attachments.dart`。
     return GestureDetector(
       onTap: _handleTap,
       onLongPress: widget.onLongPress,

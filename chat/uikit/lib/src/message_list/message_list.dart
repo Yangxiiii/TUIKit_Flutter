@@ -39,18 +39,26 @@ typedef OnUserClick = void Function(String userID);
 /// Callback when user long presses on avatar (for @ mention feature)
 /// [userID] is the user ID of the message sender
 /// [displayName] is the display name of the message sender
+///
+/// 当用户长按头像时的回调（用于@提及功能）[userID] 是消息发送者的用户ID [displayName] 是消息发送者的显示名称
 typedef OnUserLongPress = void Function(String userID, String displayName);
 
 /// Callback when call message is clicked in C2C conversation
 /// [userID] is the user ID of the other party
 /// [isVideoCall] is true for video call, false for voice call
+///
+/// 当在C2C会话中点击通话消息时的回调 [userID] 是对方的用户ID [isVideoCall] 视频通话为true，语音通话为false
 typedef OnCallMessageClick = void Function(String userID, bool isVideoCall);
 
 /// Multi-select mode state callback
+///
+/// 多选模式状态回调
 typedef OnMultiSelectModeChanged = void Function(
     bool isMultiSelectMode, int selectedCount);
 
 /// Multi-select mode state
+///
+/// 多选模式状态
 class MultiSelectState {
   final bool isActive;
   final int selectedCount;
@@ -68,6 +76,8 @@ class MultiSelectState {
 }
 
 /// Multi-select mode action callbacks
+///
+/// 多选模式操作回调
 class MultiSelectCallbacks {
   final VoidCallback onCancel;
   final VoidCallback onDelete;
@@ -103,25 +113,39 @@ class MessageList extends StatefulWidget {
   final OnUserClick? onUserClick;
 
   /// Callback when user long presses on avatar (for @ mention feature in group chat)
+  ///
+  /// 当用户长按头像时的回调（用于群聊中的@提及功能）
   final OnUserLongPress? onUserLongPress;
 
   /// Callback when call message is clicked in C2C conversation
+  ///
+  /// 当在C2C会话中点击通话消息时的回调
   final OnCallMessageClick? onCallMessageClick;
 
   /// Callback when user taps "Quote" in the long-press menu
+  ///
+  /// 当用户在长按菜单中点击“引用”时的回调
   final void Function(MessageInfo message)? onQuoteMessage;
   final List<MessageCustomAction> customActions;
 
   /// Multi-select mode change callback
+  ///
+  /// 多选模式变化回调
   final OnMultiSelectModeChanged? onMultiSelectModeChanged;
 
   /// Multi-select state change callback (includes action methods)
+  ///
+  /// 多选状态变化回调（包括操作方法）
   final void Function(MultiSelectState? state)? onMultiSelectStateChanged;
 
   /// Group at-mention info list from ConversationInfo for tongue navigation
+  ///
+  /// 来自ConversationInfo的群@提及信息列表，用于小舌头导航
   final List<GroupAtInfo>? groupAtInfoList;
 
   /// Initial unread count from ConversationInfo when entering the chat
+  ///
+  /// 进入聊天时从 ConversationInfo 获取的初始未读计数
   final int initialUnreadCount;
 
   const MessageList({
@@ -162,6 +186,15 @@ class MessageList extends StatefulWidget {
 /// notifyListeners (e.g. from a reaction/extension fetch in the same
 /// 2-frame settle window) from re-applying the jump/highlight and yanking
 /// the user away from where they just landed.
+///
+/// 当前消息列表在导航方面正在做什么。
+///
+/// 四种“进行中”状态是互斥的：列表可以导航到最旧的未读消息，或者 @
+/// 提醒，或者引用的消息，或者重新加载到最新页面——永远不会同时出现两种。将它们建模为一个封闭的层次结构，而不是一堆独立的布尔值（之前的设计），可以在编译时保证这种互斥性，让滚动监听器在
+/// `_navigationState is _NavIdle` 的单次检查上就能短路，并且让传入的 `_onMessageListStateChanged` 分发器能对每种导航类型进行穷尽模式匹配。
+///
+/// `_NavToAtMention.targetSeq` 和 `_NavToQuotedMessage.targetMsgID` 是故意设计成可空的：在入站分支运行后将它们设置为
+/// null，是“只处理一次”的保护措施，可以防止第二次 notifyListeners（例如在同一个两帧稳定窗口里的反应/扩展获取）重新应用跳转/高亮，把用户从刚到达的位置拉走。
 sealed class _NavigationState {
   const _NavigationState();
 }
@@ -191,6 +224,12 @@ class _NavToQuotedMessage extends _NavigationState {
   /// can re-derive the "natural" tongue (backToLatest / atMention) after
   /// the round-trip completes — we do not want a second backToQuote
   /// tongue chaining off the back-navigation.
+  ///
+  /// 当入站分支到达目标时，要提交的小舌头类型。
+  ///
+  /// 前向导航（点击引用预览 → 跳转到被引用的目标）会传递 [TongueType.backToQuote]，这样用户可以往返回到源消息。反向导航（点击 backToQuote 小舌头 →
+  /// 回到源消息）会传递 [TongueType.none]，这样滚动监听器在往返完成后可以重新推导出“自然”的小舌头（backToLatest /
+  /// atMention）——我们不希望在反向导航上再生成第二个 backToQuote 链接。
   final TongueType tongueAfter;
 
   /// Whether to highlight the landed-on message.
@@ -204,6 +243,12 @@ class _NavToQuotedMessage extends _NavigationState {
   /// happen to align for the current forward/back uses, but they are
   /// orthogonal concerns and a future caller (e.g. "navigate to a search
   /// hit") might want one but not the other.
+  ///
+  /// 是否高亮显示跳转到的消息。
+  ///
+  /// 前向导航会高亮被引用的目标，这样用户可以清楚知道自己跳转到了哪里。反向导航不会高亮源消息——用户已经知道自己从哪里来的，重新闪烁原始消息只是视觉噪音。
+  ///
+  /// 故意将其作为独立字段与 [tongueAfter] 分开：目前在前进/后退的使用中两者碰巧一致，但它们是正交概念，将来主叫方（例如“导航到搜索结果”）可能只需要其中一个而不是另一个。
   final bool highlightTarget;
 
   const _NavToQuotedMessage(
@@ -234,6 +279,9 @@ class _MessageListState extends State<MessageList>
   /// Single source of truth for "what kind of navigation is in flight".
   /// See [_NavigationState] for why this replaces the previous bag of
   /// `_isNavigatingTo* / _isReloadingLatest` booleans.
+  ///
+  /// 关于“正在进行哪种类型的导航”的单一真实来源。请参见 [_NavigationState]，了解为什么这取代了之前的一堆 `_isNavigatingTo* / _isReloadingLatest`
+  /// 布尔值。
   _NavigationState _navigationState = const _NavIdle();
 
   bool _isInitialLoad = true;
@@ -251,6 +299,9 @@ class _MessageListState extends State<MessageList>
   /// `sequence` / `timestamp` to reload the page around it on the
   /// reverse leg (`_onBackToQuoteTongueTap`). Cleared after the
   /// round-trip completes.
+  ///
+  /// 正在进行的引用往返的源消息——也就是用户刚点击其引用预览的那条消息。以完整的 [MessageInfo] 存储（而不仅仅是 `msgID`），因为当引用目标导航触发 Store
+  /// 重新加载且源消息从加载列表中被整体替换时，我们需要其 `sequence` / `timestamp` 来在回程（`_onBackToQuoteTongueTap`）时重新加载页面。往返完成后清空。
   MessageInfo? _quoteReturnSource;
 
   Widget? _callStatusWidget;
@@ -262,9 +313,13 @@ class _MessageListState extends State<MessageList>
   Timer? _receiptTimer;
   static const Duration _receiptDebounceInterval = Duration(milliseconds: 800);
   // Threshold: auto-load older messages when within this many items of the oldest message
+  //
+  // 阈值：当接近最旧消息的这么多项目时自动加载旧消息
   static const int _loadOlderMessagesThreshold = 5;
 
   // Multi-select mode state
+  //
+  // 多选模式状态
   bool _isMultiSelectMode = false;
   final Set<String> _selectedMessageIDs = {};
 
@@ -285,33 +340,49 @@ class _MessageListState extends State<MessageList>
       false; // Defer tongue display until visibility check
 
   // @mention tracking for sequential navigation
+  //
+  // @提及跟踪用于顺序导航
   List<GroupAtInfo> _remainingAtInfoList = [];
 
   // ASR display manager for voice-to-text feature
+  //
+  // ASR显示管理器，用于语音转文字功能
   late AsrDisplayManager _asrDisplayManager;
 
   // Translation display manager for text translation feature
+  //
+  // 翻译显示管理器，用于文本翻译功能
   late TranslationDisplayManager _translationDisplayManager;
 
   // Listener references for proper removal
+  //
+  // 监听器引用以便正确移除
   late final VoidCallback _messageListStateChangedListener;
   late final VoidCallback _scrollListenerCallback;
   late final VoidCallback _joinedGroupListChangedListener;
 
   // AutomaticKeepAliveClientMixin requires this method to be implemented
   // Returning true indicates that the state is maintained even if the Widget is not in the view.
+  //
+  // AutomaticKeepAliveClientMixin 需要实现此方法，返回 true 表示即使 Widget 不在视图中状态也会被保持
   @override
   bool get wantKeepAlive => true;
 
   /// Whether in multi-select mode
+  ///
+  /// 是否处于多选模式
   bool get isMultiSelectMode => _isMultiSelectMode;
 
   /// List of selected messages
+  ///
+  /// 选中消息列表
   List<MessageInfo> get selectedMessages => _messages
       .where((m) => m.msgID != null && _selectedMessageIDs.contains(m.msgID))
       .toList();
 
   /// Number of selected messages
+  ///
+  /// 选中消息数量
   int get selectedCount => _selectedMessageIDs.length;
 
   @override
@@ -322,6 +393,8 @@ class _MessageListState extends State<MessageList>
     _translationDisplayManager = TranslationDisplayManager();
 
     // Initialize listener references
+    //
+    // 初始化监听器引用
     _messageListStateChangedListener = _onMessageListStateChanged;
     _scrollListenerCallback = _scrollListener;
     _joinedGroupListChangedListener = _onJoinedGroupListChanged;
@@ -337,6 +410,8 @@ class _MessageListState extends State<MessageList>
     if (widget.conversationID.startsWith(groupConversationIDPrefix)) {
       // Initial pull for call banner; subsequent attribute pushes arrive via
       // GroupStore.joinedGroupList (see _onJoinedGroupListChanged).
+      //
+      // 通话横幅的初始拉取；后续属性推送通过 GroupStore.joinedGroupList 到达（见 _onJoinedGroupListChanged）
       GroupStore.shared.state.joinedGroupList
           .addListener(_joinedGroupListChangedListener);
       _loadGroupAttributes();
@@ -390,6 +465,8 @@ class _MessageListState extends State<MessageList>
     if (positions.isEmpty) return;
 
     // Single-pass: compute minIndex, maxIndex, isAtBottom in one traversal
+    //
+    // 单次遍历：在一次遍历中计算 minIndex、maxIndex、isAtBottom
     int minIndex = positions.first.index;
     int maxIndex = minIndex;
     bool isAtBottom = minIndex <= 1;
@@ -403,6 +480,8 @@ class _MessageListState extends State<MessageList>
     // Don't kick off auto-loads while any user-initiated navigation is in
     // flight. Each of those nav states drives its own scroll/jumpTo and
     // would race with the scroll-listener-driven _loadNewer/_loadPrevious.
+    //
+    // 当有用户发起的导航正在进行时，不要启动自动加载。这些导航状态中的每一个都会驱动自己的滚动/jumpTo，并且会与由滚动监听器触发的 _loadNewer/_loadPrevious 发生竞争。
     final isNavIdle = _navigationState is _NavIdle;
 
     // Load newer messages when the user has scrolled to the bottom
@@ -417,6 +496,12 @@ class _MessageListState extends State<MessageList>
     // may stay fully visible while minIndex sits at 1 — so requiring
     // `<= 0` would silently skip the load even after the user is
     // visibly at the bottom of the loaded page.
+    //
+    // 当用户滚动到底部时加载更新的消息
+    //
+    // 使用 `isAtBottom`（minIndex <= 1）而不是更严格的 `minIndex <= 0`，这样触发条件与文件中其他 “到底部” 的定义一致（参见
+    // `_isUserAtBottom()` 和上面的 `isAtBottom` 标志）。使用 reverse:true 时，ScrollablePositionedList
+    // 并不总是在滚动到物理极限时把索引 0 固定在前端——索引 0 可能仍完全可见，而 minIndex 为 1——所以要求 `<= 0` 会导致即使用户看起来已经到底，加载也会被静默跳过。
     if (!_isLoadingNewer &&
         isNavIdle &&
         _messageListStore.state.hasNewerMessages.value) {
@@ -435,6 +520,8 @@ class _MessageListState extends State<MessageList>
     }
 
     // Tongue visibility logic
+    //
+    // 小舌头可见性逻辑
     if (!widget.config.isSupportTongue) return;
     _updateTongueState(minIndex, isAtBottom);
   }
@@ -446,6 +533,9 @@ class _MessageListState extends State<MessageList>
     // and any scroll-driven re-derivation here would race with that.
     // Reload-latest needs the tongue's loading spinner kept on too, until
     // the Completer-driven cleanup hides it.
+    //
+    // 任何用户发起的导航在其 2 帧的稳定窗口期间控制小舌头状态 —— `_onMessageListStateChanged`
+    // 中对应的分支会原子地设置小舌头/高亮/滚动，任何由滚动触发的重新推导都会和它竞争。刷新最新需要小舌头的加载旋转保持显示，直到由 Completer 控制的清理隐藏它。
     if (_navigationState is! _NavIdle) return;
 
     if (isAtBottom) {
@@ -457,6 +547,10 @@ class _MessageListState extends State<MessageList>
             // Only hide tongue when truly at the bottom of ALL messages.
             // If there are still newer messages to load, keep backToLatest
             // visible so the user can tap to jump to the latest.
+            //
+            // 只有在所有消息真正到达底部时才隐藏小舌头。
+            //
+            // 可见，以便用户可以点击跳转到最新消息。
             if (_messageListStore.state.hasNewerMessages.value) {
               _tongueType = TongueType.backToLatest;
             } else {
@@ -472,6 +566,8 @@ class _MessageListState extends State<MessageList>
 
     if (isScrolledPastThreshold) {
       // Don't override backToQuote tongue — it stays until user taps it or scrolls to bottom
+      //
+      // 不要覆盖 backToQuote 小舌头 —— 它会保持显示，直到用户点击它或滚动到底部。
       if (_tongueType != TongueType.backToQuote) {
         final newType = _computeTongueType();
         if (newType != _tongueType) {
@@ -485,6 +581,9 @@ class _MessageListState extends State<MessageList>
       // the threshold (atMention).  Keep newMessages and backToLatest tongue
       // visible: the user is NOT at bottom (handled above) so they should
       // still see the indicator to jump back to the latest position.
+      //
+      // 没有滚动超过阈值 —— 只隐藏那些需要阈值的小舌头类型（如 @提及）。保持 newMessages 和 backToLatest
+      // 小舌头可见：用户不在底部（前面已经处理），所以他们仍然应该看到指示器以跳回最新位置。
       if (_tongueType != TongueType.none &&
           _tongueType != TongueType.newMessages &&
           _tongueType != TongueType.backToLatest &&
@@ -551,6 +650,13 @@ class _MessageListState extends State<MessageList>
     // the 2-frame settle window may see additional notifyListeners
     // (e.g. reaction/extension fetch) and we don't want to re-fire the
     // jump and yank the user away from where they just landed.
+    //
+    // 每种导航类型都有一个“原子帧”分支：messages + scroll + highlight + tongue 会在一次 setState 中应用，同时我们仍然持有 notifyListeners
+    // 栈，所以偶然的 _scrollListener / _updateTongueState 调用永远不会观察到半应用的中间状态（例如 list 已经换了，但 jumpTo 还没运行，所以
+    // positions 仍然报告 index 0 / isAtBottom=true）。
+    //
+    // `_NavToAtMention` 和 `_NavToQuotedMessage` 带有可空的 target；null 意味着“这个导航已经处理过一次”——两帧的稳定窗口可能会看到额外的
+    // notifyListeners（例如 reaction/extension fetch），而我们不想重新触发 jump，把用户从刚落下的地方拉走。
     final navState = _navigationState;
     switch (navState) {
       case _NavToUnread()
@@ -586,6 +692,8 @@ class _MessageListState extends State<MessageList>
         // window — a subsequent notifyListeners in this window will fall
         // through this switch to the default branch instead of
         // re-jumping back to the @ message.
+        //
+        // 在不离开 2 框架结算窗口的情况下，将此导航标记为“已处理”——在此窗口中的后续 notifyListeners 调用将会穿过此 switch 到默认分支，而不会重新跳回 @ 消息。
         _navigationState = const _NavToAtMention(null);
         _activateAtMentionTongueIfNeeded();
         return;
@@ -608,6 +716,8 @@ class _MessageListState extends State<MessageList>
           }
           _tongueType = tongueAfter;
           // Same processed-once guard as the at-mention branch.
+          //
+          // 与 @ 提及分支相同的“已处理一次”保护。
           _navigationState =
               _NavToQuotedMessage(null, tongueAfter, highlightTarget);
         });
@@ -630,6 +740,8 @@ class _MessageListState extends State<MessageList>
     final oldLength = _messages.length;
     // Remember the first message's ID to detect head-insertion (new messages)
     // vs tail-append (older history messages).
+    //
+    // 记住第一条消息的 ID，以便检测是头部插入（新消息）还是尾部追加（历史旧消息）。
     final oldFirstMsgID = _messages.isNotEmpty ? _messages.first.msgID : null;
 
     setState(() {
@@ -641,6 +753,10 @@ class _MessageListState extends State<MessageList>
     // the first message's ID has changed — if it changed, newer messages were
     // prepended; if it didn't, older messages were appended at the tail and
     // no compensation is needed (existing item indices are unchanged).
+    //
+    // 仅当新消息插入在列表的 HEAD 时才进行补偿。
+    //
+    // 第一条消息的 ID 已更改——如果它更改了，说明有新消息被添加到前面；如果没有更改，说明旧消息被追加到尾部，不需要补偿（现有条目索引保持不变）。
     final insertedCount = _messages.length - oldLength;
     final newFirstMsgID = _messages.isNotEmpty ? _messages.first.msgID : null;
     final isHeadInsertion = insertedCount > 0 &&
@@ -658,12 +774,18 @@ class _MessageListState extends State<MessageList>
     // after the await, and if we also schedule a postFrame jumpTo(0)
     // here, that postFrame fires last and clobbers the scroll-preserve,
     // visibly snapping the user to the very bottom on every second load.
+    //
+    // 在 _loadNewerMessages 正在进行时也必须跳过：当一页更新的消息恰好包含自己发送的尾部（例如用户之前发送了一条引用消息，而我们现在滚动加载包含它的页面），新的
+    // _messages.first 会是自己发送的消息——但这并不是一个新的“用户刚发送消息”的事件。_loadNewerMessages 已经在 await 之后运行它自己的滚动保持
+    // jumpTo(insertedCount)，如果我们在这里还安排 postFrame jumpTo(0)，postFrame 会最后触发，覆盖滚动保持，让用户在每次第二次加载时明显地跳到最底部。
     if (isHeadInsertion &&
         !_isLoadingNewer &&
         _messages.isNotEmpty &&
         _messages.first.isSentBySelf) {
       if (_messageListStore.state.hasNewerMessages.value) {
         // List was loaded around an older position, need to reload latest
+        //
+        // 列表加载到一个较旧的位置附近，需要重新加载最新内容
         _reloadLatestMessages();
       } else if (_itemScrollController.isAttached) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -675,6 +797,8 @@ class _MessageListState extends State<MessageList>
     }
     // Skip compensation when _loadNewerMessages is in progress — it already
     // does its own jumpTo after the await returns.
+    //
+    // 当 _loadNewerMessages 进行中时跳过补偿——它自己在 await 返回后已经做了 jumpTo。
     else if (isHeadInsertion &&
         !_isLoadingNewer &&
         !_isUserAtBottom() &&
@@ -687,6 +811,8 @@ class _MessageListState extends State<MessageList>
         // Jump immediately (synchronously) — same approach as _loadNewerMessages —
         // to avoid the visible "scroll then snap back" flicker that
         // addPostFrameCallback would cause.
+        //
+        // 立即跳转（同步）——与_loadNewerMessages的做法相同——以避免addPostFrameCallback导致的“滚动然后回弹”闪烁。
         _itemScrollController.jumpTo(
           index: anchor.index + insertedCount,
           alignment: anchor.itemLeadingEdge,
@@ -742,6 +868,8 @@ class _MessageListState extends State<MessageList>
           });
         }
         // Fetch reactions for new message
+        //
+        // 获取新消息的反应
         if (widget.config.isSupportReaction) {
           _fetchMessageReactions([message]);
         }
@@ -751,6 +879,8 @@ class _MessageListState extends State<MessageList>
   Future<void> _fetchMessageReactions(List<MessageInfo> messages) async {
     // Reactions are now auto-fetched by MessageListStore's internal listener
     // when new messages are added to the message list.
+    //
+    // 当新消息添加到消息列表时，MessageListStore的内部监听器现在会自动获取反应。
   }
 
   bool _isUserAtBottom() {
@@ -769,6 +899,8 @@ class _MessageListState extends State<MessageList>
     // loadMessages entry and only flips hasOlderMessages back to true if
     // more older pages exist. Read sites check
     // `_messageListStore.state.hasOlderMessages.value` directly.
+    //
+    // 没有本地的has-more标记镜像——Store在loadMessages入口时将两者重置为false，并且只有在存在更多旧页时才将hasOlderMessages翻回true。阅读网站直接检查`_messageListStore.state.hasOlderMessages.value`。
   }
 
   Future<void> _loadMessagesAround(MessageInfo message) async {
@@ -861,11 +993,15 @@ class _MessageListState extends State<MessageList>
     Widget messageWidget = _buildMessageItem(message, colors);
 
     // Add spacing between messages
+    //
+    // 在消息之间添加间距
     final spacing = index < _messages.length - 1
         ? SizedBox(height: widget.config.cellSpacing)
         : const SizedBox.shrink();
 
     // Loading indicator at the newest end (index 0 area in reverse list, visually at bottom)
+    //
+    // 在最新端显示加载指示器（反向列表的索引0区域，视觉上在底部）
     if (_isLoadingNewer && index == _messages.length - 1) {
       return Column(
         children: [
@@ -970,6 +1106,8 @@ class _MessageListState extends State<MessageList>
   @override
   Widget build(BuildContext context) {
     // Super.build must be called; AutomaticKeepAliveClientMixin is required.
+    //
+    // 必须调用super.build；需要AutomaticKeepAliveClientMixin。
     super.build(context);
     final colorsTheme = SemanticColorScheme.of(context);
 
@@ -1010,6 +1148,8 @@ class _MessageListState extends State<MessageList>
                 child: _callStatusWidget!,
               ),
             // Top-right unread messages tongue
+            //
+            // 右上角未读消息标签
             if (widget.config.isSupportTongue &&
                 _unreadTongueType == TongueType.unreadMessages)
               Positioned(
@@ -1028,6 +1168,8 @@ class _MessageListState extends State<MessageList>
                 ),
               ),
             // Bottom-right tongue (back to latest / new messages / @mention)
+            //
+            // 右下角气泡（返回到最新/新的消息/@提及）
             if (widget.config.isSupportTongue && _tongueType != TongueType.none)
               Positioned(
                 bottom: 16,
@@ -1068,22 +1210,30 @@ class _MessageListState extends State<MessageList>
     if (atInfoList == null || atInfoList.isEmpty) return;
 
     // Sort by msgSeq ascending (oldest first) for sequential navigation
+    //
+    // 按 msgSeq 升序排序（最旧的在前）以便顺序浏览
     _remainingAtInfoList = List.from(atInfoList)
       ..sort((a, b) => a.msgSeq.compareTo(b.msgSeq));
 
     // Don't show @mention tongue immediately; it will be shown
     // after the unread tongue is consumed or if there's no unread tongue
     // and the @messages are not visible on screen
+    //
+    // 不要立即显示 @提及气泡；只有在未读气泡被处理后，或者如果没有未读气泡且屏幕上看不到 @消息时，它才会显示
     final oldest = _remainingAtInfoList.first;
     _atMessageSeq = oldest.msgSeq;
 
     // Store atType for later text resolution
+    //
+    // 存储 atType 以备后续文本解析
     _pendingAtType = oldest.atType;
   }
 
   /// Initialize unread messages tongue (右上角)
   /// Only for group conversations — C2C message seq is not sequential,
   /// so seq-based positioning is not possible.
+  ///
+  /// 仅限群聊 — C2C 消息 seq 不是连续的，所以无法基于 seq 定位
   void _initUnreadTongue() {
     if (!widget.config.isSupportTongue) return;
     if (widget.initialUnreadCount <= 0) return;
@@ -1097,6 +1247,8 @@ class _MessageListState extends State<MessageList>
   /// Check if unread messages exceed visible count; if so, show unread tongue.
   /// Called after messages are loaded and layout is settled.
   /// Tongue is NOT shown until this check confirms it's needed (avoids flash).
+  ///
+  /// 检查未读消息是否超过可见数量；如果是，则显示未读气泡。在消息加载完成并布局稳定后调用。气泡不会显示，直到此检查确认需要（避免闪烁）
   void _scheduleUnreadTongueVisibilityCheck() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1112,6 +1264,8 @@ class _MessageListState extends State<MessageList>
     final positions = _itemPositionsListener.itemPositions.value;
     if (positions.isEmpty) {
       // Layout not ready yet — show tongue as fallback (unread count > 0)
+      //
+      // 布局尚未准备好 — 作为回退显示气泡（未读数 > 0）
       setState(() {
         _unreadTongueCount = _initialUnreadCount;
         _unreadTongueType = TongueType.unreadMessages;
@@ -1133,9 +1287,13 @@ class _MessageListState extends State<MessageList>
     if (remainingUnreadCount <= 0) {
       // All unread messages are visible, no need for the tongue
       // _unreadTongueType remains TongueType.none — tongue was never shown
+      //
+      // 所有未读消息都可见，不需要显示提示 _unreadTongueType 仍然是 TongueType.none — 提示从未显示过
       _activateAtMentionTongueIfNeeded();
     } else {
       // Unread messages exceed visible area, NOW show the tongue
+      //
+      // 未读消息超过可见区域，现在显示提示
       setState(() {
         _unreadTongueCount = remainingUnreadCount;
         _unreadTongueType = TongueType.unreadMessages;
@@ -1145,10 +1303,14 @@ class _MessageListState extends State<MessageList>
   }
 
   /// Compute the seq of the oldest unread message based on the latest message seq and unread count
+  ///
+  /// 根据最新消息的序列号和未读数量计算最旧未读消息的序列号
   void _computeOldestUnreadSeq() {
     if (_messages.isEmpty) return;
 
     // Messages are in reverse order (newest first), so first message is newest
+    //
+    // 消息是倒序的（最新在前），所以第一条消息是最新的
     final newestMessage = _messages.first;
     final newestSeq = int.tryParse(newestMessage.rawMessage?.seq ?? '') ?? 0;
     if (newestSeq > 0) {
@@ -1164,6 +1326,8 @@ class _MessageListState extends State<MessageList>
     _atomicLocale = AppLocalization.of(context);
 
     // Resolve @mention text after locale is available
+    //
+    // 在本地化信息可用后解析 @提及 文本
     if (_pendingAtType != null) {
       _atMentionText = _getAtMentionTextForType(_pendingAtType!);
       _pendingAtType = null;
@@ -1222,6 +1386,8 @@ class _MessageListState extends State<MessageList>
   }
 
   /// Handle tap on the top-right unread messages tongue
+  ///
+  /// 处理点击右上角未读消息提示的操作
   Future<void> _onUnreadTongueTap() async {
     if (_initialUnreadCount <= 0) return;
 
@@ -1231,28 +1397,38 @@ class _MessageListState extends State<MessageList>
 
     if (_initialUnreadCount <= 20) {
       // No network fetch needed, hide tongue immediately
+      //
+      // 不需要网络请求，立即隐藏提示
       setState(() {
         _unreadTongueType = TongueType.none;
       });
 
       // Unread count within the loaded page, scroll to the oldest unread message
       // _messages is newest-first (reversed), so index = unreadCount - 1 is the oldest unread
+      //
+      // 未读数量在已加载页面内，滚动到最旧未读消息
       final targetIndex = _initialUnreadCount - 1;
       if (targetIndex >= 0 && targetIndex < _messages.length) {
         // In reverse:true list, a higher alignment moves the item towards the top.
         // alignment=1.0 leaves 0 paint extent so the item becomes invisible.
         // 0.9 places the item near the top of the viewport.
+        //
+        // 在 reverse:true 的列表中，更高的对齐度会将项目移动到顶部。alignment=1.0 时，绘制范围为 0，因此项目变得不可见。0.9 会将项目放到视口顶部附近。
         _itemScrollController.jumpTo(index: targetIndex, alignment: 0.9);
       }
     } else {
       // Unread count exceeds default page size, need to load around oldest unread message.
       // Compute seq if not already computed
+      //
+      // 未读消息数超过默认页面大小，需要加载最早未读消息附近的消息。如果序列号尚未计算，则进行计算。
       if (_oldestUnreadMessageSeq == null || _oldestUnreadMessageSeq! <= 0) {
         _computeOldestUnreadSeq();
       }
 
       if (_oldestUnreadMessageSeq == null || _oldestUnreadMessageSeq! <= 0) {
         // Fallback: still can't compute seq, just scroll to the top of current list
+        //
+        // 备用方案：仍然无法计算序列号，就滚动到当前列表的顶部。
         if (_messages.isNotEmpty) {
           _itemScrollController.jumpTo(index: _messages.length - 1);
         }
@@ -1273,6 +1449,8 @@ class _MessageListState extends State<MessageList>
       // Use both direction to load messages around the oldest unread message.
       // This gives us some older (read) messages above and newer (unread) messages below,
       // matching WeChat's experience of showing context above the first unread message.
+      //
+      // 同时使用两个方向加载最早未读消息附近的消息。这样我们可以在其上方显示一些较早的（已读）消息，下方显示较新的（未读）消息，和微信展示首条未读消息上下文的体验一致。
       final cursorMsg = MessageInfo(sequence: _oldestUnreadMessageSeq!);
       final option = MessageLoadOption()
         ..cursor = cursorMsg
@@ -1287,6 +1465,9 @@ class _MessageListState extends State<MessageList>
         // fires synchronously via notifyListeners during fetchMessageList).
         // No additional setState is needed here — doing one would cause a
         // second build frame (visible as a "list flicker").
+        //
+        // 所有状态（消息、isLoading、hasMore*）和 jumpTo 已经在 _onMessageListStateChanged 内部应用（在 fetchMessageList 中通过
+        // notifyListeners 同步触发）。这里不需要额外的 setState —— 如果再做一次会导致第二次构建帧（在列表上会看到“闪烁”）。
 
         debugPrint('messageList, _onUnreadTongueTap, fetchComplete, '
             'result.isSuccess: ${result.isSuccess}, messageCount: ${_messages.length}, '
@@ -1303,6 +1484,11 @@ class _MessageListState extends State<MessageList>
     // in the latest messages and causing a second visual change.
     // Frame 1: jumpTo → build + layout, positions update
     // Frame 2: scroll listener has fired; safe to exit nav state.
+    //
+    // 延迟清除 _NavToUnread 两帧。在 _scrollToSeq 的 jumpTo 执行后，_itemPositionsListener 只有在布局完成（下一帧）后才会触发。然后
+    // _scrollListener 再次检查 `_navigationState 是否为 _NavIdle` — 如果我们立即清除它，并且 hasNewerMessages 为 true 且索引 0
+    // 可见（几条消息），_loadNewerMessages 就会被触发，拉取最新消息并导致第二次视觉变化。帧 1：jumpTo → 构建 + 布局，位置更新 帧
+    // 2：滚动监听器已触发；可以安全退出导航状态。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _navigationState is _NavToUnread) {
@@ -1319,14 +1505,20 @@ class _MessageListState extends State<MessageList>
   /// Scroll to a message by its seq number.
   /// In a reversed list (reverse: true), the alignment is used as CustomScrollView's anchor.
   /// anchor: 0.0 places the center item at the top of the viewport.
+  ///
+  /// 通过消息的序列号滚动到该消息。在反向列表（reverse: true）中，对齐方式用作 CustomScrollView 的锚点。anchor: 0.0 会把中心消息放在视口顶部。
   void _scrollToSeq(int targetSeq, {double alignment = 0.9}) {
     // Try exact match first
+    //
+    // 先尝试完全匹配
     int targetIndex = _messages.indexWhere((m) {
       final seq = int.tryParse(m.rawMessage?.seq ?? '') ?? 0;
       return seq == targetSeq;
     });
 
     // Fallback: find the message with the closest seq
+    //
+    // 备用：找到 seq 最接近的消息
     if (targetIndex == -1 && _messages.isNotEmpty) {
       int bestIndex = -1;
       int bestDiff = 999999999;
@@ -1348,6 +1540,8 @@ class _MessageListState extends State<MessageList>
   }
 
   /// Activate @mention tongue if there are remaining @messages
+  ///
+  /// 如果还有 @消息，就激活 @mention 小舌头
   void _activateAtMentionTongueIfNeeded() {
     if (_remainingAtInfoList.isEmpty) {
       setState(() {
@@ -1357,11 +1551,15 @@ class _MessageListState extends State<MessageList>
     }
 
     // Show tongue for the oldest remaining @message
+    //
+    // 对最早的剩余@消息显示小舌头
     final nextAt = _remainingAtInfoList.first;
     setState(() {
       _atMessageSeq = nextAt.msgSeq;
       _atMentionText = _getAtMentionTextForType(nextAt.atType);
       // Only show @mention tongue when unread tongue is not displayed
+      //
+      // 仅当未读小舌头未显示时显示@提及小舌头
       if (_unreadTongueType == TongueType.none) {
         _tongueType = TongueType.atMention;
       }
@@ -1373,6 +1571,8 @@ class _MessageListState extends State<MessageList>
       // Keep the tongue visible with a loading spinner while reloading.
       // The _NavReloadingLatest state is cleared inside
       // _reloadLatestMessages AFTER scrollToBottom + layout settle.
+      //
+      // 重新加载时保持小舌头可见并显示加载动画。_NavReloadingLatest状态在_scrollToBottom+布局稳定后在_reloadLatestMessages中清除。
       setState(() {
         _newMessageCount = 0;
         _pendingNewMessages.clear();
@@ -1393,6 +1593,8 @@ class _MessageListState extends State<MessageList>
   }
 
   /// Handle tap on quote preview inside a message bubble — navigate to quoted message
+  ///
+  /// 处理消息气泡内引用预览的点击 — 导航到被引用的消息
   void _onQuotePreviewTap(MessageInfo message) {
     final quoteInfo = message.quoteInfo;
     if (quoteInfo == null || quoteInfo.msgID.isEmpty) return;
@@ -1401,9 +1603,14 @@ class _MessageListState extends State<MessageList>
     // leg in `_onBackToQuoteTongueTap` needs seq/timestamp to reload
     // around the source when the forward leg wholesale-replaced the
     // list and the source is no longer in it.
+    //
+    // 捕获完整的源MessageInfo（不仅仅是msgID） —
+    // 在`_onBackToQuoteTongueTap`中的反向操作需要序列号/时间戳，以便在前向操作整体替换列表后重新加载源消息周围内容，而源消息可能已经不在列表中。
     _quoteReturnSource = message;
 
     // Search for the quoted message in current loaded list
+    //
+    // 在当前加载列表中搜索引用的消息
     final targetMsgID = quoteInfo.msgID;
     final targetIndex = _messages.indexWhere((msg) => msg.msgID == targetMsgID);
 
@@ -1415,15 +1622,21 @@ class _MessageListState extends State<MessageList>
 
     if (targetIndex != -1) {
       // Found in current list - scroll to it and highlight
+      //
+      // 在当前列表中找到 - 滚动到它并高亮显示
       _scrollToIndexAndHighlight(targetIndex, targetMsgID);
     } else {
       // Not in current list - need to reload around the quoted message
+      //
+      // 当前列表中未找到 - 需要围绕引用消息重新加载
       _loadAndNavigateToQuotedMessage(quoteInfo);
     }
   }
 
   void _scrollToIndexAndHighlight(int index, String msgID) {
     // Check if target is already visible on screen
+    //
+    // 检查目标是否已在屏幕上可见
     bool isVisible = false;
     if (_itemScrollController.isAttached) {
       final positions = _itemPositionsListener.itemPositions.value;
@@ -1432,6 +1645,8 @@ class _MessageListState extends State<MessageList>
 
     if (!isVisible && _itemScrollController.isAttached) {
       // Target not visible - scroll to it and show "back to quote" tongue
+      //
+      // 目标不可见 - 滚动到它并显示“返回引用”提示
       _itemScrollController.jumpTo(index: index, alignment: 0.3);
       setState(() {
         _highlightedMessageId = msgID;
@@ -1439,6 +1654,8 @@ class _MessageListState extends State<MessageList>
       });
     } else {
       // Target already visible - just highlight, no scroll, no tongue
+      //
+      // 目标已可见 - 只需高亮，无需滚动，无需提示
       setState(() {
         _highlightedMessageId = msgID;
       });
@@ -1454,6 +1671,11 @@ class _MessageListState extends State<MessageList>
   /// The cursor is constructed from `quoteInfo`'s msgID/seq/timestamp
   /// (without a rawMessage) — Store falls back to `lastMsgSeq`-based
   /// positioning in that case.
+  ///
+  /// 引用往返的前向环节：当引用目标不在当前加载的列表中时，点击引用预览。会加载目标附近的数据（Store 的 `_fetchTwoSideMessageList`），跳转到目标，高亮它，并触发一个
+  /// `backToQuote` 提示，让用户可以回到源消息。
+  ///
+  /// 光标是根据 `quoteInfo` 的 msgID/seq/timestamp 构建的（没有 rawMessage）——在这种情况下，Store 会退回到基于 `lastMsgSeq` 的定位。
   Future<void> _loadAndNavigateToQuotedMessage(MessageQuoteInfo quoteInfo) {
     final cursorMessage = MessageInfo(
       msgID: quoteInfo.msgID,
@@ -1479,6 +1701,11 @@ class _MessageListState extends State<MessageList>
   ///     source message of the quote round-trip), and
   ///   - what tongue to commit when the landing branch runs in
   ///     `_onMessageListStateChanged`.
+  ///
+  /// 通用的“加载某条消息附近的数据并跳转到它”的流程。
+  ///
+  /// 前向导航（点击引用预览）和反向导航（当来源消息在列表中被批量替换时点击 backToQuote 按钮）都会通过这里。两个调用者的不同之处仅在于：- 导航目标消息是哪条（引用的目标消息 vs.
+  /// 引用往返的来源消息），以及 - 当落地分支在 `_onMessageListStateChanged` 里运行时要提交哪个按钮。
   Future<void> _loadAndNavigateToMessage({
     required MessageInfo cursorMessage,
     required String targetMsgID,
@@ -1498,6 +1725,9 @@ class _MessageListState extends State<MessageList>
     // (the `_NavToQuotedMessage` case) when the Store fires
     // notifyListeners — same atomic-frame pattern as _NavToAtMention /
     // _NavToUnread.
+    //
+    // 进入“引用导航进行中”状态。实际的 setState/jumpTo/按钮操作是在 `_onMessageListStateChanged` 里面发生的（`_NavToQuotedMessage`
+    // 情况），当 Store 触发 notifyListeners 时 —— 跟 _NavToAtMention 的原子帧模式一样。
     setState(() {
       _navigationState =
           _NavToQuotedMessage(targetMsgID, tongueAfter, highlightTarget);
@@ -1516,6 +1746,9 @@ class _MessageListState extends State<MessageList>
     // that fires off the back of our synchronous jumpTo has settled
     // before _scrollListener / _updateTongueState are allowed to react
     // again. Mirrors the _NavToAtMention / _NavToUnread tail.
+    //
+    // 将退出导航状态的操作延迟两帧，以便在 _scrollListener / _updateTongueState 可以再次响应之前，触发我们同步 jumpTo 后的滚动监听器有时间稳定下来。对应
+    // _NavToAtMention / _NavToUnread 的尾部操作。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _navigationState is _NavToQuotedMessage) {
@@ -1542,6 +1775,14 @@ class _MessageListState extends State<MessageList>
   /// load around it the same way the forward leg loads around the
   /// quoted target, but pass `tongueAfter: TongueType.none` so we
   /// don't chain a second backToQuote tongue off the back-navigation.
+  ///
+  /// 处理点击“返回引用位置”提示的操作。
+  ///
+  /// 引用往返的逆向操作：跳回用户之前点击引用预览的源消息。
+  ///
+  /// 引用的目标（因为目标不在已加载的页面中），源本身已被驱逐——之前的实现会回退到这里的 `_reloadLatestMessages()`，这就是报告的
+  /// bug：点击“返回引用”会悄悄地将用户跳到最新页面，而不是返回到他们点击的位置。修复方法：当源不在当前列表中时，像前向加载引用目标那样加载它周围的内容，但传入 `tongueAfter:
+  /// TongueType.none`，这样我们就不会在后退导航上 chaining 第二个 backToQuote tongue。
   void _onBackToQuoteTongueTap() {
     final returnSource = _quoteReturnSource;
     _quoteReturnSource = null;
@@ -1572,6 +1813,15 @@ class _MessageListState extends State<MessageList>
       //     1-frame "回到最新位置" flash before _updateTongueState
       //     (isAtBottom branch) wipes it. So coerce backToLatest → none
       //     and let the listener materialise it next frame if needed.
+      //
+      // 反向路径没有高亮——用户刚刚离开了这条消息，重新闪烁反而是视觉噪音。
+      //
+      // 小舌头决策拆分为“与位置无关”和
+      //
+      // - atMention / newMessages 只依赖于应用状态，所以在这里提交它们。- backToLatest
+      // 依赖于跳到某个位置后是否在底部——这个信息要到下一个布局才知道。如果在源消息恰好是最新消息时在这里提交 backToLatest，会产生可见的
+      //
+      // （isAtBottom 分支）会覆盖它。所以强制 backToLatest → none，让监听器在下一个帧里根据需要再实现它。
       setState(() {
         final derived = _computeTongueType();
         _tongueType =
@@ -1585,6 +1835,9 @@ class _MessageListState extends State<MessageList>
     // `_loadAndNavigateToMessage`; the reverse leg differs in
     // `tongueAfter: none` (round-trip complete) and
     // `highlightTarget: false` (no need to flash the source).
+    //
+    // 源不在当前加载的列表里——围绕它重新加载。复用了 forward-leg 的加载 + 原子跳转 + 小舌头机制，通过 `_loadAndNavigateToMessage`；反向流程在
+    // `tongueAfter: none`（往返完成）和 `highlightTarget: false`（不用闪烁源）方面有所不同。
     _loadAndNavigateToMessage(
       cursorMessage: returnSource,
       targetMsgID: returnMsgID,
@@ -1609,6 +1862,9 @@ class _MessageListState extends State<MessageList>
       // Frame 1: jumpTo executes the scroll.
       // Frame 2: layout completes, itemPositions are updated.
       // Only then is it safe to exit _NavReloadingLatest and hide the tongue.
+      //
+      // 使用 Completer，这样我们就可以等待滚动和布局稳定。第1帧：jumpTo 执行滚动。第2帧：布局完成，itemPositions 更新。只有这样才能安全退出
+      // _NavReloadingLatest 并隐藏提示。
       final completer = Completer<void>();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_itemScrollController.isAttached && _messages.isNotEmpty) {
@@ -1636,6 +1892,8 @@ class _MessageListState extends State<MessageList>
         'messageList, _onAtMentionTongueTap, targetSeq: $targetSeq, messagesCount: ${_messages.length}');
 
     // Try to find the @message in the current list
+    //
+    // 尝试在当前列表中找到 @message
     final targetIndex = _messages.indexWhere((m) {
       final seq = int.tryParse(m.rawMessage?.seq ?? '') ?? 0;
       return seq == targetSeq;
@@ -1643,9 +1901,13 @@ class _MessageListState extends State<MessageList>
 
     if (targetIndex != -1) {
       // Message found in current list
+      //
+      // 在当前列表中找到消息
       final targetMessage = _messages[targetIndex];
       if (targetMessage.msgID != null) {
         // Only scroll if target is not already visible on screen
+        //
+        // 只有当目标在屏幕上不可见时才滚动
         final positions = _itemPositionsListener.itemPositions.value;
         final isVisible = positions.any((pos) => pos.index == targetIndex);
         if (!isVisible) {
@@ -1656,6 +1918,8 @@ class _MessageListState extends State<MessageList>
         });
       }
       // Mark this @message as consumed, activate next
+      //
+      // 将此 @message 标记为已使用，并激活下一个
       _remainingAtInfoList.removeWhere((info) => info.msgSeq == targetSeq);
       _consumeNewMessagesThrough(targetSeq);
       _activateAtMentionTongueIfNeeded();
@@ -1663,6 +1927,8 @@ class _MessageListState extends State<MessageList>
       // Message not in current list, reload around the target seq.
       // Enter _NavToAtMention(targetSeq) so the _onMessageListStateChanged
       // switch handles messages / scroll / highlight atomically.
+      //
+      // 消息不在当前列表中，重新加载目标 seq 附近的内容。进入 _NavToAtMention(targetSeq) ，从而触发 _onMessageListStateChanged
       debugPrint(
           'messageList, _onAtMentionTongueTap, message NOT in list, will fetchMessageList for seq: $targetSeq');
       setState(() {
@@ -1686,6 +1952,10 @@ class _MessageListState extends State<MessageList>
     // we exited immediately, it could fire off an unwanted load.
     // Frame 1: jumpTo → build + layout, positions update
     // Frame 2: scroll listener has fired; safe to exit nav state.
+    //
+    // 将退出导航状态的延迟设置为两帧（与 _onUnreadTongueTap 中的 _NavToUnread 模式相同）。在 _scrollToSeq 的 jumpTo
+    // 执行后，_itemPositionsListener 只有在布局完成后（下一帧）才会触发。然后 _scrollListener 再次检查 `is _NavIdle`
+    // ——如果立即退出，可能会触发不想要的加载。第 1 帧：jumpTo → 构建 + 布局，位置更新 第 2 帧：滚动监听器触发；此时退出导航状态是安全的。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _navigationState is _NavToAtMention) {
@@ -1705,8 +1975,12 @@ class _MessageListState extends State<MessageList>
   }
 
   // ==================== Multi-select mode ====================
+  //
+  // ==================== 多选模式 ====================
 
   /// Enter multi-select mode
+  ///
+  /// 进入多选模式
   void enterMultiSelectMode({MessageInfo? initialMessage}) {
     setState(() {
       _isMultiSelectMode = true;
@@ -1719,6 +1993,8 @@ class _MessageListState extends State<MessageList>
   }
 
   /// Exit multi-select mode
+  ///
+  /// 退出多选模式
   void exitMultiSelectMode() {
     setState(() {
       _isMultiSelectMode = false;
@@ -1728,6 +2004,8 @@ class _MessageListState extends State<MessageList>
   }
 
   /// Toggle message selection state
+  ///
+  /// 切换消息选择状态
   void toggleMessageSelection(MessageInfo message) {
     final msgID = message.msgID;
     if (msgID == null) return;
@@ -1743,16 +2021,22 @@ class _MessageListState extends State<MessageList>
   }
 
   /// Check if message is selected
+  ///
+  /// 检查消息是否被选中
   bool isMessageSelected(MessageInfo message) {
     return message.msgID != null && _selectedMessageIDs.contains(message.msgID);
   }
 
   /// Notify multi-select mode change
+  ///
+  /// 通知多选模式变化
   void _notifyMultiSelectModeChanged() {
     widget.onMultiSelectModeChanged
         ?.call(_isMultiSelectMode, _selectedMessageIDs.length);
 
     // Notify full state
+    //
+    // 通知完整状态
     if (_isMultiSelectMode) {
       widget.onMultiSelectStateChanged?.call(MultiSelectState(
         isActive: true,
@@ -1767,10 +2051,14 @@ class _MessageListState extends State<MessageList>
   }
 
   /// Delete selected messages
+  ///
+  /// 删除选中消息
   Future<void> deleteSelectedMessages() async {
     if (_selectedMessageIDs.isEmpty) return;
 
     // Show confirmation dialog
+    //
+    // 显示确认对话框
     AtomicAlertDialog.showWithConfig(
       context,
       config: AlertDialogConfig(
@@ -1791,11 +2079,15 @@ class _MessageListState extends State<MessageList>
   }
 
   /// Forward selected messages
+  ///
+  /// 转发选中消息
   Future<void> forwardSelectedMessages(BuildContext context) async {
     if (_selectedMessageIDs.isEmpty) return;
 
     // Get selected messages in the order they appear in _messages.
     // _messages is reversed from messageListStore (newest first), so we need to reverse it back to get oldest first
+    //
+    // 按 _messages 中出现的顺序获取已选择的消息。_messages 是从 messageListStore 反转过来的（最新的在前），所以我们需要再反转一次才能按最旧的顺序获取
     final messages = _messages.reversed
         .where((message) =>
             message.msgID != null &&
@@ -1803,6 +2095,8 @@ class _MessageListState extends State<MessageList>
         .toList();
 
     // 1. Validate message status first (don't exit multi-select if failed)
+    //
+    // 1. 先验证消息状态（如果失败，不退出多选）
     final statusError =
         ForwardService.validateMessagesStatus(context, messages);
     if (statusError != null) {
@@ -1811,12 +2105,16 @@ class _MessageListState extends State<MessageList>
     }
 
     // 2. Select forward type
+    //
+    // 2. 选择转发类型
     final forwardType = await ForwardService.showForwardTypeSelector(context);
     if (forwardType == null) {
       return;
     }
 
     // 3. Validate separate forward limit (don't exit multi-select if failed)
+    //
+    // 3. 验证单独转发限制（如果失败，不退出多选）
     final limitError = ForwardService.validateSeparateForwardLimit(
         context, messages, forwardType);
     if (limitError != null) {
@@ -1825,9 +2123,13 @@ class _MessageListState extends State<MessageList>
     }
 
     // 4. Exit multi-select mode before showing target selector
+    //
+    // 4. 在显示目标选择器前退出多选模式
     exitMultiSelectMode();
 
     // 5. Continue with forward flow (target selection and execution)
+    //
+    // 5. 继续进行转发流程（目标选择和执行）
     ForwardService.forwardMessagesWithType(
       context: context,
       messages: messages,
@@ -1839,6 +2141,8 @@ class _MessageListState extends State<MessageList>
   }
 
   // ==================== Multi-select mode end ====================
+  //
+  // ==================== 多选模式结束 ====================
 
   bool _isSystemMessage(MessageInfo message) {
     if (message.messageType == MessageType.tips) {
@@ -1862,6 +2166,8 @@ class _MessageListState extends State<MessageList>
     final message = _messages[index];
 
     // Skip time display for system messages when they are hidden
+    //
+    // 当系统消息被隐藏时跳过时间显示
     if (!widget.config.isShowSystemMessage && _isSystemMessage(message)) {
       return null;
     }
@@ -1871,6 +2177,8 @@ class _MessageListState extends State<MessageList>
     }
 
     // Find the previous message, skipping system messages if they are hidden
+    //
+    // 找到上一条消息，如果系统消息被隐藏就跳过它们
     int prevIndex = index + 1;
     MessageInfo? prevMessage;
 
@@ -1925,6 +2233,8 @@ class _MessageListState extends State<MessageList>
     }
 
     // Compute Monday-based week start to determine "same week".
+    //
+    // 计算基于周一的周开始时间来确定“同一周”
     final int nowWeekIndex = (now.weekday + 6) % 7;
     final int dateWeekIndex = (date.weekday + 6) % 7;
     final DateTime nowWeekStart = today.subtract(Duration(days: nowWeekIndex));
@@ -1958,6 +2268,8 @@ class _MessageListState extends State<MessageList>
     if (result.isSuccess && result.groupInfo != null && mounted) {
       // Prefer the joinedGroupList entry (same instance attribute pushes mutate)
       // so the call banner stays in sync with subsequent _onGroupAttributeChanged.
+      //
+      // 优先使用 joinedGroupList 条目（相同实例属性会推动变更），这样通话横幅会与后续 _onGroupAttributeChanged 保持同步。
       final list = GroupStore.shared.state.joinedGroupList.value;
       GroupInfo? fromList;
       for (final g in list) {
@@ -1975,6 +2287,8 @@ class _MessageListState extends State<MessageList>
 
   /// Sync call banner when GroupStore pushes group attribute / profile updates
   /// (e.g. in-group call start / end while this chat page is already open).
+  ///
+  /// 当 GroupStore 推送群组属性/资料更新时同步通话横幅（例如在群内通话开始/结束时，此聊天页面已打开）。
   void _onJoinedGroupListChanged() {
     if (!mounted) return;
     final groupId =
@@ -2012,6 +2326,8 @@ class _MessageListState extends State<MessageList>
   }
 
   // ==================== readReceipt ====================
+  //
+  // ==================== 已读回执 ====================
 
   void _handleMessageAppear(MessageInfo message) {
     if (message.isSentBySelf) return;
@@ -2068,8 +2384,12 @@ class _MessageListState extends State<MessageList>
   }
 
   // ==================== ASR text bubble menu ====================
+  //
+  // ==================== ASR 文本气泡菜单 ====================
 
   /// Show ASR text bubble long press menu (popup above the target)
+  ///
+  /// 显示 ASR 文本气泡长按菜单（弹窗显示在目标上方）
   void _showAsrTextMenu(MessageInfo message, GlobalKey asrBubbleKey) {
     final asrText =
         (message.messagePayload as AudioMessagePayload?)?.asrText ?? '';
@@ -2086,6 +2406,8 @@ class _MessageListState extends State<MessageList>
         //   iconAsset: 'chat_assets/icon/hide.svg',
         //   onTap: () => _hideAsrText(message),
         // ),
+        //
+        // 标签: _atomicLocale.hide, 图标资源: 'chat_assets/icon/hide.svg',
         AsrPopupMenuAction(
           label: _atomicLocale.forward,
           iconAsset: 'chat_assets/icon/forward.svg',
@@ -2106,8 +2428,12 @@ class _MessageListState extends State<MessageList>
   //   final messageID = message.msgID ?? '';
   //   _asrDisplayManager.hide(messageID);
   // }
+  //
+  // /// 隐藏 ASR 文本气泡（仅针对本次会话） void _hideAsrText(MessageInfo message) {
 
   /// Forward ASR text as text message
+  ///
+  /// 转发 ASR 文本为文本消息
   void _forwardAsrText(MessageInfo message) {
     final asrText =
         (message.messagePayload as AudioMessagePayload?)?.asrText ?? '';
@@ -2121,6 +2447,8 @@ class _MessageListState extends State<MessageList>
   }
 
   /// Copy ASR text to clipboard
+  ///
+  /// 将 ASR 文本复制到剪贴板
   void _copyAsrText(MessageInfo message) {
     final asrText =
         (message.messagePayload as AudioMessagePayload?)?.asrText ?? '';
@@ -2130,8 +2458,12 @@ class _MessageListState extends State<MessageList>
   }
 
   // ==================== Translation text bubble menu ====================
+  //
+  // ==================== 翻译文本气泡菜单 ====================
 
   /// Show translation text bubble long press menu (popup above the target)
+  ///
+  /// 显示翻译文本气泡长按菜单（在目标上方弹出）
   void _showTranslationTextMenu(
       MessageInfo message, GlobalKey translationBubbleKey) {
     final translatedTextMap =
@@ -2149,6 +2481,8 @@ class _MessageListState extends State<MessageList>
         //   iconAsset: 'chat_assets/icon/hide.svg',
         //   onTap: () => _hideTranslationText(message),
         // ),
+        //
+        // 标签: _atomicLocale.hide, 图标资源: 'chat_assets/icon/hide.svg',
         AsrPopupMenuAction(
           label: _atomicLocale.forward,
           iconAsset: 'chat_assets/icon/forward.svg',
@@ -2169,14 +2503,20 @@ class _MessageListState extends State<MessageList>
   //   final messageID = message.msgID ?? '';
   //   _translationDisplayManager.hide(messageID);
   // }
+  //
+  // /// 隐藏翻译文本气泡（仅限本次会话）void _hideTranslationText(MessageInfo message) {
 
   /// Forward translated text as text message
+  ///
+  /// 将翻译后的文本作为文本消息转发
   void _forwardTranslationText(MessageInfo message) {
     final translatedTextMap =
         (message.messagePayload as TextMessagePayload?)?.translatedText;
     if (translatedTextMap == null || translatedTextMap.isEmpty) return;
 
     // Build translated display text with emoji preserved (same as copy logic)
+    //
+    // 构建保留表情符的翻译显示文本（与复制逻辑相同）
     final originalText =
         (message.messagePayload as TextMessagePayload?)?.text ?? '';
     final translatedText = TranslationTextParser.buildTranslatedDisplayText(
@@ -2194,12 +2534,16 @@ class _MessageListState extends State<MessageList>
   }
 
   /// Copy translated text to clipboard
+  ///
+  /// 将翻译文本复制到剪贴板
   void _copyTranslationText(MessageInfo message) {
     final translatedTextMap =
         (message.messagePayload as TextMessagePayload?)?.translatedText;
     if (translatedTextMap == null || translatedTextMap.isEmpty) return;
 
     // Get the translated display text with emoji preserved (no need to fetch atUserNames)
+    //
+    // 获取保留表情符的翻译显示文本（无需获取 atUserNames）
     final originalText =
         (message.messagePayload as TextMessagePayload?)?.text ?? '';
     final textToCopy = TranslationTextParser.buildTranslatedDisplayText(

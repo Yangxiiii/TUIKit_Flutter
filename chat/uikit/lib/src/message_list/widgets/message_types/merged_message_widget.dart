@@ -10,6 +10,8 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/message_status_mixin
 import 'package:tencent_chat_uikit/src/third_party/extended_text/extended_text.dart';
 
 /// Merged message display widget
+///
+/// 合并消息展示控件
 class MergedMessageWidget extends StatefulWidget {
   final MessageInfo message;
   final bool isSelf;
@@ -23,6 +25,8 @@ class MergedMessageWidget extends StatefulWidget {
   /// Optional override for bubble background color — used by the
   /// "highlight after navigate" animation in `MessageBubble`. Matches
   /// the same hook on [SoundMessageWidget] / [FileMessageWidget].
+  ///
+  /// 气泡背景颜色的可选覆盖 — 用于 `MessageBubble` 中的“导航后高亮”动画。与 [SoundMessageWidget] / [FileMessageWidget] 上的同样钩子匹配。
   final Color? bubbleColor;
 
   const MergedMessageWidget({
@@ -88,6 +92,8 @@ class _MergedMessageWidgetState extends State<MergedMessageWidget>
               color: colors.strokeColorPrimary.withOpacity(0.5),
             ),
             // Abstract list with status and time
+            //
+            // 带状态和时间的摘要列表
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
               child: Column(
@@ -97,6 +103,8 @@ class _MergedMessageWidgetState extends State<MergedMessageWidget>
                   _buildAbstractList(context, mergedInfo?.abstractList, colors),
                   const SizedBox(height: 6),
                   // Status and time row
+                  //
+                  // 状态和时间行
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: buildStatusAndTimeWidgets(
@@ -132,6 +140,8 @@ class _MergedMessageWidgetState extends State<MergedMessageWidget>
     }
 
     // Show max 4 abstracts
+    //
+    // 最多显示 4 条摘要
     final displayList = abstractList.take(4).toList();
 
     return Column(
@@ -139,6 +149,8 @@ class _MergedMessageWidgetState extends State<MergedMessageWidget>
       mainAxisSize: MainAxisSize.min,
       children: displayList.map((abstract) {
         // Use ExtendedText with ChatSpecialTextSpanBuilder to render emoji images
+        //
+        // 使用 ExtendedText 和 ChatSpecialTextSpanBuilder 渲染表情图片
         return Padding(
           padding: const EdgeInsets.only(bottom: 2),
           child: ExtendedText(

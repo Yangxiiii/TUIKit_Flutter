@@ -1,6 +1,10 @@
 /// MentionInfo represents a mention (@) in the message input.
+///
+/// MentionInfo 表示消息输入中的提及（@）。
 class MentionInfo {
   /// Special userID for @All
+  ///
+  /// @All 的特殊用户ID
   static const String atAllUserID = '__kImSDK_MesssageAtALL__';
 
   final String userID;

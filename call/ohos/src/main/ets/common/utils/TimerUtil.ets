@@ -1,5 +1,7 @@
 export class TimerUtil {
   /** Format seconds → "MM:SS" or "H:MM:SS" when ≥ 1h. */
+
+  /* 将秒格式化为 “MM:SS” 或 “H:MM:SS”，当时间 ≥ 1 小时时使用 H:MM:SS。 */
   static secondToHMSString(seconds: number): string {
     const total = Math.max(0, Math.floor(seconds));
     const h = Math.floor(total / 3600);

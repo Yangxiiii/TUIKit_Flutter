@@ -68,6 +68,12 @@ class MessageUtil {
   /// is wrong because the common case is `revokerInfo.userID == from.userID`
   /// (a user revoking their own message) — for the receiving side that
   /// should display "对方撤回了一条消息", not "你撤回了一条消息".
+  ///
+  /// 根据 MessageInfo 的 revokerInfo 和 revokeReason 构建撤回显示字符串。
+  ///
+  /// “自己”必须通过与**当前登录用户**比较来确定，而不是消息的发送者。不要只比对 `messageInfo.from`。
+  ///
+  /// （用户撤回自己的消息）——针对接收方
   static String getRevokeDisplayString(
       MessageInfo messageInfo, BuildContext context) {
     AppLocalizedText? localizations = AppLocalization.of(context);
@@ -87,6 +93,8 @@ class MessageUtil {
       // Fallback: when revoker info is unavailable, fall back to the message
       // sender — for self-sent messages the original sender is the only one
       // typically allowed to revoke, so this still gives a sensible result.
+      //
+      // 备用方案：当撤回者信息不可用时，退而求其次使用消息发送者——对于自己发送的消息，原发送者通常是唯一被允许撤回的人，所以仍然可以得到合理的结果。
       revokedBySelf = messageInfo.isSentBySelf;
     }
 
@@ -301,6 +309,8 @@ class MessageUtil {
     AppLocalizedText? localizations = AppLocalization.of(context);
 
     // Revoked messages show revoke info directly
+    //
+    // 被撤回的消息会直接显示撤回信息
     if (messageInfo.status == MessageStatus.revoked) {
       return getRevokeDisplayString(messageInfo, context);
     }

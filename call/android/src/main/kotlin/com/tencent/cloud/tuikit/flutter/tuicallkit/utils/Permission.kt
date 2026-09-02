@@ -12,6 +12,8 @@ object Permission {
             return
         }
         //In TUICallKit,Please open both OverlayWindows and Background pop-ups permission.
+        //
+        // 在 TUICallKit 中，请开启覆盖窗口和后台弹出权限。
         com.tencent.qcloud.tuicore.permission.PermissionRequester.newInstance(com.tencent.qcloud.tuicore.permission.PermissionRequester.FLOAT_PERMISSION, com.tencent.qcloud.tuicore.permission.PermissionRequester.BG_START_PERMISSION)
             .request()
     }

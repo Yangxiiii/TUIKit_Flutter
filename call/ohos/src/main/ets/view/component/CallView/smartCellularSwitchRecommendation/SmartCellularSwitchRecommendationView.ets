@@ -4,6 +4,10 @@
 // The Wi-Fi / Cellular glyphs use solid-coloured circles as placeholders
 // since the call surface ships no PNG resource for them; upgrading to a
 // faithful canvas rendering is a follow-up.
+//
+// 当 atomicxcore 发出 `DeviceEvent.onSmartCellularSwitchRecommended` 时显示底部弹出。
+//
+// Wi-Fi / 蜂窝图标使用纯色圆形作为占位，因为调用端没有提供 PNG 资源；升级到真实 Canvas 渲染是后续操作。
 
 import { CallConstants } from '../../../../common/CallConstants';
 import { TUICallKitLocalize } from '../../../../common/Localized';

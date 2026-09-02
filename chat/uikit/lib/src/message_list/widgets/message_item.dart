@@ -25,44 +25,67 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   final OnUserClick? onUserClick;
 
   /// Callback when user long presses on avatar (for @ mention feature)
+  ///
+  /// 用户长按头像时的回调（用于@提及功能）
   final OnUserLongPress? onUserLongPress;
 
   /// Callback when call message is clicked in C2C conversation
+  ///
+  /// C2C会话中点击通话消息时的回调
   final OnCallMessageClick? onCallMessageClick;
   final List<MessageCustomAction> customActions;
   final MessageListConfigProtocol config;
 
   // Multi-select mode related
+  //
+  // 多选模式相关
   final bool isMultiSelectMode;
   final bool isSelected;
   final VoidCallback? onToggleSelection;
   final VoidCallback? onEnterMultiSelectMode;
 
   // Merged detail view mode - disables long press menu and read receipt
+  //
+  // 合并详情视图模式——禁用长按菜单和已读回执
   final bool isInMergedDetailView;
 
   // ASR display manager for voice-to-text feature
+  //
+  // 语音转文字功能的ASR显示管理器
   final AsrDisplayManager? asrDisplayManager;
   // Callback when ASR text bubble is long pressed, provides message and GlobalKey for positioning popup menu
+  //
+  // ASR文字气泡被长按时的回调，提供消息和GlobalKey以定位弹出菜单
   final void Function(MessageInfo message, GlobalKey asrBubbleKey)?
       onAsrBubbleLongPress;
 
   // Translation display manager for text translation feature
+  //
+  // 文本翻译功能的翻译显示管理器
   final TranslationDisplayManager? translationDisplayManager;
   // Callback when translation bubble is long pressed, provides message and GlobalKey for positioning popup menu
+  //
+  // 翻译气泡被长按时的回调，提供消息和GlobalKey以定位弹出菜单
   final void Function(MessageInfo message, GlobalKey translationBubbleKey)?
       onTranslationBubbleLongPress;
 
   // Callback when quote preview is tapped (for navigation to quoted message)
+  //
+  // 点击引用预览时的回调（用于导航到被引用消息）
   final void Function(MessageInfo message)? onQuotePreviewTap;
 
   // Callback when "Quote" is selected from long-press menu
+  //
+  // 从长按菜单选择“引用”时的回调
   final void Function(MessageInfo message)? onQuoteMessage;
 
   /// In merged detail view: the bundle's full message list, used as the
   /// static data source for image / video viewers when [isInMergedDetailView]
   /// is true. The page's MessageListStore is empty in that mode, so the
   /// viewer needs this fallback list to render any media at all.
+  ///
+  /// 在合并详情视图中：捆绑包的完整消息列表，当 [isInMergedDetailView] 为 true 时，用作图片/视频查看器的静态数据源。在该模式下，页面的 MessageListStore
+  /// 是空的，因此查看器需要这个备用列表来渲染任何媒体。
   final List<MessageInfo>? mergedMediaMessages;
 
   const MessageItem({
@@ -138,6 +161,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         message.status == MessageStatus.revoked ||
         MessageUtil.isSystemStyleCustomMessagePayload(message, context)) {
       // Check if system messages should be shown
+      //
+      // 检查是否应该显示系统消息
       if (!config.isShowSystemMessage) {
         return const SizedBox.shrink();
       }
@@ -145,6 +170,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     }
 
     // In merged detail view, always use left-aligned layout
+    //
+    // 在合并详情视图中，总是使用左对齐布局
     if (isInMergedDetailView) {
       return _buildLeftAlignedLayout(
           context, messageBubble, isSelf, avatarURL, senderName);
@@ -170,6 +197,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     }
 
     // Add checkbox in multi-select mode
+    //
+    // 在多选模式下添加复选框
     if (isMultiSelectMode) {
       return _buildMultiSelectRow(messageRow, isSelf);
     }
@@ -178,6 +207,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   }
 
   /// Build row layout in multi-select mode
+  ///
+  /// 在多选模式下构建行布局
   Widget _buildMultiSelectRow(Widget messageRow, bool isSelf) {
     return GestureDetector(
       onTap: onToggleSelection,
@@ -186,12 +217,16 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           // Checkbox always on the left
+          //
+          // 复选框始终在左侧
           MessageCheckbox(
             isSelected: isSelected,
             isEnabled: true,
           ),
           const SizedBox(width: 8),
           // Message content
+          //
+          // 消息内容
           Expanded(child: messageRow),
         ],
       ),
@@ -199,9 +234,13 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   }
 
   /// Build menu callbacks
+  ///
+  /// 构建菜单回调
   MessageMenuCallbacks? _buildMenuCallbacks(BuildContext context) {
     if (isMultiSelectMode) {
       // Disable menu in multi-select mode
+      //
+      // 在多选模式下禁用菜单
       return null;
     }
     return DefaultMessageMenuCallbacks(
@@ -216,6 +255,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   }
 
   /// Show resend confirmation dialog
+  ///
+  /// 显示重新发送确认对话框
   void _showResendConfirmDialog(BuildContext context) {
     final locale = AppLocalization.of(context);
     AtomicAlertDialog.showWithConfig(
@@ -239,11 +280,18 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   /// caused by minting a new msgID via [MessageInputStore.sendMessage] —
   /// see [MessageResender] for the rationale and the cross-platform
   /// alignment with the Kotlin team.
+  ///
+  /// 处理重新发送消息。
+  ///
+  /// 通过 [MessageResender] 操作，它会先删除失败的行，然后发送新的消息。这可以避免通过 [MessageInputStore.sendMessage] 生成新 msgID
+  /// 导致的重复行问题 —— 具体原因和与 Kotlin 团队的跨平台对齐可以参考 [MessageResender]。
   void _handleResendMessage() {
     MessageResender.resend(message: message, conversationID: conversationID);
   }
 
   /// Show read receipt detail page (group messages only)
+  ///
+  /// 显示已读回执详情页（仅限群组消息）
   void _showReadReceiptDetail(BuildContext context) {
     final messageActionStore = MessageActionStore.create(message);
 
@@ -317,6 +365,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         message.status == MessageStatus.revoked ||
         MessageUtil.isSystemStyleCustomMessagePayload(message, context)) {
       // Check if system messages should be shown
+      //
+      // 检查是否应该显示系统消息
       if (!config.isShowSystemMessage) {
         return const SizedBox.shrink();
       }
@@ -343,6 +393,9 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   /// hangs below the main bubble. See `MessageAttachmentBuilder` for why
   /// this lives here instead of inside `SoundMessageWidget` /
   /// `TextMessageWidget`.
+  ///
+  /// 构建可选附件组件（ASR / 翻译气泡），挂在主消息气泡下方。为什么放在这里而不是 `SoundMessageWidget` / `TextMessageWidget` 内可以看
+  /// `MessageAttachmentBuilder`。
   Widget? _buildAttachmentIfAny(bool isSelf) {
     return MessageAttachmentBuilder.buildIfAny(
       message: message,
@@ -383,11 +436,15 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     final locale = AppLocalization.of(context);
 
     // In merged detail view: always show avatar, disable click, hide nickname
+    //
+    // 在合并详情视图中：始终显示头像，禁用点击，隐藏昵称
     final shouldShowAvatar = isInMergedDetailView || config.isShowLeftAvatar;
     final shouldShowNickname =
         !isInMergedDetailView && config.isShowLeftNickname;
 
     // Build status indicator if needed (only for self messages)
+    //
+    // 如果需要，为自己发送的消息构建状态指示器
     final statusIndicator = isSelf
         ? buildOutsideBubbleStatusIndicator(
             message: message,
@@ -399,6 +456,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         : null;
 
     // Build read receipt label (only for self messages)
+    //
+    // 为自己发送的消息构建已读回执标签
     final readReceiptLabel = isSelf
         ? buildOutsideReadReceiptLabel(
             message: message,
@@ -424,6 +483,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                   ? null
                   : () {
                       // Disable avatar click in multi-select mode
+                      //
+                      // 多选模式下禁用头像点击
                       if (isMultiSelectMode) {
                         onToggleSelection?.call();
                         return;
@@ -436,8 +497,12 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                   ? null
                   : () {
                       // Disable avatar long press in multi-select mode
+                      //
+                      // 在多选模式下禁用头像长按
                       if (isMultiSelectMode) return;
                       // Trigger @ mention callback
+                      //
+                      // 触发@提及回调
                       if (onUserLongPress != null) {
                         onUserLongPress!(
                             message.from.userID, displaySenderName);
@@ -462,6 +527,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                     ),
                   ),
                 // Bubble row with status icon and read receipt label
+                //
+                // 带状态图标和已读回执标签的气泡行
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.end,
@@ -480,10 +547,16 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                 // ASR / translation bubble (when present) hangs *below*
                 // the row so it doesn't shift the receipt down — see
                 // Bug-956459.
+                //
+                // ASR/翻译气泡（存在时）挂在行*下方*，不会把回执往下推——见
                 if (attachment != null) attachment,
                 // Violation hint text below the bubble
+                //
+                // 气泡下方的违规提示文本
                 _buildViolationHintText(context),
                 // Reaction bar for left-aligned layout
+                //
+                // 左对齐布局的反应条
                 if (config.isSupportReaction && message.reactionList.isNotEmpty)
                   _buildReactionBar(context, isLeft: true),
               ],
@@ -504,6 +577,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     final locale = AppLocalization.of(context);
 
     // Build status indicator if needed (only for self messages)
+    //
+    // 根据需要构建状态指示器（仅限自己消息）
     final statusIndicator = isSelf
         ? buildOutsideBubbleStatusIndicator(
             message: message,
@@ -515,6 +590,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         : null;
 
     // Build read receipt label (only for self messages)
+    //
+    // 构建已读回执标签（仅限自己消息）
     final readReceiptLabel = isSelf
         ? buildOutsideReadReceiptLabel(
             message: message,
@@ -547,6 +624,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                     ),
                   ),
                 // Bubble row with read receipt label on the left, status icon, then bubble
+                //
+                // 带已读回执标签在左侧、状态图标，然后是气泡的气泡行
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.end,
@@ -565,8 +644,12 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                 ),
                 if (attachment != null) attachment,
                 // Violation hint text below the bubble
+                //
+                // 气泡下方的违规提示文本
                 _buildViolationHintText(context),
                 // Reaction bar for right-aligned layout
+                //
+                // 右对齐布局的反应条
                 if (config.isSupportReaction && message.reactionList.isNotEmpty)
                   _buildReactionBar(context, isLeft: false),
               ],
@@ -577,6 +660,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
             GestureDetector(
               onTap: () {
                 // Disable avatar click in multi-select mode
+                //
+                // 在多选模式下禁用头像点击
                 if (isMultiSelectMode) {
                   onToggleSelection?.call();
                   return;
@@ -604,6 +689,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     final locale = AppLocalization.of(context);
 
     // Build status indicator if needed
+    //
+    // 根据需要构建状态指示器
     final statusIndicator = buildOutsideBubbleStatusIndicator(
       message: message,
       colorsTheme: colors,
@@ -613,6 +700,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     );
 
     // Build read receipt label (shown outside bubble on the left)
+    //
+    // 构建已读回执标签（显示在气泡外左侧）
     final readReceiptLabel = buildOutsideReadReceiptLabel(
       message: message,
       colorsTheme: colors,
@@ -627,6 +716,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     // When the other side's left avatar is shown, add a left spacer for self messages
     // so the bubble's left edge aligns with other-message bubble's left edge
     // and doesn't overlap with the other side's avatar.
+    //
+    // 当显示对方的左边头像时，为自己消息添加左侧间隔，这样气泡的左边缘就能和对方消息气泡的左边缘对齐，不会覆盖对方的头像。
     final needLeftSpacer = config.isShowLeftAvatar;
     final leftSpacerWidth =
         needLeftSpacer ? AvatarSize.m.value + config.avatarSpacing : 0.0;
@@ -646,6 +737,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                 ),
               ),
             // Bubble row with read receipt label on the left, status icon, then bubble
+            //
+            // 气泡行，左边是已读回执标签，然后是状态图标，接着是气泡
             Row(
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.end,
@@ -664,8 +757,12 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
             ),
             if (attachment != null) attachment,
             // Violation hint text below the bubble
+            //
+            // 气泡下方的违规提示文字
             _buildViolationHintText(context),
             // Reaction bar for self messages (right aligned)
+            //
+            // 自己消息的反应条（右对齐）
             if (config.isSupportReaction && message.reactionList.isNotEmpty)
               _buildReactionBar(context, isLeft: false),
           ],
@@ -692,6 +789,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         GestureDetector(
           onTap: () {
             // Disable avatar click in multi-select mode
+            //
+            // 多选模式下禁用头像点击
             if (isMultiSelectMode) {
               onToggleSelection?.call();
               return;
@@ -702,8 +801,12 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
           },
           onLongPress: () {
             // Disable avatar long press in multi-select mode
+            //
+            // 多选模式下禁用头像长按
             if (isMultiSelectMode) return;
             // Trigger @ mention callback
+            //
+            // 触发 @ 提及回调
             if (onUserLongPress != null) {
               onUserLongPress!(message.from.userID, displaySenderName);
             }
@@ -729,8 +832,12 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
             messageBubble,
             if (attachment != null) attachment,
             // Violation hint text below the bubble
+            //
+            // 气泡下方的违规提示文字
             _buildViolationHintText(context),
             // Reaction bar for other messages (left aligned)
+            //
+            // 对方消息的反应条（左对齐）
             if (config.isSupportReaction && message.reactionList.isNotEmpty)
               _buildReactionBar(context, isLeft: true),
           ],
@@ -739,6 +846,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
       // When self's right avatar is shown, add a right spacer for other messages
       // so the bubble's right edge aligns with self-message bubble's right edge
       // and doesn't overlap with self's avatar.
+      //
+      // 当显示自己的右边头像时，为对方消息添加右侧间隔，这样气泡的右边缘就能和自己消息气泡的右边缘对齐，不会覆盖自己的头像。
       if (config.isShowRightAvatar)
         SizedBox(width: AvatarSize.m.value + config.avatarSpacing),
     ];
@@ -771,11 +880,15 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         Navigator.of(context).pop();
       },
       // Disable remove reaction in merged message detail view
+      //
+      // 合并消息详情视图中禁用移除反应
       allowRemove: !isInMergedDetailView,
     );
   }
 
   /// Build violation hint text widget
+  ///
+  /// 构建违规提示文本Widget
   Widget _buildViolationHintText(BuildContext context) {
     if (message.status != MessageStatus.violation) {
       return const SizedBox.shrink();

@@ -23,6 +23,11 @@ import FilePickerHelper, { PickerResult } from './FilePickerHelper';
  *
  * openFile 通过 startAbility + implicit want 触发系统里可打开该文件的 App。
  * 需要 UIAbilityContext,通过 AbilityAware 生命周期注入。
+ *
+ * 方法通道 : 'tencent_chat_uikit/file_picker' - pickFiles({ 最大数量, 允许的Mime类型 }) -> 列表<{文件路径, 文件名, 文件大小,
+ * 扩展名}>
+ *
+ * - openFile({ 文件路径 }) -> 布尔值
  */
 export default class FilePicker implements MethodCallHandler {
   private static readonly TAG = 'ChatUiKit.FilePicker';

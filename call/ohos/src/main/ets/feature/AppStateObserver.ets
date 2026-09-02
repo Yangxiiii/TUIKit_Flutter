@@ -1,6 +1,10 @@
 // Process-wide singleton wrapping HarmonyOS `applicationStateChange`.
 // Centralised to keep the registration count = 1 per process and avoid state
 // divergence between multiple consumers (CallingBellFeature, IncomingNotificationFeature).
+//
+// 全进程单例，封装 HarmonyOS 的 `applicationStateChange`。
+//
+// 多个消费者之间的差异（CallingBellFeature、IncomingNotificationFeature）。
 
 import { common } from '@kit.AbilityKit';
 import ApplicationStateChangeCallback from '@ohos.app.ability.ApplicationStateChangeCallback';
@@ -23,6 +27,8 @@ class AppStateObserverImpl {
   };
 
   /** Idempotent; must be called from `TUICallKit.init`. */
+
+  /* 幂等；必须从 `TUICallKit.init` 调用。 */
   init(context: common.UIAbilityContext): void {
     if (this.context) {
       return;
@@ -66,6 +72,8 @@ class AppStateObserverImpl {
     }
     this._isBackground = isBackground;
     // Snapshot in case a listener mutates `listeners` during dispatch.
+    //
+    // 快照，以防监听器在分发过程中修改 `listeners`。
     const snapshot: Listener[] = Array.from(this.listeners);
     snapshot.forEach((cb): void => {
       try {

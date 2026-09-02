@@ -26,6 +26,13 @@ import 'package:url_launcher/url_launcher.dart';
 /// expands. Pulling the attachment out so `MessageItem` can render it
 /// in the column *below* the main row keeps the receipt anchored to
 /// the main bubble.
+///
+/// 构建可选的“附加”Widget，挂在主要消息气泡下方——音频消息的 ASR（语音 → 文本）气泡，以及文本消息的翻译气泡。
+///
+/// **为什么它作为一个独立的Widget存在，而不是直接集成到 `SoundMessageWidget` / `TextMessageWidget` 中：** 已读回执标签和状态/失败图标放在与
+/// `MessageItem` 内主气泡同一行的 `Row(crossAxisAlignment: end)` 中。如果 ASR/翻译气泡放在主气泡Widget内部（作为 [main,
+/// attachment] 的 `Column` 返回），行的 `end` 对齐会把回执固定在整个列的底部 —— 也就是附件的底部 —— 这会导致语音转文本或翻译展开时回执向下漂移。把附件抽出来，让
+/// `MessageItem` 可以在主行下面的列里渲染，就能保持回执锚定在主气泡。
 class MessageAttachmentBuilder {
   MessageAttachmentBuilder._();
 
@@ -36,6 +43,10 @@ class MessageAttachmentBuilder {
   /// `isInMergedDetailView` suppresses attachments inside merged
   /// forwards: those bubbles never have ASR / translation state in the
   /// first place, and the merged view doesn't have managers attached.
+  ///
+  /// 返回 [message] 的附件Widget，如果不适用则返回 `null`（例如：非音频/非文本的内容、未请求 ASR、隐藏翻译等情况）。
+  ///
+  /// `isInMergedDetailView` 会在合并转发中屏蔽附件：那些气泡本身就没有 ASR / 翻译状态，而且合并视图也没有附加管理器。
   static Widget? buildIfAny({
     required MessageInfo message,
     required bool isSelf,
@@ -100,6 +111,8 @@ class MessageAttachmentBuilder {
 }
 
 /// ASR (voice → text) bubble shown directly underneath the audio bubble.
+///
+/// ASR（语音→文本）气泡直接显示在音频气泡下方。
 class AsrAttachmentBubble extends StatefulWidget {
   final MessageInfo message;
   final bool isSelf;
@@ -178,6 +191,11 @@ class _AsrAttachmentBubbleState extends State<AsrAttachmentBubble> {
 /// text widget no longer has to. Until the names are loaded the bubble
 /// renders nothing rather than a half-resolved string (the legacy
 /// in-bubble translation had the same gate on `_atUserNamesLoaded`).
+///
+/// 翻译气泡直接显示在文本气泡下方。
+///
+/// 负责异步加载 `@user` 显示名，这样父文本控件就不必处理了。在名字加载之前，气泡不会渲染任何内容，而不是显示半完成的字符串（遗留的气泡内翻译对 `_atUserNamesLoaded`
+/// 也有同样的限制）。
 class TranslationAttachmentBubble extends StatefulWidget {
   final MessageInfo message;
   final bool isSelf;
@@ -292,6 +310,8 @@ class _TranslationAttachmentBubbleState
     } else if (!_atUserNamesLoaded) {
       // Same gating as the legacy in-bubble translation: until names are
       // resolved, render nothing rather than a half-resolved string.
+      //
+      // 和遗留的气泡内翻译一样：在名字解析之前，不渲染内容，而不是显示半完成的字符串。
       return const SizedBox.shrink();
     } else {
       final originalText =

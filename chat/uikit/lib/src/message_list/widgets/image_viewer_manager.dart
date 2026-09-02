@@ -22,6 +22,9 @@ class ImageViewerManager {
   /// renders this exact list. `loadMore` becomes a no-op in that mode
   /// because merged forwards are immutable bundles — there is nothing
   /// older or newer to fetch.
+  ///
+  /// 可选的预填充媒体列表。当提供时（例如通过合并消息详情页，这里没有 live MessageListStore 来补充数据），查看器会完全跳过 `loadMessages`
+  /// 并渲染这个精确列表。`loadMore` 在这种模式下无效，因为合并转发是不可变的包——没有更多旧的或新的内容可以获取。
   final List<MessageInfo>? _presetMediaMessages;
 
   ImageViewerManager({
@@ -169,6 +172,9 @@ class ImageViewerDataManager {
   /// loadMessages` and `loadMoreData` returns empty. Used by the merged
   /// message detail page where the bundle is immutable and the underlying
   /// store is empty (there is no real conversation to page against).
+  ///
+  /// 由调用方提供的静态媒体列表。当非空时，该管理器运行在“预设”模式：不会调用 `messageListStore.loadMessages`，`loadMoreData`
+  /// 会返回空。用于合并消息详情页，其中包是不可变的，底层存储为空（没有真正的会话可以分页）。
   final List<MessageInfo>? presetMediaMessages;
 
   bool _isLoadingOlder = false;
@@ -203,6 +209,8 @@ class ImageViewerDataManager {
     if (_isPresetMode) {
       // Skip the live store fetch — the merged bundle is the entire
       // dataset. Build elements directly from the preset list.
+      //
+      // 跳过实时商店获取——合并后的包就是完整数据集。直接从预设列表构建元素。
       final mediaElements = await _buildElementsFromPreset();
       final currentIndex = _findCurrentMessageIndex();
       return (mediaElements: mediaElements, currentIndex: currentIndex);
@@ -223,6 +231,8 @@ class ImageViewerDataManager {
   Future<({List<ImageElement> elements, bool hasMoreData})> loadMoreData(
       {required bool isOlder}) async {
     // Merged bundles are bounded in-memory lists; nothing to page.
+    //
+    // 合并的包是有界的内存列表；没有需要分页的内容。
     if (_isPresetMode) {
       return (elements: <ImageElement>[], hasMoreData: false);
     }

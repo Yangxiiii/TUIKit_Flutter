@@ -9,6 +9,8 @@ import 'package:tencent_chat_uikit/src/third_party/extended_text/extended_text.d
 /// A quote message preview block shown inside a message bubble.
 /// Displays the quoted message's sender name + content summary/thumbnail.
 /// Tapping triggers navigation to the quoted message.
+///
+/// 显示在消息气泡内的引用消息预览块。显示被引用消息的发送者姓名 + 内容摘要/缩略图。点击可导航到引用消息。
 class QuoteMessagePreview extends StatelessWidget {
   final MessageQuoteInfo quoteInfo;
   final VoidCallback? onTap;
@@ -41,6 +43,8 @@ class QuoteMessagePreview extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               // Left vertical bar
+              //
+              // 左侧垂直栏
               Container(
                 width: 3,
                 decoration: BoxDecoration(
@@ -48,6 +52,8 @@ class QuoteMessagePreview extends StatelessWidget {
                 ),
               ),
               // Content area
+              //
+              // 内容区域
               Flexible(
                 child: Padding(
                   padding:
@@ -89,6 +95,20 @@ class QuoteMessagePreview extends StatelessWidget {
     //          asynchronously filling quoteInfo.
     //
     //   5. Otherwise → render full original content normally.
+    //
+    // 显示优先级 —— 仅由 (状态, payload) 派生；不需要额外的 “isNotFound” 标记，因为引擎会重新利用
+    //
+    // 查找也失败（见 MessageListStoreImpl._fillQuoteInfoFromCloud）。
+    //
+    // 按照全局约定，被撤回的消息为 null，因此这必须在任何 payload-null 检查之前。
+    //
+    // → 渲染原始 payload 预览（根据产品规范：“如果已删除的原始消息仍可加载，则显示其内容”）。点击时的导航仍被阻塞，并且
+    //
+    // 引擎会在本地数据库和云端历史记录都找不到引用消息时进行路由。
+    //
+    // → 部分加载占位符。引擎仍在异步填充 quoteInfo。
+    //
+    // 5. 否则 → 正常渲染完整原始内容。
     if (quoteInfo.status == MessageStatus.revoked) {
       return _buildStatusContent(colors, locale.quotedMessageRevoked);
     }
@@ -115,6 +135,11 @@ class QuoteMessagePreview extends StatelessWidget {
   ///     repurposed by the engine to mean "cloud lookup gave up" —
   ///     either way it can't be located in the list)
   ///   - any other state (including partial-loading) → defer to caller
+  ///
+  /// 点击处理器：在原始消息无法访问时，阻止上游的 `onTap`（导航至原始消息），并显示提示
+  ///
+  /// 可达性规则：- `revoked` → 无法访问（服务器仍保留消息，但根据产品设计，它在历史记录导航中被隐藏）- `deleted` →
+  /// 无法访问（要么被用户真正删除，要么被引擎重新解释为“云端查询放弃”——无论哪种情况，都无法在列表中找到）- 任何其他状态（包括部分加载）→ 由调用方决定
   void _handleTap(BuildContext context, AppLocalizedText locale) {
     final unreachable = quoteInfo.status == MessageStatus.revoked ||
         quoteInfo.status == MessageStatus.deleted;
@@ -188,6 +213,10 @@ class QuoteMessagePreview extends StatelessWidget {
               // video payloads), skip the redundant "[图片]" / "[视频]"
               // text label — the thumbnail itself IS the content
               // summary, and showing both is visual noise.
+              //
+              // 当缩略图与（图片/
+              //
+              // 文本标签）一起渲染时——缩略图本身就是内容摘要，同时显示两者会形成视觉干扰。
               if (thumbnail == null) ...[
                 const SizedBox(height: 2),
                 _buildContentWidget(payload, colors, locale),
@@ -210,6 +239,8 @@ class QuoteMessagePreview extends StatelessWidget {
     );
 
     // Audio and file types use Icon prefix instead of emoji
+    //
+    // 音频和文件类型使用图标前缀而非表情符号
     switch (payload) {
       case AudioMessagePayload p:
         final duration = p.audioDuration;
@@ -247,6 +278,8 @@ class QuoteMessagePreview extends StatelessWidget {
         // Use ExtendedText so [TUIEmoji_*] tokens render as inline emoji
         // images instead of being shown literally. This matches the bubble
         // rendering and the merged-message preview.
+        //
+        // 使用 ExtendedText，这样 [TUIEmoji_*] 标记会以内联表情图像渲染，而不是直接显示文字。这与气泡渲染和合并消息预览保持一致。
         return ExtendedText(
           _getContentSummary(payload, locale),
           specialTextSpanBuilder: ChatSpecialTextSpanBuilder(

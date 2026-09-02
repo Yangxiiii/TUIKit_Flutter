@@ -85,6 +85,8 @@ class FilePickerHandler: NSObject, QLPreviewControllerDataSource {
         self.pendingResult = result
         
         // Ensure UI operations happen on main thread
+        //
+        // 确保 UI 操作在主线程上进行
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.logger.info("Calling FilePicker.shared.pickFiles")
@@ -114,6 +116,8 @@ class FilePickerHandler: NSObject, QLPreviewControllerDataSource {
             let fileURL = URL(fileURLWithPath: filePath)
             
             // Check if file exists
+            //
+            // 检查文件是否存在
             guard FileManager.default.fileExists(atPath: filePath) else {
                 self.logger.error("File does not exist: \(filePath)")
                 result(false)
@@ -121,6 +125,8 @@ class FilePickerHandler: NSObject, QLPreviewControllerDataSource {
             }
             
             // Get the root view controller
+            //
+            // 获取根视图控制器
             guard let rootViewController = self.getRootViewController() else {
                 self.logger.error("No root view controller found")
                 result(false)
@@ -128,14 +134,20 @@ class FilePickerHandler: NSObject, QLPreviewControllerDataSource {
             }
             
             // Use QuickLook to preview the file
+            //
+            // 使用 QuickLook 预览文件
             let previewController = QLPreviewController()
             previewController.dataSource = self
             
             // Store the file URL and preview controller
+            //
+            // 存储文件 URL 和预览控制器
             self.previewFileURL = fileURL
             self.previewController = previewController
             
             // Present the preview controller
+            //
+            // 展示预览控制器
             rootViewController.present(previewController, animated: true) {
                 self.logger.info("File preview presented successfully")
             }
@@ -160,10 +172,14 @@ class FilePickerHandler: NSObject, QLPreviewControllerDataSource {
         }
         
         // Find the topmost presented view controller
+        //
+        // 找到最顶部的呈现视图控制器
         return getTopmostViewController(from: rootViewController)
     }
     
     /// Recursively find the topmost presented view controller
+    ///
+    /// 递归查找最顶部的呈现视图控制器
     private func getTopmostViewController(from viewController: UIViewController?) -> UIViewController? {
         guard let vc = viewController else { return nil }
         

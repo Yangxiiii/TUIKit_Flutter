@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 
 /// Controller for inline video player
 /// Allows Flutter to control the native video player
+///
+/// 内联视频播放器控制器，允许 Flutter 控制原生视频播放器
 class InlineVideoPlayerController extends ChangeNotifier {
   final String videoPath;
   final int width;
@@ -72,6 +74,8 @@ class InlineVideoPlayerController extends ChangeNotifier {
         break;
       case 'onVideoSizeChanged':
         // Video size changed - can be used for aspect ratio if needed
+        //
+        // 视频大小已更改——如果需要，可用于宽高比
         notifyListeners();
         break;
     }
@@ -131,6 +135,8 @@ class InlineVideoPlayerController extends ChangeNotifier {
 
 /// Inline video player widget - only renders video, no controls
 /// Controls are handled by Flutter layer
+///
+/// 内联视频播放器Widget——只渲染视频，没有控制按钮，控制由 Flutter 层处理
 class InlineVideoPlayer extends StatefulWidget {
   final InlineVideoPlayerController controller;
   final BoxFit fit;
@@ -200,6 +206,8 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
 }
 
 /// Video player with Flutter controls overlay
+///
+/// 带 Flutter 控制覆盖层的视频播放器
 class InlineVideoPlayerWithControls extends StatefulWidget {
   final InlineVideoPlayerController controller;
   final bool showControls;
@@ -265,9 +273,13 @@ class _InlineVideoPlayerWithControlsState
         fit: StackFit.expand,
         children: [
           // Video player
+          //
+          // 视频播放器
           InlineVideoPlayer(controller: widget.controller),
 
           // Controls overlay
+          //
+          // 控制覆盖层
           if (widget.showControls && _showControlsOverlay)
             _buildControlsOverlay(),
         ],
@@ -294,9 +306,13 @@ class _InlineVideoPlayerWithControlsState
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           // Top spacer
+          //
+          // 顶部间隔
           const SizedBox(height: 50),
 
           // Center play/pause button
+          //
+          // 中心播放/暂停按钮
           GestureDetector(
             onTap: () => widget.controller.togglePlayPause(),
             child: Container(
@@ -315,6 +331,8 @@ class _InlineVideoPlayerWithControlsState
           ),
 
           // Bottom controls
+          //
+          // 底部控制
           _buildBottomControls(),
         ],
       ),
@@ -328,6 +346,8 @@ class _InlineVideoPlayerWithControlsState
         child: Row(
           children: [
             // Play/Pause button
+            //
+            // 播放/暂停按钮
             GestureDetector(
               onTap: () => widget.controller.togglePlayPause(),
               child: Container(
@@ -347,6 +367,8 @@ class _InlineVideoPlayerWithControlsState
             const SizedBox(width: 8),
 
             // Current time
+            //
+            // 当前时间
             Text(
               _formatDuration(widget.controller.position),
               style: const TextStyle(color: Colors.white, fontSize: 12),
@@ -354,12 +376,16 @@ class _InlineVideoPlayerWithControlsState
             const SizedBox(width: 8),
 
             // Progress bar
+            //
+            // 进度条
             Expanded(
               child: _buildProgressBar(),
             ),
             const SizedBox(width: 8),
 
             // Total time
+            //
+            // 总时间
             Text(
               _formatDuration(widget.controller.duration),
               style: const TextStyle(color: Colors.white, fontSize: 12),
@@ -374,12 +400,16 @@ class _InlineVideoPlayerWithControlsState
     return GestureDetector(
       onHorizontalDragStart: (details) {
         // Pause while dragging
+        //
+        // 拖动时暂停
       },
       onHorizontalDragUpdate: (details) {
         final RenderBox box = context.findRenderObject() as RenderBox;
         final localPosition = box.globalToLocal(details.globalPosition);
         // Calculate progress based on the progress bar width
         // This is a simplified version - you may need to adjust based on actual layout
+        //
+        // 根据进度条宽度计算进度，这是简化版本——可能需要根据实际布局调整
       },
       onTapDown: (details) {
         final RenderBox box = context.findRenderObject() as RenderBox;
@@ -396,6 +426,8 @@ class _InlineVideoPlayerWithControlsState
           alignment: Alignment.centerLeft,
           children: [
             // Background track
+            //
+            // 背景轨道
             Container(
               height: 4,
               decoration: BoxDecoration(
@@ -404,6 +436,8 @@ class _InlineVideoPlayerWithControlsState
               ),
             ),
             // Progress track
+            //
+            // 进度轨道
             FractionallySizedBox(
               widthFactor: widget.controller.progress,
               child: Container(
