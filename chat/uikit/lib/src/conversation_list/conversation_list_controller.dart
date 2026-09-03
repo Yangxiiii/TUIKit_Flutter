@@ -1,6 +1,8 @@
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../message_list/message_list.dart';
+
 final conversationListControllerProvider = AsyncNotifierProvider.autoDispose
     .family<ConversationListController, ConversationListViewState,
         ConversationListStore>(ConversationListController.new);
@@ -71,14 +73,24 @@ final class ConversationListController
       );
 
   /// 清空指定会话的历史消息。
-  Future<void> clearHistory(ConversationInfo conversation) =>
-      _store.clearConversationMessages(
-        conversationID: conversation.conversationID,
-      );
+  Future<void> clearHistory(ConversationInfo conversation) async {
+    final result = await _store.clearConversationMessages(
+      conversationID: conversation.conversationID,
+    );
+    if (result.isSuccess) {
+      MessageList.removeViewportSnapshot(conversation.conversationID);
+    }
+  }
 
   /// 删除指定会话。
-  Future<void> delete(ConversationInfo conversation) =>
-      _store.deleteConversation(conversationID: conversation.conversationID);
+  Future<void> delete(ConversationInfo conversation) async {
+    final result = await _store.deleteConversation(
+      conversationID: conversation.conversationID,
+    );
+    if (result.isSuccess) {
+      MessageList.removeViewportSnapshot(conversation.conversationID);
+    }
+  }
 
   /// 清除真实未读数和手工未读标记。
   Future<void> markAsRead(ConversationInfo conversation) async {

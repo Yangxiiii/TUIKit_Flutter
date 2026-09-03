@@ -266,8 +266,13 @@ class _C2CChatSettingState extends State<C2CChatSetting> {
               title: atomicLocale.clearMessage,
               content: atomicLocale.clearMsgTip,
               onConfirm: () async {
-                await _conversationListStore.clearConversationMessages(
-                    conversationID: conversationID);
+                final result =
+                    await _conversationListStore.clearConversationMessages(
+                  conversationID: conversationID,
+                );
+                if (result.isSuccess) {
+                  MessageList.removeViewportSnapshot(conversationID);
+                }
               },
             );
           },
@@ -285,8 +290,13 @@ class _C2CChatSettingState extends State<C2CChatSetting> {
                   final result =
                       await _contactStore.deleteFriend(userID: widget.userID);
                   if (result.errorCode == 0) {
-                    _conversationListStore.deleteConversation(
-                        conversationID: conversationID);
+                    final deleteResult =
+                        await _conversationListStore.deleteConversation(
+                      conversationID: conversationID,
+                    );
+                    if (deleteResult.isSuccess) {
+                      MessageList.removeViewportSnapshot(conversationID);
+                    }
                     if (mounted) Navigator.of(context).pop();
                     widget.onContactDelete?.call();
                   }

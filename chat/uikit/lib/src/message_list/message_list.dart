@@ -11,6 +11,7 @@ import 'package:tencent_chat_uikit/src/message_list/message_list_config.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/at_mention_utils.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/asr_display_manager.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/call_ui_extension.dart';
+import 'package:tencent_chat_uikit/src/message_list/utils/message_viewport_anchor.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_utils.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/translation_display_manager.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/translation_text_parser.dart';
@@ -164,6 +165,19 @@ class MessageList extends StatefulWidget {
     this.initialUnreadCount = 0,
   });
 
+  /// 清除当前进程内的全部会话浏览快照；用户登出时调用。
+  static void clearViewportSnapshots() {
+    _MessageListState._viewportSnapshots.clear();
+  }
+
+  /// 清除当前登录用户的指定会话快照；删除会话或清空历史时调用。
+  static void removeViewportSnapshot(String conversationID) {
+    final userID = LoginStore.shared.loginState.loginUserInfo?.userID ?? '';
+    _MessageListState._viewportSnapshots.remove(
+      _MessageListState._viewportKey(userID, conversationID),
+    );
+  }
+
   @override
   State<MessageList> createState() => _MessageListState();
 }
@@ -265,7 +279,35 @@ class _NavReloadingLatest extends _NavigationState {
 /// 协调消息分页、可见性已读回执与列表内跳转状态。
 class _MessageListState extends State<MessageList>
     with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+  /// 每个锚点两侧各缓存 20 条，与 SDK 双向分页的单侧页大小保持一致。
+  static const int _snapshotMessagesPerSide = 20;
+
+  /// 以“登录用户 + 会话”隔离快照，避免切换账号后复用其他用户的消息窗口。
+  static final Map<String, MessageViewportSnapshot> _viewportSnapshots = {};
+
+  static String _viewportKey(String userID, String conversationID) =>
+      '$userID\u0000$conversationID';
+
   late MessageListStore _messageListStore;
+
+  /// 当前会话在进程内快照表中的稳定键。
+  late final String _viewportAnchorKey;
+
+  /// 进入页面前命中的快照；仅用于首屏同步渲染和随后的一次 SDK 刷新。
+  MessageViewportSnapshot? _restoreViewportSnapshot;
+
+  /// SDK 刷新快照期间需要保持不动的锚点，刷新完成后立即清空。
+  MessageViewportAnchor? _refreshViewportAnchor;
+
+  /// 滚动过程中最近一次有效锚点，退出页面采样失败时作为兜底。
+  MessageViewportAnchor? _currentViewportAnchor;
+
+  /// 列表首次创建时使用的消息索引和视口对齐比例。
+  int _initialScrollIndex = 0;
+  double _initialScrollAlignment = 0;
+
+  /// 为 false 时暂不创建列表，避免初始索引尚未确定就先渲染 index 0。
+  bool _isInitialViewportReady = false;
   GroupInfo? _groupInfo;
   late AppLocalizedText _atomicLocale;
   final ItemScrollController _itemScrollController = ItemScrollController();
@@ -287,7 +329,6 @@ class _MessageListState extends State<MessageList>
   bool _isInitialLoad = true;
   bool _isInitialRenderComplete = false;
   bool _initialLoadStarted = false;
-  Animation<double>? _routeAnimation;
 
   String? _highlightedMessageId;
 
@@ -336,6 +377,8 @@ class _MessageListState extends State<MessageList>
   int _initialUnreadCount = 0;
   int _unreadTongueCount = 0;
   int? _oldestUnreadMessageSeq;
+  int? _viewedUnreadMinSequence;
+  int? _viewedUnreadMaxSequence;
   bool _pendingUnreadCheck =
       false; // Defer tongue display until visibility check
 
@@ -388,6 +431,24 @@ class _MessageListState extends State<MessageList>
   @override
   void initState() {
     super.initState();
+
+    final currentUserID =
+        LoginStore.shared.loginState.loginUserInfo?.userID ?? '';
+    _viewportAnchorKey = _viewportKey(currentUserID, widget.conversationID);
+
+    // 外部指定消息用于搜索、@ 或引用跳转，优先级高于普通浏览位置恢复。
+    if (widget.locateMessage == null) {
+      final snapshot = _viewportSnapshots[_viewportAnchorKey];
+      if (snapshot != null) {
+        // initState 内同步注入消息窗口，让缓存会话在页面转场的第一帧就有内容。
+        _restoreViewportSnapshot = snapshot;
+        _messages = snapshot.messages;
+        _isInitialViewportReady = _setInitialViewport(
+          snapshot.anchor.message,
+          alignment: snapshot.anchor.alignment,
+        );
+      }
+    }
 
     _asrDisplayManager = AsrDisplayManager();
     _translationDisplayManager = TranslationDisplayManager();
@@ -444,7 +505,27 @@ class _MessageListState extends State<MessageList>
 
   @override
   void dispose() {
-    _routeAnimation?.removeStatusListener(_onRouteAnimationStatusChanged);
+    // 优先读取退出瞬间的真实视口；路由销毁导致位置丢失时退回最近一次滚动采样。
+    final viewportAnchor = selectMessageViewportAnchor(
+          messages: _messages,
+          positions: _itemPositionsListener.itemPositions.value,
+        ) ??
+        _currentViewportAnchor;
+    if (viewportAnchor != null && _messages.isNotEmpty) {
+      final snapshot = createMessageViewportSnapshot(
+        messages: _messages,
+        anchor: viewportAnchor,
+        messagesPerSide: _snapshotMessagesPerSide,
+        unreadAboveCount: _unreadTongueCount,
+        unreadBelowCount: _newMessageCount,
+        oldestUnreadSequence: _oldestUnreadMessageSeq,
+        viewedUnreadMinSequence: _viewedUnreadMinSequence,
+        viewedUnreadMaxSequence: _viewedUnreadMaxSequence,
+      );
+      if (snapshot != null) {
+        _viewportSnapshots[_viewportAnchorKey] = snapshot;
+      }
+    }
     _messageListStore.state.messageList
         .removeListener(_messageListStateChangedListener);
     _messageEventSubscription?.cancel();
@@ -483,6 +564,16 @@ class _MessageListState extends State<MessageList>
     //
     // 当有用户发起的导航正在进行时，不要启动自动加载。这些导航状态中的每一个都会驱动自己的滚动/jumpTo，并且会与由滚动监听器触发的 _loadNewer/_loadPrevious 发生竞争。
     final isNavIdle = _navigationState is _NavIdle;
+    if (_isInitialViewportReady && isNavIdle) {
+      final viewportAnchor = selectMessageViewportAnchor(
+        messages: _messages,
+        positions: positions,
+      );
+      if (viewportAnchor != null) {
+        _consumeVisibleUnread(positions);
+        _currentViewportAnchor = viewportAnchor;
+      }
+    }
 
     // Load newer messages when the user has scrolled to the bottom
     // (reverse:true → "bottom" = newest = index 0 area).
@@ -522,7 +613,7 @@ class _MessageListState extends State<MessageList>
     // Tongue visibility logic
     //
     // 小舌头可见性逻辑
-    if (!widget.config.isSupportTongue) return;
+    if (!widget.config.isSupportTongue || !_isInitialRenderComplete) return;
     _updateTongueState(minIndex, isAtBottom);
   }
 
@@ -539,21 +630,22 @@ class _MessageListState extends State<MessageList>
     if (_navigationState is! _NavIdle) return;
 
     if (isAtBottom) {
+      final hasNewerMessages = _messageListStore.state.hasNewerMessages.value;
+      final isAtLatest = isAtConversationLatest(
+        isAtLoadedWindowBottom: isAtBottom,
+        hasNewerMessages: hasNewerMessages,
+      );
       if (_tongueType != TongueType.none || _newMessageCount > 0) {
         setState(() {
-          _newMessageCount = 0;
-          _pendingNewMessages.clear();
           if (_remainingAtInfoList.isEmpty) {
-            // Only hide tongue when truly at the bottom of ALL messages.
-            // If there are still newer messages to load, keep backToLatest
-            // visible so the user can tap to jump to the latest.
-            //
-            // 只有在所有消息真正到达底部时才隐藏小舌头。
-            //
-            // 可见，以便用户可以点击跳转到最新消息。
-            if (_messageListStore.state.hasNewerMessages.value) {
-              _tongueType = TongueType.backToLatest;
+            // 当前可能只是历史分页窗口的底部；SDK 仍有更新消息时必须保留未读数量。
+            if (!isAtLatest) {
+              _tongueType = _newMessageCount > 0
+                  ? TongueType.newMessages
+                  : TongueType.backToLatest;
             } else {
+              _newMessageCount = 0;
+              _pendingNewMessages.clear();
               _tongueType = TongueType.none;
             }
           }
@@ -603,6 +695,7 @@ class _MessageListState extends State<MessageList>
     return TongueType.backToLatest;
   }
 
+  /// 根据显式定位、进程内快照或最新消息的优先级完成首次加载。
   Future<void> _loadInitialMessages() async {
     if (isLoading) return;
 
@@ -610,25 +703,65 @@ class _MessageListState extends State<MessageList>
       isLoading = true;
     });
 
-    if (widget.locateMessage != null) {
+    final requestedMessage = widget.locateMessage;
+    final restoredSnapshot = _restoreViewportSnapshot;
+    if (requestedMessage != null) {
+      // 搜索、@ 和引用跳转必须围绕业务指定的消息加载，不能被浏览快照覆盖。
       debugPrint('messageList, _loadInitialMessages->_loadMessagesAround');
-      await _loadMessagesAround(widget.locateMessage!);
+      await _loadMessagesAround(requestedMessage);
+      _setInitialViewport(requestedMessage, alignment: 0);
+    } else if (restoredSnapshot != null) {
+      // 页面已同步显示快照，这里只负责用 SDK 数据静默更新其消息窗口。
+      debugPrint('messageList, _loadInitialMessages->restoreViewport');
+      final restoredAnchor = restoredSnapshot.anchor;
+      var refreshSucceeded = true;
+      _refreshViewportAnchor = restoredAnchor;
+      try {
+        await _loadMessagesAround(restoredAnchor.message);
+      } catch (error) {
+        // 已有内存快照时刷新失败不阻塞页面，继续展示离开前的消息窗口。
+        refreshSucceeded = false;
+        debugPrint('messageList, restore viewport refresh failed: $error');
+      } finally {
+        _refreshViewportAnchor = null;
+      }
+      if (refreshSucceeded &&
+          !_setInitialViewport(
+            restoredAnchor.message,
+            alignment: restoredAnchor.alignment,
+          )) {
+        // SDK 已无法返回原锚点时丢弃失效快照，并降级展示最新消息。
+        _viewportSnapshots.remove(_viewportAnchorKey);
+        await _loadLatestMessages();
+      }
     } else {
+      // 首次访问或进程重启后没有内存快照，按原有规则进入最新消息位置。
       debugPrint('messageList, _loadInitialMessages->_loadLatestMessages');
       await _loadLatestMessages();
     }
 
     final initialRenderComplete =
         _messages.length == _messageListStore.state.messageList.value.length;
+    if (!mounted) return;
     setState(() {
       isLoading = false;
       _isInitialLoad = false;
       _isInitialRenderComplete = initialRenderComplete;
+      _isInitialViewportReady = true;
     });
 
     if (_pendingUnreadCheck && initialRenderComplete) {
       _scheduleUnreadTongueVisibilityCheck();
     }
+  }
+
+  /// 将稳定消息标识转换为本次消息窗口内的初始列表索引。
+  bool _setInitialViewport(MessageInfo message, {required double alignment}) {
+    final index = _messages.indexWhere((item) => item.msgID == message.msgID);
+    if (index == -1) return false;
+    _initialScrollIndex = index;
+    _initialScrollAlignment = alignment;
+    return true;
   }
 
   void _onMessageListStateChanged() {
@@ -637,6 +770,35 @@ class _MessageListState extends State<MessageList>
     debugPrint('messageList, _onMessageListStateChanged, '
         'msgCount: ${state.messageList.value.length}, '
         'navState: ${_navigationState.runtimeType}');
+
+    // 快照已在首帧展示；SDK 回包后仍围绕原锚点替换窗口，避免刷新把用户拉回最新消息。
+    final refreshAnchor = _refreshViewportAnchor;
+    if (refreshAnchor != null) {
+      final refreshedMessages = state.messageList.value.reversed.toList();
+      final previousTargetIndex = _messages.indexWhere(
+        (message) => message.msgID == refreshAnchor.message.msgID,
+      );
+      final targetIndex = refreshedMessages.indexWhere(
+        (message) => message.msgID == refreshAnchor.message.msgID,
+      );
+      if (targetIndex != -1) {
+        _initialScrollIndex = targetIndex;
+        _initialScrollAlignment = refreshAnchor.alignment;
+      }
+      setState(() {
+        _messages = refreshedMessages;
+      });
+      // 索引未变化时保持当前视口；变化时同步补偿，避免先渲染错误位置再于下一帧跳回。
+      if (targetIndex != -1 &&
+          targetIndex != previousTargetIndex &&
+          _itemScrollController.isAttached) {
+        _itemScrollController.jumpTo(
+          index: targetIndex,
+          alignment: refreshAnchor.alignment,
+        );
+      }
+      return;
+    }
 
     // Each navigation kind owns an "atomic-frame" branch: messages +
     // scroll + highlight + tongue are applied in one setState while we
@@ -862,8 +1024,8 @@ class _MessageListState extends State<MessageList>
             if (!_pendingNewMessages
                 .any((pending) => pending.msgID == message.msgID)) {
               _pendingNewMessages.add(message);
+              _newMessageCount++;
             }
-            _newMessageCount = _pendingNewMessages.length;
             _tongueType = _computeTongueType();
           });
         }
@@ -1126,17 +1288,22 @@ class _MessageListState extends State<MessageList>
                     top: _callStatusWidget != null ? 70 : 8,
                     bottom: 8,
                   ),
-                  child: ScrollablePositionedList.builder(
-                    reverse: true,
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    itemScrollController: _itemScrollController,
-                    itemPositionsListener: _itemPositionsListener,
-                    itemCount: _messages.length,
-                    itemBuilder: _renderItem,
-                    addRepaintBoundaries: true,
-                    addAutomaticKeepAlives: true,
-                    addSemanticIndexes: false,
-                  ),
+                  // 缓存会话会在 initState 直接就绪；无缓存时等待首批消息和目标索引同时准备完成。
+                  child: !_isInitialViewportReady
+                      ? const SizedBox.shrink()
+                      : ScrollablePositionedList.builder(
+                          reverse: true,
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          itemScrollController: _itemScrollController,
+                          itemPositionsListener: _itemPositionsListener,
+                          initialScrollIndex: _initialScrollIndex,
+                          initialAlignment: _initialScrollAlignment,
+                          itemCount: _messages.length,
+                          itemBuilder: _renderItem,
+                          addRepaintBoundaries: true,
+                          addAutomaticKeepAlives: true,
+                          addSemanticIndexes: false,
+                        ),
                 ),
               ),
             ),
@@ -1236,8 +1403,24 @@ class _MessageListState extends State<MessageList>
   /// 仅限群聊 — C2C 消息 seq 不是连续的，所以无法基于 seq 定位
   void _initUnreadTongue() {
     if (!widget.config.isSupportTongue) return;
-    if (widget.initialUnreadCount <= 0) return;
     if (widget.locateMessage != null) return;
+
+    final snapshot = _restoreViewportSnapshot;
+    if (snapshot != null) {
+      // 恢复位置时保留两侧尚未浏览的消息；离开后新增的未读只会出现在当前锚点下方。
+      _unreadTongueCount = snapshot.unreadAboveCount;
+      _newMessageCount = snapshot.unreadBelowCount + widget.initialUnreadCount;
+      _oldestUnreadMessageSeq = snapshot.oldestUnreadSequence;
+      _viewedUnreadMinSequence = snapshot.viewedUnreadMinSequence;
+      _viewedUnreadMaxSequence = snapshot.viewedUnreadMaxSequence;
+      _unreadTongueType =
+          _unreadTongueCount > 0 ? TongueType.unreadMessages : TongueType.none;
+      _tongueType =
+          _newMessageCount > 0 ? TongueType.newMessages : TongueType.none;
+      return;
+    }
+
+    if (widget.initialUnreadCount <= 0) return;
     if (!widget.conversationID.startsWith(groupConversationIDPrefix)) return;
 
     _initialUnreadCount = widget.initialUnreadCount;
@@ -1275,11 +1458,14 @@ class _MessageListState extends State<MessageList>
 
     // 只扣除未读区间内实际进入屏幕的消息，避免把可见的历史已读消息也算进去。
     int visibleUnreadCount = 0;
+    final visibleUnreadSequences = <int>[];
     for (final pos in positions) {
       if (pos.index < _initialUnreadCount &&
           pos.itemLeadingEdge < 1.0 &&
           pos.itemTrailingEdge > 0.0) {
         visibleUnreadCount++;
+        final sequence = _messages[pos.index].sequence;
+        if (sequence != null) visibleUnreadSequences.add(sequence);
       }
     }
     final remainingUnreadCount = _initialUnreadCount - visibleUnreadCount;
@@ -1297,6 +1483,11 @@ class _MessageListState extends State<MessageList>
       setState(() {
         _unreadTongueCount = remainingUnreadCount;
         _unreadTongueType = TongueType.unreadMessages;
+        if (visibleUnreadSequences.isNotEmpty) {
+          visibleUnreadSequences.sort();
+          _viewedUnreadMinSequence = visibleUnreadSequences.first;
+          _viewedUnreadMaxSequence = visibleUnreadSequences.last;
+        }
       });
       _computeOldestUnreadSeq();
     }
@@ -1318,6 +1509,54 @@ class _MessageListState extends State<MessageList>
     }
   }
 
+  /// 消耗刚进入视口的未读消息，确保提示数字与实际可见范围同步。
+  void _consumeVisibleUnread(Iterable<ItemPosition> positions) {
+    int? visibleMinSequence;
+    int? visibleMaxSequence;
+    for (final position in positions) {
+      if (position.index < 0 || position.index >= _messages.length) continue;
+      final sequence = _messages[position.index].sequence;
+      if (sequence == null) continue;
+      if (visibleMinSequence == null || sequence < visibleMinSequence) {
+        visibleMinSequence = sequence;
+      }
+      if (visibleMaxSequence == null || sequence > visibleMaxSequence) {
+        visibleMaxSequence = sequence;
+      }
+    }
+
+    final counts = consumeUnreadInVisibleRange(
+      above: _unreadTongueCount,
+      below: _newMessageCount,
+      viewedMinSequence: _viewedUnreadMinSequence,
+      viewedMaxSequence: _viewedUnreadMaxSequence,
+      visibleMinSequence: visibleMinSequence,
+      visibleMaxSequence: visibleMaxSequence,
+    );
+    if (counts.above == _unreadTongueCount &&
+        counts.below == _newMessageCount &&
+        counts.viewedMinSequence == _viewedUnreadMinSequence &&
+        counts.viewedMaxSequence == _viewedUnreadMaxSequence) {
+      return;
+    }
+
+    setState(() {
+      _unreadTongueCount = counts.above;
+      _newMessageCount = counts.below;
+      _viewedUnreadMinSequence = counts.viewedMinSequence;
+      _viewedUnreadMaxSequence = counts.viewedMaxSequence;
+      _unreadTongueType =
+          counts.above > 0 ? TongueType.unreadMessages : TongueType.none;
+      if (counts.below > 0 &&
+          _tongueType != TongueType.atMention &&
+          _tongueType != TongueType.backToQuote) {
+        _tongueType = TongueType.newMessages;
+      } else if (counts.below == 0 && _tongueType == TongueType.newMessages) {
+        _tongueType = TongueType.none;
+      }
+    });
+  }
+
   GroupAtType? _pendingAtType;
 
   @override
@@ -1333,27 +1572,14 @@ class _MessageListState extends State<MessageList>
       _pendingAtType = null;
     }
 
-    if (_initialLoadStarted) return;
-    final animation = ModalRoute.of(context)?.animation;
-    if (animation == null || animation.status == AnimationStatus.completed) {
-      _startInitialLoad();
-      return;
-    }
-    if (identical(_routeAnimation, animation)) return;
-    _routeAnimation?.removeStatusListener(_onRouteAnimationStatusChanged);
-    _routeAnimation = animation;
-    animation.addStatusListener(_onRouteAnimationStatusChanged);
+    // 不再等待路由动画结束，让 SDK 本地查询与页面转场并行进行。
+    _startInitialLoad();
   }
 
-  void _onRouteAnimationStatusChanged(AnimationStatus status) {
-    if (status == AnimationStatus.completed) _startInitialLoad();
-  }
-
+  /// 保证依赖变化或重复构建期间只触发一次首屏加载。
   void _startInitialLoad() {
     if (_initialLoadStarted) return;
     _initialLoadStarted = true;
-    _routeAnimation?.removeStatusListener(_onRouteAnimationStatusChanged);
-    _routeAnimation = null;
     _loadInitialMessages();
   }
 
@@ -1389,59 +1615,33 @@ class _MessageListState extends State<MessageList>
   ///
   /// 处理点击右上角未读消息提示的操作
   Future<void> _onUnreadTongueTap() async {
-    if (_initialUnreadCount <= 0) return;
+    if (_unreadTongueCount <= 0) return;
+
+    if (_oldestUnreadMessageSeq == null || _oldestUnreadMessageSeq! <= 0) {
+      _computeOldestUnreadSeq();
+    }
+
+    final targetSeq = _oldestUnreadMessageSeq;
+    if (targetSeq == null || targetSeq <= 0) return;
+    final targetIndex = _messages.indexWhere(
+      (message) => message.sequence == targetSeq,
+    );
+    final unreadMovedBelow =
+        _unreadTongueCount > 1 ? _unreadTongueCount - 1 : 0;
 
     setState(() {
       _navigationState = const _NavToUnread();
+      _unreadTongueCount = 0;
+      _unreadTongueType = TongueType.none;
+      _newMessageCount += unreadMovedBelow;
+      _viewedUnreadMinSequence = targetSeq;
+      _viewedUnreadMaxSequence = targetSeq;
+      if (_newMessageCount > 0) _tongueType = TongueType.newMessages;
     });
 
-    if (_initialUnreadCount <= 20) {
-      // No network fetch needed, hide tongue immediately
-      //
-      // 不需要网络请求，立即隐藏提示
-      setState(() {
-        _unreadTongueType = TongueType.none;
-      });
-
-      // Unread count within the loaded page, scroll to the oldest unread message
-      // _messages is newest-first (reversed), so index = unreadCount - 1 is the oldest unread
-      //
-      // 未读数量在已加载页面内，滚动到最旧未读消息
-      final targetIndex = _initialUnreadCount - 1;
-      if (targetIndex >= 0 && targetIndex < _messages.length) {
-        // In reverse:true list, a higher alignment moves the item towards the top.
-        // alignment=1.0 leaves 0 paint extent so the item becomes invisible.
-        // 0.9 places the item near the top of the viewport.
-        //
-        // 在 reverse:true 的列表中，更高的对齐度会将项目移动到顶部。alignment=1.0 时，绘制范围为 0，因此项目变得不可见。0.9 会将项目放到视口顶部附近。
-        _itemScrollController.jumpTo(index: targetIndex, alignment: 0.9);
-      }
+    if (targetIndex != -1) {
+      _itemScrollController.jumpTo(index: targetIndex, alignment: 0.9);
     } else {
-      // Unread count exceeds default page size, need to load around oldest unread message.
-      // Compute seq if not already computed
-      //
-      // 未读消息数超过默认页面大小，需要加载最早未读消息附近的消息。如果序列号尚未计算，则进行计算。
-      if (_oldestUnreadMessageSeq == null || _oldestUnreadMessageSeq! <= 0) {
-        _computeOldestUnreadSeq();
-      }
-
-      if (_oldestUnreadMessageSeq == null || _oldestUnreadMessageSeq! <= 0) {
-        // Fallback: still can't compute seq, just scroll to the top of current list
-        //
-        // 备用方案：仍然无法计算序列号，就滚动到当前列表的顶部。
-        if (_messages.isNotEmpty) {
-          _itemScrollController.jumpTo(index: _messages.length - 1);
-        }
-        setState(() {
-          _navigationState = const _NavIdle();
-          _unreadTongueType = TongueType.none;
-        });
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _activateAtMentionTongueIfNeeded();
-        });
-        return;
-      }
-
       setState(() {
         isLoading = true;
       });
@@ -1451,7 +1651,7 @@ class _MessageListState extends State<MessageList>
       // matching WeChat's experience of showing context above the first unread message.
       //
       // 同时使用两个方向加载最早未读消息附近的消息。这样我们可以在其上方显示一些较早的（已读）消息，下方显示较新的（未读）消息，和微信展示首条未读消息上下文的体验一致。
-      final cursorMsg = MessageInfo(sequence: _oldestUnreadMessageSeq!);
+      final cursorMsg = MessageInfo(sequence: targetSeq);
       final option = MessageLoadOption()
         ..cursor = cursorMsg
         ..direction = MessageLoadDirection.both
@@ -1969,9 +2169,12 @@ class _MessageListState extends State<MessageList>
 
   /// 跳转后移除目标及其之前的新消息，保留下方尚未查看的数量。
   void _consumeNewMessagesThrough(int targetSeq) {
+    final previousCount = _pendingNewMessages.length;
     _pendingNewMessages
         .removeWhere((message) => !isMessageAfterSequence(message, targetSeq));
-    _newMessageCount = _pendingNewMessages.length;
+    final consumedCount = previousCount - _pendingNewMessages.length;
+    _newMessageCount =
+        _newMessageCount > consumedCount ? _newMessageCount - consumedCount : 0;
   }
 
   // ==================== Multi-select mode ====================

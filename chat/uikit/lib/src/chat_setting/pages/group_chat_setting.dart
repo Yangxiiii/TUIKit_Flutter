@@ -2,6 +2,7 @@ import 'package:app_ui/app_ui.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
+import 'package:tencent_chat_uikit/src/message_list/message_list.dart';
 import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
 import 'package:flutter/material.dart' hide AlertDialog;
 import 'package:flutter_svg/svg.dart';
@@ -792,8 +793,12 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
       title: atomicLocale.clearMessage,
       content: atomicLocale.clearMsgTip,
       onConfirm: () async {
-        await _conversationListStore.clearConversationMessages(
-            conversationID: conversationID);
+        final result = await _conversationListStore.clearConversationMessages(
+          conversationID: conversationID,
+        );
+        if (result.isSuccess) {
+          MessageList.removeViewportSnapshot(conversationID);
+        }
       },
     );
   }
@@ -807,8 +812,12 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
         final result =
             await GroupStore.shared.quitGroup(groupID: widget.groupID);
         if (result.errorCode == 0) {
-          _conversationListStore.deleteConversation(
-              conversationID: conversationID);
+          final deleteResult = await _conversationListStore.deleteConversation(
+            conversationID: conversationID,
+          );
+          if (deleteResult.isSuccess) {
+            MessageList.removeViewportSnapshot(conversationID);
+          }
           if (mounted) Navigator.of(context).pop();
           widget.onGroupDelete?.call();
         } else {
@@ -836,8 +845,12 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
         final result =
             await GroupStore.shared.dismissGroup(groupID: widget.groupID);
         if (result.errorCode == 0) {
-          _conversationListStore.deleteConversation(
-              conversationID: conversationID);
+          final deleteResult = await _conversationListStore.deleteConversation(
+            conversationID: conversationID,
+          );
+          if (deleteResult.isSuccess) {
+            MessageList.removeViewportSnapshot(conversationID);
+          }
           if (mounted) Navigator.of(context).pop();
           widget.onGroupDelete?.call();
         } else {
