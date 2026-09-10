@@ -304,15 +304,14 @@ class Avatar extends StatelessWidget {
     final key = isGroup
         ? AppSkinIllustrations.chatGroupAvatar
         : AppSkinIllustrations.chatUserAvatar;
-    final asset = AppSkinScope.maybeOf(context)?.illustration(key);
-    if (asset == null) return null;
-    return Image.asset(
-      asset,
+    final image = AppSkinScope.maybeOf(context)?.image(key);
+    if (image == null) return null;
+    return AppSkinImageView(
+      image: image,
       width: size.value,
       height: size.value,
       fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) =>
-          _buildDefaultAvatarIcon(colors, isGroup: isGroup),
+      error: _buildDefaultAvatarIcon(colors, isGroup: isGroup),
     );
   }
 
