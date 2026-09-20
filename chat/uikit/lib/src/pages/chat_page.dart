@@ -1,10 +1,10 @@
 import 'package:app_ui/app_ui.dart';
+import 'package:flutter/material.dart' hide IconButton;
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
 import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
 import 'package:tuikit_atomic_x/base_component/utils/tui_event_bus.dart';
 import 'package:tencent_chat_uikit/src/contact_list/pages/add_friend.dart';
 import 'package:tencent_chat_uikit/src/message_list/listen/listen_playback_bar.dart';
-import 'package:flutter/material.dart' hide IconButton;
 
 class ChatSettingPage extends StatelessWidget {
   final ConversationInfo conversation;
@@ -123,6 +123,7 @@ class ChatPage extends StatefulWidget {
   State<ChatPage> createState() => _ChatPageState();
 }
 
+/// 协调会话页的消息展示和输入交互。
 class _ChatPageState extends State<ChatPage> {
   late SemanticColorScheme colorsTheme;
 

@@ -96,6 +96,7 @@ class DefaultMessageMenuCallbacks implements MessageMenuCallbacks {
   void onResendMessage(MessageInfo message) {}
 }
 
+/// 按消息类型选择气泡内容，并统一承接高亮和长按操作。
 class MessageBubble extends StatefulWidget {
   final MessageInfo message;
   final String conversationID;
@@ -171,6 +172,7 @@ class MessageBubble extends StatefulWidget {
   State<StatefulWidget> createState() => _MessageBubbleState();
 }
 
+/// 管理消息气泡的高亮动画与菜单生命周期，并渲染对应消息类型。
 class _MessageBubbleState extends State<MessageBubble>
     with SingleTickerProviderStateMixin {
   late MessageMenuCallbacks _menuCallbacks;
@@ -455,6 +457,7 @@ class _MessageBubbleState extends State<MessageBubble>
             message: widget.message,
             isSelf: widget.isSelf,
             maxWidth: widget.maxWidth,
+            config: widget.config,
             onLongPress: _longPressCallback,
             messageListStore: widget.messageListStore,
           );

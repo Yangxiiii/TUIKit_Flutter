@@ -4,7 +4,9 @@ import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
 import 'package:flutter/cupertino.dart';
 
 import 'calling_message_data_provider.dart';
+import 'rich_content_message.dart';
 
+/// 汇总消息的展示文案，并为会话列表提供统一的消息摘要。
 class MessageUtil {
   static String getSystemInfoDisplayString(
       List<GroupTipsInfo> groupTipsInfo, BuildContext context) {
@@ -297,6 +299,7 @@ class MessageUtil {
     return '$operator ${localizations.groupInviteMethodChangedTo} $approvalDesc';
   }
 
+  /// 从消息内容生成会话摘要；无法识别的自定义消息保留通用提示。
   static String getMessageAbstract(
       MessageInfo? messageInfo, BuildContext context,
       {bool showMergedTitle = false}) {
@@ -350,6 +353,26 @@ class MessageUtil {
 
         final customInfo =
             ChatUtil.jsonData2Dictionary(customPayload.customData);
+        if (customInfo?['businessID'] == RichContentMessage.businessID) {
+          final richContent =
+              RichContentMessage.tryParse(customPayload.customData);
+          if (richContent != null) {
+            // 会话摘要优先展示首段非空文字，无文字时使用第一个附件的信息。
+            for (final block in richContent.blocks) {
+              if (block is RichTextBlock && block.text.trim().isNotEmpty) {
+                return block.text.trim();
+              }
+            }
+            for (final block in richContent.blocks) {
+              if (block is RichImageBlock) {
+                return localizations.messageTypeImage;
+              }
+              if (block is RichFileBlock) {
+                return block.name;
+              }
+            }
+          }
+        }
         if (customInfo != null && customInfo['businessID'] == 'group_create') {
           final sender = customInfo['opUser'] ?? '';
           final cmd = customInfo['cmd'] is int ? customInfo['cmd'] : 0;

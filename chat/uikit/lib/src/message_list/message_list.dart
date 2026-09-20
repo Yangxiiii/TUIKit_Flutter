@@ -107,6 +107,7 @@ class MessageCustomAction {
   });
 }
 
+/// 展示 SDK 会话消息，并协调分页和列表内跳转。
 class MessageList extends StatefulWidget {
   final String conversationID;
   final MessageListConfigProtocol config;
