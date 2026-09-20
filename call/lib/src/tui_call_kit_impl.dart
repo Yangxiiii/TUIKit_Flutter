@@ -19,6 +19,7 @@ import 'bridge/voip/voip_data_sync_handler.dart';
 import 'common/utils/error_parser.dart';
 import 'feature/ios_pip_feature.dart';
 
+/// 协调通话界面与 IM 登录状态，并向上层传递 SDK 操作结果。
 class TUICallKitImpl implements TUICallKit {
   static final TUICallKitImpl _instance = TUICallKitImpl();
   static TUICallKitImpl get instance => _instance;
@@ -128,9 +129,16 @@ class TUICallKitImpl implements TUICallKit {
   }
 
   @override
-  Future<void> logout() async {
-    TUILogin.instance.logout(
-      TUICallback(onSuccess: () {}, onError: (code, message) {}),
+  Future<void> logout() => logoutIm();
+
+  /// 等待 IM SDK 登出完成；失败时把错误交给会话清理调用方。
+  static Future<void> logoutIm() async {
+    await TUILogin.instance.logout(
+      TUICallback(
+        onSuccess: () {},
+        onError: (code, message) =>
+            throw StateError('腾讯云 IM 登出失败：$code $message'),
+      ),
     );
   }
 
