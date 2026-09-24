@@ -80,6 +80,83 @@ class ExtendedRenderEditable extends _RenderEditable {
     return ExtendedTextLibraryUtils.textSpanToActualText(_textPainter.text!);
   }
 
+  /// 按实际视觉行校准光标：图片行居中到最高占位元素，其余折行恢复普通文字高度。
+  @override
+  Rect getLocalRectForCaret(TextPosition caretPosition) {
+    final caretRect = super.getLocalRectForCaret(caretPosition);
+    final displayedText = text?.toPlainText() ?? '';
+    final followsHardBreak = caretPosition.offset > 0 &&
+        caretPosition.offset <= displayedText.length &&
+        displayedText.codeUnitAt(caretPosition.offset - 1) == 0x0A;
+    // 段落引擎会把图片行高重复计入末尾空行，直接从上一视觉行底部开始新行。
+    if (followsHardBreak) {
+      final previousLine = _textPainter.getLineBoundary(
+        TextPosition(
+          offset: caretPosition.offset - 1,
+          affinity: TextAffinity.upstream,
+        ),
+      );
+      final previousBoxes = super.getBoxesForSelection(
+        TextSelection(
+          baseOffset: previousLine.start,
+          extentOffset: previousLine.end,
+        ),
+      );
+      if (previousBoxes.any(
+        (box) => box.bottom - box.top > preferredLineHeight,
+      )) {
+        final previousBottom =
+            previousBoxes.map((box) => box.bottom).reduce(math.max);
+        return Rect.fromLTWH(
+          caretRect.left,
+          previousBottom,
+          caretRect.width,
+          preferredLineHeight,
+        );
+      }
+    }
+    if (cursorHeight <= preferredLineHeight) return caretRect;
+    final line = _textPainter.getLineBoundary(caretPosition);
+    if (line.isCollapsed) {
+      final defaultPrototype = Rect.fromLTWH(
+        0,
+        _kCaretHeightOffset,
+        cursorWidth,
+        preferredLineHeight - 2 * _kCaretHeightOffset,
+      );
+      final offset = _textPainter.getOffsetForCaret(
+            caretPosition,
+            defaultPrototype,
+          ) +
+          cursorOffset +
+          _paintOffset;
+      final rect = Rect.fromLTWH(
+        caretRect.left,
+        offset.dy - 2 * _kCaretHeightOffset,
+        caretRect.width,
+        preferredLineHeight,
+      );
+      return rect.shift(_snapToPhysicalPixel(rect.topLeft));
+    }
+    final boxes = super.getBoxesForSelection(
+      TextSelection(baseOffset: line.start, extentOffset: line.end),
+    );
+    if (boxes.isEmpty) return caretRect;
+    final tallest = boxes.reduce(
+      (current, box) =>
+          box.bottom - box.top > current.bottom - current.top ? box : current,
+    );
+    final boxHeight = tallest.bottom - tallest.top;
+    final targetHeight =
+        boxHeight >= caretRect.height ? caretRect.height : preferredLineHeight;
+    return Rect.fromLTWH(
+      caretRect.left,
+      tallest.top + (boxHeight - targetHeight) / 2,
+      caretRect.width,
+      targetHeight,
+    );
+  }
+
   /// Move the selection to the beginning or end of a word.
   ///
   /// {@macro flutter.rendering.RenderEditable.selectPosition}

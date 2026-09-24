@@ -13,6 +13,22 @@ final class RichContentMessage {
 
   const RichContentMessage(this.blocks);
 
+  /// 编码为腾讯 IM 自定义消息的 customData。
+  String toCustomData() {
+    return jsonEncode({
+      'businessID': businessID,
+      'version': version,
+      'payload': {'blocks': blocks.map(_encodeBlock).toList()},
+    });
+  }
+
+  /// 提取离线推送和会话摘要可用的纯文本内容。
+  String get plainTextPreview => blocks
+      .whereType<RichTextBlock>()
+      .map((block) => block.text)
+      .join(' ')
+      .trim();
+
   /// 从 SDK 的 customData 解析图文消息；不属于本协议或内容不完整时返回 null。
   static RichContentMessage? tryParse(String? raw) {
     if (raw == null || raw.isEmpty) return null;
@@ -80,6 +96,26 @@ final class RichContentMessage {
       default:
         return null;
     }
+  }
+
+  /// 将已校验的内容块编码为协议字段。
+  static Map<String, Object> _encodeBlock(RichContentBlock block) {
+    return switch (block) {
+      RichTextBlock block => {'type': 'text', 'text': block.text},
+      RichImageBlock block => {
+        'type': 'image',
+        'url': block.url,
+        'width': block.width,
+        'height': block.height,
+      },
+      RichFileBlock block => {
+        'type': 'file',
+        'url': block.url,
+        'name': block.name,
+        'size': block.size,
+        'mimeType': block.mimeType,
+      },
+    };
   }
 
   /// 只接受可供网络图片和文件组件访问的 HTTP(S) 地址。

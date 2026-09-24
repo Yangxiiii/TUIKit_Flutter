@@ -4,22 +4,25 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/rich_c
 
 void main() {
   testWidgets('文字块渲染常用 Markdown 与单波浪号下划线', (tester) async {
-    const source = '**粗体** ~~删除~~ ~下划线~ *斜体* [链接](https://example.com)\n\n'
+    const source =
+        '**粗体** ~~删除~~ ~下划线~ *斜体* [链接](https://example.com)\n\n'
         '1. 第一项\n2. 第二项\n\n'
         '- 无序项\n\n'
         '> 引用内容\n\n'
         '```\n代码内容\n```';
 
-    await tester.pumpWidget(const MaterialApp(
-      home: Scaffold(
-        body: SingleChildScrollView(
-          child: RichContentMarkdown(
-            data: source,
-            textStyle: TextStyle(fontSize: 14),
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: RichContentMarkdown(
+              data: source,
+              textStyle: TextStyle(fontSize: 14),
+            ),
           ),
         ),
       ),
-    ));
+    );
 
     expect(tester.takeException(), isNull);
     final visibleText = tester
@@ -49,5 +52,24 @@ void main() {
       tester.widget<Text>(find.text('下划线')).style?.decoration,
       TextDecoration.underline,
     );
+  });
+
+  testWidgets('相邻的单格式与组合格式不会显示 Markdown 标记', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: RichContentMarkdown(
+          data: '**粗体*****叠加***',
+          textStyle: TextStyle(fontSize: 14),
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    final visibleText = tester
+        .widgetList<RichText>(find.byType(RichText))
+        .map((widget) => widget.text.toPlainText())
+        .join();
+    expect(visibleText, contains('粗体叠加'));
+    expect(visibleText, isNot(contains('*')));
   });
 }

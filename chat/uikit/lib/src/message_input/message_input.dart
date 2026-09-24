@@ -1,4 +1,3 @@
-import 'package:app_ui/app_ui.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:atomic_x_core/atomicxcore.dart';
@@ -6,6 +5,8 @@ import 'package:atomic_x_core/impl/message/message_input_store_impl.dart';
 import 'package:atomic_x_core/impl/message/message_list_store_impl.dart';
 import 'package:atomic_x_core/impl/message/message_action_store_impl.dart';
 import 'package:flutter/material.dart' hide IconButton;
+import 'package:flutter/material.dart' as material;
+import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:tuikit_atomic_x/album_picker/album_picker.dart';
 import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
@@ -19,8 +20,10 @@ import 'package:tencent_chat_uikit/src/chat_setting/pages/group_member_picker.da
 import 'package:tencent_chat_uikit/src/emoji_picker/emoji_manager.dart';
 import 'package:tencent_chat_uikit/src/emoji_picker/emoji_picker.dart';
 import 'package:tencent_chat_uikit/src/file_picker/file_picker.dart';
-import 'package:tencent_chat_uikit/src/message_input/src/chat_special_text_span_builder.dart';
 import 'package:tencent_chat_uikit/src/message_input/src/record_pointer_up_action.dart';
+import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
+import 'package:tencent_chat_uikit/src/message_input/widget/rich_content_editor_sheet.dart';
+import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_message.dart';
 import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
 import 'package:tencent_chat_uikit/src/third_party/extended_text_field/extended_text_field.dart';
 import 'package:tencent_chat_uikit/src/audio_player/audio_player_platform.dart';
@@ -47,6 +50,7 @@ export 'message_input_config.dart';
 /// - [文本]: 文本输入激活。显示键盘，左侧为麦克风图标。- [语音]: 语音录制模式。显示“按住说话”按钮，左侧为键盘图标。
 enum _InputMode { idle, text, voice }
 
+/// 聊天页消息输入组件，统一协调文字、富文本、媒体和语音入口。
 class MessageInput extends StatefulWidget {
   final String conversationID;
   final MessageInputConfigProtocol config;
@@ -61,6 +65,7 @@ class MessageInput extends StatefulWidget {
   State<MessageInput> createState() => MessageInputState();
 }
 
+/// 管理当前会话的输入模式、草稿、焦点和消息发送顺序。
 class MessageInputState extends State<MessageInput>
     with TickerProviderStateMixin {
   /// Group conversation ID prefix
@@ -79,24 +84,19 @@ class MessageInputState extends State<MessageInput>
   Timer? _recordingStarter;
   bool _isWaitingToStartRecord = false;
   bool _showSendButton = false;
-
-  /// Timer for distinguishing tap vs long-press in idle mode.
-  /// If the pointer is lifted before this fires, it's a tap (→ text mode).
-  /// If the timer fires while the pointer is still down, it's a long-press (→ start recording).
-  ///
-  /// 空闲模式下区分轻触和长按的计时器。
-  Timer? _idleLongPressTimer;
-  bool _isIdleLongPressing = false;
-
-  /// Set when the idle long-press timer has fired (i.e. recording was triggered).
-  /// Used to suppress the synthetic GestureDetector.onTap that Flutter still
-  /// emits after a long press, so we don't accidentally switch into text mode
-  /// and pop up the keyboard right after the user just sent a voice message.
-  ///
-  /// 当空闲长按计时器触发（即开始录音）时设置。用于抑制 Flutter 在长按后仍然发送的合成 GestureDetector.onTap，避免在用户刚发送语音消息后不小心切换到文本模式并弹出键盘。
-  bool _idleLongPressHandled = false;
   bool _showEmojiPanel = false;
   bool _showMorePanel = false;
+
+  /// 普通输入区是否显示 Markdown 文字格式工具栏。
+  bool _showTextFormattingToolbar = false;
+
+  /// 普通输入内容是否需要按富文本自定义消息发送。
+  bool _inlineRichContentEnabled = false;
+
+  /// 普通输入区格式栏中处于选中状态的 Markdown 标记。
+  final Set<String> _activeInlineFormats = {};
+  late final TextInputFormatter _inlineFormatInputFormatter =
+      activeMarkdownFormatInputFormatter(() => _activeInlineFormats);
   int _morePanelPageIndex = 0;
   final GlobalKey<AudioRecordOverlayState> _recordOverlayKey = GlobalKey();
   OverlayEntry? _recordOverlayEntry;
@@ -138,6 +138,22 @@ class MessageInputState extends State<MessageInput>
   // @ 提及相关状态
   String? _groupID;
   int _previousTextLength = 0;
+
+  /// 当前会话内收起后保留的富文本标题、正文顺序和附件上传状态。
+  RichContentDraft _richContentDraft = const RichContentDraft();
+
+  /// 普通输入框内附件令牌对应的富文本草稿块。
+  final Map<int, RichContentDraftAttachmentBlock>
+      _inlineRichContentAttachments = {};
+  final GlobalKey<RichContentEditorSheetState> _richContentEditorKey =
+      GlobalKey<RichContentEditorSheetState>();
+
+  /// 保留普通输入区中的工具条几何位置，供顶层工具条视图精确覆盖。
+  final GlobalKey _sharedToolbarAnchorKey = GlobalKey();
+
+  /// 同时承载编辑器和顶层工具条视图，子节点顺序保证工具条不被动画遮挡。
+  OverlayEntry? _richContentEditorOverlay;
+  bool _isRichContentEditorOpen = false;
   bool _isMentionPickerShowing = false;
 
   // Conversation info for offline push
@@ -155,8 +171,9 @@ class MessageInputState extends State<MessageInput>
   @override
   void initState() {
     super.initState();
-    _messageInputStore =
-        MessageInputStore.create(conversationID: widget.conversationID);
+    _messageInputStore = MessageInputStore.create(
+      conversationID: widget.conversationID,
+    );
     _conversationListStore = ConversationListStore.create();
     _albumPickerListener = _AlbumPickerMediaSendListenerImpl(this);
     AlbumPickerMediaSendManager.shared.restorePlaceholders(
@@ -353,8 +370,9 @@ class MessageInputState extends State<MessageInput>
 
   @override
   void dispose() {
+    _richContentEditorOverlay?.remove();
+    _richContentEditorOverlay = null;
     _removeRecordOverlay();
-    _idleLongPressTimer?.cancel();
     _textEditingController.removeListener(_onTextChanged);
     _textEditingFocusNode.removeListener(_onFocusChanged);
     _draftSaveTimer?.cancel();
@@ -379,21 +397,28 @@ class MessageInputState extends State<MessageInput>
       final draft = _conversationInfo!.draft;
       if (draft != null && draft.isNotEmpty) {
         _setDraftToInput(draft);
+      } else if (mounted) {
+        setState(() {});
       }
     }
     _isLoadingDraft = false;
   }
 
-  /// Set draft content to input field
-  ///
-  /// 将草稿内容设置到输入框
+  /// 从 IM SDK 恢复普通文本或带本地附件路径的富文本草稿。
   void _setDraftToInput(String draft) {
-    _textEditingController.text = draft;
+    final richDraft = RichContentDraft.tryParsePersisted(draft);
+    if (richDraft != null) {
+      _restoreInlineRichContentDraft(richDraft);
+      _inlineRichContentEnabled = true;
+    } else if (!RichContentDraft.isPersistedString(draft)) {
+      _textEditingController.text = draft;
+    }
+    final inputLength = _textEditingController.text.length;
     // Position cursor at the end
     //
     // 将光标定位到末尾
     _textEditingController.selection = TextSelection.fromPosition(
-      TextPosition(offset: draft.length),
+      TextPosition(offset: inputLength),
     );
     // Switch to text mode synchronously so the very first build after the
     // draft load renders the input field with the draft content, instead of
@@ -432,11 +457,19 @@ class MessageInputState extends State<MessageInput>
     });
   }
 
-  /// Save draft immediately (for dispose fallback)
-  ///
-  /// 立即保存草稿（用于 dispose 回退）
+  /// 立即把当前普通文本或完整富文本草稿写入 IM SDK。
   void _saveDraftImmediately() {
-    final draftText = _textEditingController.text;
+    final richDraft = _isRichContentEditorOpen
+        ? _richContentDraft
+        : _buildInlineRichContentDraft();
+    final hasRichContent = _inlineRichContentEnabled ||
+        richDraft.title.isNotEmpty ||
+        richDraft.blocks
+            .whereType<RichContentDraftAttachmentBlock>()
+            .isNotEmpty;
+    final draftText = hasRichContent
+        ? richDraft.toPersistedString()
+        : _textEditingController.text;
     _conversationListStore.setConversationDraft(
       conversationID: widget.conversationID,
       draft: draftText.isEmpty ? null : draftText,
@@ -455,6 +488,16 @@ class MessageInputState extends State<MessageInput>
   }
 
   void _onTextChanged() {
+    _inlineRichContentAttachments.removeWhere(
+      (id, _) => !_textEditingController.text.contains(
+        richContentAttachmentToken(id),
+      ),
+    );
+    if (_inlineRichContentEnabled ||
+        _inlineRichContentAttachments.isNotEmpty ||
+        _richContentDraft.title.isNotEmpty) {
+      _richContentDraft = _buildInlineRichContentDraft();
+    }
     final hasText = _textEditingController.text.trim().isNotEmpty;
     if (hasText != _showSendButton) {
       setState(() {
@@ -581,8 +624,9 @@ class MessageInputState extends State<MessageInput>
     //
     // 删除触发的 '@' 字符 - 使用 atPos + 1 跳过 '@'
     final beforeAt = text.substring(0, atPos);
-    final afterAt =
-        text.substring(atPos + 1); // Skip the '@' that triggered the picker
+    final afterAt = text.substring(
+      atPos + 1,
+    ); // Skip the '@' that triggered the picker
 
     // Build the mention text to insert (each mention includes its own '@')
     //
@@ -656,8 +700,9 @@ class MessageInputState extends State<MessageInput>
     // First check if we're deleting a mention (cursor at end or inside)
     //
     // 先检查是否在删除提及（光标在末尾或内部）
-    MentionInfo? mentionToDelete =
-        _textEditingController.getMentionEndingAt(targetPos);
+    MentionInfo? mentionToDelete = _textEditingController.getMentionEndingAt(
+      targetPos,
+    );
     mentionToDelete ??= _textEditingController.getMentionAt(targetPos);
 
     if (mentionToDelete != null) {
@@ -692,8 +737,10 @@ class MessageInputState extends State<MessageInput>
       final deletedLength = text.length - deletedText.length;
       _textEditingController.text = deletedText;
 
-      final newCursorPos =
-          (targetPos - deletedLength).clamp(0, deletedText.length);
+      final newCursorPos = (targetPos - deletedLength).clamp(
+        0,
+        deletedText.length,
+      );
       _textEditingController.selection = TextSelection.fromPosition(
         TextPosition(offset: newCursorPos),
       );
@@ -720,27 +767,6 @@ class MessageInputState extends State<MessageInput>
     }
 
     return text.substring(0, cursorPos - 1) + text.substring(cursorPos);
-  }
-
-  void _toggleMorePanel() {
-    if (_showMorePanel) {
-      // Closing more panel
-      //
-      // 关闭更多面板
-      setState(() {
-        _showMorePanel = false;
-      });
-    } else {
-      // Opening more panel: hide keyboard and emoji panel
-      //
-      // 打开更多面板：隐藏键盘和表情面板
-      _isSwitchingPanel = true;
-      _textEditingFocusNode.unfocus();
-      setState(() {
-        _showEmojiPanel = false;
-        _showMorePanel = true;
-      });
-    }
   }
 
   /// Handle sending text message from input field or emoji panel
@@ -778,11 +804,234 @@ class MessageInputState extends State<MessageInput>
     final result = await _sendMessage(messageInfo);
     if (!result.isSuccess) {
       debugPrint(
-          "_handleTextSendMessagePayload, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}");
+        "_handleTextSendMessagePayload, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}",
+      );
     }
   }
 
+  /// 根据普通输入区的编辑模式选择文本或富文本发送链路。
+  Future<void> _handleInputSend() async {
+    if (!_inlineRichContentEnabled) {
+      await _handleTextSendMessagePayload();
+      return;
+    }
+
+    final draft = _buildInlineRichContentDraft();
+    final mentionList = _textEditingController.mentionList;
+    final sent = await _sendRichContentDraft(
+      draft,
+      atUserList: mentionList.map((mention) => mention.userID).toList(),
+    );
+    if (!sent || !mounted) return;
+
+    _textEditingController.clearMentions();
+    _inlineRichContentAttachments.clear();
+    _richContentDraft = const RichContentDraft();
+    _textEditingController._isInternalUpdate = true;
+    _textEditingController.clear();
+    _textEditingController._isInternalUpdate = false;
+    _clearDraft();
+    setState(() {
+      _inlineRichContentEnabled = false;
+      _showTextFormattingToolbar = false;
+      _activeInlineFormats.clear();
+    });
+  }
+
+  /// 在现有工具条上方展开富文本编辑器，不重建键盘输入连接。
+  void _openRichContentEditor() {
+    if (_richContentEditorOverlay != null) return;
+    // 输入框已聚焦时保留输入连接，等待展开编辑器的正文首帧直接接管焦点。
+    if (_textEditingFocusNode.hasFocus) _isSwitchingPanel = true;
+    setState(() {
+      _showEmojiPanel = false;
+      _showMorePanel = false;
+      _isRichContentEditorOpen = true;
+    });
+    final currentDraft = _buildInlineRichContentDraft();
+    // 工具条完成本帧布局后再建立覆盖层，确保编辑器底部精确贴合工具条顶部。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_isRichContentEditorOpen) return;
+      final overlay = Overlay.of(context);
+      final entry = OverlayEntry(
+        builder: (overlayContext) {
+          final overlayBox = overlay.context.findRenderObject() as RenderBox?;
+          final toolbarBox = _sharedToolbarAnchorKey.currentContext
+              ?.findRenderObject() as RenderBox?;
+          final overlayHeight = MediaQuery.sizeOf(overlayContext).height;
+          final toolbarOffset = overlayBox == null || toolbarBox == null
+              ? Offset(0, overlayHeight - 38)
+              : toolbarBox.localToGlobal(Offset.zero, ancestor: overlayBox);
+          final toolbarSize =
+              toolbarBox?.size ?? Size(overlayBox?.size.width ?? 0, 38);
+          final toolbarRect = toolbarOffset & toolbarSize;
+          final toolbarTop = toolbarRect.top;
+          final editorBottom = toolbarTop.clamp(58.0, overlayHeight).toDouble();
+          // 编辑器先绘制、共享工具条后绘制，确保动画层级不会压住工具条。
+          return RichContentEditorOverlayLayout(
+            editorBottom: editorBottom,
+            toolbarRect: toolbarRect,
+            editor: RichContentEditorSheet(
+              key: _richContentEditorKey,
+              conversationName:
+                  _conversationInfo?.title ?? widget.conversationID,
+              initialDraft: currentDraft,
+              attachmentUploader: widget.config.richContentAttachmentUploader,
+              onSend: _sendRichContentDraft,
+              onClose: _closeRichContentEditor,
+              onToolbarChanged: _refreshSharedToolbar,
+              onDraftChanged: _rememberRichContentDraft,
+              showToolbar: false,
+              initialShowFormatting: _showTextFormattingToolbar,
+              initialActiveFormats: _activeInlineFormats,
+            ),
+            toolbar: Material(
+              type: MaterialType.transparency,
+              child: _buildSharedToolbar(
+                key: const Key('rich_content_overlay_toolbar'),
+              ),
+            ),
+          );
+        },
+      );
+      _richContentEditorOverlay = entry;
+      overlay.insert(entry);
+    });
+  }
+
+  /// 缓存展开编辑器的最新草稿，并沿用输入区现有防抖保存策略。
+  void _rememberRichContentDraft(RichContentDraft draft) {
+    _richContentDraft = draft;
+    _scheduleDraftSave();
+  }
+
+  /// 移除展开编辑器，并把其草稿同步回普通输入框。
+  void _closeRichContentEditor(RichContentEditorResult result) {
+    final editor = _richContentEditorKey.currentState;
+    if (editor != null) {
+      _showTextFormattingToolbar = editor.showFormatting;
+      _activeInlineFormats
+        ..clear()
+        ..addAll(editor.activeFormats);
+    }
+    _richContentEditorOverlay?.remove();
+    _richContentEditorOverlay = null;
+    if (!mounted) return;
+    _restoreInlineRichContentDraft(result.draft);
+    if (result.sent) _clearDraft();
+    setState(() {
+      _isRichContentEditorOpen = false;
+      _inputMode = !result.sent &&
+              (result.draft.title.isNotEmpty || result.draft.blocks.isNotEmpty)
+          ? _InputMode.text
+          : _inputMode;
+      _inlineRichContentEnabled = !result.sent &&
+          (result.draft.title.isNotEmpty ||
+              result.draft.blocks
+                  .whereType<RichContentDraftAttachmentBlock>()
+                  .isNotEmpty ||
+              _inlineRichContentEnabled);
+    });
+  }
+
+  /// 把普通输入框的文字与附件令牌还原为有序富文本草稿。
+  RichContentDraft _buildInlineRichContentDraft() {
+    final blocks = <RichContentDraftBlock>[];
+    final text = _textEditingController.text;
+    var nextId = _inlineRichContentAttachments.values.fold<int>(
+          0,
+          (largest, block) => block.id > largest ? block.id : largest,
+        ) +
+        1;
+    var offset = 0;
+    // 令牌位置就是块顺序，拆分时保留其前后的 Markdown 原文。
+    for (final match in richContentAttachmentTokenPattern.allMatches(text)) {
+      final leading = text.substring(offset, match.start);
+      if (leading.isNotEmpty) {
+        blocks.add(RichContentDraftTextBlock(nextId++, leading));
+      }
+      final attachment =
+          _inlineRichContentAttachments[int.parse(match.group(1)!)];
+      if (attachment != null) blocks.add(attachment);
+      offset = match.end;
+    }
+    final trailing = text.substring(offset);
+    if (trailing.isNotEmpty) {
+      blocks.add(RichContentDraftTextBlock(nextId, trailing));
+    }
+    return RichContentDraft(title: _richContentDraft.title, blocks: blocks);
+  }
+
+  /// 把展开编辑器的有序块转为普通输入框可编辑的附件令牌。
+  void _restoreInlineRichContentDraft(RichContentDraft draft) {
+    _richContentDraft = draft;
+    _inlineRichContentAttachments.clear();
+    final text = StringBuffer();
+    // 文字原样写入，附件改写为可逆令牌，不另外维护一份排序。
+    for (final block in draft.blocks) {
+      switch (block) {
+        case RichContentDraftTextBlock block:
+          text.write(block.text);
+        case RichContentDraftAttachmentBlock block:
+          _inlineRichContentAttachments[block.id] = block;
+          text.write(richContentAttachmentToken(block.id));
+      }
+    }
+    // 一次替换控制器值，避免中间态让草稿监听器丢失附件。
+    final value = text.toString();
+    _textEditingController.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
+    );
+  }
+
+  /// 把编辑器中的工具条模式同步回共享状态，避免展开和收起时回落默认值。
+  void _refreshSharedToolbar() {
+    if (!mounted) return;
+    final editor = _richContentEditorKey.currentState;
+    setState(() {
+      if (editor == null) return;
+      _showTextFormattingToolbar = editor.showFormatting;
+      _activeInlineFormats
+        ..clear()
+        ..addAll(editor.activeFormats);
+    });
+    // 父级工具条完成本帧布局后再重建覆盖层，避免读取切换前的顶部坐标。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _richContentEditorOverlay?.markNeedsBuild();
+    });
+  }
+
+  /// 把富文本草稿编码为一个自定义消息气泡，并复用现有发送链路。
+  Future<bool> _sendRichContentDraft(
+    RichContentDraft draft, {
+    List<String> atUserList = const [],
+  }) async {
+    final richMessage = draft.toMessage();
+    if (richMessage == null) return false;
+    final messageInfo = MessageInfo()
+      ..messageType = MessageType.custom
+      ..messagePayload = CustomMessagePayload(
+        customData: richMessage.toCustomData(),
+        description: _trimPushDescription(richMessage.plainTextPreview),
+      )
+      ..atUserList = atUserList;
+    final result = await _sendMessage(messageInfo);
+    if (!result.isSuccess) {
+      debugPrint(
+        '_sendRichContentDraft, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}',
+      );
+    }
+    return result.isSuccess;
+  }
+
   void _onPickAlbum() async {
+    // 点击时重新判断模式，避免切换帧内残留的普通回调把图片作为独立消息发送。
+    if (_isRichContentEditorOpen) {
+      await _richContentEditorKey.currentState?.pickImages();
+      return;
+    }
     final locale = Localizations.localeOf(context);
 
     AlbumPickerConfig config = AlbumPickerConfig(
@@ -851,8 +1100,10 @@ class MessageInputState extends State<MessageInput>
       offlinePushInfo: _createOfflinePushInfo(messageInfo),
     );
 
-    final result =
-        await _messageInputStore.sendMessage(payload: payload, option: option);
+    final result = await _messageInputStore.sendMessage(
+      payload: payload,
+      option: option,
+    );
     if (!result.isSuccess) {
       if (mounted) {
         Toast.error(context, atomicLocale.sendMessageFail);
@@ -871,7 +1122,9 @@ class MessageInputState extends State<MessageInput>
     notificationCenter.post(
       MessageSendNotifyKey.messageSendBegin,
       MessageSendEventData(
-          conversationID: widget.conversationID, message: placeholder),
+        conversationID: widget.conversationID,
+        message: placeholder,
+      ),
     );
   }
 
@@ -904,15 +1157,20 @@ class MessageInputState extends State<MessageInput>
         );
       case AudioMessagePayload p:
         return AudioSendMessagePayload(
-            audioFilePath: p.audioPath ?? '', duration: p.audioDuration);
+          audioFilePath: p.audioPath ?? '',
+          duration: p.audioDuration,
+        );
       case FileMessagePayload p:
         return FileSendMessagePayload(
-            filePath: p.filePath ?? '',
-            fileName: p.fileName ?? '',
-            fileSize: p.fileSize);
+          filePath: p.filePath ?? '',
+          fileName: p.fileName ?? '',
+          fileSize: p.fileSize,
+        );
       case FaceMessagePayload p:
         return FaceSendMessagePayload(
-            index: p.faceIndex, data: p.faceData ?? '');
+          index: p.faceIndex,
+          data: p.faceData ?? '',
+        );
       case CustomMessagePayload p:
         return CustomSendMessagePayload(
           customData: p.customData,
@@ -987,8 +1245,10 @@ class MessageInputState extends State<MessageInput>
         // Convert emoji codes to localized names
         //
         // 将表情代码转换为本地化名称
-        content = EmojiManager.createLocalizedStringFromEmojiCodes(context,
-            (message.messagePayload as TextMessagePayload?)?.text ?? '');
+        content = EmojiManager.createLocalizedStringFromEmojiCodes(
+          context,
+          (message.messagePayload as TextMessagePayload?)?.text ?? '',
+        );
         break;
       case MessageType.image:
         content = atomicLocale.messageTypeImage;
@@ -1007,6 +1267,12 @@ class MessageInputState extends State<MessageInput>
         break;
       case MessageType.merged:
         content = '[${atomicLocale.chatHistory}]';
+        break;
+      case MessageType.custom:
+        final customData =
+            (message.messagePayload as CustomMessagePayload?)?.customData;
+        content =
+            RichContentMessage.tryParse(customData)?.plainTextPreview ?? '';
         break;
       default:
         content = '';
@@ -1074,6 +1340,11 @@ class MessageInputState extends State<MessageInput>
   }
 
   void _onPickFile() async {
+    // 文件与图片遵循同一隔离规则，富文本展开期间只能写入当前草稿。
+    if (_isRichContentEditorOpen) {
+      await _richContentEditorKey.currentState?.pickFiles();
+      return;
+    }
     List<PickerResult> filePickerResults = await FilePicker.pickFiles(
       context: context,
       config: FilePickerConfig(maxCount: 1),
@@ -1092,7 +1363,8 @@ class MessageInputState extends State<MessageInput>
       final result = await _sendMessage(messageInfo);
       if (!result.isSuccess) {
         debugPrint(
-            "_onPickFile, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}");
+          "_onPickFile, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}",
+        );
       }
     }
   }
@@ -1145,7 +1417,9 @@ class MessageInputState extends State<MessageInput>
       VideoRecorderResult result = await VideoRecorder.startRecord(
         context: context,
         config: const VideoRecorderConfig(
-            recordMode: RecordMode.mixed, minDurationMs: 500),
+          recordMode: RecordMode.mixed,
+          minDurationMs: 500,
+        ),
       );
 
       if (result.filePath.isEmpty) {
@@ -1177,7 +1451,8 @@ class MessageInputState extends State<MessageInput>
       final sendResult = await _sendMessage(messageInfo);
       if (!sendResult.isSuccess) {
         debugPrint(
-            "_onTakeVideo, errorCode:${sendResult.errorCode}, errorMessage:${sendResult.errorMessage}");
+          "_onTakeVideo, errorCode:${sendResult.errorCode}, errorMessage:${sendResult.errorMessage}",
+        );
       }
     } catch (e) {
       debugPrint("_onTakeVideo error: $e");
@@ -1188,9 +1463,7 @@ class MessageInputState extends State<MessageInput>
     try {
       VideoRecorderResult result = await VideoRecorder.startRecord(
         context: context,
-        config: const VideoRecorderConfig(
-          recordMode: RecordMode.photoOnly,
-        ),
+        config: const VideoRecorderConfig(recordMode: RecordMode.photoOnly),
       );
 
       if (result.filePath.isEmpty) {
@@ -1208,7 +1481,8 @@ class MessageInputState extends State<MessageInput>
       final sendResult = await _sendMessage(messageInfo);
       if (!sendResult.isSuccess) {
         debugPrint(
-            "_onTakePhoto, errorCode:${sendResult.errorCode}, errorMessage:${sendResult.errorMessage}");
+          "_onTakePhoto, errorCode:${sendResult.errorCode}, errorMessage:${sendResult.errorMessage}",
+        );
       }
     } catch (e) {
       debugPrint("_onTakePhoto error: $e");
@@ -1248,8 +1522,10 @@ class MessageInputState extends State<MessageInput>
                 if (recordInfo.errorCode == AudioRecordResultCode.success ||
                     recordInfo.errorCode ==
                         AudioRecordResultCode.successExceedMaxDuration) {
-                  _recordOverlayKey.currentState
-                      ?.enterConverting(recordInfo.path, recordInfo.duration);
+                  _recordOverlayKey.currentState?.enterConverting(
+                    recordInfo.path,
+                    recordInfo.duration,
+                  );
                   return;
                 }
                 // Recording too short / failed: fall through to default
@@ -1298,7 +1574,8 @@ class MessageInputState extends State<MessageInput>
     final result = await _sendMessage(messageInfo);
     if (!result.isSuccess) {
       debugPrint(
-          "_onRecordFinish, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}");
+        "_onRecordFinish, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}",
+      );
     }
   }
 
@@ -1362,22 +1639,7 @@ class MessageInputState extends State<MessageInput>
       return;
     }
 
-    // [bug#161275344] Defer overlay insertion to the moment recording actually
-    // starts. Rationale: the overlay is a full-screen transparent Material and
-    // steals all pointer events once inserted. When _onStartRecording is fired
-    // by the 200ms idle-longpress timer (see _buildIdleInputArea), the user may
-    // still lift their finger shortly after; if the overlay is up already, the
-    // resulting PointerUp is routed to the overlay (with no matching PointerDown
-    // there) and _onStopRecording — which lives on the original Listener — is
-    // never invoked, leaving the recording UI stuck. Keeping the overlay off
-    // until the 100ms starter fires means PointerUp during the "waiting" window
-    // still reaches _onStopRecording and correctly cancels via the
-    // _isWaitingToStartRecord branch.
-    //
-    // [bug#161275344] 推迟覆盖层的插入，直到录制实际上开始为止。原因：覆盖层是一个全屏透明的 Material，一旦插入就会抢走所有指针事件。当 _onStartRecording 由
-    // 200ms 的长按空闲计时器触发（见 _buildIdleInputArea）时，用户可能很快就会抬起手指；如果此时覆盖层已经出现，产生的 PointerUp 会被路由到覆盖层（而那里没有匹配的
-    // PointerDown），原本在 Listener 上的 _onStopRecording 就永远不会被调用，导致录制界面卡住。在 100ms 启动器触发前保持覆盖层关闭，意味着“等待”窗口期间的
-    // PointerUp 仍然能到达 _onStopRecording，并通过 _isWaitingToStartRecord 分支正确取消。
+    // 延迟插入全屏录音覆盖层，使按住说话按钮在启动等待期仍能收到 PointerUp 并正常取消。
     _recordingStarter = Timer(const Duration(milliseconds: 100), () {
       if (!_isWaitingToStartRecord) return;
       _isWaitingToStartRecord = false;
@@ -1474,50 +1736,62 @@ class MessageInputState extends State<MessageInput>
     final List<_MorePanelItem> items = [];
 
     if (widget.config.isShowAlbum) {
-      items.add(_MorePanelItem(
-        icon: 'chat_assets/icon/image_action.svg',
-        title: atomicLocale.album,
-        onTap: _onPickAlbum,
-      ));
+      items.add(
+        _MorePanelItem(
+          icon: 'chat_assets/icon/image_action.svg',
+          title: atomicLocale.album,
+          onTap: _onPickAlbum,
+        ),
+      );
     }
 
     if (widget.config.isShowPhotoTaker) {
-      items.add(_MorePanelItem(
-        icon: 'chat_assets/icon/camera_action.svg',
-        title: atomicLocale.takeAPhoto,
-        onTap: _onTakePhoto,
-      ));
+      items.add(
+        _MorePanelItem(
+          icon: 'chat_assets/icon/camera_action.svg',
+          title: atomicLocale.takeAPhoto,
+          onTap: _onTakePhoto,
+        ),
+      );
     }
 
     if (widget.config.isShowVideoRecorder) {
-      items.add(_MorePanelItem(
-        icon: 'chat_assets/icon/record_action.svg',
-        title: atomicLocale.recordAVideo,
-        onTap: _onTakeVideo,
-      ));
+      items.add(
+        _MorePanelItem(
+          icon: 'chat_assets/icon/record_action.svg',
+          title: atomicLocale.recordAVideo,
+          onTap: _onTakeVideo,
+        ),
+      );
     }
 
     if (widget.config.isShowFile) {
-      items.add(_MorePanelItem(
-        icon: 'chat_assets/icon/file_action.svg',
-        title: atomicLocale.file,
-        onTap: _onPickFile,
-      ));
+      items.add(
+        _MorePanelItem(
+          icon: 'chat_assets/icon/file_action.svg',
+          title: atomicLocale.file,
+          onTap: _onPickFile,
+        ),
+      );
     }
 
     if (widget.config.isShowVideoCall) {
-      items.add(_MorePanelItem(
-        icon: 'chat_assets/icon/video_call_action.svg',
-        title: atomicLocale.videoCall,
-        onTap: _onVideoCallTap,
-      ));
+      items.add(
+        _MorePanelItem(
+          icon: 'chat_assets/icon/video_call_action.svg',
+          title: atomicLocale.videoCall,
+          onTap: _onVideoCallTap,
+        ),
+      );
     }
     if (widget.config.isShowAudioCall) {
-      items.add(_MorePanelItem(
-        icon: 'chat_assets/icon/audio_call_action.svg',
-        title: atomicLocale.audioCall,
-        onTap: _onAudioCallTap,
-      ));
+      items.add(
+        _MorePanelItem(
+          icon: 'chat_assets/icon/audio_call_action.svg',
+          title: atomicLocale.audioCall,
+          onTap: _onAudioCallTap,
+        ),
+      );
     }
 
     // Each page shows 2 rows × 4 columns = 8 items max
@@ -1545,8 +1819,10 @@ class MessageInputState extends State<MessageInput>
                     },
                     itemBuilder: (context, pageIndex) {
                       final startIndex = pageIndex * itemsPerPage;
-                      final endIndex =
-                          (startIndex + itemsPerPage).clamp(0, items.length);
+                      final endIndex = (startIndex + itemsPerPage).clamp(
+                        0,
+                        items.length,
+                      );
                       final pageItems = items.sublist(startIndex, endIndex);
 
                       // Each item row: icon 64 + spacing 8 + text ~14 = ~86pt
@@ -1605,7 +1881,9 @@ class MessageInputState extends State<MessageInput>
   ///
   /// 在更多面板网格中构建单页（最多 2 行 × 4 列）
   Widget _buildMorePanelPage(
-      List<_MorePanelItem> pageItems, SemanticColorScheme colorsTheme) {
+    List<_MorePanelItem> pageItems,
+    SemanticColorScheme colorsTheme,
+  ) {
     const int columns = 4;
     // Split items into rows of 4
     //
@@ -1629,7 +1907,9 @@ class MessageInputState extends State<MessageInput>
                 for (int colIndex = 0; colIndex < columns; colIndex++)
                   if (colIndex < rows[rowIndex].length)
                     _buildMorePanelItemWidget(
-                        rows[rowIndex][colIndex], colorsTheme)
+                      rows[rowIndex][colIndex],
+                      colorsTheme,
+                    )
                   else
                     const SizedBox(width: 64), // Placeholder for grid alignment
               ],
@@ -1644,7 +1924,9 @@ class MessageInputState extends State<MessageInput>
   ///
   /// 在更多面板中构建单个操作项Widget
   Widget _buildMorePanelItemWidget(
-      _MorePanelItem item, SemanticColorScheme colorsTheme) {
+    _MorePanelItem item,
+    SemanticColorScheme colorsTheme,
+  ) {
     return GestureDetector(
       onTap: item.onTap,
       child: SizedBox(
@@ -1693,6 +1975,12 @@ class MessageInputState extends State<MessageInput>
     _bottomPadding = MediaQuery.paddingOf(context).bottom;
     atomicLocale = AppLocalization.of(context);
     final panelHeight = _getBottomContainerHeight();
+    if (_richContentEditorOverlay != null) {
+      // 键盘 Insets 改变后等待工具条完成布局，再校正编辑器底部锚点。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _richContentEditorOverlay?.markNeedsBuild();
+      });
+    }
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final colors = SemanticColorScheme.of(context);
@@ -1705,7 +1993,10 @@ class MessageInputState extends State<MessageInput>
                 onClose: clearQuotedMessage,
               ),
             AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
+              // 键盘出现会逐帧改变底部安全区，不能再叠加高度补间；仅面板切换需要动画。
+              duration: (_showEmojiPanel || _showMorePanel)
+                  ? const Duration(milliseconds: 300)
+                  : Duration.zero,
               curve: Curves.ease,
               clipBehavior: Clip.hardEdge,
               decoration: BoxDecoration(color: colors.bgColorInput),
@@ -1717,8 +2008,10 @@ class MessageInputState extends State<MessageInput>
                   ? Center(
                       child: FutureBuilder<bool>(
                         future: getEmojiPanelWidget(),
-                        builder: (BuildContext context,
-                            AsyncSnapshot<bool> snapshot) {
+                        builder: (
+                          BuildContext context,
+                          AsyncSnapshot<bool> snapshot,
+                        ) {
                           return stickerWidget;
                         },
                       ),
@@ -1736,13 +2029,13 @@ class MessageInputState extends State<MessageInput>
   Future<bool> getEmojiPanelWidget() async {
     stickerWidget = EmojiPicker(
       onEmojiClick: _onEmojiClicked,
-      onSendClick: _handleTextSendMessagePayload,
+      onSendClick: _handleInputSend,
       onDeleteClick: _onDeleteClick,
     );
     return true;
   }
 
-  /// 按微信风格排列语音切换、输入区、表情和更多操作。
+  /// 按设计稿排列语音切换、输入区和下方快捷操作栏。
   ///
   /// 输入栏使用聊天背景色，内部输入区使用页面操作面颜色以保持明暗主题可读。
   Widget _buildInputWidget(SemanticColorScheme colorsTheme) {
@@ -1752,124 +2045,38 @@ class MessageInputState extends State<MessageInput>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              // Left: Voice / Keyboard toggle button (28×28pt icon)
-              // SizedBox height matches input field minHeight so button is
-              // vertically centered when single-line, and stays at bottom when multi-line.
-              //
-              // 左侧：语音/键盘切换按钮（28×28pt 图标） SizedBox 高度匹配输入框最小高度，这样单行时按钮垂直居中，多行时保持在底部。
-              if (widget.config.isShowAudioRecorder)
-                SizedBox(
-                  height: 34,
-                  child: Center(
-                    child: GestureDetector(
-                      onTap: _toggleVoiceMode,
-                      child: _inputMode == _InputMode.voice
-                          ? SvgPicture.asset(
-                              'chat_assets/icon/keyboard.svg',
-                              package: 'tencent_chat_uikit',
-                              colorFilter: ColorFilter.mode(
-                                colorsTheme.textColorPrimary,
-                                BlendMode.srcIn,
-                              ),
-                              width: 26,
-                              height: 26,
-                            )
-                          : SvgPicture.asset(
-                              'chat_assets/icon/mic.svg',
-                              package: 'tencent_chat_uikit',
-                              colorFilter: ColorFilter.mode(
-                                colorsTheme.textColorPrimary,
-                                BlendMode.srcIn,
-                              ),
-                              width: 26,
-                              height: 26,
-                            ),
-                    ),
-                  ),
-                ),
-              // Gap: 10pt between voice icon and input field
-              //
-              // 间距：语音图标和输入框之间 10pt
-              const SizedBox(width: 10),
-
-              // Middle: Input field or "Hold to talk" button
-              //
-              // 中间：输入框或“按住说话”按钮
-              Expanded(
-                child: _inputMode == _InputMode.voice
-                    ? _buildHoldToTalkButton(colorsTheme)
-                    : _inputMode == _InputMode.idle
-                        ? _buildIdleInputArea(colorsTheme)
-                        : Container(
-                            constraints: const BoxConstraints(minHeight: 34),
-                            decoration: BoxDecoration(
-                              color: colorsTheme.bgColorOperate,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child:
-                                _buildInputTextField(colorsTheme: colorsTheme),
-                          ),
-              ),
-
-              // Gap: 10pt between input field and emoji icon
-              //
-              // 间距：输入框和表情图标之间 10pt
-              const SizedBox(width: 10),
-
-              // Right: Emoji button (28×28pt icon)
-              //
-              // 右侧：表情按钮（28×28pt 图标）
-              SizedBox(
-                height: 34,
-                child: Center(
-                  child: GestureDetector(
-                    onTap: _toggleEmojiPanel,
-                    child: _showEmojiPanel
-                        ? SvgPicture.asset(
-                            'chat_assets/icon/keyboard.svg',
-                            package: 'tencent_chat_uikit',
-                            colorFilter: ColorFilter.mode(
-                              colorsTheme.textColorPrimary,
-                              BlendMode.srcIn,
-                            ),
-                            width: 28,
-                            height: 28,
-                          )
-                        : SvgPicture.asset(
-                            'chat_assets/icon/emoji.svg',
-                            package: 'tencent_chat_uikit',
-                            colorFilter: ColorFilter.mode(
-                              colorsTheme.textColorPrimary,
-                              BlendMode.srcIn,
-                            ),
-                            width: 26,
-                            height: 26,
-                          ),
-                  ),
-                ),
-              ),
-
-              // Gap: 10pt between emoji and more/send
-              //
-              // 间距：表情和更多/发送按钮之间 10pt
-              const SizedBox(width: 10),
-
-              // Right: More button or Send button (28×28pt icon)
-              //
-              // 右侧：更多按钮或发送按钮（28×28pt 图标）
-              SizedBox(
-                height: 34,
-                child: Center(
-                  child: _showSendButton && _inputMode != _InputMode.voice
-                      ? _buildSendButton(colorsTheme)
-                      : widget.config.isShowMore
-                          ? GestureDetector(
-                              onTap: _toggleMorePanel,
-                              child: SvgPicture.asset(
-                                'chat_assets/icon/add.svg',
+          // 展开态只隐藏普通输入行，保留文本框和输入连接，避免切换时键盘回弹。
+          Offstage(
+            key: const Key('message_input_normal_input_offstage'),
+            offstage: _isRichContentEditorOpen,
+            child: Row(
+              key: const Key('message_input_normal_input_row'),
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                // Left: Voice / Keyboard toggle button (28×28pt icon)
+                // SizedBox height matches input field minHeight so button is
+                // vertically centered when single-line, and stays at bottom when multi-line.
+                //
+                // 左侧：语音/键盘切换按钮（28×28pt 图标） SizedBox 高度匹配输入框最小高度，这样单行时按钮垂直居中，多行时保持在底部。
+                if (widget.config.isShowAudioRecorder)
+                  SizedBox(
+                    height: 34,
+                    child: Center(
+                      child: GestureDetector(
+                        onTap: _toggleVoiceMode,
+                        child: _inputMode == _InputMode.voice
+                            ? SvgPicture.asset(
+                                'chat_assets/icon/keyboard.svg',
+                                package: 'tencent_chat_uikit',
+                                colorFilter: ColorFilter.mode(
+                                  colorsTheme.textColorPrimary,
+                                  BlendMode.srcIn,
+                                ),
+                                width: 26,
+                                height: 26,
+                              )
+                            : SvgPicture.asset(
+                                'chat_assets/icon/mic.svg',
                                 package: 'tencent_chat_uikit',
                                 colorFilter: ColorFilter.mode(
                                   colorsTheme.textColorPrimary,
@@ -1878,15 +2085,169 @@ class MessageInputState extends State<MessageInput>
                                 width: 26,
                                 height: 26,
                               ),
-                            )
-                          : const SizedBox.shrink(),
+                      ),
+                    ),
+                  ),
+                // Gap: 10pt between voice icon and input field
+                //
+                // 间距：语音图标和输入框之间 10pt
+                const SizedBox(width: 10),
+
+                // Middle: Input field or "Hold to talk" button
+                //
+                // 中间：输入框或“按住说话”按钮
+                Expanded(
+                  child: _inputMode == _InputMode.voice
+                      ? _buildHoldToTalkButton(colorsTheme)
+                      : _buildTextInputArea(colorsTheme),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
+          if (_inputMode != _InputMode.voice) ...[
+            const SizedBox(height: 6),
+            KeyedSubtree(
+              key: _sharedToolbarAnchorKey,
+              child: _buildSharedToolbar(
+                key: const Key('message_input_shared_toolbar'),
+              ),
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  /// 构建普通输入和展开编辑器共用同一状态与回调的工具条视图。
+  Widget _buildSharedToolbar({required Key key}) {
+    final richEditor = _richContentEditorKey.currentState;
+    return RichContentInputToolbar(
+      key: key,
+      switcherKey: const Key('message_input_toolbar_switcher'),
+      keyPrefix: 'message_input_toolbar',
+      showFormatting: _isRichContentEditorOpen
+          ? richEditor?.showFormatting ?? _showTextFormattingToolbar
+          : _showTextFormattingToolbar,
+      activeFormats: _isRichContentEditorOpen
+          ? richEditor?.activeFormats ?? _activeInlineFormats
+          : _activeInlineFormats,
+      canSend: _isRichContentEditorOpen
+          ? richEditor?.canSend ?? _showSendButton
+          : _inlineRichContentEnabled
+              ? _buildInlineRichContentDraft().canSend
+              : _showSendButton,
+      emojiAsset: !_isRichContentEditorOpen && _showEmojiPanel
+          ? 'chat_assets/icon/keyboard.svg'
+          : 'chat_assets/icon/emoji.svg',
+      emojiTooltip:
+          !_isRichContentEditorOpen && _showEmojiPanel ? '显示键盘' : '表情',
+      imageTooltip: _isRichContentEditorOpen ? '插入图片' : atomicLocale.album,
+      fileTooltip: _isRichContentEditorOpen ? '插入文件' : atomicLocale.file,
+      sendTooltip: _isRichContentEditorOpen ? '发送富文本消息' : atomicLocale.send,
+      onEmoji: _isRichContentEditorOpen
+          ? () => _richContentEditorKey.currentState?.insertEmoji()
+          : _toggleEmojiPanel,
+      onMention: _isRichContentEditorOpen
+          ? () => _richContentEditorKey.currentState?.insertMention()
+          : () => _insertPlainText('@'),
+      onVideo: _isRichContentEditorOpen
+          ? null
+          : widget.config.isShowVideoCall
+              ? _onVideoCallTap
+              : null,
+      onImage: _isRichContentEditorOpen || widget.config.isShowAlbum
+          ? _onPickAlbum
+          : null,
+      onFile: _isRichContentEditorOpen || widget.config.isShowFile
+          ? _onPickFile
+          : null,
+      onShowFormatting: _isRichContentEditorOpen
+          ? () => _richContentEditorKey.currentState?.showFormattingToolbar()
+          : _showInlineFormattingToolbar,
+      onCloseFormatting: _isRichContentEditorOpen
+          ? () => _richContentEditorKey.currentState?.closeFormattingToolbar()
+          : _closeInlineFormattingToolbar,
+      onToggleFormat: _isRichContentEditorOpen
+          ? (marker) => _richContentEditorKey.currentState?.toggleFormat(marker)
+          : _toggleInlineFormat,
+      onSend: _isRichContentEditorOpen
+          ? () => _richContentEditorKey.currentState?.send()
+          : _handleInputSend,
+    );
+  }
+
+  /// 根据输入状态创建文本框，空闲时移除文本输入连接以便键盘及时收起。
+  Widget _buildTextInputArea(SemanticColorScheme colorsTheme) {
+    if (_inputMode == _InputMode.idle) {
+      return _buildIdleInputArea(colorsTheme);
+    }
+    return Container(
+      constraints: const BoxConstraints(minHeight: 34),
+      decoration: BoxDecoration(
+        color: colorsTheme.bgColorOperate,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: _buildInputTextField(colorsTheme: colorsTheme),
+    );
+  }
+
+  /// 进入普通输入区的富文本模式，并在文本框创建后唤起键盘。
+  void _showInlineFormattingToolbar() {
+    setState(() {
+      _inputMode = _InputMode.text;
+      _showEmojiPanel = false;
+      _showMorePanel = false;
+      _showTextFormattingToolbar = true;
+      _inlineRichContentEnabled = true;
+    });
+    // 空闲态会在本帧创建文本框，等待布局完成后再唤起键盘。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _textEditingFocusNode.requestFocus();
+      }
+    });
+  }
+
+  /// 切换普通输入区的格式选中态，只影响下一次输入而不修改已有文字。
+  void _toggleInlineFormat(String marker) {
+    if (_textEditingController.selection.isCollapsed) {
+      _textEditingController.value = exitActiveMarkdownFormats(
+        _textEditingController.value,
+        _activeInlineFormats,
+      );
+    }
+    if (!_activeInlineFormats.remove(marker)) {
+      _activeInlineFormats.add(marker);
+    }
+    setState(() {});
+    _textEditingFocusNode.requestFocus();
+  }
+
+  /// 退出格式栏并结束当前格式范围，避免隐藏状态继续影响后续输入。
+  void _closeInlineFormattingToolbar() {
+    _textEditingController.value = exitActiveMarkdownFormats(
+      _textEditingController.value,
+      _activeInlineFormats,
+    );
+    setState(() {
+      _activeInlineFormats.clear();
+      _showTextFormattingToolbar = false;
+    });
+  }
+
+  void _insertPlainText(String value) {
+    final current = _textEditingController.value;
+    final selection = current.selection.isValid
+        ? current.selection
+        : TextSelection.collapsed(offset: current.text.length);
+    _textEditingController.value = TextEditingValue(
+      text: current.text.replaceRange(selection.start, selection.end, value),
+      selection: TextSelection.collapsed(
+        offset: selection.start + value.length,
+      ),
+    );
+    setState(() => _inputMode = _InputMode.text);
+    _textEditingFocusNode.requestFocus();
   }
 
   /// Toggle between voice mode and text input mode.
@@ -1967,90 +2328,43 @@ class MessageInputState extends State<MessageInput>
     );
   }
 
-  /// 构建空闲输入区：点击进入文本模式，长按超过 200ms 直接录音。
+  /// 构建空闲输入区；录音只由独立麦克风入口触发，避免与键盘焦点竞争。
   Widget _buildIdleInputArea(SemanticColorScheme colorsTheme) {
     return GestureDetector(
       onTap: () {
-        // Cancel any pending long-press timer
-        //
-        // 取消任何待处理的长按计时器
-        _idleLongPressTimer?.cancel();
-        _idleLongPressTimer = null;
-        // Flutter's TapGestureRecognizer has no time upper bound, so a long
-        // press that already triggered recording will still fire onTap when
-        // the pointer is released. Detect that here and stay in idle mode,
-        // otherwise we'd switch to text mode + pop the keyboard right after
-        // the user sent a voice message.
-        //
-        // Flutter 的 TapGestureRecognizer 没有时间上限，所以已经触发录音的长按在指针释放时仍然会触发
-        // onTap。在这里检测并保持空闲模式，否则用户发送语音消息后，我们会立即切换到文本模式并弹出键盘。
-        if (_idleLongPressHandled) {
-          _idleLongPressHandled = false;
-          return;
-        }
         setState(() {
           _showEmojiPanel = false;
           _showMorePanel = false;
           _inputMode = _InputMode.text;
         });
+        // 文本框创建完成后再申请焦点，避免向已移除的输入连接发起键盘请求。
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
             _textEditingFocusNode.requestFocus();
           }
         });
       },
-      child: Listener(
-        onPointerDown: (PointerDownEvent event) {
-          _isIdleLongPressing = false;
-          _idleLongPressHandled = false;
-          _idleLongPressTimer?.cancel();
-          _idleLongPressTimer = Timer(const Duration(milliseconds: 200), () {
-            _isIdleLongPressing = true;
-            _idleLongPressHandled = true;
-            _onStartRecording(event);
-          });
-        },
-        onPointerUp: (PointerUpEvent event) {
-          if (_isIdleLongPressing) {
-            _onStopRecording(event);
-            _isIdleLongPressing = false;
-          }
-          // Tap case is handled by GestureDetector.onTap above; the
-          // _idleLongPressHandled flag tells onTap whether to suppress
-          // the mode switch (long-press → recording path).
-          //
-          // 点击情况由上面的 GestureDetector.onTap 处理；_idleLongPressHandled 标志告诉 onTap 是否抑制模式切换（长按 → 录音路径）。
-        },
-        onPointerCancel: (PointerCancelEvent event) {
-          if (_isIdleLongPressing) {
-            _onRecordingPointerCancel(event);
-            _isIdleLongPressing = false;
-          } else {
-            _idleLongPressTimer?.cancel();
-            _idleLongPressTimer = null;
-          }
-        },
-        onPointerMove: (PointerMoveEvent event) {
-          if (_isIdleLongPressing) {
-            _recordOverlayKey.currentState
-                ?.updatePointerPosition(event.position);
-          }
-        },
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 34),
-          decoration: BoxDecoration(
-            color: colorsTheme.bgColorOperate,
-            borderRadius: BorderRadius.circular(4),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-          child: Text(
-            atomicLocale.sendMessageOrHoldToTalk,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: FontScheme.caption1Regular.copyWith(
-              color: colorsTheme.textColorTertiary,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 34),
+        decoration: BoxDecoration(
+          color: colorsTheme.bgColorOperate,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                '发送给 ${_conversationInfo?.title ?? widget.conversationID}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: FontScheme.caption1Regular.copyWith(
+                  color: colorsTheme.textColorTertiary,
+                ),
+              ),
             ),
-          ),
+            _buildRichContentExpandButton(colorsTheme),
+          ],
         ),
       ),
     );
@@ -2060,35 +2374,39 @@ class MessageInputState extends State<MessageInput>
     return _MentionTextField(
       controller: _textEditingController,
       focusNode: _textEditingFocusNode,
+      inputFormatter: _inlineFormatInputFormatter,
+      inlineAttachments: _inlineRichContentAttachments,
       colorsTheme: colorsTheme,
-      hintText: null,
+      hintText: '发送给 ${_conversationInfo?.title ?? widget.conversationID}',
+      onExpand: _openRichContentEditor,
       onTap: () {
-        _textEditingFocusNode.requestFocus();
-        setState(() {
-          _showEmojiPanel = false;
-          _showMorePanel = false;
-          _inputMode = _InputMode.text;
-        });
+        if (_showEmojiPanel ||
+            _showMorePanel ||
+            _inputMode != _InputMode.text) {
+          setState(() {
+            _showEmojiPanel = false;
+            _showMorePanel = false;
+            _inputMode = _InputMode.text;
+          });
+        }
       },
     );
   }
 
-  Widget _buildSendButton(SemanticColorScheme colorsTheme) {
-    return GestureDetector(
-      onTap: _handleTextSendMessagePayload,
-      child: Container(
-        width: 56,
-        height: 32,
-        decoration: BoxDecoration(
-          color: colorsTheme.buttonColorPrimaryDefault,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Center(
-          child: Text(
-            atomicLocale.send,
-            style: FontScheme.caption2Regular.copyWith(
-              color: colorsTheme.textColorButton,
-            ),
+  Widget _buildRichContentExpandButton(SemanticColorScheme colorsTheme) {
+    return Semantics(
+      key: const Key('open_rich_content_editor'),
+      label: '展开富文本编辑器',
+      button: true,
+      child: GestureDetector(
+        onTap: _openRichContentEditor,
+        child: SizedBox(
+          width: 24,
+          height: 22,
+          child: Icon(
+            Icons.open_in_full,
+            size: 17,
+            color: colorsTheme.textColorSecondary,
           ),
         ),
       ),
@@ -2255,8 +2573,9 @@ class _MentionTextEditingController extends TextEditingController {
 
         super.value = TextEditingValue(
           text: updatedText,
-          selection:
-              TextSelection.collapsed(offset: affectedMention.startIndex),
+          selection: TextSelection.collapsed(
+            offset: affectedMention.startIndex,
+          ),
         );
 
         _isInternalUpdate = false;
@@ -2296,6 +2615,9 @@ class _MentionTextField extends StatefulWidget {
   final SemanticColorScheme colorsTheme;
   final VoidCallback? onTap;
   final String? hintText;
+  final VoidCallback? onExpand;
+  final TextInputFormatter? inputFormatter;
+  final Map<int, RichContentDraftAttachmentBlock> inlineAttachments;
 
   const _MentionTextField({
     required this.controller,
@@ -2303,6 +2625,9 @@ class _MentionTextField extends StatefulWidget {
     required this.colorsTheme,
     this.onTap,
     this.hintText,
+    this.onExpand,
+    this.inputFormatter,
+    this.inlineAttachments = const {},
   });
 
   @override
@@ -2345,8 +2670,10 @@ class _MentionTextFieldState extends State<_MentionTextField> {
         // Jump to nearest boundary
         //
         // 跳到最近的边界
-        final anchorPos =
-            widget.controller.getAnchorPosition(mention, selStart);
+        final anchorPos = widget.controller.getAnchorPosition(
+          mention,
+          selStart,
+        );
 
         // Only adjust if cursor is actually inside the mention (not at boundary)
         //
@@ -2358,8 +2685,9 @@ class _MentionTextFieldState extends State<_MentionTextField> {
           // 使用微任务确保调整立即发生，但在当前事件之后
           Future.microtask(() {
             if (mounted) {
-              widget.controller.selection =
-                  TextSelection.collapsed(offset: anchorPos);
+              widget.controller.selection = TextSelection.collapsed(
+                offset: anchorPos,
+              );
             }
             _isAdjustingSelection = false;
           });
@@ -2390,8 +2718,10 @@ class _MentionTextFieldState extends State<_MentionTextField> {
         _isAdjustingSelection = true;
         Future.microtask(() {
           if (mounted) {
-            widget.controller.selection =
-                TextSelection(baseOffset: newStart, extentOffset: newEnd);
+            widget.controller.selection = TextSelection(
+              baseOffset: newStart,
+              extentOffset: newEnd,
+            );
           }
           _isAdjustingSelection = false;
         });
@@ -2401,31 +2731,87 @@ class _MentionTextFieldState extends State<_MentionTextField> {
 
   @override
   Widget build(BuildContext context) {
-    return ExtendedTextField(
-      onTap: widget.onTap,
-      focusNode: widget.focusNode,
-      controller: widget.controller,
-      minLines: 1,
-      maxLines: 5,
-      style: FontScheme.caption1Regular.copyWith(
-        color: widget.colorsTheme.textColorPrimary,
-      ),
-      decoration: InputDecoration(
-        isDense: true,
-        hintText: widget.hintText,
-        hintStyle: FontScheme.caption1Regular.copyWith(
-          color: widget.colorsTheme.textColorTertiary,
-        ),
-        border: InputBorder.none,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 6,
-          vertical: 6,
-        ),
-      ),
-      specialTextSpanBuilder: ChatSpecialTextSpanBuilder(
-        colorScheme: widget.colorsTheme,
-        onTapUrl: (_) {},
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final style = FontScheme.caption1Regular.copyWith(
+          color: widget.colorsTheme.textColorPrimary,
+        );
+        final maxImageWidth = constraints.maxWidth / 2;
+        final maxInputHeight = TextPainter(
+                  text: TextSpan(text: ' ', style: style),
+                  textDirection: Directionality.of(context),
+                ).preferredLineHeight *
+                5 +
+            12;
+        // 展开按钮独立于文本滚动区，输入内容只由 ExtendedTextField 自身滚动。
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxInputHeight),
+          child: Row(
+            children: [
+              Expanded(
+                child: ClipRect(
+                  child: ExtendedTextField(
+                    key: const Key('message_input_text_field'),
+                    onTap: widget.onTap,
+                    focusNode: widget.focusNode,
+                    controller: widget.controller,
+                    minLines: 1,
+                    maxLines: 5,
+                    inputFormatters: [
+                      if (widget.inputFormatter != null) widget.inputFormatter!,
+                    ],
+                    style: style,
+                    // 与展开编辑器一致，让图片参与真实行高而不被固定 strut 上移。
+                    strutStyle: StrutStyle.disabled,
+                    cursorHeight: richContentAttachmentCursorHeight(
+                      context: context,
+                      controller: widget.controller,
+                      attachments: widget.inlineAttachments,
+                      maxImageWidth: maxImageWidth,
+                      textStyle: style,
+                    ),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: widget.hintText,
+                      hintStyle: FontScheme.caption1Regular.copyWith(
+                        color: widget.colorsTheme.textColorTertiary,
+                      ),
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 6,
+                      ),
+                    ),
+                    specialTextSpanBuilder: RichContentAttachmentSpanBuilder(
+                      attachments: widget.inlineAttachments,
+                      maxImageWidth: maxImageWidth,
+                      colorScheme: widget.colorsTheme,
+                      onTapUrl: (_) {},
+                      mapMarkdownMarkers: true,
+                    ),
+                  ),
+                ),
+              ),
+              if (widget.onExpand != null)
+                SizedBox(
+                  width: 38,
+                  height: 34,
+                  child: material.IconButton(
+                    key: const Key('open_rich_content_editor'),
+                    tooltip: '展开富文本编辑器',
+                    onPressed: widget.onExpand,
+                    padding: EdgeInsets.zero,
+                    icon: Icon(
+                      Icons.open_in_full,
+                      size: 18,
+                      color: widget.colorsTheme.textColorSecondary,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -2460,7 +2846,8 @@ class _AlbumPickerMediaSendListenerImpl
     _state._sendMessage(messageInfo).then((result) {
       if (!result.isSuccess) {
         debugPrint(
-            "AlbumPicker onSendMessage failed: ${result.errorCode}, ${result.errorMessage}");
+          "AlbumPicker onSendMessage failed: ${result.errorCode}, ${result.errorMessage}",
+        );
       }
     });
   }

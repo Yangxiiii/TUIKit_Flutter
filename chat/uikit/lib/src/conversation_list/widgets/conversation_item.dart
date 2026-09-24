@@ -7,6 +7,7 @@ import 'package:tuikit_atomic_x/base_component/utils/time_util.dart';
 import 'package:tencent_chat_uikit/src/conversation_list/conversation_list.dart';
 import 'package:tencent_chat_uikit/src/conversation_list/conversation_list_config.dart';
 import 'package:tencent_chat_uikit/src/emoji_picker/emoji_manager.dart';
+import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_utils.dart';
 import 'package:tencent_chat_uikit/src/third_party/flutter_swipe_action_cell/core/cell.dart';
 
@@ -202,8 +203,12 @@ class _ConversationItemState extends State<ConversationItem> {
       // Convert emoji codes to localized names for preview
       //
       // 将表情代码转换为本地化名称以供预览。
-      String localizedDraft =
-          EmojiManager.getEmojiMap(context).keys.fold(draft, (previous, key) {
+      final richDraft = RichContentDraft.tryParsePersisted(draft);
+      final draftPreview = richDraft?.plainTextPreview ??
+          (RichContentDraft.isPersistedString(draft) ? '' : draft);
+      String localizedDraft = EmojiManager.getEmojiMap(context)
+          .keys
+          .fold(draftPreview, (previous, key) {
         return previous.replaceAll(
             key, EmojiManager.getEmojiMap(context)[key]!);
       });
