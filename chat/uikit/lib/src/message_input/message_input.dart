@@ -468,7 +468,7 @@ class MessageInputState extends State<MessageInput>
             .whereType<RichContentDraftAttachmentBlock>()
             .isNotEmpty;
     final draftText = hasRichContent
-        ? richDraft.toPersistedString()
+        ? (richDraft.hasContent ? richDraft.toPersistedString() : '')
         : _textEditingController.text;
     _conversationListStore.setConversationDraft(
       conversationID: widget.conversationID,
@@ -921,16 +921,11 @@ class MessageInputState extends State<MessageInput>
     if (result.sent) _clearDraft();
     setState(() {
       _isRichContentEditorOpen = false;
-      _inputMode = !result.sent &&
-              (result.draft.title.isNotEmpty || result.draft.blocks.isNotEmpty)
+      _inputMode = !result.sent && result.draft.hasContent
           ? _InputMode.text
           : _inputMode;
       _inlineRichContentEnabled = !result.sent &&
-          (result.draft.title.isNotEmpty ||
-              result.draft.blocks
-                  .whereType<RichContentDraftAttachmentBlock>()
-                  .isNotEmpty ||
-              _inlineRichContentEnabled);
+          (result.draft.hasContent || _inlineRichContentEnabled);
     });
   }
 

@@ -204,6 +204,10 @@ class _ConversationItemState extends State<ConversationItem> {
       //
       // 将表情代码转换为本地化名称以供预览。
       final richDraft = RichContentDraft.tryParsePersisted(draft);
+      final hasDraft = richDraft?.hasContent ??
+          (!RichContentDraft.isPersistedString(draft) &&
+              draft.trim().isNotEmpty);
+      if (!hasDraft) return _buildLastMessageSubtitle(context, colorsTheme);
       final draftPreview = richDraft?.plainTextPreview ??
           (RichContentDraft.isPersistedString(draft) ? '' : draft);
       String localizedDraft = EmojiManager.getEmojiMap(context)
@@ -264,9 +268,15 @@ class _ConversationItemState extends State<ConversationItem> {
       );
     }
 
-    // No draft: show last message as before
-    //
-    // 无草稿：像以前一样显示最后一条消息。
+    return _buildLastMessageSubtitle(context, colorsTheme);
+  }
+
+  /// 富文本草稿为空或不存在时展示最后一条消息摘要。
+  Widget _buildLastMessageSubtitle(
+    BuildContext context,
+    SemanticColorScheme colorsTheme,
+  ) {
+    final atPrefix = _buildAtMentionPrefix();
     String replaceText = EmojiManager.getEmojiMap(context).keys.fold(
         MessageUtil.getMessageAbstract(
             widget.conversation.lastMessage, context), (previous, key) {

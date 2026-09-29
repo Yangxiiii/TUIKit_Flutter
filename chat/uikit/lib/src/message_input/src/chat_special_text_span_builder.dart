@@ -19,9 +19,6 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
   /// 是否为 ExtendedTextField 输出带原文映射的隐藏标签。
   final bool mapMarkdownMarkers;
 
-  static final RegExp _markdownPattern = RegExp(
-    r'(\*\*([^*\n]+)\*\*)|(~~([^~\n]+)~~)|(\*([^*\n]+)\*)|(~([^~\n]+)~)|(\[([^\]\n]+)\]\((https?://[^)\s]+)\))|(```([\s\S]*?)```)',
-  );
   ChatSpecialTextSpanBuilder({
     this.showAtBackground = false,
     this.mapMarkdownMarkers = false,
@@ -41,7 +38,7 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
     SpecialTextGestureTapCallback? onTap,
   }) {
     final source = super.build(data, textStyle: textStyle, onTap: onTap);
-    if (!_markdownPattern.hasMatch(data)) return source;
+    if (!richContentMarkdownPattern.hasMatch(data)) return source;
 
     final children = <InlineSpan>[];
     var sourceOffset = 0;
@@ -79,7 +76,7 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
     var plainStart = 0;
     while (offset < text.length) {
       final combined = _nestedFormatAt(text, offset, sourceStart, baseStyle);
-      final match = _markdownPattern.matchAsPrefix(text, offset);
+      final match = richContentMarkdownPattern.matchAsPrefix(text, offset);
       if (combined == null && match == null) {
         offset++;
         continue;

@@ -163,11 +163,58 @@ void main() {
     expect(image.attachment.localPath, '/data/user/0/app/files/draft.png');
     expect(image.attachment.width, 640);
     expect(image.attachment.height, 480);
-    expect(restored.plainTextPreview, '标题 图片前 draft.png 图片后');
+    expect(restored.plainTextPreview, '标题 图片前 [图片] 图片后');
+    expect(restored.hasContent, isTrue);
     expect(
       RichContentDraft.tryParsePersisted('oa-rich-content-draft-v1:broken'),
       isNull,
     );
+  });
+
+  test('富文本草稿摘要隐藏相邻和多层 Markdown 标签', () {
+    const draft = RichContentDraft(
+      title: '标题 *保持原样*',
+      blocks: [
+        RichContentDraftTextBlock(
+          1,
+          '普通 **粗体****斜体** ~下划线~ '
+          '~**~~*四层格式*~~**~ [链接](https://example.com) ```代码```',
+        ),
+      ],
+    );
+
+    expect(
+      draft.plainTextPreview,
+      '标题 *保持原样* 普通 粗体斜体 下划线 四层格式 链接 代码',
+    );
+  });
+
+  test('空富文本不作为草稿，纯图片草稿显示图片摘要', () {
+    expect(const RichContentDraft().hasContent, isFalse);
+    expect(
+      const RichContentDraft(
+        blocks: [RichContentDraftTextBlock(1, '  \n')],
+      ).hasContent,
+      isFalse,
+    );
+    const imageDraft = RichContentDraft(
+      blocks: [
+        RichContentDraftAttachmentBlock(
+          1,
+          attachment: RichContentLocalAttachment(
+            type: RichContentAttachmentType.image,
+            localPath: '/tmp/image.png',
+            fileName: 'image.png',
+            fileSize: 1,
+            mimeType: 'image/png',
+            width: 1,
+            height: 1,
+          ),
+        ),
+      ],
+    );
+    expect(imageDraft.hasContent, isTrue);
+    expect(imageDraft.plainTextPreview, '[图片]');
   });
 
   test('选中格式后只在实际输入时写入 Markdown 标记', () {

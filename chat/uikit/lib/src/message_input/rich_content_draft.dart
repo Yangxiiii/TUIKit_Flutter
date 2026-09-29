@@ -7,6 +7,11 @@ import 'package:flutter/services.dart';
 const _markdownFormatOrder = ['**', '~~', '*', '~'];
 const _richContentDraftPrefix = 'oa-rich-content-draft-v1:';
 
+/// 富文本输入与摘要共用的 Markdown 行内格式规则。
+final richContentMarkdownPattern = RegExp(
+  r'(\*\*([^*\n]+)\*\*)|(~~([^~\n]+)~~)|(\*([^*\n]+)\*)|(~([^~\n]+)~)|(\[([^\]\n]+)\]\((https?://[^)\s]+)\))|(```([\s\S]*?)```)',
+);
+
 /// 从指定位置识别任意顺序的多层 Markdown 格式标签。
 ///
 /// 打开标签不能重复，关闭标签必须与打开顺序相反，正文不能跨行。
@@ -44,6 +49,35 @@ const _richContentDraftPrefix = 'oa-rich-content-draft-v1:';
     contentEnd: contentEnd,
     closeEnd: contentEnd + closing.length,
   );
+}
+
+/// 移除富文本格式标签，只保留会话摘要需要展示的可见文字。
+String richContentMarkdownToPlainText(String text) {
+  final output = StringBuffer();
+  var offset = 0;
+  while (offset < text.length) {
+    final nested = parseNestedMarkdownFormat(text, offset);
+    final match = richContentMarkdownPattern.matchAsPrefix(text, offset);
+    if (nested != null) {
+      output.write(text.substring(nested.contentStart, nested.contentEnd));
+      offset = nested.closeEnd;
+    } else if (match != null) {
+      output.write(
+        match.group(2) ??
+            match.group(4) ??
+            match.group(6) ??
+            match.group(8) ??
+            match.group(10) ??
+            match.group(13) ??
+            '',
+      );
+      offset = match.end;
+    } else {
+      output.writeCharCode(text.codeUnitAt(offset));
+      offset++;
+    }
+  }
+  return output.toString();
 }
 
 /// 富文本附件在编辑和上传过程中的状态。
@@ -147,15 +181,29 @@ final class RichContentDraft {
   static bool isPersistedString(String source) =>
       source.startsWith(_richContentDraftPrefix);
 
+  /// 草稿是否包含可展示的文字或附件；仅有格式状态不算草稿内容。
+  bool get hasContent =>
+      title.trim().isNotEmpty ||
+      blocks.any(
+        (block) => switch (block) {
+          RichContentDraftTextBlock block => block.text.trim().isNotEmpty,
+          RichContentDraftAttachmentBlock _ => true,
+        },
+      );
+
   /// 返回会话列表使用的单行草稿摘要，避免展示内部持久化 JSON。
   String get plainTextPreview {
     final values = <String>[if (title.isNotEmpty) title];
     for (final block in blocks) {
       switch (block) {
         case RichContentDraftTextBlock block:
-          values.add(block.text);
+          values.add(richContentMarkdownToPlainText(block.text));
         case RichContentDraftAttachmentBlock block:
-          values.add(block.attachment.fileName);
+          values.add(
+            block.attachment.type == RichContentAttachmentType.image
+                ? '[图片]'
+                : block.attachment.fileName,
+          );
       }
     }
     return values.join(' ');
@@ -163,13 +211,6 @@ final class RichContentDraft {
 
   /// 草稿至少有一段有效内容，且所有附件都已取得合法远端 URL 时可发送。
   bool get canSend {
-    final hasContent = title.trim().isNotEmpty ||
-        blocks.any(
-          (block) => switch (block) {
-            RichContentDraftTextBlock block => block.text.trim().isNotEmpty,
-            RichContentDraftAttachmentBlock _ => true,
-          },
-        );
     return hasContent &&
         blocks.whereType<RichContentDraftAttachmentBlock>().every(
               (block) => _isReadyAttachment(block),
