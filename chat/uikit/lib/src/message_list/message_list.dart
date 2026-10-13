@@ -114,6 +114,9 @@ class MessageList extends StatefulWidget {
   final MessageInfo? locateMessage;
   final OnUserClick? onUserClick;
 
+  /// 首次SDK消息窗口成功加载且非空后通知业务，失败或空窗口不清未读。
+  final VoidCallback? onInitialMessagesLoaded;
+
   /// Callback when user long presses on avatar (for @ mention feature in group chat)
   ///
   /// 当用户长按头像时的回调（用于群聊中的@提及功能）
@@ -156,6 +159,7 @@ class MessageList extends StatefulWidget {
     this.config = const ChatMessageListConfig(),
     this.locateMessage,
     this.onUserClick,
+    this.onInitialMessagesLoaded,
     this.onUserLongPress,
     this.onCallMessageClick,
     this.onQuoteMessage,
@@ -704,41 +708,49 @@ class _MessageListState extends State<MessageList>
       isLoading = true;
     });
 
-    final requestedMessage = widget.locateMessage;
-    final restoredSnapshot = _restoreViewportSnapshot;
-    if (requestedMessage != null) {
-      // 搜索、@ 和引用跳转必须围绕业务指定的消息加载，不能被浏览快照覆盖。
-      debugPrint('messageList, _loadInitialMessages->_loadMessagesAround');
-      await _loadMessagesAround(requestedMessage);
-      _setInitialViewport(requestedMessage, alignment: 0);
-    } else if (restoredSnapshot != null) {
-      // 页面已同步显示快照，这里只负责用 SDK 数据静默更新其消息窗口。
-      debugPrint('messageList, _loadInitialMessages->restoreViewport');
-      final restoredAnchor = restoredSnapshot.anchor;
-      var refreshSucceeded = true;
-      _refreshViewportAnchor = restoredAnchor;
-      try {
-        await _loadMessagesAround(restoredAnchor.message);
-      } catch (error) {
-        // 已有内存快照时刷新失败不阻塞页面，继续展示离开前的消息窗口。
-        refreshSucceeded = false;
-        debugPrint('messageList, restore viewport refresh failed: $error');
-      } finally {
-        _refreshViewportAnchor = null;
+    var loadSucceeded = false;
+    try {
+      final requestedMessage = widget.locateMessage;
+      final restoredSnapshot = _restoreViewportSnapshot;
+      if (requestedMessage != null) {
+        // 搜索、@ 和引用跳转必须围绕业务指定的消息加载，不能被浏览快照覆盖。
+        debugPrint('messageList, _loadInitialMessages->_loadMessagesAround');
+        loadSucceeded = await _loadMessagesAround(requestedMessage);
+        _setInitialViewport(requestedMessage, alignment: 0);
+      } else if (restoredSnapshot != null) {
+        // 页面已同步显示快照，这里只负责用 SDK 数据静默更新其消息窗口。
+        debugPrint('messageList, _loadInitialMessages->restoreViewport');
+        final restoredAnchor = restoredSnapshot.anchor;
+        var refreshSucceeded = true;
+        _refreshViewportAnchor = restoredAnchor;
+        try {
+          refreshSucceeded = await _loadMessagesAround(restoredAnchor.message);
+        } catch (error) {
+          // 已有内存快照时刷新失败不阻塞页面，继续展示离开前的消息窗口。
+          refreshSucceeded = false;
+          debugPrint('messageList, restore viewport refresh failed: $error');
+        } finally {
+          _refreshViewportAnchor = null;
+        }
+        loadSucceeded = refreshSucceeded;
+        if (refreshSucceeded &&
+            !_setInitialViewport(
+              restoredAnchor.message,
+              alignment: restoredAnchor.alignment,
+            )) {
+          // SDK 已无法返回原锚点时丢弃失效快照，并降级展示最新消息。
+          _viewportSnapshots.remove(_viewportAnchorKey);
+          loadSucceeded = await _loadLatestMessages();
+        }
+      } else {
+        // 首次访问或进程重启后没有内存快照，按原有规则进入最新消息位置。
+        debugPrint('messageList, _loadInitialMessages->_loadLatestMessages');
+        loadSucceeded = await _loadLatestMessages();
       }
-      if (refreshSucceeded &&
-          !_setInitialViewport(
-            restoredAnchor.message,
-            alignment: restoredAnchor.alignment,
-          )) {
-        // SDK 已无法返回原锚点时丢弃失效快照，并降级展示最新消息。
-        _viewportSnapshots.remove(_viewportAnchorKey);
-        await _loadLatestMessages();
-      }
-    } else {
-      // 首次访问或进程重启后没有内存快照，按原有规则进入最新消息位置。
-      debugPrint('messageList, _loadInitialMessages->_loadLatestMessages');
-      await _loadLatestMessages();
+    } on Object catch (error) {
+      // 原生加载异常与失败返回都不清未读，页面继续保留已有消息窗口。
+      loadSucceeded = false;
+      debugPrint('messageList, initial load failed: $error');
     }
 
     final initialRenderComplete =
@@ -750,6 +762,11 @@ class _MessageListState extends State<MessageList>
       _isInitialRenderComplete = initialRenderComplete;
       _isInitialViewportReady = true;
     });
+
+    // 只有真实非空消息窗口加载成功才能清未读，旧快照或空响应不能代替成功信号。
+    if (loadSucceeded && _messageListStore.state.messageList.value.isNotEmpty) {
+      widget.onInitialMessagesLoaded?.call();
+    }
 
     if (_pendingUnreadCheck && initialRenderComplete) {
       _scheduleUnreadTongueVisibilityCheck();
@@ -1052,27 +1069,31 @@ class _MessageListState extends State<MessageList>
     return positions.isNotEmpty && positions.any((pos) => pos.index <= 1);
   }
 
-  Future<void> _loadLatestMessages() async {
+  /// 返回SDK真实加载结果，业务仅在成功后清除会话未读。
+  Future<bool> _loadLatestMessages() async {
     final option = MessageLoadOption()
       ..direction = MessageLoadDirection.older
       ..pageCount = 20;
 
-    await _messageListStore.loadMessages(option: option);
+    final result = await _messageListStore.loadMessages(option: option);
     // No local mirroring of has-more flags — Store resets both to false on
     // loadMessages entry and only flips hasOlderMessages back to true if
     // more older pages exist. Read sites check
     // `_messageListStore.state.hasOlderMessages.value` directly.
     //
     // 没有本地的has-more标记镜像——Store在loadMessages入口时将两者重置为false，并且只有在存在更多旧页时才将hasOlderMessages翻回true。阅读网站直接检查`_messageListStore.state.hasOlderMessages.value`。
+    return result.isSuccess;
   }
 
-  Future<void> _loadMessagesAround(MessageInfo message) async {
+  /// 围绕定位消息读取窗口，保留SDK失败结果供首次加载判断。
+  Future<bool> _loadMessagesAround(MessageInfo message) async {
     debugPrint('messageList, _loadMessagesAround');
     final option = MessageLoadOption()
       ..cursor = message
       ..direction = MessageLoadDirection.both
       ..pageCount = 20;
-    await _messageListStore.loadMessages(option: option);
+    final result = await _messageListStore.loadMessages(option: option);
+    return result.isSuccess;
   }
 
   Future<void> _loadPreviousMessages() async {

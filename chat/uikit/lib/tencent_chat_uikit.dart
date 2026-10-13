@@ -25,6 +25,7 @@ export 'src/message_input/message_input.dart';
 export 'src/message_list/message_list.dart';
 export 'src/navigation/chat_uikit_navigation.dart';
 export 'src/pages/chat_page.dart';
+export 'src/search/search_page.dart';
 export 'src/pages/contacts_page.dart';
 export 'src/pages/conversations_page.dart';
 export 'src/user_picker/user_picker.dart';

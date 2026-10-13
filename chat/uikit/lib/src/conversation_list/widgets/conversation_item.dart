@@ -18,6 +18,9 @@ class ConversationItem extends StatefulWidget {
   /// 会话行和滑动层背景；为空时沿用 TUIKit 默认列表颜色。
   final Color? backgroundColor;
 
+  /// 自定义行布局并复用SDK摘要，点击及左滑层继续由UIKit管理。
+  final Widget Function(BuildContext context, Widget subtitle)? contentBuilder;
+
   final VoidCallback? onTap;
 
   final VoidCallback? onLongPress;
@@ -40,6 +43,7 @@ class ConversationItem extends StatefulWidget {
     super.key,
     required this.conversation,
     this.backgroundColor,
+    this.contentBuilder,
     this.onTap,
     this.onLongPress,
     this.onPinToggle,
@@ -55,6 +59,7 @@ class ConversationItem extends StatefulWidget {
   State<StatefulWidget> createState() => _ConversationItemState();
 }
 
+/// 保留会话行的点击与左滑生命周期，可见布局允许业务按设计替换。
 class _ConversationItemState extends State<ConversationItem> {
   late AppLocalizedText atomicLocale;
 
@@ -136,53 +141,56 @@ class _ConversationItemState extends State<ConversationItem> {
         onLongPress: widget.onLongPress,
         splashColor: primary.withValues(alpha: 0.12),
         highlightColor: primary.withValues(alpha: 0.08),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-          child: Row(
-            children: [
-              _buildAvatar(context),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+        // 业务仅替换可见内容，保留原有点击、长按和左滑动作。
+        child: widget.contentBuilder
+                ?.call(context, _buildSubtitle(context, colorsTheme)) ??
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+              child: Row(
+                children: [
+                  _buildAvatar(context),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          child: Text(
-                            widget.conversation.title ?? '',
-                            style: FontScheme.caption1Medium.copyWith(
-                              color: colorsTheme.textColorPrimary,
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                widget.conversation.title ?? '',
+                                style: FontScheme.caption1Medium.copyWith(
+                                  color: colorsTheme.textColorPrimary,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                            _buildUnreadOrMuteIcon(),
+                          ],
                         ),
-                        _buildUnreadOrMuteIcon(),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _buildSubtitle(context, colorsTheme),
-                        ),
-                        const SizedBox(width: 8),
-                        _buildErrorStatusIcon(colorsTheme),
-                        Text(
-                          formatTime,
-                          style: FontScheme.caption3Regular.copyWith(
-                            color: colorsTheme.textColorTertiary,
-                          ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _buildSubtitle(context, colorsTheme),
+                            ),
+                            const SizedBox(width: 8),
+                            _buildErrorStatusIcon(colorsTheme),
+                            Text(
+                              formatTime,
+                              style: FontScheme.caption3Regular.copyWith(
+                                color: colorsTheme.textColorTertiary,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
+            ),
       ),
     );
   }

@@ -103,6 +103,9 @@ class ChatSettingPage extends StatelessWidget {
 class ChatPage extends StatefulWidget {
   final ConversationInfo conversation;
   final MessageInfo? message;
+
+  /// 消息首次加载成功后交给业务清未读；失败及页面销毁不会触发。
+  final VoidCallback? onInitialMessagesLoaded;
   final ChatMessageInputConfig messageInputConfig;
   final ChatMessageListConfig messageListConfig;
   final bool isShowAppBarActions;
@@ -111,6 +114,7 @@ class ChatPage extends StatefulWidget {
     super.key,
     required this.conversation,
     this.message,
+    this.onInitialMessagesLoaded,
     this.messageInputConfig = const ChatMessageInputConfig(
       isShowAudioCall: true,
       isShowVideoCall: true,
@@ -283,6 +287,7 @@ class _ChatPageState extends State<ChatPage> {
                   conversationID: widget.conversation.conversationID,
                   config: widget.messageListConfig,
                   locateMessage: widget.message,
+                  onInitialMessagesLoaded: widget.onInitialMessagesLoaded,
                   onUserClick: (String userID) => _onUserClick(userID),
                   onUserLongPress: (String userID, String displayName) {
                     _messageInputKey.currentState?.insertMention(
