@@ -76,7 +76,8 @@ class _ConversationItemState extends State<ConversationItem> {
         widget.backgroundColor ?? colorsTheme.listColorDefault;
 
     return SwipeActionCell(
-      key: ObjectKey(widget.conversation.conversationID),
+      // SDK刷新可能生成内容相同的新ID字符串，按值保留滑动层及已加载头像。
+      key: ValueKey('conversation.swipe.${widget.conversation.conversationID}'),
       trailingActions: _buildSwipeActions(colorsTheme),
       backgroundColor: backgroundColor,
       child: _buildConversationContent(context, backgroundColor),
