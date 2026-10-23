@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'message_input_config.dart';
+import 'message_text.dart';
 import '../message_list/utils/rich_content_message.dart';
 import 'package:flutter/services.dart';
 
@@ -186,7 +187,8 @@ final class RichContentDraft {
       title.trim().isNotEmpty ||
       blocks.any(
         (block) => switch (block) {
-          RichContentDraftTextBlock block => block.text.trim().isNotEmpty,
+          RichContentDraftTextBlock block =>
+            richContentMarkdownToPlainText(block.text).trim().isNotEmpty,
           RichContentDraftAttachmentBlock _ => true,
         },
       );
@@ -209,9 +211,22 @@ final class RichContentDraft {
     return values.join(' ');
   }
 
-  /// 草稿至少有一段有效内容，且所有附件都已取得合法远端 URL 时可发送。
+  /// 标题及文字块的可见字符总数；隐藏格式标记和附件不计，输入的换行计数。
+  int get characterCount =>
+      messageTextCharacterCount(title) +
+      blocks.whereType<RichContentDraftTextBlock>().fold<int>(
+            0,
+            (count, block) =>
+                count +
+                messageTextCharacterCount(
+                  richContentMarkdownToPlainText(block.text),
+                ),
+          );
+
+  /// 草稿有有效内容、未超过文字上限且全部附件取得合法远端URL时可发送。
   bool get canSend {
     return hasContent &&
+        characterCount <= messageTextCharacterLimit &&
         blocks.whereType<RichContentDraftAttachmentBlock>().every(
               (block) => _isReadyAttachment(block),
             );

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -15,6 +16,64 @@ import 'package:tuikit_atomic_x/base_component/base_component.dart'
 import 'package:tuikit_atomic_x/album_picker/album_picker.dart';
 
 void main() {
+  testWidgets('发送期间的新编辑不会随旧快照成功而关闭', (tester) async {
+    final editorKey = GlobalKey<RichContentEditorSheetState>();
+    final pending = Completer<bool>();
+    var sends = 0;
+    var closes = 0;
+    await tester.pumpWidget(
+      _testApp(
+        const RichContentDraft(blocks: [RichContentDraftTextBlock(1, '旧内容')]),
+        editorKey: editorKey,
+        onSend: (_) {
+          sends++;
+          return pending.future;
+        },
+        onClose: (_) => closes++,
+      ),
+    );
+    await tester.pump();
+    final first = editorKey.currentState!.send();
+    await editorKey.currentState!.send();
+    expect(sends, 1);
+    final input = tester.widget<ExtendedTextField>(
+      find.byKey(const Key('rich_content_text_1')),
+    );
+    input.controller!.text = '继续编辑的新内容';
+    pending.complete(true);
+    await first;
+    await tester.pump();
+    expect(closes, 0);
+    expect(input.controller!.text, '继续编辑的新内容');
+    expect(editorKey.currentState!.canSend, isTrue);
+  });
+
+  testWidgets('发送回调异常后释放编辑器忙碌态并保留草稿', (tester) async {
+    final editorKey = GlobalKey<RichContentEditorSheetState>();
+    var attempts = 0;
+    await tester.pumpWidget(
+      _testApp(
+        const RichContentDraft(blocks: [RichContentDraftTextBlock(1, '待重试')]),
+        editorKey: editorKey,
+        onSend: (_) async {
+          attempts++;
+          throw StateError('模拟发送异常');
+        },
+      ),
+    );
+    await tester.pump();
+    for (var attempt = 0; attempt < 2; attempt++) {
+      await expectLater(editorKey.currentState!.send(), throwsStateError);
+      await tester.pump();
+      expect(editorKey.currentState!.canSend, isTrue);
+    }
+    expect(attempts, 2);
+    final input = tester.widget<ExtendedTextField>(
+      find.byKey(const Key('rich_content_text_1')),
+    );
+    expect(input.controller!.text, '待重试');
+  });
+
   testWidgets('编辑器展开后普通输入行保留但隐藏', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -73,17 +132,20 @@ void main() {
     final input = tester.widget<ExtendedTextField>(
       find.byKey(const Key('message_input_text_field')),
     );
-    expect(tester.getSize(find.byKey(inputRow)).height, 36);
+    // 单行输入框对照MasterGo为44高，换行后继续保留五行上限。
+    expect(tester.getSize(find.byKey(inputRow)).height, 44);
 
     input.controller!.text = '1\n2\n3';
     await tester.pump();
     final threeLineHeight = tester.getSize(find.byKey(inputRow)).height;
-    expect(threeLineHeight, greaterThan(36));
+    expect(threeLineHeight, greaterThan(44));
 
     input.controller!.text = '1\n2\n3\n4\n5';
     await tester.pump();
     final fiveLineHeight = tester.getSize(find.byKey(inputRow)).height;
     expect(fiveLineHeight, greaterThan(threeLineHeight));
+    // 16号字、1.5倍行高与上下20像素内边距，五行应完整容纳而非提前裁切。
+    expect(fiveLineHeight, closeTo(140, .01));
 
     input.controller!.text = '1\n2\n3\n4\n5\n6\n7';
     await tester.pump();
@@ -153,7 +215,7 @@ void main() {
       isTrue,
     );
     await tester.pump();
-    await tester.tap(find.byIcon(Icons.close_fullscreen));
+    await tester.tap(find.byTooltip('收起富文本编辑器'));
     await tester.pumpAndSettle();
 
     const token = '\uFFF92\uFFFA';
@@ -178,9 +240,10 @@ void main() {
       ),
       findsNothing,
     );
+    // 多行时展开入口锚定输入区顶部，不能随正文滚动或跟随高度居中。
     expect(
-      tester.getCenter(expandButton).dy,
-      closeTo(tester.getCenter(inputField).dy, 0.1),
+      tester.getTopLeft(expandButton).dy,
+      closeTo(tester.getTopLeft(inputField).dy, 0.1),
     );
     final buttonCenter = tester.getCenter(expandButton);
     expect(inputScrollable.position.maxScrollExtent, greaterThan(0));
@@ -1113,6 +1176,7 @@ Widget _testApp(
   bool showToolbar = true,
   GlobalKey<RichContentEditorSheetState>? editorKey,
   bool initialShowFormatting = false,
+  ValueChanged<RichContentEditorResult>? onClose,
   Set<String> initialActiveFormats = const {},
 }) {
   return MaterialApp(
@@ -1126,6 +1190,7 @@ Widget _testApp(
         conversationName: '杨洋阳 (一只羊)',
         initialDraft: draft,
         onSend: onSend,
+        onClose: onClose,
         showToolbar: showToolbar,
         initialShowFormatting: initialShowFormatting,
         initialActiveFormats: initialActiveFormats,

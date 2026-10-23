@@ -1,5 +1,6 @@
 import 'package:tuikit_atomic_x/base_component/utils/app_builder.dart';
 
+/// 约定消息列表的外观和可操作能力，具体默认值由聊天配置提供。
 abstract class MessageListConfigProtocol {
   double get textBubbleCornerRadius;
   String get alignment;
@@ -9,6 +10,8 @@ abstract class MessageListConfigProtocol {
   bool get isShowRightAvatar;
   bool get isShowRightNickname;
   bool get isShowTimeInBubble;
+
+  /// 同一时间组内消息项的间隔，单位为逻辑像素；新时间组独立留出分组间隔。
   double get cellSpacing;
   bool get isShowSystemMessage;
   bool get isShowUnsupportMessage;
@@ -26,6 +29,7 @@ abstract class MessageListConfigProtocol {
   bool get isSupportQuote;
 }
 
+/// 提供消息列表默认外观，并保留宿主显式传入的单项覆盖。
 class ChatMessageListConfig implements MessageListConfigProtocol {
   final double? _userTextBubbleCornerRadius;
   final String? _userAlignment;
@@ -35,6 +39,8 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
   final bool? _userIsShowRightAvatar;
   final bool? _userIsShowRightNickname;
   final bool? _userIsShowTimeInBubble;
+
+  /// 宿主指定的组内间距；为空时使用设计中的16逻辑像素。
   final double? _userCellSpacing;
   final bool? _userIsShowSystemMessage;
   final bool? _userIsShowUnsupportMessage;
@@ -83,7 +89,7 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
   bool get isShowTimeInBubble => _userIsShowTimeInBubble ?? false;
 
   @override
-  double get cellSpacing => _userCellSpacing ?? 0;
+  double get cellSpacing => _userCellSpacing ?? 16;
 
   @override
   bool get isShowSystemMessage => _userIsShowSystemMessage ?? true;

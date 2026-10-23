@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:app_core/app_core.dart';
+import 'package:app_ui/app_ui.dart' show AppIcons;
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:atomic_x_core/impl/message/message_input_store_impl.dart';
 import 'package:atomic_x_core/impl/message/message_list_store_impl.dart';
@@ -34,6 +36,7 @@ import 'package:tencent_chat_uikit/src/video_recorder/video_recorder.dart';
 import 'mention/mention_info.dart';
 import 'mention/mention_member_picker.dart';
 import 'message_input_config.dart';
+import 'message_text.dart';
 import 'widget/audio_record_overlay.dart';
 import 'widget/quote_preview_bar.dart';
 
@@ -52,7 +55,10 @@ enum _InputMode { idle, text, voice }
 
 /// 聊天页消息输入组件，统一协调文字、富文本、媒体和语音入口。
 class MessageInput extends StatefulWidget {
+  /// 当前输入和草稿所属的稳定会话标识。
   final String conversationID;
+
+  /// 宿主配置的可见能力、附件上传器和统一操作守卫。
   final MessageInputConfigProtocol config;
 
   const MessageInput({
@@ -83,7 +89,25 @@ class MessageInputState extends State<MessageInput>
 
   Timer? _recordingStarter;
   bool _isWaitingToStartRecord = false;
+
+  /// 当前输入内容的校验结果；发送任务的忙碌状态另行限制按钮。
   bool _showSendButton = false;
+
+  /// 仅驱动发送按钮忙碌态，实际并发由ActionGuard统一保护。
+  bool _isSendingText = false;
+
+  /// 宿主注入全局守卫；独立使用UIKit时也复用同一种防重复实现。
+  late final ActionGuard _textSendGuard =
+      widget.config.actionGuard ?? ActionGuard();
+
+  /// 每次正文或展开草稿实际变化时递增，阻止迟到的旧草稿覆盖新编辑。
+  int _draftRevision = 0;
+
+  /// 只用于区分正文变化与选区变化，不作为另一份可编辑文本。
+  String _lastObservedText = '';
+
+  /// 记录上次是否超限，仅用于让全局提示在进入超限状态时显示一次。
+  bool _wasOverTextLimit = false;
   bool _showEmojiPanel = false;
   bool _showMorePanel = false;
 
@@ -129,8 +153,16 @@ class MessageInputState extends State<MessageInput>
   // Draft related state
   //
   // 草稿相关状态
+  /// 合并连续输入的草稿写入，离开页面时取消并立即补存。
   Timer? _draftSaveTimer;
+
+  /// 首次草稿读取期间，未编辑的空输入不能反向清除尚未读出的草稿。
   bool _isLoadingDraft = false;
+
+  /// 只有成功读取后才能把未编辑的空输入当作空草稿；读取失败不等于草稿为空。
+  bool _hasLoadedDraft = false;
+
+  /// 用户停止输入800毫秒后保存，避免每次按键都调用SDK。
   static const _draftSaveDelay = Duration(milliseconds: 800);
 
   // @ mention related state
@@ -334,11 +366,12 @@ class MessageInputState extends State<MessageInput>
     //
     // 更新发送按钮状态并切换到文本模式
     setState(() {
-      _showSendButton = newText.trim().isNotEmpty;
       _inputMode = _InputMode.text;
       _showEmojiPanel = false;
       _showMorePanel = false;
     });
+    // 提及回填临时移除了监听，必须补走统一校验和草稿版本更新。
+    _onTextChanged();
   }
 
   /// Set a message to be quoted. Shows the quote preview bar and raises keyboard.
@@ -376,32 +409,43 @@ class MessageInputState extends State<MessageInput>
     _textEditingController.removeListener(_onTextChanged);
     _textEditingFocusNode.removeListener(_onFocusChanged);
     _draftSaveTimer?.cancel();
-    // Save draft immediately on dispose (fallback mechanism)
-    //
-    // 在销毁时立即保存草稿（备用机制）
+    // 离开时补存用户已编辑内容；尚未读取的草稿不能被默认空输入覆盖。
     _saveDraftImmediately();
     _textEditingController.dispose();
+    _textEditingFocusNode.dispose();
     super.dispose();
   }
 
-  /// Load draft from IM SDK when entering conversation
-  ///
-  /// 进入会话时从 IM SDK 加载草稿
+  /// 加载会话草稿；只在当前输入仍属于初始版本时回填，不主动唤起键盘。
   Future<void> _loadDraft() async {
+    final initialRevision = _draftRevision;
     _isLoadingDraft = true;
-    final result = await _conversationListStore.getConversationInfo(
-      conversationID: widget.conversationID,
-    );
-    if (result.isSuccess && result.conversationInfo != null) {
+    try {
+      final result = await _conversationListStore.getConversationInfo(
+        conversationID: widget.conversationID,
+      );
+      // 退出页面后控制器可能已销毁；用户已编辑时也不能再回填旧正文。
+      if (!mounted || !result.isSuccess || result.conversationInfo == null) {
+        return;
+      }
+      _hasLoadedDraft = true;
       _conversationInfo = result.conversationInfo;
       final draft = _conversationInfo!.draft;
-      if (draft != null && draft.isNotEmpty) {
+      if (_draftRevision == initialRevision &&
+          draft != null &&
+          draft.isNotEmpty) {
         _setDraftToInput(draft);
-      } else if (mounted) {
+      } else {
         setState(() {});
       }
+    } on Object catch (error) {
+      // 读取失败保留当前输入，不能把失败解释成没有草稿并清空内容。
+      debugPrint('加载聊天草稿失败: $error');
+    } finally {
+      _isLoadingDraft = false;
+      // 加载期间的用户编辑暂未保存，读取结束后恢复原有防抖保存流程。
+      if (mounted && _draftRevision != initialRevision) _scheduleDraftSave();
     }
-    _isLoadingDraft = false;
   }
 
   /// 从 IM SDK 恢复普通文本或带本地附件路径的富文本草稿。
@@ -414,35 +458,12 @@ class MessageInputState extends State<MessageInput>
       _textEditingController.text = draft;
     }
     final inputLength = _textEditingController.text.length;
-    // Position cursor at the end
-    //
-    // 将光标定位到末尾
+    // 恢复正文和末尾选区，但只有用户主动点击时才建立键盘焦点。
     _textEditingController.selection = TextSelection.fromPosition(
       TextPosition(offset: inputLength),
     );
-    // Switch to text mode synchronously so the very first build after the
-    // draft load renders the input field with the draft content, instead of
-    // briefly showing the idle placeholder "发消息或按住说话..." until the
-    // keyboard pops up and triggers a rebuild via viewInsets changes.
-    //
-    // 草稿加载时会在输入框中显示草稿内容，而不是
-    //
-    // 弹出键盘并通过 viewInsets 变化触发重建。
-    if (mounted) {
-      setState(() {
-        _inputMode = _InputMode.text;
-      });
-    } else {
-      _inputMode = _InputMode.text;
-    }
-    // Auto focus after frame is built (keyboard pop-up requires post-frame).
-    //
-    // 构建完成后自动聚焦（键盘弹出需要在帧后处理）。
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _textEditingFocusNode.requestFocus();
-      }
-    });
+    _onTextChanged();
+    setState(() => _inputMode = _InputMode.text);
   }
 
   /// Save draft with debounce
@@ -459,6 +480,8 @@ class MessageInputState extends State<MessageInput>
 
   /// 立即把当前普通文本或完整富文本草稿写入 IM SDK。
   void _saveDraftImmediately() {
+    // 未成功读取且没有用户编辑时，空输入并不代表用户删除了草稿。
+    if (!_hasLoadedDraft && _draftRevision == 0) return;
     final richDraft = _isRichContentEditorOpen
         ? _richContentDraft
         : _buildInlineRichContentDraft();
@@ -487,7 +510,15 @@ class MessageInputState extends State<MessageInput>
     );
   }
 
+  /// 同步输入校验与草稿版本，所有实际文字变化均走相同的保存与禁发规则。
   void _onTextChanged() {
+    // 选区移动不推进编辑版本，避免仅聚焦就阻止旧草稿正常恢复。
+    final text = _textEditingController.text;
+    if (text != _lastObservedText) {
+      _draftRevision++;
+      _lastObservedText = text;
+    }
+    // 清理已从正文删除的附件，再从当前原文生成同一份富文本快照。
     _inlineRichContentAttachments.removeWhere(
       (id, _) => !_textEditingController.text.contains(
         richContentAttachmentToken(id),
@@ -498,21 +529,38 @@ class MessageInputState extends State<MessageInput>
         _richContentDraft.title.isNotEmpty) {
       _richContentDraft = _buildInlineRichContentDraft();
     }
-    final hasText = _textEditingController.text.trim().isNotEmpty;
-    if (hasText != _showSendButton) {
+    // 按钮与实际发送共用同一字符口径，非空到超限的变化也必须刷新。
+    final characterCount = _inlineRichContentEnabled
+        ? _richContentDraft.characterCount
+        : messageTextCharacterCount(text);
+    _updateTextLimitFeedback(characterCount);
+    final canSend = _inlineRichContentEnabled
+        ? _richContentDraft.canSend
+        : text.trim().isNotEmpty && characterCount <= messageTextCharacterLimit;
+    if (canSend != _showSendButton) {
       setState(() {
-        _showSendButton = hasText;
+        _showSendButton = canSend;
       });
     }
-    // Schedule draft save with debounce
-    //
-    // 使用防抖计划保存草稿
+    // 正文同步后再保存并检测提及，避免监听到过期的编辑位置。
     _scheduleDraftSave();
 
-    // Handle @ mention detection
-    //
-    // 处理 @ 提及检测
     _handleMentionDetection();
+  }
+
+  /// 超限时沿用宿主全局Toast，保留输入供修改；回到上限内后允许再次提示。
+  void _updateTextLimitFeedback(int characterCount) {
+    final exceeded = characterCount > messageTextCharacterLimit;
+    final shouldNotify = exceeded && !_wasOverTextLimit;
+    _wasOverTextLimit = exceeded;
+    if (!shouldNotify) return;
+    // 草稿恢复也可能触发校验，等当前帧结束后再展示覆盖层。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _wasOverTextLimit) {
+        Toast.error(
+            context, AppLocalization.of(context).messageTextLimitExceeded);
+      }
+    });
   }
 
   /// Detect @ input and show member picker
@@ -670,8 +718,9 @@ class MessageInputState extends State<MessageInput>
     // 显式切回文本模式，这样输入框会显示提及的文本而不是空闲提示。防御性处理：即使焦点状态不同步，界面仍会显示已输入的内容。
     setState(() {
       _inputMode = _InputMode.text;
-      _showSendButton = newText.trim().isNotEmpty;
     });
+    // 成员选择回填不能用“非空”绕过4000字符上限。
+    _onTextChanged();
     _textEditingFocusNode.requestFocus();
   }
 
@@ -732,81 +781,37 @@ class MessageInputState extends State<MessageInput>
       return;
     }
 
-    final deletedText = _deleteEmojiOrCharacter(text, targetPos);
-    if (deletedText != text) {
-      final deletedLength = text.length - deletedText.length;
-      _textEditingController.text = deletedText;
-
-      final newCursorPos = (targetPos - deletedLength).clamp(
-        0,
-        deletedText.length,
-      );
-      _textEditingController.selection = TextSelection.fromPosition(
-        TextPosition(offset: newCursorPos),
-      );
-    }
+    _textEditingController.value = deleteMessageCharacterBefore(
+      _textEditingController.value.copyWith(
+        selection: TextSelection.collapsed(offset: targetPos),
+      ),
+    );
   }
 
-  String _deleteEmojiOrCharacter(String text, int cursorPos) {
-    if (cursorPos <= 0) return text;
-
-    final emojiPattern = RegExp(r'\[TUIEmoji_\w{2,}\]');
-    final matches = emojiPattern.allMatches(text);
-
-    for (final match in matches) {
-      final start = match.start;
-      final end = match.end;
-
-      if (cursorPos == end) {
-        return text.substring(0, start) + text.substring(end);
-      }
-
-      if (cursorPos > start && cursorPos < end) {
-        return text.substring(0, start) + text.substring(end);
-      }
-    }
-
-    return text.substring(0, cursorPos - 1) + text.substring(cursorPos);
-  }
-
-  /// Handle sending text message from input field or emoji panel
-  ///
-  /// 处理从输入框或表情面板发送文本消息
+  /// 在统一并发边界内发送普通文字，保留现有发送前清理与失败消息重试策略。
   Future<void> _handleTextSendMessagePayload() async {
-    final text = _textEditingController.text.trim();
-    if (text.isEmpty) return;
+    await _runTextSend(() async {
+      final rawText = _textEditingController.text;
+      if (rawText.trim().isEmpty ||
+          messageTextCharacterCount(rawText) > messageTextCharacterLimit) {
+        return false;
+      }
+      final messageInfo = MessageInfo()
+        ..messageType = MessageType.text
+        ..messagePayload = TextMessagePayload(text: rawText.trim())
+        ..atUserList = _textEditingController.mentionList
+            .map((mention) => mention.userID)
+            .toList();
 
-    final messageInfo = MessageInfo();
-    messageInfo.messageType = MessageType.text;
-    messageInfo.messagePayload = TextMessagePayload(text: text);
-
-    // Add @ mention info to message
-    //
-    // 给消息添加@提及信息
-    final mentionList = _textEditingController.mentionList;
-    if (mentionList.isNotEmpty) {
-      // Add all mentioned user IDs (including AT_ALL_USER_ID if present)
-      //
-      // 添加所有被提及的用户ID（如果存在包括AT_ALL_USER_ID）
-      messageInfo.atUserList = mentionList.map((m) => m.userID).toList();
-    }
-
-    // Clear draft and mentions BEFORE sending (not dependent on send result)
-    // Must clear mentions first to prevent value setter from incorrectly handling the clear operation
-    //
-    // 在发送前清空草稿和提及（不依赖发送结果）必须先清空提及以防止值设置器错误处理清空操作
-    _textEditingController.clearMentions();
-    _textEditingController._isInternalUpdate = true;
-    _textEditingController.clear();
-    _textEditingController._isInternalUpdate = false;
-    _clearDraft();
-
-    final result = await _sendMessage(messageInfo);
-    if (!result.isSuccess) {
-      debugPrint(
-        "_handleTextSendMessagePayload, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}",
-      );
-    }
+      // 提及先于正文清理，避免控制器误判提及编辑；清理只由首个受保护任务执行。
+      _textEditingController.clearMentions();
+      _textEditingController._isInternalUpdate = true;
+      _textEditingController.clear();
+      _textEditingController._isInternalUpdate = false;
+      _clearDraft();
+      final result = await _sendMessage(messageInfo);
+      return result.isSuccess;
+    });
   }
 
   /// 根据普通输入区的编辑模式选择文本或富文本发送链路。
@@ -817,25 +822,32 @@ class MessageInputState extends State<MessageInput>
     }
 
     final draft = _buildInlineRichContentDraft();
+    final revision = _draftRevision;
     final mentionList = _textEditingController.mentionList;
-    final sent = await _sendRichContentDraft(
+    await _sendRichContentDraft(
       draft,
       atUserList: mentionList.map((mention) => mention.userID).toList(),
+      onSent: () {
+        // 等待期间继续编辑或展开时，成功结果只能清理已发送的那份草稿。
+        if (!mounted ||
+            _draftRevision != revision ||
+            _isRichContentEditorOpen) {
+          return;
+        }
+        _textEditingController.clearMentions();
+        _inlineRichContentAttachments.clear();
+        _richContentDraft = const RichContentDraft();
+        _textEditingController._isInternalUpdate = true;
+        _textEditingController.clear();
+        _textEditingController._isInternalUpdate = false;
+        _clearDraft();
+        setState(() {
+          _inlineRichContentEnabled = false;
+          _showTextFormattingToolbar = false;
+          _activeInlineFormats.clear();
+        });
+      },
     );
-    if (!sent || !mounted) return;
-
-    _textEditingController.clearMentions();
-    _inlineRichContentAttachments.clear();
-    _richContentDraft = const RichContentDraft();
-    _textEditingController._isInternalUpdate = true;
-    _textEditingController.clear();
-    _textEditingController._isInternalUpdate = false;
-    _clearDraft();
-    setState(() {
-      _inlineRichContentEnabled = false;
-      _showTextFormattingToolbar = false;
-      _activeInlineFormats.clear();
-    });
   }
 
   /// 在现有工具条上方展开富文本编辑器，不重建键盘输入连接。
@@ -901,7 +913,11 @@ class MessageInputState extends State<MessageInput>
 
   /// 缓存展开编辑器的最新草稿，并沿用输入区现有防抖保存策略。
   void _rememberRichContentDraft(RichContentDraft draft) {
+    if (draft.toPersistedString() != _richContentDraft.toPersistedString()) {
+      _draftRevision++;
+    }
     _richContentDraft = draft;
+    _updateTextLimitFeedback(draft.characterCount);
     _scheduleDraftSave();
   }
 
@@ -1002,24 +1018,42 @@ class MessageInputState extends State<MessageInput>
   Future<bool> _sendRichContentDraft(
     RichContentDraft draft, {
     List<String> atUserList = const [],
-  }) async {
-    final richMessage = draft.toMessage();
-    if (richMessage == null) return false;
-    final messageInfo = MessageInfo()
-      ..messageType = MessageType.custom
-      ..messagePayload = CustomMessagePayload(
-        customData: richMessage.toCustomData(),
-        description: _trimPushDescription(richMessage.plainTextPreview),
-      )
-      ..atUserList = atUserList;
-    final result = await _sendMessage(messageInfo);
-    if (!result.isSuccess) {
-      debugPrint(
-        '_sendRichContentDraft, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}',
+    VoidCallback? onSent,
+  }) =>
+      _runTextSend(() async {
+        final richMessage = draft.toMessage();
+        if (richMessage == null) return false;
+        final messageInfo = MessageInfo()
+          ..messageType = MessageType.custom
+          ..messagePayload = CustomMessagePayload(
+            customData: richMessage.toCustomData(),
+            description: _trimPushDescription(richMessage.plainTextPreview),
+          )
+          ..atUserList = atUserList;
+        final result = await _sendMessage(messageInfo);
+        if (result.isSuccess) onSent?.call();
+        return result.isSuccess;
+      });
+
+  /// 合并同会话的文字发送，确保提示、状态清理和外部调用各执行一次。
+  Future<bool> _runTextSend(Future<bool> Function() action) =>
+      _textSendGuard.singleFlight<bool>(
+        'tim.text-send:${widget.conversationID}',
+        () async {
+          if (!mounted) return false;
+          setState(() => _isSendingText = true);
+          try {
+            return await action();
+          } on Object catch (error) {
+            // SDK抛出异常也必须恢复交互，不能让发送按钮永久停留在忙碌态。
+            if (mounted) Toast.error(context, atomicLocale.sendMessageFail);
+            debugPrint('聊天文字发送异常: $error');
+            return false;
+          } finally {
+            if (mounted) setState(() => _isSendingText = false);
+          }
+        },
       );
-    }
-    return result.isSuccess;
-  }
 
   void _onPickAlbum() async {
     // 点击时重新判断模式，避免切换帧内残留的普通回调把图片作为独立消息发送。
@@ -1574,22 +1608,20 @@ class MessageInputState extends State<MessageInput>
     }
   }
 
-  /// Send a plain-text message constructed from voice-to-text conversion.
-  /// Used by [AudioRecordOverlay]'s editing-state "send" button.
-  ///
-  /// 发送由语音转文字生成的纯文本消息。由[AudioRecordOverlay]的编辑状态“发送”按钮使用。
+  /// 语音转文字确认发送也遵守相同文字上限和同会话并发边界。
   void _sendTextMessageFromVoice(String text) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
-    final messageInfo = MessageInfo();
-    messageInfo.messageType = MessageType.text;
-    messageInfo.messagePayload = TextMessagePayload(text: trimmed);
-    final result = await _sendMessage(messageInfo);
-    if (!result.isSuccess) {
-      debugPrint(
-        "_sendTextMessageFromVoice, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}",
-      );
+    if (messageTextCharacterCount(text) > messageTextCharacterLimit) {
+      Toast.error(context, atomicLocale.messageTextLimitExceeded);
+      return;
     }
+    await _runTextSend(() async {
+      final messageInfo = MessageInfo()
+        ..messageType = MessageType.text
+        ..messagePayload = TextMessagePayload(text: trimmed);
+      return (await _sendMessage(messageInfo)).isSuccess;
+    });
   }
 
   void _onStartRecording(PointerDownEvent event) async {
@@ -2030,88 +2062,63 @@ class MessageInputState extends State<MessageInput>
     return true;
   }
 
-  /// 按设计稿排列语音切换、输入区和下方快捷操作栏。
-  ///
-  /// 输入栏使用聊天背景色，内部输入区使用页面操作面颜色以保持明暗主题可读。
-  Widget _buildInputWidget(SemanticColorScheme colorsTheme) {
-    return Container(
-      color: colorsTheme.bgColorInput,
-      padding: const EdgeInsets.only(left: 10, right: 10, top: 8, bottom: 8),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // 展开态只隐藏普通输入行，保留文本框和输入连接，避免切换时键盘回弹。
-          Offstage(
-            key: const Key('message_input_normal_input_offstage'),
-            offstage: _isRichContentEditorOpen,
-            child: Row(
-              key: const Key('message_input_normal_input_row'),
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                // Left: Voice / Keyboard toggle button (28×28pt icon)
-                // SizedBox height matches input field minHeight so button is
-                // vertically centered when single-line, and stays at bottom when multi-line.
-                //
-                // 左侧：语音/键盘切换按钮（28×28pt 图标） SizedBox 高度匹配输入框最小高度，这样单行时按钮垂直居中，多行时保持在底部。
-                if (widget.config.isShowAudioRecorder)
-                  SizedBox(
-                    height: 34,
-                    child: Center(
-                      child: GestureDetector(
-                        onTap: _toggleVoiceMode,
-                        child: _inputMode == _InputMode.voice
-                            ? SvgPicture.asset(
-                                'chat_assets/icon/keyboard.svg',
-                                package: 'tencent_chat_uikit',
-                                colorFilter: ColorFilter.mode(
-                                  colorsTheme.textColorPrimary,
-                                  BlendMode.srcIn,
-                                ),
-                                width: 26,
-                                height: 26,
-                              )
-                            : SvgPicture.asset(
-                                'chat_assets/icon/mic.svg',
-                                package: 'tencent_chat_uikit',
-                                colorFilter: ColorFilter.mode(
-                                  colorsTheme.textColorPrimary,
-                                  BlendMode.srcIn,
-                                ),
-                                width: 26,
-                                height: 26,
-                              ),
-                      ),
-                    ),
-                  ),
-                // Gap: 10pt between voice icon and input field
-                //
-                // 间距：语音图标和输入框之间 10pt
-                const SizedBox(width: 10),
-
-                // Middle: Input field or "Hold to talk" button
-                //
-                // 中间：输入框或“按住说话”按钮
-                Expanded(
-                  child: _inputMode == _InputMode.voice
-                      ? _buildHoldToTalkButton(colorsTheme)
-                      : _buildTextInputArea(colorsTheme),
-                ),
-              ],
-            ),
-          ),
-          if (_inputMode != _InputMode.voice) ...[
-            const SizedBox(height: 6),
-            KeyedSubtree(
-              key: _sharedToolbarAnchorKey,
-              child: _buildSharedToolbar(
-                key: const Key('message_input_shared_toolbar'),
+  /// 输入行与44高快捷栏分别承载，展开态仍保留原输入连接。
+  Widget _buildInputWidget(SemanticColorScheme colorsTheme) => Container(
+        color: colorsTheme.bgColorInput,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 只隐藏输入行，键盘与草稿继续由同一输入状态持有。
+            Offstage(
+              key: const Key('message_input_normal_input_offstage'),
+              offstage: _isRichContentEditorOpen,
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: _buildInputRow(colorsTheme),
               ),
             ),
+            if (_inputMode != _InputMode.voice)
+              KeyedSubtree(
+                key: _sharedToolbarAnchorKey,
+                child: _buildSharedToolbar(
+                  key: const Key('message_input_shared_toolbar'),
+                ),
+              ),
           ],
+        ),
+      );
+
+  /// 语音入口固定在输入区底部，文本增高时不跟随正文滚动。
+  Widget _buildInputRow(SemanticColorScheme colorsTheme) => Row(
+        key: const Key('message_input_normal_input_row'),
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (widget.config.isShowAudioRecorder) ...[
+            SizedBox(
+              width: 36,
+              height: 44,
+              child: material.IconButton(
+                tooltip: _inputMode == _InputMode.voice ? '切换文字输入' : '切换语音输入',
+                onPressed: _toggleVoiceMode,
+                padding: EdgeInsets.zero,
+                icon: Icon(
+                  _inputMode == _InputMode.voice
+                      ? AppIcons.inputKeyboard
+                      : AppIcons.speak,
+                  size: 24,
+                  color: colorsTheme.textColorPrimary,
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+          ],
+          Expanded(
+            child: _inputMode == _InputMode.voice
+                ? _buildHoldToTalkButton(colorsTheme)
+                : _buildTextInputArea(colorsTheme),
+          ),
         ],
-      ),
-    );
-  }
+      );
 
   /// 构建普通输入和展开编辑器共用同一状态与回调的工具条视图。
   Widget _buildSharedToolbar({required Key key}) {
@@ -2126,14 +2133,13 @@ class MessageInputState extends State<MessageInput>
       activeFormats: _isRichContentEditorOpen
           ? richEditor?.activeFormats ?? _activeInlineFormats
           : _activeInlineFormats,
-      canSend: _isRichContentEditorOpen
-          ? richEditor?.canSend ?? _showSendButton
-          : _inlineRichContentEnabled
-              ? _buildInlineRichContentDraft().canSend
-              : _showSendButton,
-      emojiAsset: !_isRichContentEditorOpen && _showEmojiPanel
-          ? 'chat_assets/icon/keyboard.svg'
-          : 'chat_assets/icon/emoji.svg',
+      canSend: !_isSendingText &&
+          (_isRichContentEditorOpen
+              ? richEditor?.canSend ?? _showSendButton
+              : _inlineRichContentEnabled
+                  ? _buildInlineRichContentDraft().canSend
+                  : _showSendButton),
+      showKeyboard: !_isRichContentEditorOpen && _showEmojiPanel,
       emojiTooltip:
           !_isRichContentEditorOpen && _showEmojiPanel ? '显示键盘' : '表情',
       imageTooltip: _isRichContentEditorOpen ? '插入图片' : atomicLocale.album,
@@ -2177,10 +2183,10 @@ class MessageInputState extends State<MessageInput>
       return _buildIdleInputArea(colorsTheme);
     }
     return Container(
-      constraints: const BoxConstraints(minHeight: 34),
+      constraints: const BoxConstraints(minHeight: 44),
       decoration: BoxDecoration(
         color: colorsTheme.bgColorOperate,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: _buildInputTextField(colorsTheme: colorsTheme),
     );
@@ -2306,10 +2312,10 @@ class MessageInputState extends State<MessageInput>
         _recordOverlayKey.currentState?.updatePointerPosition(event.position);
       },
       child: Container(
-        height: 34,
+        height: 44,
         decoration: BoxDecoration(
           color: colorsTheme.bgColorOperate,
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(8),
         ),
         child: Center(
           child: Text(
@@ -2340,12 +2346,12 @@ class MessageInputState extends State<MessageInput>
         });
       },
       child: Container(
-        constraints: const BoxConstraints(minHeight: 34),
+        constraints: const BoxConstraints(minHeight: 44),
         decoration: BoxDecoration(
           color: colorsTheme.bgColorOperate,
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(8),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(
           children: [
             Expanded(
@@ -2354,7 +2360,7 @@ class MessageInputState extends State<MessageInput>
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: FontScheme.caption1Regular.copyWith(
-                  color: colorsTheme.textColorTertiary,
+                  color: colorsTheme.textColorSecondary,
                 ),
               ),
             ),
@@ -2391,6 +2397,8 @@ class MessageInputState extends State<MessageInput>
   Widget _buildRichContentExpandButton(SemanticColorScheme colorsTheme) {
     return Semantics(
       key: const Key('open_rich_content_editor'),
+      container: true,
+      identifier: 'tim.input.expand',
       label: '展开富文本编辑器',
       button: true,
       child: GestureDetector(
@@ -2399,8 +2407,8 @@ class MessageInputState extends State<MessageInput>
           width: 24,
           height: 22,
           child: Icon(
-            Icons.open_in_full,
-            size: 17,
+            AppIcons.expand1,
+            size: 24,
             color: colorsTheme.textColorSecondary,
           ),
         ),
@@ -2601,17 +2609,30 @@ class _MentionTextEditingController extends TextEditingController {
   }
 }
 
-/// Custom TextField that handles mention selection and cursor movement
-///
-/// 自定义 TextField，处理提及选择和光标移动
+/// 展示当前输入正文及展开入口，复用父输入区持有的控制器和焦点。
 class _MentionTextField extends StatefulWidget {
+  /// 父输入区持有的正文与提及范围，子组件只监听并修正选区。
   final _MentionTextEditingController controller;
+
+  /// 由父输入区释放，切换编辑模式时保持同一焦点身份。
   final FocusNode focusNode;
+
+  /// 当前宿主解析后的文字、占位和背景语义色。
   final SemanticColorScheme colorsTheme;
+
+  /// 正文被点击时通知父输入区收起其他输入面板。
   final VoidCallback? onTap;
+
+  /// 当前会话的空输入提示，不作为实际正文保存。
   final String? hintText;
+
+  /// 展开编辑器时交回父输入区保留当前草稿。
   final VoidCallback? onExpand;
+
+  /// 父输入区提供的格式同步约束，不在此截断超限正文。
   final TextInputFormatter? inputFormatter;
+
+  /// 编辑态令牌对应的附件，用于按真实图片高度布局正文。
   final Map<int, RichContentDraftAttachmentBlock> inlineAttachments;
 
   const _MentionTextField({
@@ -2629,6 +2650,7 @@ class _MentionTextField extends StatefulWidget {
   State<_MentionTextField> createState() => _MentionTextFieldState();
 }
 
+/// 将提及选区修正为完整边界，并让正文在固定最大高度内独立滚动。
 class _MentionTextFieldState extends State<_MentionTextField> {
   bool _isAdjustingSelection = false;
 
@@ -2730,76 +2752,93 @@ class _MentionTextFieldState extends State<_MentionTextField> {
       builder: (context, constraints) {
         final style = FontScheme.caption1Regular.copyWith(
           color: widget.colorsTheme.textColorPrimary,
+          height: 1.5,
         );
+        // 高度测量与实际输入使用同一行高，避免主题继承后五行正文被提前裁掉。
         final maxImageWidth = constraints.maxWidth / 2;
         final maxInputHeight = TextPainter(
                   text: TextSpan(text: ' ', style: style),
                   textDirection: Directionality.of(context),
                 ).preferredLineHeight *
                 5 +
-            12;
+            20;
         // 展开按钮独立于文本滚动区，输入内容只由 ExtendedTextField 自身滚动。
         return ConstrainedBox(
           constraints: BoxConstraints(maxHeight: maxInputHeight),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 child: ClipRect(
-                  child: ExtendedTextField(
-                    key: const Key('message_input_text_field'),
-                    onTap: widget.onTap,
-                    focusNode: widget.focusNode,
-                    controller: widget.controller,
-                    minLines: 1,
-                    maxLines: 5,
-                    inputFormatters: [
-                      if (widget.inputFormatter != null) widget.inputFormatter!,
-                    ],
-                    style: style,
-                    // 与展开编辑器一致，让图片参与真实行高而不被固定 strut 上移。
-                    strutStyle: StrutStyle.disabled,
-                    cursorHeight: richContentAttachmentCursorHeight(
-                      context: context,
+                  child: Semantics(
+                    identifier: 'tim.input.text',
+                    child: ExtendedTextField(
+                      key: const Key('message_input_text_field'),
+                      onTap: widget.onTap,
+                      focusNode: widget.focusNode,
                       controller: widget.controller,
-                      attachments: widget.inlineAttachments,
-                      maxImageWidth: maxImageWidth,
-                      textStyle: style,
-                    ),
-                    decoration: InputDecoration(
-                      isDense: true,
-                      hintText: widget.hintText,
-                      hintStyle: FontScheme.caption1Regular.copyWith(
-                        color: widget.colorsTheme.textColorTertiary,
+                      minLines: 1,
+                      maxLines: 5,
+                      inputFormatters: [
+                        if (widget.inputFormatter != null)
+                          widget.inputFormatter!,
+                      ],
+                      style: style,
+                      // 与展开编辑器一致，让图片参与真实行高而不被固定 strut 上移。
+                      strutStyle: StrutStyle.disabled,
+                      cursorHeight: richContentAttachmentCursorHeight(
+                        context: context,
+                        controller: widget.controller,
+                        attachments: widget.inlineAttachments,
+                        maxImageWidth: maxImageWidth,
+                        textStyle: style,
                       ),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 6,
+                      decoration: InputDecoration(
+                        // 白色背景与圆角由父输入框承载，避免主题填充覆盖圆角。
+                        filled: false,
+                        isDense: true,
+                        hintText: widget.hintText,
+                        hintStyle: FontScheme.caption1Regular.copyWith(
+                          color: widget.colorsTheme.textColorSecondary,
+                          height: 1.5,
+                        ),
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        disabledBorder: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
                       ),
-                    ),
-                    specialTextSpanBuilder: RichContentAttachmentSpanBuilder(
-                      attachments: widget.inlineAttachments,
-                      maxImageWidth: maxImageWidth,
-                      colorScheme: widget.colorsTheme,
-                      onTapUrl: (_) {},
-                      mapMarkdownMarkers: true,
+                      specialTextSpanBuilder: RichContentAttachmentSpanBuilder(
+                        attachments: widget.inlineAttachments,
+                        maxImageWidth: maxImageWidth,
+                        colorScheme: widget.colorsTheme,
+                        onTapUrl: (_) {},
+                        mapMarkdownMarkers: true,
+                      ),
                     ),
                   ),
                 ),
               ),
               if (widget.onExpand != null)
                 SizedBox(
-                  width: 38,
-                  height: 34,
-                  child: material.IconButton(
-                    key: const Key('open_rich_content_editor'),
-                    tooltip: '展开富文本编辑器',
-                    onPressed: widget.onExpand,
-                    padding: EdgeInsets.zero,
-                    icon: Icon(
-                      Icons.open_in_full,
-                      size: 18,
-                      color: widget.colorsTheme.textColorSecondary,
+                  width: 44,
+                  height: 44,
+                  child: Semantics(
+                    identifier: 'tim.input.expand',
+                    container: true,
+                    child: material.IconButton(
+                      key: const Key('open_rich_content_editor'),
+                      tooltip: '展开富文本编辑器',
+                      onPressed: widget.onExpand,
+                      padding: EdgeInsets.zero,
+                      icon: Icon(
+                        AppIcons.expand1,
+                        size: 24,
+                        color: widget.colorsTheme.textColorSecondary,
+                      ),
                     ),
                   ),
                 ),

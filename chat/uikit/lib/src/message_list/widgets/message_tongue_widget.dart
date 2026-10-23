@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart' show AppIcons;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
@@ -71,10 +72,19 @@ class TongueState {
 /// 消息列表中显示的浮动小舌头控件。支持多种显示模式：1. “返回最新” - 滚动到底部（右下角，双下箭头） 2. “x 条新消息” - 新消息数量提示（右下角，双下箭头） 3. “@提到” -
 /// @提到导航（右下角，双下箭头） 4. “x 条未读消息” - 进入时未读消息（右上角，双上箭头）
 class MessageTongueWidget extends StatelessWidget {
+  /// 当前跳转方向、数量和加载状态，不在展示组件内推进消息游标。
   final TongueState tongueState;
+
+  /// 加载期间禁用跳转，其他状态交由消息列表处理。
   final VoidCallback onTap;
+
+  /// 返回最新位置的独立文案。
   final String backToLatestText;
+
+  /// 按数量生成新消息提示，未提供时只展示数字。
   final String Function(int count)? newMessageCountText;
+
+  /// 返回引用原位置时使用的文案。
   final String? backToQuoteText;
 
   const MessageTongueWidget({
@@ -103,10 +113,18 @@ class MessageTongueWidget extends StatelessWidget {
     return GestureDetector(
       onTap: tongueState.isLoading ? null : onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        // 数量提示沿用132宽设计基线，长文案仍可随可用空间扩展。
+        constraints: BoxConstraints(
+          minHeight: 44,
+          minWidth: tongueState.type == TongueType.newMessages ||
+                  tongueState.type == TongueType.unreadMessages
+              ? 132
+              : 0,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: colorsTheme.bgColorDefault,
-          borderRadius: BorderRadius.circular(20),
+          color: colorsTheme.bgColorOperate,
+          borderRadius: BorderRadius.circular(22),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.1),
@@ -119,11 +137,11 @@ class MessageTongueWidget extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             _buildLeadingIcon(colorsTheme),
-            const SizedBox(width: 4),
+            const SizedBox(width: 6),
             Flexible(
               child: Text(
                 text,
-                style: FontScheme.caption2Medium.copyWith(
+                style: FontScheme.caption2Regular.copyWith(
                   color: colorsTheme.buttonColorPrimaryDefault,
                 ),
                 maxLines: 1,
@@ -146,17 +164,14 @@ class MessageTongueWidget extends StatelessWidget {
     return _buildDoubleArrow(colorsTheme);
   }
 
-  /// Build double arrow icon (chevron) pointing up or down
-  ///
-  /// 构建双箭头图标（箭头符号），指向上或下
+  /// 两种方向使用同源字体的双箭头，不改变各自跳转目标。
   Widget _buildDoubleArrow(SemanticColorScheme colorsTheme) {
     final color = colorsTheme.buttonColorPrimaryDefault;
-    final icon = _isUpDirection
-        ? Icons.keyboard_double_arrow_up
-        : Icons.keyboard_double_arrow_down;
+    final icon =
+        _isUpDirection ? AppIcons.directionIcon2 : AppIcons.directionIcon;
     return Icon(
       icon,
-      size: 18,
+      size: 16,
       color: color,
     );
   }

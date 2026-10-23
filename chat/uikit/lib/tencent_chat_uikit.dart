@@ -15,6 +15,7 @@ export 'src/contact_list/contact_list.dart';
 export 'src/contact_list/pages/start_c2c_chat.dart';
 export 'src/contact_list/pages/start_group_chat.dart';
 export 'src/conversation_list/conversation_list.dart';
+export 'src/conversation_list/conversation_preview.dart';
 export 'src/emoji_picker/emoji_manager.dart';
 export 'src/emoji_picker/emoji_picker.dart';
 export 'src/file_picker/file_picker.dart';

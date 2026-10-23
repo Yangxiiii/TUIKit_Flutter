@@ -10,16 +10,36 @@ import 'package:url_launcher/url_launcher.dart';
 
 typedef BackgroundBuilder = Widget Function(Widget child);
 
+/// 渲染文字正文与气泡外观，发送状态及头像由外层消息项协调。
 class TextMessageWidget extends StatefulWidget {
+  /// 当前正文及发送状态的数据来源。
   final MessageInfo message;
+
+  /// 仅决定己方与对方气泡颜色，不推断已读状态。
   final bool isSelf;
+
+  /// 外层消息项分配的最大宽度，单位为逻辑像素。
   final double maxWidth;
+
+  /// 正文单击回调；为空时保留链接自身的点击行为。
   final VoidCallback? onTap;
+
+  /// 长按操作由外层消息菜单处理。
   final VoidCallback? onLongPress;
+
+  /// 供菜单定位与高亮复用的正文气泡锚点。
   final GlobalKey? bubbleKey;
+
+  /// 自定义背景包裹器；未提供时使用配置中的气泡外观。
   final BackgroundBuilder? backgroundBuilder;
+
+  /// 交由业务重发失败消息，不在展示组件内创建发送任务。
   final VoidCallback? onResendTap;
+
+  /// 正文圆角、时间和回执等展示配置。
   final MessageListConfigProtocol config;
+
+  /// 合并消息详情中关闭原会话的回执操作。
   final bool isInMergedDetailView;
 
   const TextMessageWidget({
@@ -40,6 +60,7 @@ class TextMessageWidget extends StatefulWidget {
   State<TextMessageWidget> createState() => _TextMessageWidgetState();
 }
 
+/// 保留正文链接、格式和手势，按消息配置绘制统一圆角气泡。
 class _TextMessageWidgetState extends State<TextMessageWidget>
     with MessageStatusMixin {
   // The translation bubble used to be rendered here as a sibling of the
@@ -64,7 +85,7 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
       constraints: BoxConstraints(
         maxWidth: widget.maxWidth * 0.9,
       ),
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       child: _buildTextWithStatusAndTime(colors),
     );
 
@@ -84,7 +105,17 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
     );
   }
 
+  /// 只有实际显示内部时间或状态时才预留间隔，普通正文不保留空白尾槽。
   Widget _buildTextWithStatusAndTime(SemanticColorScheme colors) {
+    final indicators = buildStatusAndTimeWidgets(
+      message: widget.message,
+      isSelf: widget.isSelf,
+      colors: colors,
+      onResendTap: widget.onResendTap,
+      isShowTimeInBubble: widget.config.isShowTimeInBubble,
+      enableReadReceipt: widget.config.enableReadReceipt,
+      isInMergedDetailView: widget.isInMergedDetailView,
+    );
     return Row(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -92,17 +123,9 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
         Flexible(
           child: _buildTextContent(colors),
         ),
-        ...[
+        if (indicators.isNotEmpty) ...[
           const SizedBox(width: 8),
-          ...buildStatusAndTimeWidgets(
-            message: widget.message,
-            isSelf: widget.isSelf,
-            colors: colors,
-            onResendTap: widget.onResendTap,
-            isShowTimeInBubble: widget.config.isShowTimeInBubble,
-            enableReadReceipt: widget.config.enableReadReceipt,
-            isInMergedDetailView: widget.isInMergedDetailView,
-          ),
+          ...indicators,
         ],
       ],
     );
@@ -120,6 +143,7 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
         showAtBackground: true,
       ),
       style: FontScheme.caption1Regular.copyWith(
+        height: 1.5,
         color: widget.isSelf
             ? colorsTheme.textColorAntiPrimary
             : colorsTheme.textColorPrimary,
@@ -175,39 +199,7 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
     }
   }
 
-  BorderRadius _getBubbleBorderRadius() {
-    switch (widget.config.alignment) {
-      case 'left':
-        return BorderRadius.only(
-          topLeft: Radius.circular(widget.config.textBubbleCornerRadius),
-          topRight: Radius.circular(widget.config.textBubbleCornerRadius),
-          bottomLeft: const Radius.circular(0),
-          bottomRight: Radius.circular(widget.config.textBubbleCornerRadius),
-        );
-      case 'right':
-        return BorderRadius.only(
-          topLeft: Radius.circular(widget.config.textBubbleCornerRadius),
-          topRight: Radius.circular(widget.config.textBubbleCornerRadius),
-          bottomLeft: Radius.circular(widget.config.textBubbleCornerRadius),
-          bottomRight: const Radius.circular(0),
-        );
-      case 'two-sided':
-      default:
-        if (widget.isSelf) {
-          return BorderRadius.only(
-            topLeft: Radius.circular(widget.config.textBubbleCornerRadius),
-            topRight: Radius.circular(widget.config.textBubbleCornerRadius),
-            bottomLeft: Radius.circular(widget.config.textBubbleCornerRadius),
-            bottomRight: const Radius.circular(0),
-          );
-        } else {
-          return BorderRadius.only(
-            topLeft: Radius.circular(widget.config.textBubbleCornerRadius),
-            topRight: Radius.circular(widget.config.textBubbleCornerRadius),
-            bottomLeft: const Radius.circular(0),
-            bottomRight: Radius.circular(widget.config.textBubbleCornerRadius),
-          );
-        }
-    }
-  }
+  /// 方向由气泡左右归属表达，四角统一使用宿主配置的圆角。
+  BorderRadius _getBubbleBorderRadius() =>
+      BorderRadius.circular(widget.config.textBubbleCornerRadius);
 }

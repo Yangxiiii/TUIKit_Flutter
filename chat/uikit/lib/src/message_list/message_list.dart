@@ -307,6 +307,12 @@ class _MessageListState extends State<MessageList>
   /// 滚动过程中最近一次有效锚点，退出页面采样失败时作为兜底。
   MessageViewportAnchor? _currentViewportAnchor;
 
+  /// 连续插入消息期间固定的历史锚点；布局与位置通知稳定后才允许消费可见未读。
+  MessageViewportAnchor? _pendingInsertionAnchor;
+
+  /// 使旧批次的布局回调失效，避免它提前释放新批次的锚点。
+  int _insertionRevision = 0;
+
   /// 列表首次创建时使用的消息索引和视口对齐比例。
   int _initialScrollIndex = 0;
   double _initialScrollAlignment = 0;
@@ -487,21 +493,16 @@ class _MessageListState extends State<MessageList>
     _initUnreadTongue();
   }
 
+  /// 时间分组直接显示次要文字，避免把分隔时间渲染为灰底标签。
   Widget _buildTimeDivider(String timeString, SemanticColorScheme colorsTheme) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      padding: const EdgeInsets.only(bottom: 16),
       child: Center(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          decoration: BoxDecoration(
-            color: colorsTheme.strokeColorPrimary,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Text(
-            timeString,
-            style: FontScheme.caption3Regular.copyWith(
-              color: colorsTheme.textColorTertiary,
-            ),
+        child: Text(
+          timeString,
+          style: FontScheme.caption2Regular.copyWith(
+            color: colorsTheme.textColorSecondary,
+            height: 1.5,
           ),
         ),
       ),
@@ -510,8 +511,9 @@ class _MessageListState extends State<MessageList>
 
   @override
   void dispose() {
-    // 优先读取退出瞬间的真实视口；路由销毁导致位置丢失时退回最近一次滚动采样。
-    final viewportAnchor = selectMessageViewportAnchor(
+    // 批量插入尚未稳定时保留固定锚点，否则读取退出瞬间的真实视口并以最近采样兜底。
+    final viewportAnchor = _pendingInsertionAnchor ??
+        selectMessageViewportAnchor(
           messages: _messages,
           positions: _itemPositionsListener.itemPositions.value,
         ) ??
@@ -547,6 +549,7 @@ class _MessageListState extends State<MessageList>
   }
 
   void _scrollListener() {
+    if (_pendingInsertionAnchor != null) return;
     final positions = _itemPositionsListener.itemPositions.value;
     if (positions.isEmpty) return;
 
@@ -962,6 +965,9 @@ class _MessageListState extends State<MessageList>
         !_isLoadingNewer &&
         _messages.isNotEmpty &&
         _messages.first.isSentBySelf) {
+      // 主动发送交回最新位置，不能继续沿用接收消息时固定的历史锚点。
+      _pendingInsertionAnchor = null;
+      _insertionRevision++;
       if (_messageListStore.state.hasNewerMessages.value) {
         // List was loaded around an older position, need to reload latest
         //
@@ -981,22 +987,25 @@ class _MessageListState extends State<MessageList>
     // 当 _loadNewerMessages 进行中时跳过补偿——它自己在 await 返回后已经做了 jumpTo。
     else if (isHeadInsertion &&
         !_isLoadingNewer &&
+        _navigationState is _NavIdle &&
         !_isUserAtBottom() &&
         _itemScrollController.isAttached) {
-      final positions = _itemPositionsListener.itemPositions.value;
-      if (positions.isNotEmpty) {
-        final anchor = positions.reduce(
-          (a, b) => a.itemLeadingEdge < b.itemLeadingEdge ? a : b,
-        );
-        // Jump immediately (synchronously) — same approach as _loadNewerMessages —
-        // to avoid the visible "scroll then snap back" flicker that
-        // addPostFrameCallback would cause.
-        //
-        // 立即跳转（同步）——与_loadNewerMessages的做法相同——以避免addPostFrameCallback导致的“滚动然后回弹”闪烁。
-        _itemScrollController.jumpTo(
-          index: anchor.index + insertedCount,
-          alignment: anchor.itemLeadingEdge,
-        );
+      // 同一帧可连续到达多条消息，旧位置索引尚未刷新；按稳定消息ID重定位，避免只补偿最后一条。
+      final stableAnchor = _pendingInsertionAnchor ?? _currentViewportAnchor;
+      if (stableAnchor != null) {
+        _restoreInsertedMessageAnchor(stableAnchor);
+      } else {
+        // 首个可见消息锚点尚未建立时，保留原有位置索引补偿。
+        final positions = _itemPositionsListener.itemPositions.value;
+        if (positions.isNotEmpty) {
+          final anchor = positions.reduce(
+            (a, b) => a.itemLeadingEdge < b.itemLeadingEdge ? a : b,
+          );
+          _itemScrollController.jumpTo(
+            index: anchor.index + insertedCount,
+            alignment: anchor.itemLeadingEdge,
+          );
+        }
       }
     }
 
@@ -1005,6 +1014,34 @@ class _MessageListState extends State<MessageList>
       _scrollToMessageAndHighlight(widget.locateMessage!.msgID!);
       return;
     }
+  }
+
+  /// 先让列表接收新增数量，再按稳定消息ID恢复历史位置，最后恢复可见未读统计。
+  void _restoreInsertedMessageAnchor(MessageViewportAnchor anchor) {
+    _pendingInsertionAnchor = anchor;
+    final revision = ++_insertionRevision;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || revision != _insertionRevision) return;
+      // jumpTo会按当前Widget的itemCount截断索引，必须等待新增数量进入布局。
+      if (_navigationState is _NavIdle && _itemScrollController.isAttached) {
+        final index = _messages
+            .indexWhere((message) => message.msgID == anchor.message.msgID);
+        if (index >= 0) {
+          _itemScrollController.jumpTo(
+              index: index, alignment: anchor.alignment);
+        }
+      }
+      // 跳转后的索引和可见位置分帧发布，稳定前不把旧索引映射到新增消息。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || revision != _insertionRevision) return;
+          _pendingInsertionAnchor = null;
+          _scrollListener();
+        });
+        WidgetsBinding.instance.scheduleFrame();
+      });
+      WidgetsBinding.instance.scheduleFrame();
+    });
   }
 
   void _onMessageEvent(MessageEvent event) {
@@ -1064,6 +1101,7 @@ class _MessageListState extends State<MessageList>
   }
 
   bool _isUserAtBottom() {
+    if (_pendingInsertionAnchor != null) return false;
     if (!_itemScrollController.isAttached) return true;
     final positions = _itemPositionsListener.itemPositions.value;
     return positions.isNotEmpty && positions.any((pos) => pos.index <= 1);
@@ -1166,45 +1204,44 @@ class _MessageListState extends State<MessageList>
     return '${message.msgID}-${message.timestamp}';
   }
 
+  /// 时间组之间留24像素，组内使用宿主间距；隐藏消息不占据视觉间隔。
   Widget _renderItem(BuildContext context, int index) {
     if (index >= _messages.length) return Container();
     final message = _messages[index];
+    if (!widget.config.isShowSystemMessage && _isSystemMessage(message)) {
+      return const SizedBox.shrink();
+    }
     final colors = SemanticColorScheme.of(context);
 
     final timeString = _getMessageTimeString(index);
     final shouldShowTime =
         widget.config.isShowTimeMessage && timeString != null;
-    Widget messageWidget = _buildMessageItem(message, colors);
+    // 反向列表中较大的索引更旧；跳过隐藏系统消息后再判断是否为首个可见项。
+    var olderIndex = index + 1;
+    while (olderIndex < _messages.length &&
+        !widget.config.isShowSystemMessage &&
+        _isSystemMessage(_messages[olderIndex])) {
+      olderIndex++;
+    }
+    final topSpacing = olderIndex == _messages.length
+        ? 0.0
+        : shouldShowTime
+            ? 24.0
+            : widget.config.cellSpacing;
 
-    // Add spacing between messages
-    //
-    // 在消息之间添加间距
-    final spacing = index < _messages.length - 1
-        ? SizedBox(height: widget.config.cellSpacing)
-        : const SizedBox.shrink();
-
-    // Loading indicator at the newest end (index 0 area in reverse list, visually at bottom)
-    //
-    // 在最新端显示加载指示器（反向列表的索引0区域，视觉上在底部）
-    if (_isLoadingNewer && index == _messages.length - 1) {
-      return Column(
+    return Padding(
+      padding: EdgeInsets.only(top: topSpacing),
+      child: Column(
         children: [
           if (shouldShowTime) _buildTimeDivider(timeString, colors),
-          messageWidget,
-          const Padding(
-            padding: EdgeInsets.all(16.0),
-            child: CupertinoActivityIndicator(),
-          ),
+          _buildMessageItem(message, colors),
+          if (_isLoadingNewer && index == _messages.length - 1)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: CupertinoActivityIndicator(),
+            ),
         ],
-      );
-    }
-
-    return Column(
-      children: [
-        if (shouldShowTime) _buildTimeDivider(timeString, colors),
-        messageWidget,
-        spacing,
-      ],
+      ),
     );
   }
 
@@ -1297,7 +1334,7 @@ class _MessageListState extends State<MessageList>
 
     return Expanded(
       child: Container(
-        color: colorsTheme.bgColorDefault,
+        color: colorsTheme.bgColorOperate,
         child: Stack(
           children: [
             Positioned.fill(
@@ -1307,7 +1344,7 @@ class _MessageListState extends State<MessageList>
                   padding: EdgeInsets.only(
                     left: 16,
                     right: 16,
-                    top: _callStatusWidget != null ? 70 : 8,
+                    top: _callStatusWidget != null ? 70 : 16,
                     bottom: 8,
                   ),
                   // 缓存会话会在 initState 直接就绪；无缓存时等待首批消息和目标索引同时准备完成。
@@ -1315,6 +1352,8 @@ class _MessageListState extends State<MessageList>
                       ? const SizedBox.shrink()
                       : ScrollablePositionedList.builder(
                           reverse: true,
+                          // 短会话由外层顶部对齐；内容超出视口时仍保留反向分页与最新端锚点。
+                          shrinkWrap: true,
                           physics: const AlwaysScrollableScrollPhysics(),
                           itemScrollController: _itemScrollController,
                           itemPositionsListener: _itemPositionsListener,
@@ -2454,7 +2493,9 @@ class _MessageListState extends State<MessageList>
     }
 
     if (daysDiff == 1) {
-      return "${_atomicLocale.yesterday} $timeStr";
+      // 中文设计不在日期与时间之间留空格；其他语言保留词间分隔。
+      final separator = _atomicLocale.locale.languageCode == 'zh' ? '' : ' ';
+      return '${_atomicLocale.yesterday}$separator$timeStr';
     }
 
     // Compute Monday-based week start to determine "same week".

@@ -6,6 +6,7 @@ import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tuikit_atomic_x/base_component/utils/time_util.dart';
 import 'package:tencent_chat_uikit/src/conversation_list/conversation_list.dart';
 import 'package:tencent_chat_uikit/src/conversation_list/conversation_list_config.dart';
+import 'package:tencent_chat_uikit/src/conversation_list/conversation_preview.dart';
 import 'package:tencent_chat_uikit/src/emoji_picker/emoji_manager.dart';
 import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_utils.dart';
@@ -20,6 +21,9 @@ class ConversationItem extends StatefulWidget {
 
   /// 自定义行布局并复用SDK摘要，点击及左滑层继续由UIKit管理。
   final Widget Function(BuildContext context, Widget subtitle)? contentBuilder;
+
+  /// 业务传入的精确未读前缀，仅在接收但不通知时使用；空值保留SDK默认格式。
+  final String? mutedUnreadPrefix;
 
   final VoidCallback? onTap;
 
@@ -44,6 +48,7 @@ class ConversationItem extends StatefulWidget {
     required this.conversation,
     this.backgroundColor,
     this.contentBuilder,
+    this.mutedUnreadPrefix,
     this.onTap,
     this.onLongPress,
     this.onPinToggle,
@@ -226,20 +231,11 @@ class _ConversationItemState extends State<ConversationItem> {
             key, EmojiManager.getEmojiMap(context)[key]!);
       });
 
-      // Replace newlines with spaces for single-line display
-      //
-      // 将换行符替换为空格以便单行显示。
-      localizedDraft = localizedDraft.replaceAll('\n', ' ');
+      // 草稿和末条消息共用换行规则，CRLF不会产生两个空格。
+      localizedDraft = singleLineConversationPreview(localizedDraft);
 
-      // Build prefix for unread count (only when muted and unreadCount >= 2)
-      //
-      // 构建未读数前缀（仅在已静音且 unreadCount >= 2 时）。
-      String unreadPrefix = '';
-      if (widget.conversation.receiveOption == ReceiveMessageOption.notNotify &&
-          widget.conversation.unreadCount >= 2) {
-        unreadPrefix =
-            '[${_formatUnreadCount(widget.conversation.unreadCount)} ${atomicLocale.messageNum}]';
-      }
+      // 复用业务精确计数，草稿和@提醒仍由原有摘要解析处理。
+      final unreadPrefix = _unreadPrefix();
 
       return RichText(
         maxLines: 1,
@@ -280,6 +276,17 @@ class _ConversationItemState extends State<ConversationItem> {
     return _buildLastMessageSubtitle(context, colorsTheme);
   }
 
+  /// 显式前缀只扩展业务调用方，其他UIKit列表保持原有阈值和缩略格式。
+  String _unreadPrefix() {
+    if (widget.conversation.receiveOption != ReceiveMessageOption.notNotify) {
+      return '';
+    }
+    if (widget.mutedUnreadPrefix != null) return widget.mutedUnreadPrefix!;
+    return widget.conversation.unreadCount >= 2
+        ? '[${_formatUnreadCount(widget.conversation.unreadCount)} ${atomicLocale.messageNum}]'
+        : '';
+  }
+
   /// 富文本草稿为空或不存在时展示最后一条消息摘要。
   Widget _buildLastMessageSubtitle(
     BuildContext context,
@@ -292,11 +299,8 @@ class _ConversationItemState extends State<ConversationItem> {
       return previous.replaceAll(key, EmojiManager.getEmojiMap(context)[key]!);
     });
 
-    String unreadPrefix = widget.conversation.receiveOption ==
-                ReceiveMessageOption.notNotify &&
-            widget.conversation.unreadCount >= 2
-        ? '[${_formatUnreadCount(widget.conversation.unreadCount)} ${atomicLocale.messageNum}]'
-        : '';
+    replaceText = singleLineConversationPreview(replaceText);
+    final unreadPrefix = _unreadPrefix();
 
     // If there's @ mention, show with red color
     if (atPrefix.isNotEmpty) {

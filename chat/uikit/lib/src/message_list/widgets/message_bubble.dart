@@ -98,15 +98,34 @@ class DefaultMessageMenuCallbacks implements MessageMenuCallbacks {
 
 /// 按消息类型选择气泡内容，并统一承接高亮和长按操作。
 class MessageBubble extends StatefulWidget {
+  /// 当前消息类型、正文和发送结果的唯一数据来源。
   final MessageInfo message;
+
+  /// 消息操作所属的会话，用于重发和菜单动作。
   final String conversationID;
+
+  /// 是否为己方消息，决定气泡与操作的展示方向。
   final bool isSelf;
+
+  /// 外层消息项分配的可用宽度，单位为逻辑像素。
   final double maxWidth;
+
+  /// 当前会话的消息操作入口，不由气泡创建第二份消息状态。
   final MessageListStore messageListStore;
+
+  /// 宿主可替换菜单操作；为空时使用默认消息菜单。
   final MessageMenuCallbacks? menuCallbacks;
+
+  /// 定位消息时播放高亮，动画结束后由外层清除此状态。
   final bool isHighlighted;
+
+  /// 高亮播放结束时通知列表，避免重复播放定位效果。
   final VoidCallback? onHighlightComplete;
+
+  /// 当前消息允许附加的菜单操作。
   final List<MessageCustomAction> customActions;
+
+  /// 宿主指定的气泡圆角、回执和可见能力。
   final MessageListConfigProtocol config;
   // Merged detail view mode - disables long press menu and read receipt
   //
@@ -1430,39 +1449,7 @@ class _MessageBubbleState extends State<MessageBubble>
     }
   }
 
-  BorderRadius _getBubbleBorderRadius() {
-    switch (widget.config.alignment) {
-      case 'left':
-        return const BorderRadius.only(
-          topLeft: Radius.circular(10),
-          topRight: Radius.circular(10),
-          bottomLeft: Radius.circular(0),
-          bottomRight: Radius.circular(10),
-        );
-      case 'right':
-        return const BorderRadius.only(
-          topLeft: Radius.circular(10),
-          topRight: Radius.circular(10),
-          bottomLeft: Radius.circular(10),
-          bottomRight: Radius.circular(0),
-        );
-      case 'two-sided':
-      default:
-        if (widget.isSelf) {
-          return const BorderRadius.only(
-            topLeft: Radius.circular(10),
-            topRight: Radius.circular(10),
-            bottomLeft: Radius.circular(10),
-            bottomRight: Radius.circular(0),
-          );
-        } else {
-          return const BorderRadius.only(
-            topLeft: Radius.circular(10),
-            topRight: Radius.circular(10),
-            bottomLeft: Radius.circular(0),
-            bottomRight: Radius.circular(10),
-          );
-        }
-    }
-  }
+  /// 普通正文和高亮包裹层共用配置圆角，避免背景覆盖文字组件的四角设置。
+  BorderRadius _getBubbleBorderRadius() =>
+      BorderRadius.circular(widget.config.textBubbleCornerRadius);
 }

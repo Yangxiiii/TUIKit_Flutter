@@ -14,14 +14,30 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/message_status_mixin
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_read_receipt_view.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_tooltip.dart';
 
+/// 组合消息头像、正文、发送提示与阅读回执，列表负责消息项之间的间距。
 class MessageItem extends StatelessWidget with MessageStatusMixin {
+  /// 当前消息、发送状态及阅读回执，状态标记和正文共用此数据。
   final MessageInfo message;
+
+  /// 当前消息所属会话，供菜单和消息定位使用。
   final String conversationID;
+
+  /// 群聊可显示发送人昵称；单聊仍使用同一消息布局。
   final bool isGroup;
+
+  /// 列表分配的消息可用宽度，单位为逻辑像素。
   final double maxWidth;
+
+  /// 当前会话的消息操作入口，展示组件不创建独立消息状态。
   final MessageListStore messageListStore;
+
+  /// 定位命中时播放气泡高亮，不改变消息本身的发送状态。
   final bool isHighlighted;
+
+  /// 高亮结束后通知列表释放定位状态。
   final VoidCallback? onHighlightComplete;
+
+  /// 头像点击交给会话页打开资料。
   final OnUserClick? onUserClick;
 
   /// Callback when user long presses on avatar (for @ mention feature)
@@ -33,7 +49,11 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   ///
   /// C2C会话中点击通话消息时的回调
   final OnCallMessageClick? onCallMessageClick;
+
+  /// 当前消息允许附加的菜单操作。
   final List<MessageCustomAction> customActions;
+
+  /// 宿主指定的布局、头像、气泡和回执能力。
   final MessageListConfigProtocol config;
 
   // Multi-select mode related
@@ -413,16 +433,13 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   Widget _buildTwoSidedLayout(
       BuildContext context, Widget messageBubble, bool isSelf,
       [String? avatarUrl, String? senderName]) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
-        mainAxisAlignment:
-            isSelf ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: isSelf
-            ? _buildSelfMessage(context, messageBubble, avatarUrl, senderName)
-            : _buildOtherMessage(context, messageBubble, avatarUrl, senderName),
-      ),
+    return Row(
+      mainAxisAlignment:
+          isSelf ? MainAxisAlignment.end : MainAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: isSelf
+          ? _buildSelfMessage(context, messageBubble, avatarUrl, senderName)
+          : _buildOtherMessage(context, messageBubble, avatarUrl, senderName),
     );
   }
 
@@ -455,11 +472,9 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
           )
         : null;
 
-    // Build read receipt label (only for self messages)
-    //
-    // 为自己发送的消息构建已读回执标签
-    final readReceiptLabel = isSelf
-        ? buildOutsideReadReceiptLabel(
+    // 仅为己方消息展示阅读回执，单聊使用图标，群聊保留人数。
+    final readReceiptIndicator = isSelf
+        ? buildOutsideReadReceiptIndicator(
             message: message,
             colorsTheme: colors,
             locale: locale,
@@ -526,9 +541,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                       style: FontScheme.caption3Regular,
                     ),
                   ),
-                // Bubble row with status icon and read receipt label
-                //
-                // 带状态图标和已读回执标签的气泡行
+                // 气泡外分别承载发送提示和阅读回执。
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.end,
@@ -538,9 +551,9 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                       const SizedBox(width: 6),
                       statusIndicator,
                     ],
-                    if (readReceiptLabel != null) ...[
+                    if (readReceiptIndicator != null) ...[
                       const SizedBox(width: 4),
-                      readReceiptLabel,
+                      readReceiptIndicator,
                     ],
                   ],
                 ),
@@ -589,11 +602,9 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
           )
         : null;
 
-    // Build read receipt label (only for self messages)
-    //
-    // 构建已读回执标签（仅限自己消息）
-    final readReceiptLabel = isSelf
-        ? buildOutsideReadReceiptLabel(
+    // 仅为己方消息展示阅读回执，单聊使用图标，群聊保留人数。
+    final readReceiptIndicator = isSelf
+        ? buildOutsideReadReceiptIndicator(
             message: message,
             colorsTheme: colors,
             locale: locale,
@@ -623,16 +634,14 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                       style: FontScheme.caption3Regular,
                     ),
                   ),
-                // Bubble row with read receipt label on the left, status icon, then bubble
-                //
-                // 带已读回执标签在左侧、状态图标，然后是气泡的气泡行
+                // 己方气泡左侧依次承载阅读回执和发送提示。
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.end,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    if (readReceiptLabel != null) ...[
-                      readReceiptLabel,
+                    if (readReceiptIndicator != null) ...[
+                      readReceiptIndicator,
                       const SizedBox(width: 4),
                     ],
                     if (statusIndicator != null) ...[
@@ -699,10 +708,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
           : null,
     );
 
-    // Build read receipt label (shown outside bubble on the left)
-    //
-    // 构建已读回执标签（显示在气泡外左侧）
-    final readReceiptLabel = buildOutsideReadReceiptLabel(
+    // 阅读回执显示在己方气泡左侧，与发送进度和失败提示分别处理。
+    final readReceiptIndicator = buildOutsideReadReceiptIndicator(
       message: message,
       colorsTheme: colors,
       locale: locale,
@@ -736,21 +743,19 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                   style: FontScheme.caption3Regular,
                 ),
               ),
-            // Bubble row with read receipt label on the left, status icon, then bubble
-            //
-            // 气泡行，左边是已读回执标签，然后是状态图标，接着是气泡
+            // 己方气泡左侧依次承载阅读回执和发送提示。
             Row(
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.end,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                if (readReceiptLabel != null) ...[
-                  readReceiptLabel,
+                if (readReceiptIndicator != null) ...[
+                  readReceiptIndicator,
                   const SizedBox(width: 4),
                 ],
                 if (statusIndicator != null) ...[
                   statusIndicator,
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 8),
                 ],
                 Flexible(child: messageBubble),
               ],

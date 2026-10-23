@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
+import 'package:app_ui/app_ui.dart' show AppIcons;
 import 'package:tencent_chat_uikit/src/file_picker/file_picker.dart';
 import 'package:tencent_chat_uikit/src/message_input/message_input_config.dart';
 import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
@@ -124,12 +124,23 @@ final class RichContentEditorOverlayLayout extends StatelessWidget {
 
 /// 为普通输入和展开编辑器提供同一套快捷操作与文字格式工具条。
 final class RichContentInputToolbar extends StatelessWidget {
+  /// 工具条切换动画的稳定身份，普通输入与展开态分别持有。
   final Key _switcherKey;
+
+  /// 当前工具条的键与无障碍标识前缀。
   final String _keyPrefix;
+
+  /// 为真时展示格式操作，为假时展示默认七个快捷入口。
   final bool _showFormatting;
+
+  /// 当前草稿已启用的格式标记，组件不维护第二份格式状态。
   final Set<String> _activeFormats;
+
+  /// 调用方已校验内容上限及发送状态，禁用时不触发发送回调。
   final bool _canSend;
-  final String _emojiAsset;
+
+  /// 表情面板展开时，原表情入口显示键盘字形。
+  final bool _showKeyboard;
   final String _emojiTooltip;
   final String _imageTooltip;
   final String _fileTooltip;
@@ -152,7 +163,7 @@ final class RichContentInputToolbar extends StatelessWidget {
     required bool showFormatting,
     required Set<String> activeFormats,
     required bool canSend,
-    required String emojiAsset,
+    bool showKeyboard = false,
     required String emojiTooltip,
     required String imageTooltip,
     required String fileTooltip,
@@ -171,7 +182,7 @@ final class RichContentInputToolbar extends StatelessWidget {
         _showFormatting = showFormatting,
         _activeFormats = activeFormats,
         _canSend = canSend,
-        _emojiAsset = emojiAsset,
+        _showKeyboard = showKeyboard,
         _emojiTooltip = emojiTooltip,
         _imageTooltip = imageTooltip,
         _fileTooltip = fileTooltip,
@@ -197,12 +208,21 @@ final class RichContentInputToolbar extends StatelessWidget {
         transitionBuilder: (child, animation) {
           final isFormatting =
               child.key == ValueKey('${_keyPrefix}_formatting');
-          return SlideTransition(
-            position: Tween<Offset>(
-              begin: Offset(0, isFormatting ? 1 : -1),
-              end: Offset.zero,
-            ).animate(animation),
-            child: child,
+          // 切换动画的旧工具条仍在绘制，但不能保留可操作的重复语义入口。
+          return ExcludeSemantics(
+            excluding: child.key !=
+                ValueKey(
+                  _showFormatting
+                      ? '${_keyPrefix}_formatting'
+                      : '${_keyPrefix}_main',
+                ),
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: Offset(0, isFormatting ? 1 : -1),
+                end: Offset.zero,
+              ).animate(animation),
+              child: child,
+            ),
           );
         },
         child: KeyedSubtree(
@@ -217,124 +237,75 @@ final class RichContentInputToolbar extends StatelessWidget {
     );
   }
 
-  Widget _buildMainToolbar(SemanticColorScheme colors) {
-    return SizedBox(
-      height: 38,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          _assetButton(_emojiAsset, _emojiTooltip, _onEmoji, colors),
-          _textButton('@', '提及成员', _onMention, colors),
-          _assetButton(
-            'chat_assets/icon/video_call_action.svg',
-            '视频通话',
-            _onVideo,
-            colors,
-          ),
-          _assetButton(
-            'chat_assets/icon/image_action.svg',
-            _imageTooltip,
-            _onImage,
-            colors,
-          ),
-          _assetButton(
-            'chat_assets/icon/file_action.svg',
-            _fileTooltip,
-            _onFile,
-            colors,
-          ),
-          _textButton('Aa', '文字格式', _onShowFormatting, colors),
-          _iconButton(
-            Icons.send_outlined,
-            _sendTooltip,
-            _canSend ? _onSend : null,
-            colors,
-            highlight: true,
-          ),
+  /// 快捷栏使用同源字体字形，保留六个入口和独立的发送区域。
+  Widget _buildMainToolbar(SemanticColorScheme colors) => _buildActionRow(
+        [
+          _iconButton(_showKeyboard ? AppIcons.inputKeyboard : AppIcons.emoji,
+              _emojiTooltip, _onEmoji, colors),
+          _iconButton(AppIcons.a, '提及成员', _onMention, colors),
+          _iconButton(AppIcons.startVideoConference, '视频通话', _onVideo, colors),
+          _iconButton(AppIcons.photo, _imageTooltip, _onImage, colors),
+          _iconButton(AppIcons.flile, _fileTooltip, _onFile, colors),
+          _iconButton(AppIcons.format, '文字格式', _onShowFormatting, colors),
         ],
-      ),
-    );
-  }
+        _buildSendButton(colors, _sendTooltip),
+      );
 
-  Widget _buildFormattingToolbar(SemanticColorScheme colors) {
-    return SizedBox(
-      height: 38,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          _iconButton(
-            Icons.keyboard_arrow_down,
-            '关闭文字格式',
-            _onCloseFormatting,
-            colors,
-          ),
-          _textButton(
-            'B',
-            '粗体',
-            () => _onToggleFormat('**'),
-            colors,
-            selected: _activeFormats.contains('**'),
-            fontWeight: FontWeight.bold,
-          ),
-          _textButton(
-            'S',
-            '删除线',
-            () => _onToggleFormat('~~'),
-            colors,
-            selected: _activeFormats.contains('~~'),
-            decoration: TextDecoration.lineThrough,
-          ),
-          _textButton(
-            'I',
-            '斜体',
-            () => _onToggleFormat('*'),
-            colors,
-            selected: _activeFormats.contains('*'),
-            fontStyle: FontStyle.italic,
-          ),
-          _textButton(
-            'U',
-            '下划线',
-            () => _onToggleFormat('~'),
-            colors,
-            selected: _activeFormats.contains('~'),
-            decoration: TextDecoration.underline,
-          ),
-          _iconButton(
-            Icons.arrow_upward,
-            '发送富文本消息',
-            _canSend ? _onSend : null,
-            colors,
-            highlight: true,
-          ),
+  /// 格式切换只改变工具条内容，发送仍使用同一个字形和可用状态。
+  Widget _buildFormattingToolbar(SemanticColorScheme colors) => _buildActionRow(
+        [
+          _iconButton(AppIcons.expand, '关闭文字格式', _onCloseFormatting, colors),
+          for (final format in [
+            (AppIcons.bold, '粗体', '**'),
+            (AppIcons.strikethrough, '删除线', '~~'),
+            (AppIcons.tilt, '斜体', '*'),
+            (AppIcons.underline, '下划线', '~'),
+          ])
+            _iconButton(
+                format.$1, format.$2, () => _onToggleFormat(format.$3), colors,
+                selected: _activeFormats.contains(format.$3)),
         ],
-      ),
-    );
-  }
+        _buildSendButton(colors, '发送富文本消息'),
+      );
 
-  Widget _assetButton(
-    String asset,
-    String tooltip,
-    VoidCallback? onPressed,
-    SemanticColorScheme colors,
-  ) {
-    return IconButton(
-      tooltip: tooltip,
-      onPressed: onPressed,
-      constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
-      padding: EdgeInsets.zero,
-      icon: SvgPicture.asset(
-        asset,
-        package: 'tencent_chat_uikit',
-        width: 24,
-        height: 24,
-        colorFilter: ColorFilter.mode(
-          onPressed == null ? colors.textColorDisable : colors.textColorPrimary,
-          BlendMode.srcIn,
+  /// 对照390宽设计：44高触控区，前六项等距，发送前留34的独立间隔。
+  Widget _buildActionRow(List<Widget> actions, Widget send) => SizedBox(
+        height: 44,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: LayoutBuilder(builder: (context, constraints) {
+            // 窄屏只收缩操作触控区，避免七个入口与发送间隔挤出可用宽度。
+            final actionWidth =
+                ((constraints.maxWidth - 78) / actions.length).clamp(0.0, 44.0);
+            return Row(
+              children: [
+                Expanded(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      for (final action in actions)
+                        SizedBox(width: actionWidth, child: action),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 34),
+                send,
+              ],
+            );
+          }),
         ),
-      ),
-    );
-  }
+      );
+
+  /// 合并按钮语义，禁用时保留实心发送字形并关闭点击动作。
+  Widget _buildSendButton(SemanticColorScheme colors, String tooltip) =>
+      MergeSemantics(
+        child: Semantics(
+          identifier: 'tim.$_keyPrefix.send',
+          child: _iconButton(
+              AppIcons.send1, tooltip, _canSend ? _onSend : null, colors,
+              highlight: true),
+        ),
+      );
 
   Widget _iconButton(
     IconData icon,
@@ -342,59 +313,34 @@ final class RichContentInputToolbar extends StatelessWidget {
     VoidCallback? onPressed,
     SemanticColorScheme colors, {
     bool highlight = false,
-  }) {
-    return IconButton(
-      tooltip: tooltip,
-      onPressed: onPressed,
-      constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
-      padding: EdgeInsets.zero,
-      icon: Icon(
-        icon,
-        size: 24,
-        color: onPressed == null
-            ? colors.textColorDisable
-            : highlight
-                ? colors.buttonColorPrimaryDefault
-                : colors.textColorPrimary,
-      ),
-    );
-  }
-
-  Widget _textButton(
-    String text,
-    String tooltip,
-    VoidCallback? onPressed,
-    SemanticColorScheme colors, {
     bool selected = false,
-    FontWeight? fontWeight,
-    FontStyle? fontStyle,
-    TextDecoration? decoration,
-  }) {
-    return IconButton(
-      tooltip: tooltip,
-      onPressed: onPressed,
-      isSelected: selected,
-      constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
-      padding: EdgeInsets.zero,
-      style: IconButton.styleFrom(
-        backgroundColor: selected
-            ? colors.buttonColorPrimaryDefault.withValues(alpha: 0.12)
-            : null,
-      ),
-      icon: Text(
-        text,
-        style: TextStyle(
-          color: selected
-              ? colors.buttonColorPrimaryDefault
-              : colors.textColorPrimary,
-          fontSize: 22,
-          fontWeight: fontWeight,
-          fontStyle: fontStyle,
-          decoration: decoration,
+  }) =>
+      SizedBox(
+        width: 44,
+        height: 44,
+        child: IconButton(
+          tooltip: tooltip,
+          onPressed: onPressed,
+          isSelected: selected,
+          constraints: const BoxConstraints.tightFor(width: 44, height: 44),
+          padding: EdgeInsets.zero,
+          style: IconButton.styleFrom(
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            backgroundColor: selected
+                ? colors.buttonColorPrimaryDefault.withValues(alpha: 0.12)
+                : null,
+          ),
+          icon: Icon(
+            icon,
+            size: 24,
+            color: onPressed == null
+                ? colors.textColorTertiary
+                : highlight || selected
+                    ? colors.buttonColorPrimaryDefault
+                    : colors.textColorPrimary,
+          ),
         ),
-      ),
-    );
-  }
+      );
 }
 
 /// 按 MasterGo 展开态展示标题、有序正文块和格式工具栏。
@@ -458,6 +404,8 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
   int _nextBlockId = 1;
   int? _activeTextBlockId;
   late bool _showFormatting;
+
+  /// 仅限制本编辑器的提交交互；跨入口业务防重仍由宿主发送入口处理。
   bool _isSending = false;
 
   /// 当前格式栏中处于选中状态的 Markdown 标记。
@@ -612,14 +560,21 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     }
   }
 
-  /// 发送当前草稿；成功后通知输入区关闭编辑器。
+  /// 发送当前快照；成功只关闭未继续编辑的草稿，失败或异常均释放忙碌态。
   Future<void> send() async {
     final draft = _buildDraft();
     if (_isSending || !draft.canSend) return;
+    final sentSnapshot = draft.toPersistedString();
     _setEditorState(() => _isSending = true);
-    final sent = await widget.onSend(draft);
-    if (!mounted) return;
-    if (sent) {
+    var closed = false;
+    try {
+      final sent = await widget.onSend(draft);
+      // 发送期间允许继续编辑，旧消息成功不能带走用户新增的内容。
+      if (!mounted ||
+          !sent ||
+          _buildDraft().toPersistedString() != sentSnapshot) {
+        return;
+      }
       const result = RichContentEditorResult(
         draft: RichContentDraft(),
         sent: true,
@@ -630,8 +585,10 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
       } else {
         Navigator.of(context).pop(result);
       }
-    } else {
-      _setEditorState(() => _isSending = false);
+      closed = true;
+    } finally {
+      // 已关闭的编辑器不能再回传旧草稿，未关闭时保证失败后可以重试。
+      if (mounted && !closed) _setEditorState(() => _isSending = false);
     }
   }
 
@@ -887,7 +844,6 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
                 showFormatting: _showFormatting,
                 activeFormats: _activeFormats,
                 canSend: canSend,
-                emojiAsset: 'chat_assets/icon/emoji.svg',
                 emojiTooltip: '插入表情',
                 imageTooltip: '插入图片',
                 fileTooltip: '插入文件',
@@ -970,28 +926,31 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
       child: Row(
         children: [
           Expanded(
-            child: TextField(
-              key: const Key('rich_content_title'),
-              controller: _titleController,
-              maxLines: 1,
-              style: TextStyle(
-                color: colors.textColorPrimary,
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-              ),
-              decoration: InputDecoration(
-                hintText: '无标题',
-                hintStyle: TextStyle(color: colors.textColorTertiary),
-                border: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Semantics(
+              identifier: 'tim.rich.title',
+              child: TextField(
+                key: const Key('rich_content_title'),
+                controller: _titleController,
+                maxLines: 1,
+                style: TextStyle(
+                  color: colors.textColorPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+                decoration: InputDecoration(
+                  hintText: '无标题',
+                  hintStyle: TextStyle(color: colors.textColorTertiary),
+                  border: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                ),
               ),
             ),
           ),
           IconButton(
             tooltip: '收起富文本编辑器',
             onPressed: _close,
-            icon: Icon(Icons.close_fullscreen, color: colors.textColorPrimary),
+            icon: Icon(AppIcons.narrow, color: colors.textColorPrimary),
           ),
           const SizedBox(width: 4),
         ],
@@ -1021,42 +980,45 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
                 final maxImageWidth = constraints.maxWidth / 2;
                 final defaultMinLines =
                     _blocks.length == 1 && index == 0 ? 5 : 1;
-                return ExtendedTextField(
-                  key: Key('rich_content_text_${block.id}'),
-                  controller: block.controller,
-                  focusNode: block.focusNode,
-                  inputFormatters: [_formatInputFormatter],
-                  onTap: () => _activeTextBlockId = block.id,
-                  keyboardType: TextInputType.multiline,
-                  minLines: defaultMinLines,
-                  maxLines: null,
-                  style: style,
-                  // 图片需要参与真实行高，固定 strut 会把图片绘制到上一行之上。
-                  strutStyle: StrutStyle.disabled,
-                  cursorHeight: richContentAttachmentCursorHeight(
-                    context: context,
+                return Semantics(
+                  identifier: 'tim.rich.text.${block.id}',
+                  child: ExtendedTextField(
+                    key: Key('rich_content_text_${block.id}'),
                     controller: block.controller,
-                    attachments: _inlineImages,
-                    maxImageWidth: maxImageWidth,
-                    textStyle: style,
-                  ),
-                  // 正文只由外层列表滚动，避免图片撑高后内外滚动手势互相抢占。
-                  scrollPhysics: const NeverScrollableScrollPhysics(),
-                  decoration: InputDecoration(
-                    hintText:
-                        index == 0 ? '发送给 ${widget.conversationName}' : null,
-                    hintStyle: TextStyle(color: colors.textColorTertiary),
-                    border: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 6),
-                  ),
-                  specialTextSpanBuilder: RichContentAttachmentSpanBuilder(
-                    attachments: _inlineImages,
-                    maxImageWidth: maxImageWidth,
-                    onTapUrl: (_) {},
-                    colorScheme: colors,
-                    mapMarkdownMarkers: true,
+                    focusNode: block.focusNode,
+                    inputFormatters: [_formatInputFormatter],
+                    onTap: () => _activeTextBlockId = block.id,
+                    keyboardType: TextInputType.multiline,
+                    minLines: defaultMinLines,
+                    maxLines: null,
+                    style: style,
+                    // 图片需要参与真实行高，固定 strut 会把图片绘制到上一行之上。
+                    strutStyle: StrutStyle.disabled,
+                    cursorHeight: richContentAttachmentCursorHeight(
+                      context: context,
+                      controller: block.controller,
+                      attachments: _inlineImages,
+                      maxImageWidth: maxImageWidth,
+                      textStyle: style,
+                    ),
+                    // 正文只由外层列表滚动，避免图片撑高后内外滚动手势互相抢占。
+                    scrollPhysics: const NeverScrollableScrollPhysics(),
+                    decoration: InputDecoration(
+                      hintText:
+                          index == 0 ? '发送给 ${widget.conversationName}' : null,
+                      hintStyle: TextStyle(color: colors.textColorTertiary),
+                      border: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                    ),
+                    specialTextSpanBuilder: RichContentAttachmentSpanBuilder(
+                      attachments: _inlineImages,
+                      maxImageWidth: maxImageWidth,
+                      onTapUrl: (_) {},
+                      colorScheme: colors,
+                      mapMarkdownMarkers: true,
+                    ),
                   ),
                 );
               },

@@ -1,3 +1,4 @@
+import 'package:app_core/app_core.dart';
 import 'package:tuikit_atomic_x/base_component/utils/app_builder.dart';
 
 /// 富文本编辑器支持插入的本地附件类型。
@@ -38,11 +39,14 @@ final class RichContentLocalAttachment {
 }
 
 /// 宿主业务上传附件并返回可公开访问的 HTTP(S) URL。
-typedef RichContentAttachmentUploader =
-    Future<String> Function(RichContentLocalAttachment attachment);
+typedef RichContentAttachmentUploader = Future<String> Function(
+    RichContentLocalAttachment attachment);
 
 /// 定义 MessageInput 的可见能力和宿主业务扩展入口。
 abstract class MessageInputConfigProtocol {
+  /// 宿主注册的全局异步操作守卫；未注入时输入组件使用独立的同类型守卫。
+  ActionGuard? get actionGuard;
+
   bool get isShowAudioRecorder;
   bool get isShowMore;
   bool get enableReadReceipt;
@@ -65,6 +69,10 @@ abstract class MessageInputConfigProtocol {
 
 /// 提供聊天输入区的默认配置，并允许宿主按会话覆盖单项能力。
 class ChatMessageInputConfig implements MessageInputConfigProtocol {
+  /// 保持与宿主其他文字发送入口共用同一并发边界。
+  @override
+  final ActionGuard? actionGuard;
+
   final bool? _userIsShowAudioRecorder;
   final bool? _userIsShowMore;
   final bool? _userEnableReadReceipt;
@@ -122,6 +130,7 @@ class ChatMessageInputConfig implements MessageInputConfigProtocol {
       _richContentAttachmentUploader;
 
   const ChatMessageInputConfig({
+    this.actionGuard,
     bool? isShowAudioRecorder,
     bool? isShowMore,
     bool? enableReadReceipt,
@@ -134,16 +143,16 @@ class ChatMessageInputConfig implements MessageInputConfigProtocol {
     bool? isShowVideoCall,
     bool? isShowAudioCall,
     RichContentAttachmentUploader? richContentAttachmentUploader,
-  }) : _userIsShowAudioRecorder = isShowAudioRecorder,
-       _userIsShowMore = isShowMore,
-       _userEnableReadReceipt = enableReadReceipt,
-       _userEnableMention = enableMention,
-       _userEnableVoiceToTextOnRecord = enableVoiceToTextOnRecord,
-       _userIsShowAlbum = isShowAlbum,
-       _userIsShowPhotoTaker = isShowPhotoTaker,
-       _userIsShowVideoRecorder = isShowVideoRecorder,
-       _userIsShowFile = isShowFile,
-       _userIsShowVideoCall = isShowVideoCall,
-       _userIsShowAudioCall = isShowAudioCall,
-       _richContentAttachmentUploader = richContentAttachmentUploader;
+  })  : _userIsShowAudioRecorder = isShowAudioRecorder,
+        _userIsShowMore = isShowMore,
+        _userEnableReadReceipt = enableReadReceipt,
+        _userEnableMention = enableMention,
+        _userEnableVoiceToTextOnRecord = enableVoiceToTextOnRecord,
+        _userIsShowAlbum = isShowAlbum,
+        _userIsShowPhotoTaker = isShowPhotoTaker,
+        _userIsShowVideoRecorder = isShowVideoRecorder,
+        _userIsShowFile = isShowFile,
+        _userIsShowVideoCall = isShowVideoCall,
+        _userIsShowAudioCall = isShowAudioCall,
+        _richContentAttachmentUploader = richContentAttachmentUploader;
 }

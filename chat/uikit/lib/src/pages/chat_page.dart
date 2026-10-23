@@ -101,13 +101,22 @@ class ChatSettingPage extends StatelessWidget {
 
 /// 展示完整聊天详情，并统一使用宿主 app_ui 提供的页面语义色。
 class ChatPage extends StatefulWidget {
+  /// 当前单聊或群聊的标题、类型与会话标识。
   final ConversationInfo conversation;
+
+  /// 搜索或引用进入时的定位消息；为空时恢复最新消息窗口。
   final MessageInfo? message;
 
   /// 消息首次加载成功后交给业务清未读；失败及页面销毁不会触发。
   final VoidCallback? onInitialMessagesLoaded;
+
+  /// 当前宿主允许的输入能力与操作守卫。
   final ChatMessageInputConfig messageInputConfig;
+
+  /// 宿主指定的头像、气泡与消息操作展示配置。
   final ChatMessageListConfig messageListConfig;
+
+  /// 是否显示现有会话设置入口，不改变设置页面权限。
   final bool isShowAppBarActions;
 
   const ChatPage({
@@ -242,20 +251,25 @@ class _ChatPageState extends State<ChatPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+          toolbarHeight: 48,
           backgroundColor: colorsTheme.bgColorOperate,
+          // 导航栏底部保留主题分隔线，描边不额外占用消息区域高度。
+          shape: Border(
+            bottom: BorderSide(color: colorsTheme.strokeColorPrimary),
+          ),
           titleSpacing: 4.0,
           centerTitle: true,
           title: Text(
             widget.conversation.title ??
                 AppLocalization.text(context, LocaleKeys.chat_title, '聊天'),
-            style: FontScheme.caption2Medium,
+            style: FontScheme.caption1Medium,
             overflow: TextOverflow.ellipsis,
             maxLines: 1,
           ),
           scrolledUnderElevation: 0.0,
           leading: IconButton.buttonContent(
-            content: IconOnlyContent(Icon(Icons.arrow_back_ios,
-                color: colorsTheme.textColorPrimary)),
+            content: IconOnlyContent(
+                Icon(AppIcons.back, color: colorsTheme.textColorPrimary)),
             type: ButtonType.noBorder,
             size: ButtonSize.l,
             onClick: () => Navigator.of(context).pop(),
@@ -264,8 +278,7 @@ class _ChatPageState extends State<ChatPage> {
               ? [
                   IconButton.buttonContent(
                     content: IconOnlyContent(
-                      Icon(Icons.more_horiz,
-                          color: colorsTheme.textColorPrimary),
+                      Icon(AppIcons.more, color: colorsTheme.textColorPrimary),
                     ),
                     type: ButtonType.noBorder,
                     size: ButtonSize.l,
