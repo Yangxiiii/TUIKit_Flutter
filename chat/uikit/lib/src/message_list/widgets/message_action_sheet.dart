@@ -15,6 +15,7 @@ class MessageActionSheet extends StatefulWidget {
     this.onReaction,
     this.onMoreReactions,
     this.editExpiresAt,
+    this.recallExpiresAt,
   });
 
   /// 以稳定动作标识匹配已有复制、转发、回复等能力，不通过翻译后的文字推断。
@@ -35,6 +36,9 @@ class MessageActionSheet extends StatefulWidget {
   /// 原发送时间加五分钟；菜单已打开时到期只禁用编辑，不移除该行。
   final DateTime? editExpiresAt;
 
+  /// 原发送时间加两分钟；到期立即移除撤回行，提交时仍须重查SDK。
+  final DateTime? recallExpiresAt;
+
   @override
   State<MessageActionSheet> createState() => _MessageActionSheetState();
 }
@@ -50,6 +54,12 @@ class _MessageActionSheetState extends State<MessageActionSheet> {
   /// 只负责菜单资格到期后的重绘，实际保存资格仍由SDK服务复核。
   Timer? _expiryTimer;
 
+  /// 仅负责本次面板的撤回入口到期重绘，不执行SDK动作。
+  Timer? _recallExpiryTimer;
+
+  /// 当前菜单是否已越过撤回截止时间；为true时必须移除入口。
+  bool _recallExpired = false;
+
   /// 到期后保持菜单行可见并禁用点击，直到本次面板被销毁。
   bool _editExpired = false;
 
@@ -60,6 +70,15 @@ class _MessageActionSheetState extends State<MessageActionSheet> {
   @override
   void initState() {
     super.initState();
+    final recallRemaining = widget.recallExpiresAt?.difference(DateTime.now());
+    if (recallRemaining != null) {
+      _recallExpired = recallRemaining <= Duration.zero;
+      if (!_recallExpired) {
+        _recallExpiryTimer = Timer(recallRemaining, () {
+          if (mounted) setState(() => _recallExpired = true);
+        });
+      }
+    }
     final expiry = widget.editExpiresAt;
     if (expiry != null) {
       final remaining = expiry.difference(DateTime.now());
@@ -77,6 +96,7 @@ class _MessageActionSheetState extends State<MessageActionSheet> {
 
   @override
   void dispose() {
+    _recallExpiryTimer?.cancel();
     _expiryTimer?.cancel();
     _routeAnimation?.removeListener(_scheduleBounds);
     super.dispose();
@@ -308,7 +328,9 @@ class _MessageActionSheetState extends State<MessageActionSheet> {
                   _buildQuickActions(),
                   const SizedBox(height: 15),
                   _group([
-                    _action('recall', '撤回', AppIcons.recall1),
+                    // 不合资格的消息和已跨过120秒的菜单都不保留撤回入口。
+                    if (_item('recall') != null && !_recallExpired)
+                      _action('recall', '撤回', AppIcons.recall1),
                     // 只有符合消息类型、所有权和时限时才展示编辑入口。
                     if (_item('edit') != null)
                       _action('edit', '编辑消息', AppIcons.editMessage),

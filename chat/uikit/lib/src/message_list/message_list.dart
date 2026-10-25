@@ -1224,6 +1224,7 @@ class _MessageListState extends State<MessageList>
   Widget _renderItem(BuildContext context, int index) {
     if (index >= _messages.length) return Container();
     final message = _messages[index];
+
     if (!widget.config.isShowSystemMessage && _isSystemMessage(message)) {
       return const SizedBox.shrink();
     }
@@ -2442,6 +2443,11 @@ class _MessageListState extends State<MessageList>
     if (index < 0 || index >= _messages.length) return null;
 
     final message = _messages[index];
+
+    // 撤回提示直接嵌入原消息位置，不再为该行单独生成时间分隔符。
+    if (widget.conversationID.startsWith('c2c_') && message.status == MessageStatus.revoked) {
+      return null;
+    }
 
     // Skip time display for system messages when they are hidden
     //

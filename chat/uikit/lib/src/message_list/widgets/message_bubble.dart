@@ -18,6 +18,9 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/message_read_receipt
 
 import 'message_tooltip.dart';
 import 'message_actions_scope.dart';
+import 'message_recall_scope.dart';
+import 'message_recall_notice.dart';
+import '../message_recall_config.dart';
 import 'quote_message_preview.dart';
 import 'message_types/call_message_widget.dart';
 import 'message_types/file_message_widget.dart';
@@ -27,13 +30,21 @@ import 'message_types/sound_message_widget.dart';
 import 'message_types/text_message_widget.dart';
 import 'message_types/video_message_widget.dart';
 
+/// 默认消息动作适配；宿主接入撤回时交由聊天页确认，保留其他UIKit动作。
 class DefaultMessageMenuCallbacks implements MessageMenuCallbacks {
+  /// 菜单所属页面，用于读取宿主动作范围及展示现有操作反馈。
   final BuildContext context;
+  /// 当前会话的唯一消息列表Store，不另行维护一份消息集合。
   final MessageListStore messageListStore;
+  /// 动作所属会话标识，用于转发来源和权限边界。
   final String conversationID;
+  /// 宿主允许的复制、回复、转发等消息能力。
   final MessageListConfigProtocol config;
+  /// 当前目标的公开AtomicX动作，撤回成功通过其通知更新本机列表。
   MessageActionStore messageActionStore;
+  /// 明确点击多选时由外层切换模式，普通长按不触发。
   final VoidCallback? onMultiSelectTriggered;
+  /// 交给聊天页设置输入引用，不由菜单管理输入控制器。
   final void Function(MessageInfo message)? onQuoteMessageCallback;
 
   DefaultMessageMenuCallbacks({
@@ -57,8 +68,14 @@ class DefaultMessageMenuCallbacks implements MessageMenuCallbacks {
     messageActionStore.delete();
   }
 
+  /// 宿主接入时先确认并重查SDK；未接入的会话沿用UIKit原动作。
   @override
   void onRecallMessage(MessageInfo message) {
+    final scope = MessageRecallScope.maybeOf(context);
+    if (scope != null) {
+      scope.onRecall(message);
+      return;
+    }
     messageActionStore.revoke();
   }
 
@@ -334,6 +351,15 @@ class _MessageBubbleState extends State<MessageBubble>
     }
 
     if (widget.message.status == MessageStatus.revoked) {
+      final scope = MessageRecallScope.maybeOf(context);
+      if (scope != null) {
+        return MessageRecallNotice(
+          messageId: widget.message.msgID,
+          text: chatMessageRecallText(widget.message),
+          editableUntil: scope.config.editableUntil(widget.message.msgID),
+          onReedit: () => scope.onReedit(widget.message.msgID),
+        );
+      }
       return SystemMessageWidget(
         message: widget.message,
       );
@@ -1345,15 +1371,19 @@ class _MessageBubbleState extends State<MessageBubble>
     // 撤回按钮
     if (widget.config.isSupportRecall && widget.isSelf) {
       final now = DateTime.now().millisecondsSinceEpoch / 1000;
-      final isWithin2Minutes =
-          (now - (widget.message.timestamp ?? 0)) <= 2 * 60;
+      final age = now - (widget.message.timestamp ?? 0);
+      final isWithin2Minutes = age >= 0 && age < 2 * 60;
       final isSentSuccess = widget.message.status == MessageStatus.sendSuccess;
       // Violation messages cannot be revoked
       //
       // 违规消息不能撤回
       final isNotViolation = widget.message.status != MessageStatus.violation;
 
-      if (isWithin2Minutes && isSentSuccess && isNotViolation) {
+      final scope = MessageRecallScope.maybeOf(context);
+      final eligible = scope == null
+          ? isWithin2Minutes && isSentSuccess && isNotViolation
+          : scope.config.canRecall(widget.message);
+      if (eligible) {
         items.add(MessageMenuItem(
           title: atomicLocal.recall,
           id: 'recall',

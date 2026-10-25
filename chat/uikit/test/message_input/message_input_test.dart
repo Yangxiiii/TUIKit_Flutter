@@ -7,6 +7,8 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
 import 'package:tencent_chat_uikit/src/third_party/extended_text_field/extended_text_field.dart';
+import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
+import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_message.dart';
 import 'package:tencent_cloud_chat_sdk/manager/v2_tim_conversation_manager.dart';
 import 'package:tencent_cloud_chat_sdk/manager/v2_tim_friendship_manager.dart';
 import 'package:tencent_cloud_chat_sdk/manager/v2_tim_manager.dart';
@@ -57,6 +59,62 @@ void main() {
     );
     await tester.pump();
   }
+
+  testWidgets('撤回文本回填保留已有草稿，迟到加载不能覆盖回填内容', (tester) async {
+    await mount(tester);
+    final state = tester.state<MessageInputState>(find.byType(MessageInput));
+    state.restoreRecalledDraft(const ChatMessageRecallDraft(text: '撤回原文'));
+    sdk.conversations.completeDraft('迟到的旧草稿');
+    await tester.pump();
+    var input = tester.widget<ExtendedTextField>(find.byType(ExtendedTextField).first);
+    expect(input.controller!.text, '撤回原文');
+    input.controller!.text = '正在输入';
+    state.restoreRecalledDraft(const ChatMessageRecallDraft(text: '再次回填'));
+    await tester.pump();
+    input = tester.widget<ExtendedTextField>(find.byType(ExtendedTextField).first);
+    expect(input.controller!.text, '正在输入\n再次回填');
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(sdk.conversations.saved.last, '正在输入\n再次回填');
+  });
+
+  testWidgets('富文本撤回回填后保存完整远端文件，原有文字草稿不丢失', (tester) async {
+    await mount(tester);
+    sdk.conversations.completeDraft('已有草稿');
+    await tester.pump();
+    final state = tester.state<MessageInputState>(find.byType(MessageInput));
+    state.restoreRecalledDraft(ChatMessageRecallDraft(richContent:
+      const RichContentMessage([
+        RichTextBlock('**原消息**'),
+        RichFileBlock('https://example.com/file.pdf', '文档.pdf', 123, 'application/pdf'),
+      ]).toCustomData()));
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox.shrink());
+    final draft = RichContentDraft.tryParsePersisted(sdk.conversations.saved.last!);
+    expect(draft, isNotNull);
+    expect(draft!.canSend, isTrue);
+    final message = draft.toMessage()!;
+    expect(message.plainTextPreview, contains('已有草稿'));
+    expect(message.plainTextPreview, contains('**原消息**'));
+    expect(message.blocks.whereType<RichFileBlock>().single.url, 'https://example.com/file.pdf');
+    expect(sdk.messages.created, 0);
+  });
+
+  testWidgets('撤回原消息后清理输入区引用，不能继续显示原文', (tester) async {
+    await mount(tester);
+    sdk.conversations.completeDraft('');
+    await tester.pump();
+    final state = tester.state<MessageInputState>(find.byType(MessageInput));
+    final message = MessageInfo(msgID: 'quoted', messageType: MessageType.text,
+      messagePayload: TextMessagePayload(text: '应被清除的引用原文'), status: MessageStatus.sendSuccess);
+    state.setQuotedMessage(message);
+    await tester.pump();
+    expect(find.textContaining('应被清除的引用原文'), findsOneWidget);
+    message.status = MessageStatus.revoked;
+    state.invalidateRecalledQuote([message]);
+    await tester.pump();
+    expect(find.textContaining('应被清除的引用原文'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets('320宽输入与格式工具栏保持可切换且不溢出', (tester) async {
     tester.view.physicalSize = const Size(320, 800);

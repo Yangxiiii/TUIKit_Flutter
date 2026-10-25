@@ -141,6 +141,41 @@ final class RichContentDraft {
 
   const RichContentDraft({this.title = '', this.blocks = const []});
 
+  /// 撤回后恢复已发送的完整图文；远端附件保持已上传状态，避免重复上传。
+  factory RichContentDraft.fromMessage(RichContentMessage message) {
+    final blocks = <RichContentDraftBlock>[];
+    // 按已发送消息的顺序恢复文字和远端附件，块ID仅在当前草稿内重新编号。
+    for (var i = 0; i < message.blocks.length; i++) {
+      final block = message.blocks[i];
+      if (block is RichTextBlock) {
+        blocks.add(RichContentDraftTextBlock(i, block.text));
+        continue;
+      }
+      final image = block is RichImageBlock ? block : null;
+      final file = block is RichFileBlock ? block : null;
+      final url = image?.url ?? file!.url;
+      blocks.add(
+        RichContentDraftAttachmentBlock(
+          i,
+          attachment: RichContentLocalAttachment(
+            type: image == null
+                ? RichContentAttachmentType.file
+                : RichContentAttachmentType.image,
+            localPath: '',
+            fileName: file?.name ?? 'image',
+            fileSize: file?.size ?? 0,
+            mimeType: file?.mimeType ?? 'image/*',
+            width: image?.width,
+            height: image?.height,
+          ),
+          remoteUrl: url,
+          status: RichContentAttachmentStatus.uploaded,
+        ),
+      );
+    }
+    return RichContentDraft(blocks: List.unmodifiable(blocks));
+  }
+
   /// 将编辑草稿编码为 IM SDK 可持久化的字符串，保留本地附件路径和块顺序。
   String toPersistedString() {
     return '$_richContentDraftPrefix${jsonEncode({
@@ -324,7 +359,9 @@ RichContentDraftBlock? _draftBlockFromJson(Map<String, dynamic> json) {
       .firstOrNull;
   if (attachmentType == null ||
       localPath is! String ||
-      localPath.isEmpty ||
+      // 撤回回填的附件只有远端URL；仅已上传且地址合法时允许没有本地文件。
+      (localPath.isEmpty &&
+          !(status == RichContentAttachmentStatus.uploaded && isValidRichContentUrl(remoteUrl))) ||
       fileName is! String ||
       fileName.isEmpty ||
       fileSize is! int ||

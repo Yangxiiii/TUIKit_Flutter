@@ -7,6 +7,7 @@ import '../message_list/widgets/message_action_sheet.dart';
 import '../message_list/widgets/message_actions_scope.dart';
 import '../message_list/widgets/message_overlay_avoider.dart';
 import '../message_list/widgets/message_tooltip.dart';
+import '../message_list/widgets/message_recall_scope.dart';
 import 'package:flutter/material.dart' hide IconButton;
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
 import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
@@ -36,6 +37,9 @@ class ChatPage extends StatefulWidget {
   /// 宿主提供的文本编辑及云端元数据能力；为空时保持原聊天行为。
   final ChatMessageEditConfig? messageEditConfig;
 
+  /// 宿主提供的单聊撤回与原设备重新编辑能力；为空时沿用UIKit原行为。
+  final ChatMessageRecallConfig? messageRecallConfig;
+
   /// 是否显示现有会话设置入口，不改变设置页面权限。
   final bool isShowAppBarActions;
 
@@ -50,6 +54,7 @@ class ChatPage extends StatefulWidget {
     ),
     this.messageListConfig = const ChatMessageListConfig(),
     this.messageEditConfig,
+    this.messageRecallConfig,
     this.isShowAppBarActions = true,
   });
 
@@ -110,6 +115,8 @@ class _ChatPageState extends State<ChatPage> {
         backgroundColor: Colors.transparent,
         barrierColor: Colors.transparent,
         builder: (sheetContext) => MessageActionSheet(
+          recallExpiresAt: widget.messageRecallConfig == null || message.timestamp == null
+              ? null : DateTime.fromMillisecondsSinceEpoch((message.timestamp! + 120) * 1000),
           editExpiresAt: message.timestamp == null
               ? null
               : DateTime.fromMillisecondsSinceEpoch(
@@ -217,8 +224,79 @@ class _ChatPageState extends State<ChatPage> {
     ));
   }
 
+  /// 确认后才执行受保护的SDK动作，提示和关闭只属于当前聊天页。
+  void _recallMessage(MessageInfo message) {
+    final config = widget.messageRecallConfig;
+    if (config == null) return;
+    Future<void> run() async {
+      final colors = context.appColors;
+      // 确认框只返回用户选择，取消及关闭过程中不得提前撤回原消息。
+      final confirmed = await AppDialog.showAlert(
+        content: '撤回该消息？',
+        cancelText: '取消',
+        confirmText: '撤回',
+        semanticsIdentifier: 'tim.message.recallDialog',
+        contentStyle: TextStyle(
+          fontSize: 16,
+          height: 24 / 16,
+          color: colors.textPrimary,
+        ),
+        cancelTextStyle: TextStyle(fontSize: 16, color: colors.textTertiary),
+        confirmTextStyle: TextStyle(fontSize: 16, color: colors.danger),
+        maskColor: colors.scrim.withValues(alpha: .7),
+      );
+      if (!mounted || confirmed != true) return;
+      // 复用公开AtomicX动作的成功通知，确保本机也刷新原消息，而非依赖接收端回调。
+      final error = await config.recall(message.msgID, () async {
+        final result = await MessageActionStore.create(message).revoke();
+        return result.errorCode;
+      });
+      if (mounted && error != null) {
+        AppToast.show(error, duration: const Duration(seconds: 3));
+      }
+    }
+
+    final guard = widget.messageInputConfig.actionGuard;
+    unawaited(
+      guard == null
+          ? run()
+          : guard.singleFlight<void>(
+              'tim.message.recallDialog.${widget.conversation.conversationID}',
+              run,
+            ),
+    );
+  }
+
+  /// 点击时重查原设备的回填资格，再交由普通输入组件恢复完整草稿。
+  void _reeditMessage(String messageId) {
+    final guard = widget.messageInputConfig.actionGuard;
+    if (guard != null) {
+      guard.throttle(
+        'tim.message.reedit.${widget.conversation.conversationID}.$messageId',
+        () => _restoreRecalledMessage(messageId),
+      );
+      return;
+    }
+    _restoreRecalledMessage(messageId);
+  }
+
+  /// 保留普通草稿并追加撤回原文，只有通过宿主复核后才移动输入焦点。
+  void _restoreRecalledMessage(String messageId) {
+    final result = widget.messageRecallConfig?.prepareReedit(messageId);
+    if (result == null) return;
+    if (result.error != null) {
+      AppToast.show(result.error!, duration: const Duration(seconds: 3));
+      return;
+    }
+    if (result.draft != null) {
+      _messageInputKey.currentState?.restoreRecalledDraft(result.draft!);
+    }
+  }
+
   /// 只派生当前SDK窗口的标识；目标被撤回或删除时立即结束其可保存状态。
   void _onEditWindowChanged(List<MessageInfo> messages) {
+    // 撤回事件不仅使原地编辑失效，也必须移除普通输入区尚未发送的引用。
+    _messageInputKey.currentState?.invalidateRecalledQuote(messages);
     widget.messageEditConfig
         ?.onMessageWindowChanged(messages.map((m) => m.msgID).toList());
     final target = _editingMessage;
@@ -426,6 +504,7 @@ class _ChatPageState extends State<ChatPage> {
                   key: _messageInputKey,
                   conversationID: widget.conversation.conversationID,
                   config: widget.messageInputConfig,
+                  onLocalMessageSent: widget.messageRecallConfig?.onLocalMessageSent,
                 ),
               ),
           ],
@@ -473,12 +552,17 @@ class _ChatPageState extends State<ChatPage> {
       child: page,
     );
     final config = widget.messageEditConfig;
-    return config == null
+    final editPage = config == null
         ? guardedPage
         : MessageActionsScope(
             config: config,
             showActions: _showActions,
             onMessagesChanged: _onEditWindowChanged,
             child: guardedPage);
+    final recallConfig = widget.messageRecallConfig;
+    return recallConfig == null ? editPage : MessageRecallScope(
+      config: recallConfig, onRecall: _recallMessage, onReedit: _reeditMessage,
+      child: editPage,
+    );
   }
 }

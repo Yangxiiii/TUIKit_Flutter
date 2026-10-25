@@ -174,6 +174,7 @@ void main() {
         alignment: Alignment.bottomCenter,
         child: MessageActionSheet(
           items: [
+            MessageMenuItem(id: 'recall', title: '撤回', onTap: () {}),
             MessageMenuItem(id: 'edit', title: '编辑消息', onTap: () {}),
             MessageMenuItem(id: 'copy', title: '复制', onTap: () => copied++),
             MessageMenuItem(title: '翻译', onTap: () {}),

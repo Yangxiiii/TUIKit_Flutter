@@ -39,6 +39,7 @@ import 'message_input_config.dart';
 import 'message_text.dart';
 import 'widget/audio_record_overlay.dart';
 import 'widget/quote_preview_bar.dart';
+import '../message_list/message_recall_config.dart';
 
 export 'mention/mention_info.dart';
 export 'message_input_config.dart';
@@ -61,10 +62,14 @@ class MessageInput extends StatefulWidget {
   /// 宿主配置的可见能力、附件上传器和统一操作守卫。
   final MessageInputConfigProtocol config;
 
+  /// 仅当前输入流程的本机成功发送事件，用于宿主证明原发送设备。
+  final ValueChanged<MessageInfo>? onLocalMessageSent;
+
   const MessageInput({
     super.key,
     required this.conversationID,
     this.config = const ChatMessageInputConfig(),
+    this.onLocalMessageSent,
   });
 
   @override
@@ -195,6 +200,9 @@ class MessageInputState extends State<MessageInput>
 
   late final _AlbumPickerMediaSendListenerImpl _albumPickerListener;
 
+  /// 持有本输入实例的成功通知订阅；销毁时只取消自身，不清空全局通知。
+  StreamSubscription<MessageSendEventData>? _localSendSubscription;
+
   // Quote reply state
   //
   // 引用回复状态
@@ -217,6 +225,15 @@ class MessageInputState extends State<MessageInput>
     _textEditingFocusNode.addListener(_onFocusChanged);
     _loadDraft();
     _extractGroupID();
+    _localSendSubscription = notificationCenter.addListener<MessageSendEventData>(
+      MessageSendNotifyKey.messageSendSuccess,
+      (event) {
+        final message = event.message;
+        if (mounted && event.conversationID == widget.conversationID && message is MessageInfo) {
+          widget.onLocalMessageSent?.call(message);
+        }
+      },
+    );
   }
 
   /// Extract groupID from conversationID for group chats
@@ -228,6 +245,57 @@ class MessageInputState extends State<MessageInput>
   }
 
   bool get _isGroupChat => _groupID != null;
+
+  /// 将撤回原文加入普通草稿；已有内容保留在前，避免静默覆盖用户输入。
+  void restoreRecalledDraft(ChatMessageRecallDraft recalled) {
+    // 先确认原文可以恢复，再操作焦点与现有草稿，未知协议不能清空用户输入。
+    final rich = recalled.toRichDraft();
+    if (rich == null && recalled.text == null) return;
+    collapseAllPanels();
+    if (rich == null && !_inlineRichContentEnabled) {
+      // 纯文本保留当前草稿；富文本分支随后按原模型恢复附件和顺序。
+      final existing = _textEditingController.text;
+      final value = '${existing.isEmpty ? '' : '$existing\n'}${recalled.text!}';
+      _textEditingController.value = TextEditingValue(
+        text: value,
+        selection: TextSelection.collapsed(offset: value.length),
+      );
+    } else {
+      final existing = _buildInlineRichContentDraft();
+      final incoming =
+          rich ??
+          RichContentDraft(
+            blocks: [RichContentDraftTextBlock(0, recalled.text!)],
+          );
+      final combined = [
+        ...existing.blocks,
+        if (existing.hasContent) const RichContentDraftTextBlock(0, '\n'),
+        ...incoming.blocks,
+      ];
+      // 旧草稿和撤回原文各自的块ID可能重叠，回填时重编为同一输入实例的唯一ID。
+      final blocks = <RichContentDraftBlock>[];
+      for (var i = 0; i < combined.length; i++) {
+        final block = combined[i];
+        blocks.add(switch (block) {
+          RichContentDraftTextBlock b => RichContentDraftTextBlock(i, b.text),
+          RichContentDraftAttachmentBlock b => RichContentDraftAttachmentBlock(
+            i,
+            attachment: b.attachment,
+            remoteUrl: b.remoteUrl,
+            status: b.status,
+          ),
+        });
+      }
+      _inlineRichContentEnabled = true;
+      _restoreInlineRichContentDraft(
+        RichContentDraft(title: existing.title, blocks: blocks),
+      );
+    }
+    // 原文回填推进草稿版本，迟到的加载结果不得覆盖；后续发送继续创建新消息。
+    _onTextChanged();
+    setState(() => _inputMode = _InputMode.text);
+    _textEditingFocusNode.requestFocus();
+  }
 
   void _onFocusChanged() {
     if (!_textEditingFocusNode.hasFocus) {
@@ -401,8 +469,22 @@ class MessageInputState extends State<MessageInput>
     });
   }
 
+  /// 当前引用目标被SDK确认撤回时移除输入引用，禁止继续携带失效原文发送。
+  void invalidateRecalledQuote(List<MessageInfo> messages) {
+    final target = _quotedMessage;
+    if (target != null &&
+        messages.any(
+          (message) =>
+              message.msgID == target.msgID &&
+              message.status == MessageStatus.revoked,
+        )) {
+      clearQuotedMessage();
+    }
+  }
+
   @override
   void dispose() {
+    unawaited(_localSendSubscription?.cancel());
     _richContentEditorOverlay?.remove();
     _richContentEditorOverlay = null;
     _removeRecordOverlay();

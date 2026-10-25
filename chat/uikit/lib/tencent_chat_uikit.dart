@@ -34,3 +34,4 @@ export 'src/video_picker/video_picker.dart';
 export 'src/video_recorder/video_recorder.dart';
 export 'src/widgets/az_ordered_list.dart';
 export 'src/message_list/message_edit_config.dart';
+export 'src/message_list/message_recall_config.dart';
