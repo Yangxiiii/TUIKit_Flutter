@@ -37,7 +37,6 @@ export default class FilePickerHelper {
       if (!uris || uris.length === 0) {
         return [];
       }
-      const trimmed = uris.length > max ? uris.slice(0, max) : uris;
 
       const sandboxDir = await FilePickerHelper.ensureSandboxDir(cacheDir);
       if (sandboxDir === null) {
@@ -46,7 +45,8 @@ export default class FilePickerHelper {
       }
 
       const results: PickerResult[] = [];
-      for (const uri of trimmed) {
+      // 保留完整选择结果，由Dart统一拒绝超量，不能静默丢弃后续文件。
+      for (const uri of uris) {
         const fileName = FilePickerHelper.getFileNameFromPath(uri);
         const extension = FilePickerHelper.getFileExtension(fileName);
 

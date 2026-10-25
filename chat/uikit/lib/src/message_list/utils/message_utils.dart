@@ -6,6 +6,7 @@ import 'package:flutter/cupertino.dart';
 
 import 'calling_message_data_provider.dart';
 import 'rich_content_message.dart';
+import 'big_file_message.dart';
 
 /// 汇总消息的展示文案，并为会话列表提供统一的消息摘要。
 class MessageUtil {
@@ -356,6 +357,9 @@ class MessageUtil {
         if (event != null) return event.isControl ? '' : event.preview;
         final customInfo =
             ChatUtil.jsonData2Dictionary(customPayload.customData);
+        if (BigFileMessage.tryParse(customPayload.customData) != null) {
+          return localizations.messageTypeFile;
+        }
         if (customInfo?['businessID'] == RichContentMessage.businessID) {
           final richContent =
               RichContentMessage.tryParse(customPayload.customData);

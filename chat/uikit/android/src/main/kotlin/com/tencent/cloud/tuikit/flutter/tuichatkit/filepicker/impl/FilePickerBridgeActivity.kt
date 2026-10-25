@@ -47,8 +47,8 @@ class FilePickerBridgeActivity : ComponentActivity() {
                 // 处理多个文件
                 val clipData: ClipData? = result.data?.clipData
                 if (clipData != null) {
-                    val maxSelection = SystemFilePicker.filePickerConfig?.maxCount ?: Int.MAX_VALUE
-                    val itemCount = clipData.itemCount.coerceAtMost(maxSelection)
+                    // 保留用户选择的完整结果，由 Dart 统一拒绝超量，避免静默发送前几项。
+                    val itemCount = clipData.itemCount
 
                     for (i in 0 until itemCount) {
                         val uri = clipData.getItemAt(i).uri

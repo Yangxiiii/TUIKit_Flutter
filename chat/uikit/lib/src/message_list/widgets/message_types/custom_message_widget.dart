@@ -10,6 +10,8 @@ import 'package:tencent_chat_uikit/src/message_list/message_list_config.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_message.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/rich_content_markdown.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../utils/big_file_message.dart';
+import 'file_message_widget.dart';
 
 /// 按业务标识展示自定义消息，并为未知协议保留通用气泡兜底。
 class CustomMessageWidget extends StatelessWidget {
@@ -52,6 +54,17 @@ class CustomMessageWidget extends StatelessWidget {
     final colors = SemanticColorScheme.of(context);
     final atomicLocale = AppLocalization.of(context);
     final customMessage = (message.messagePayload as CustomMessagePayload?);
+    final file = BigFileMessage.tryParse(customMessage?.customData);
+    if (file != null) {
+      return FileMessageWidget(
+          message: message,
+          isSelf: isSelf,
+          maxWidth: maxWidth,
+          config: config,
+          onLongPress: onLongPress,
+          messageListStore: messageListStore,
+          bigFile: file);
+    }
 
     final customContent =
         ChatUtil.jsonData2Dictionary(customMessage?.customData);

@@ -2,8 +2,6 @@ import 'package:app_ui/app_ui.dart';
 import 'dart:io';
 
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart' hide AlertDialog;
-import 'package:tuikit_atomic_x/device_info/device.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'file_picker_platform.dart';
@@ -27,7 +25,9 @@ class PickerResult {
   }
 }
 
+/// 为不同业务入口指定原生文件多选上限，不在平台侧截断结果。
 class FilePickerConfig {
+  /// 为空时沿用SDK默认九项，独立文件发送由宿主显式指定十项。
   final int? maxCount;
 
   FilePickerConfig({
@@ -35,6 +35,7 @@ class FilePickerConfig {
   });
 }
 
+/// 通过系统文档选择器获取文件授权，并使用平台能力打开本地文件。
 class FilePicker {
   static const int maxFileCount = 9;
 
@@ -48,19 +49,13 @@ class FilePicker {
   /// HarmonyOS 检测。`Platform.isOhos` 仅存在于 Flutter-OH SDK 中，所以我们比较操作系统字符串，以保证在标准 Flutter 下可编译
   static bool get _isOhos => Platform.operatingSystem == 'ohos';
 
+  /// 返回系统选择的全部文件；超量整体拒绝，取消则不改变业务选择。
   static Future<List<PickerResult>> pickFiles({
     required BuildContext context,
     FilePickerConfig? config,
   }) async {
     try {
-      // FilePicker uses SAF (Storage Access Framework) which doesn't require permissions
-      // The system handles permission through the document picker UI
-      //
-      // FilePicker 使用 SAF（存储访问框架），不需要权限，系统通过文档选择器 UI 处理权限
-      if (!await _checkAndRequestPermission(context)) {
-        return [];
-      }
-
+      // 系统文档选择器按所选资源授予访问权，不能用照片权限阻挡普通文件选择。
       if (Platform.isAndroid || Platform.isIOS || _isOhos) {
         int maxCount = config?.maxCount ?? maxFileCount;
 
@@ -78,7 +73,7 @@ class FilePicker {
             AppLocalizedText atomicLocal = AppLocalization.of(context);
             _showErrorDialog(context, atomicLocal.maxCountFile(maxCount));
           }
-          return results.take(maxCount).toList();
+          return [];
         }
 
         return results;
@@ -90,28 +85,6 @@ class FilePicker {
       debugPrint('FilePicker.pickFiles error: $e');
       return [];
     }
-  }
-
-  static Future<bool> _checkAndRequestPermission(BuildContext context) async {
-    if (kIsWeb) {
-      return true;
-    }
-
-    PermissionType permissionType;
-    if (Platform.isAndroid) {
-      final sdkInt = await Device.sdkInt;
-      if (sdkInt! >= 33) {
-        permissionType = PermissionType.photos;
-      } else {
-        permissionType = PermissionType.storage;
-      }
-    } else if (Platform.isIOS) {
-      permissionType = PermissionType.photos;
-    } else {
-      return true;
-    }
-
-    return Permission.checkAndRequest(context, [permissionType]);
   }
 
   /// Open file with system default application

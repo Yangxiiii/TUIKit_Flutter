@@ -285,20 +285,18 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     );
   }
 
-  /// Handle resend message.
-  ///
-  /// Goes through [MessageResender] which deletes the failed row first
-  /// and then sends a fresh message. This avoids the duplicate-row issue
-  /// caused by minting a new msgID via [MessageInputStore.sendMessage] —
-  /// see [MessageResender] for the rationale and the cross-platform
-  /// alignment with the Kotlin team.
-  ///
-  /// 处理重新发送消息。
-  ///
-  /// 通过 [MessageResender] 操作，它会先删除失败的行，然后发送新的消息。这可以避免通过 [MessageInputStore.sendMessage] 生成新 msgID
-  /// 导致的重复行问题 —— 具体原因和与 Kotlin 团队的跨平台对齐可以参考 [MessageResender]。
+  /// 本地上传失败恢复同一任务，SDK失败消息校验后由重发器替换旧行。
   void _handleResendMessage() {
-    MessageResender.resend(message: message, conversationID: conversationID);
+    // 上传前的失败行没有SDK消息ID，先恢复宿主任务，不能调用SDK删除或重发。
+    final transfer = config.fileTransfers[message.msgID];
+    if (transfer != null) {
+      transfer.retry?.call();
+      return;
+    }
+    MessageResender.resend(
+        message: message,
+        conversationID: conversationID,
+        mediaSender: config.mediaSender);
   }
 
   /// Show read receipt detail page (group messages only)

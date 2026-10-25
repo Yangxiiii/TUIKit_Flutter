@@ -1,7 +1,19 @@
 import 'package:tuikit_atomic_x/base_component/utils/app_builder.dart';
+import '../message_input/chat_media_sender.dart';
 
 /// 约定消息列表的外观和可操作能力，具体默认值由聊天配置提供。
 abstract class MessageListConfigProtocol {
+  /// 普通失败消息的重发也必须通过同一媒体大小分流入口。
+  ChatMediaSender? get mediaSender;
+
+  /// 上传占位的不可变状态，由宿主Controller维护。
+  Map<String, ChatFileTransferView> get fileTransfers;
+
+  /// 用户提供的文件类型真实图片构建入口。
+  ChatFileIconBuilder? get fileIconBuilder;
+
+  /// 大文件下载由宿主提供账号隔离存储与资源失效判定。
+  ChatFileDownloader? get fileDownloader;
   double get textBubbleCornerRadius;
   String get alignment;
   bool get isShowTimeMessage;
@@ -31,6 +43,14 @@ abstract class MessageListConfigProtocol {
 
 /// 提供消息列表默认外观，并保留宿主显式传入的单项覆盖。
 class ChatMessageListConfig implements MessageListConfigProtocol {
+  @override
+  final ChatMediaSender? mediaSender;
+  @override
+  final Map<String, ChatFileTransferView> fileTransfers;
+  @override
+  final ChatFileIconBuilder? fileIconBuilder;
+  @override
+  final ChatFileDownloader? fileDownloader;
   final double? _userTextBubbleCornerRadius;
   final String? _userAlignment;
   final bool? _userIsShowTimeMessage;
@@ -164,6 +184,10 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
   bool get isSupportQuote => _isSupportQuote;
 
   const ChatMessageListConfig({
+    this.mediaSender,
+    this.fileTransfers = const {},
+    this.fileIconBuilder,
+    this.fileDownloader,
     double? textBubbleCornerRadius,
     String? alignment,
     bool? isShowTimeMessage,

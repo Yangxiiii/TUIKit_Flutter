@@ -1,5 +1,6 @@
 import 'package:app_core/app_core.dart';
 import 'package:tuikit_atomic_x/base_component/utils/app_builder.dart';
+import 'chat_media_sender.dart';
 
 /// 富文本编辑器支持插入的本地附件类型。
 enum RichContentAttachmentType { image, file }
@@ -44,6 +45,12 @@ typedef RichContentAttachmentUploader = Future<String> Function(
 
 /// 定义 MessageInput 的可见能力和宿主业务扩展入口。
 abstract class MessageInputConfigProtocol {
+  /// 宿主统一媒体大小分流；为空时保留UIKit原生发送。
+  ChatMediaSender? get mediaSender;
+
+  /// 宿主文件选择页；为空时使用UIKit原生文件选择器。
+  ChatFileSelector? get fileSelector;
+
   /// 宿主注册的全局异步操作守卫；未注入时输入组件使用独立的同类型守卫。
   ActionGuard? get actionGuard;
 
@@ -69,6 +76,11 @@ abstract class MessageInputConfigProtocol {
 
 /// 提供聊天输入区的默认配置，并允许宿主按会话覆盖单项能力。
 class ChatMessageInputConfig implements MessageInputConfigProtocol {
+  @override
+  final ChatMediaSender? mediaSender;
+  @override
+  final ChatFileSelector? fileSelector;
+
   /// 保持与宿主其他文字发送入口共用同一并发边界。
   @override
   final ActionGuard? actionGuard;
@@ -130,6 +142,8 @@ class ChatMessageInputConfig implements MessageInputConfigProtocol {
       _richContentAttachmentUploader;
 
   const ChatMessageInputConfig({
+    this.mediaSender,
+    this.fileSelector,
     this.actionGuard,
     bool? isShowAudioRecorder,
     bool? isShowMore,

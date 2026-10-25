@@ -29,12 +29,16 @@ mixin MessageStatusMixin {
     switch (message.status) {
       case MessageStatus.sendFail:
       case MessageStatus.violation:
-        return GestureDetector(
-          onTap: onResendTap,
-          child: Icon(
-            AppIcons.error,
-            size: 18,
-            color: colorsTheme.textColorError,
+        return Semantics(
+          identifier: 'tim.message.retry.${message.msgID}',
+          button: true,
+          child: GestureDetector(
+            onTap: onResendTap,
+            child: Icon(
+              AppIcons.error,
+              size: 18,
+              color: colorsTheme.textColorError,
+            ),
           ),
         );
       case MessageStatus.sending:

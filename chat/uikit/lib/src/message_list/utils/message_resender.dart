@@ -1,50 +1,17 @@
 import 'package:atomic_x_core/atomicxcore.dart';
+import '../../message_input/chat_media_sender.dart';
 
-/// Resend a previously-failed message.
-///
-/// MessageInputStore's public API only accepts a [SendMessagePayload], so a
-/// naive "send the original payload again" approach mints a brand-new
-/// V2TimMessage with a fresh msgID — leaving the failed row stranded next
-/// to the new sending row, since MessageListStore keys reconciliation off
-/// msgID. The agreed cross-platform fix (aligned with the Kotlin team) is
-/// therefore:
-///
-/// 1. Delete the failed row first via [MessageActionStore.delete] so the
-///    stale entry disappears from the local IM SDK store and the message
-///    list.
-/// 2. Then send a fresh message constructed from the original payload.
-///
-/// This restores the desired UX (failed row replaced by a new sending row)
-/// without touching the [MessageInputStore] interface.
-///
-/// Note: fields that don't round-trip through [SendMessagePayload] /
-/// [SendMessageOption] are necessarily lost on resend (quote pointer is
-/// the main one — we only have [MessageQuoteInfo], not the original
-/// quoted [MessageInfo]). This matches Kotlin behaviour for the
-/// payload-based resend path.
-///
-/// 重新发送之前发送失败的消息。
-///
-/// MessageInputStore 的公开 API 只接受 [SendMessagePayload]，所以简单地“再次发送原始负载”会生成一个全新的 V2TimMessage 并带上一个新的
-/// msgID——导致失败的那行保留在新发送行旁边，因为 MessageListStore 是根据 msgID 来进行键的对比。双方同意的跨平台解决方案（与 Kotlin 团队一致）是
-///
-/// 1. 先通过 [MessageActionStore.delete] 删除失败行，这样本地 IM SDK 存储里就不会再有旧条目，消息也消失了。
-///
-/// 2. 然后用原始负载构建一个新的消息进行发送。
-///
-/// 这样就能恢复想要的用户体验（失败行被新的发送行替代），同时不需要修改 [MessageInputStore] 接口。
-///
-/// 注意：那些无法通过 [SendMessagePayload] / [SendMessageOption] 完整传递的字段，在重发时肯定会丢失（引用指针是主要的——我们只有
-/// [MessageQuoteInfo]，没有原始引用的 [MessageInfo]）。这和 Kotlin 的基于 payload 的重发路径行为一致。
+/// 校验失败消息后重新发送；实际调用SDK前才删除旧行，避免校验失败丢失记录。
+/// 引用信息无法由历史负载完整恢复，其余发送选项沿用原消息。
 class MessageResender {
+  /// 旧消息只在新发送具备执行条件后移除，媒体复用统一分流边界。
   static Future<void> resend({
     required MessageInfo message,
     required String conversationID,
+    ChatMediaSender? mediaSender,
   }) async {
     final payload = _convertToSendPayload(message.messagePayload);
     if (payload == null) return;
-
-    await MessageActionStore.create(message).delete();
 
     final option = SendMessageOption(
       atUserList: message.atUserList,
@@ -53,8 +20,16 @@ class MessageResender {
       offlinePushInfo: message.offlinePushInfo,
     );
 
-    await MessageInputStore.create(conversationID: conversationID)
-        .sendMessage(payload: payload, option: option);
+    await sendChatMedia(
+        message: message,
+        payload: payload,
+        option: option,
+        conversationID: conversationID,
+        sender: mediaSender,
+        beforeSend: () async {
+          final result = await MessageActionStore.create(message).delete();
+          if (!result.isSuccess) throw StateError('重发前删除失败消息失败');
+        });
   }
 
   static SendMessagePayload? _convertToSendPayload(MessagePayload? payload) {
@@ -100,8 +75,9 @@ class MessageResender {
       case FileMessagePayload p:
         final path = p.filePath;
         final name = p.fileName;
-        if (path == null || path.isEmpty || name == null || name.isEmpty)
+        if (path == null || path.isEmpty || name == null || name.isEmpty) {
           return null;
+        }
         return FileSendMessagePayload(
           filePath: path,
           fileName: name,

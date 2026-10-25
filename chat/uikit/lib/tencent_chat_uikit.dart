@@ -23,6 +23,8 @@ export 'src/image_picker/image_picker.dart';
 export 'src/image_viewer/image_element.dart';
 export 'src/image_viewer/image_viewer_widget.dart';
 export 'src/message_input/message_input.dart';
+export 'src/message_input/chat_media_sender.dart';
+export 'src/message_list/utils/big_file_message.dart';
 export 'src/message_list/message_list.dart';
 export 'src/navigation/chat_uikit_navigation.dart';
 export 'src/pages/chat_page.dart';

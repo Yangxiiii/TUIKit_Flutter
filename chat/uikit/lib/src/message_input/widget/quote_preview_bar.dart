@@ -1,4 +1,4 @@
-import 'package:app_ui/app_ui.dart';
+import 'package:tencent_chat_uikit/src/message_list/utils/big_file_message.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -154,7 +154,9 @@ class QuotePreviewBar extends StatelessWidget {
       case FaceMessagePayload _:
         return locale.messageTypeSticker;
       case CustomMessagePayload p:
-        return p.description ?? locale.messageTypeCustom;
+        return BigFileMessage.tryParse(p.customData)?.name ??
+            p.description ??
+            locale.messageTypeCustom;
       case MergedMessagePayload p:
         return p.title.isNotEmpty ? p.title : locale.messageTypeMerged;
       default:

@@ -1,3 +1,5 @@
+import 'chat_media_sender.dart';
+import '../message_list/utils/big_file_message.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:app_core/app_core.dart';
@@ -225,11 +227,14 @@ class MessageInputState extends State<MessageInput>
     _textEditingFocusNode.addListener(_onFocusChanged);
     _loadDraft();
     _extractGroupID();
-    _localSendSubscription = notificationCenter.addListener<MessageSendEventData>(
+    _localSendSubscription =
+        notificationCenter.addListener<MessageSendEventData>(
       MessageSendNotifyKey.messageSendSuccess,
       (event) {
         final message = event.message;
-        if (mounted && event.conversationID == widget.conversationID && message is MessageInfo) {
+        if (mounted &&
+            event.conversationID == widget.conversationID &&
+            message is MessageInfo) {
           widget.onLocalMessageSent?.call(message);
         }
       },
@@ -262,8 +267,7 @@ class MessageInputState extends State<MessageInput>
       );
     } else {
       final existing = _buildInlineRichContentDraft();
-      final incoming =
-          rich ??
+      final incoming = rich ??
           RichContentDraft(
             blocks: [RichContentDraftTextBlock(0, recalled.text!)],
           );
@@ -279,11 +283,11 @@ class MessageInputState extends State<MessageInput>
         blocks.add(switch (block) {
           RichContentDraftTextBlock b => RichContentDraftTextBlock(i, b.text),
           RichContentDraftAttachmentBlock b => RichContentDraftAttachmentBlock(
-            i,
-            attachment: b.attachment,
-            remoteUrl: b.remoteUrl,
-            status: b.status,
-          ),
+              i,
+              attachment: b.attachment,
+              remoteUrl: b.remoteUrl,
+              status: b.status,
+            ),
         });
       }
       _inlineRichContentEnabled = true;
@@ -1182,6 +1186,7 @@ class MessageInputState extends State<MessageInput>
     return AlbumPickerLanguage.system;
   }
 
+  /// 所有独立消息在此组合引用与推送选项，再交给宿主统一分流媒体。
   Future<CompletionHandler> _sendMessage(MessageInfo messageInfo) async {
     final payload = _convertToSendPayload(messageInfo.messagePayload);
     if (payload == null) {
@@ -1211,7 +1216,14 @@ class MessageInputState extends State<MessageInput>
       offlinePushInfo: _createOfflinePushInfo(messageInfo),
     );
 
-    final result = await _messageInputStore.sendMessage(
+    final result = await sendChatMedia(
+      message: messageInfo,
+      conversationID: widget.conversationID,
+      sender: widget.config.mediaSender,
+      onRetryFailure: () {
+        if (mounted) Toast.error(context, atomicLocale.sendMessageFail);
+      },
+      store: _messageInputStore,
       payload: payload,
       option: option,
     );
@@ -1382,8 +1394,9 @@ class MessageInputState extends State<MessageInput>
       case MessageType.custom:
         final customData =
             (message.messagePayload as CustomMessagePayload?)?.customData;
-        content =
-            RichContentMessage.tryParse(customData)?.plainTextPreview ?? '';
+        content = BigFileMessage.tryParse(customData) != null
+            ? atomicLocale.messageTypeFile
+            : RichContentMessage.tryParse(customData)?.plainTextPreview ?? '';
         break;
       default:
         content = '';
@@ -1456,26 +1469,36 @@ class MessageInputState extends State<MessageInput>
       await _richContentEditorKey.currentState?.pickFiles();
       return;
     }
+    final selector = widget.config.fileSelector;
+    if (selector != null) {
+      final messages = await selector(context);
+      // 选择页一次返回多份附件，每份独立发送并保留顺序。
+      for (final message in messages) {
+        if (!mounted) return;
+        await _sendMessage(message);
+      }
+      return;
+    }
     List<PickerResult> filePickerResults = await FilePicker.pickFiles(
       context: context,
-      config: FilePickerConfig(maxCount: 1),
+      config: FilePickerConfig(maxCount: 10),
     );
 
     if (filePickerResults.isNotEmpty) {
-      final filePickerResult = filePickerResults.first;
-
-      final messageInfo = MessageInfo();
-      messageInfo.messageType = MessageType.file;
-      messageInfo.messagePayload = FileMessagePayload(
-        filePath: filePickerResult.filePath,
-        fileName: filePickerResult.fileName,
-        fileSize: filePickerResult.fileSize,
-      );
-      final result = await _sendMessage(messageInfo);
-      if (!result.isSuccess) {
-        debugPrint(
-          "_onPickFile, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}",
+      for (final filePickerResult in filePickerResults) {
+        final messageInfo = MessageInfo();
+        messageInfo.messageType = MessageType.file;
+        messageInfo.messagePayload = FileMessagePayload(
+          filePath: filePickerResult.filePath,
+          fileName: filePickerResult.fileName,
+          fileSize: filePickerResult.fileSize,
         );
+        final result = await _sendMessage(messageInfo);
+        if (!result.isSuccess) {
+          debugPrint(
+            "_onPickFile, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}",
+          );
+        }
       }
     }
   }
