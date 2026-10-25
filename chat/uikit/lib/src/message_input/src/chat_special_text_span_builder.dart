@@ -225,7 +225,7 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
         TextSpan(
           text: code,
           style: (baseStyle ?? const TextStyle()).copyWith(
-            fontFamily: 'monospace',
+            // 代码块沿用宿主字体，避免输入与普通消息使用不同字族。
             backgroundColor: colorScheme.bgColorInput,
           ),
         ),

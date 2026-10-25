@@ -20,7 +20,8 @@ class RichContentMarkdown extends StatelessWidget {
       p: textStyle,
       pPadding: EdgeInsets.zero,
       blockquote: textStyle,
-      code: textStyle.copyWith(fontFamily: 'monospace'),
+      // 代码块保留背景与排版，字体与消息正文一致。
+      code: textStyle,
       a: textStyle.copyWith(decoration: TextDecoration.underline),
       blockSpacing: 4,
     );

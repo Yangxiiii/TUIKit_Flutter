@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -139,84 +140,54 @@ class SemanticFontScheme {
   });
 }
 
+/// 为SDK文字保留原有字号与字重，并统一使用宿主打包字体。
 class _Fonts {
+  static TextStyle _style(double size, FontWeight weight) => TextStyle(
+        fontSize: _scaled(size),
+        fontWeight: weight,
+        fontFamily: AppThemeFactory.fontFamily,
+      );
   // All font sizes below pass through [_scaled] so iOS gets the
   // _kIosFontScale bump while other platforms keep the design value.
   // Because [_scaled] reads `defaultTargetPlatform` at call time these
   // can't be `const`; `static final` is the right shape — initialised
   // once per process when the class is first touched.
-  static final TextStyle bold40 =
-      TextStyle(fontSize: _scaled(40), fontWeight: FontWeight.bold);
-  static final TextStyle bold36 =
-      TextStyle(fontSize: _scaled(36), fontWeight: FontWeight.bold);
-  static final TextStyle bold34 =
-      TextStyle(fontSize: _scaled(34), fontWeight: FontWeight.bold);
-  static final TextStyle bold32 =
-      TextStyle(fontSize: _scaled(32), fontWeight: FontWeight.bold);
-  static final TextStyle bold28 =
-      TextStyle(fontSize: _scaled(28), fontWeight: FontWeight.bold);
-  static final TextStyle bold24 =
-      TextStyle(fontSize: _scaled(24), fontWeight: FontWeight.bold);
-  static final TextStyle bold20 =
-      TextStyle(fontSize: _scaled(20), fontWeight: FontWeight.bold);
-  static final TextStyle bold18 =
-      TextStyle(fontSize: _scaled(18), fontWeight: FontWeight.bold);
-  static final TextStyle bold16 =
-      TextStyle(fontSize: _scaled(16), fontWeight: FontWeight.bold);
-  static final TextStyle bold14 =
-      TextStyle(fontSize: _scaled(14), fontWeight: FontWeight.bold);
-  static final TextStyle bold12 =
-      TextStyle(fontSize: _scaled(12), fontWeight: FontWeight.bold);
-  static final TextStyle bold10 =
-      TextStyle(fontSize: _scaled(10), fontWeight: FontWeight.bold);
+  static final TextStyle bold40 = _style(40, FontWeight.bold);
+  static final TextStyle bold36 = _style(36, FontWeight.bold);
+  static final TextStyle bold34 = _style(34, FontWeight.bold);
+  static final TextStyle bold32 = _style(32, FontWeight.bold);
+  static final TextStyle bold28 = _style(28, FontWeight.bold);
+  static final TextStyle bold24 = _style(24, FontWeight.bold);
+  static final TextStyle bold20 = _style(20, FontWeight.bold);
+  static final TextStyle bold18 = _style(18, FontWeight.bold);
+  static final TextStyle bold16 = _style(16, FontWeight.bold);
+  static final TextStyle bold14 = _style(14, FontWeight.bold);
+  static final TextStyle bold12 = _style(12, FontWeight.bold);
+  static final TextStyle bold10 = _style(10, FontWeight.bold);
 
-  static final TextStyle medium40 =
-      TextStyle(fontSize: _scaled(40), fontWeight: FontWeight.w500);
-  static final TextStyle medium36 =
-      TextStyle(fontSize: _scaled(36), fontWeight: FontWeight.w500);
-  static final TextStyle medium34 =
-      TextStyle(fontSize: _scaled(34), fontWeight: FontWeight.w500);
-  static final TextStyle medium32 =
-      TextStyle(fontSize: _scaled(32), fontWeight: FontWeight.w500);
-  static final TextStyle medium28 =
-      TextStyle(fontSize: _scaled(28), fontWeight: FontWeight.w500);
-  static final TextStyle medium24 =
-      TextStyle(fontSize: _scaled(24), fontWeight: FontWeight.w500);
-  static final TextStyle medium20 =
-      TextStyle(fontSize: _scaled(20), fontWeight: FontWeight.w500);
-  static final TextStyle medium18 =
-      TextStyle(fontSize: _scaled(18), fontWeight: FontWeight.w500);
-  static final TextStyle medium16 =
-      TextStyle(fontSize: _scaled(16), fontWeight: FontWeight.w500);
-  static final TextStyle medium14 =
-      TextStyle(fontSize: _scaled(14), fontWeight: FontWeight.w500);
-  static final TextStyle medium12 =
-      TextStyle(fontSize: _scaled(12), fontWeight: FontWeight.w500);
-  static final TextStyle medium10 =
-      TextStyle(fontSize: _scaled(10), fontWeight: FontWeight.w500);
+  static final TextStyle medium40 = _style(40, FontWeight.w500);
+  static final TextStyle medium36 = _style(36, FontWeight.w500);
+  static final TextStyle medium34 = _style(34, FontWeight.w500);
+  static final TextStyle medium32 = _style(32, FontWeight.w500);
+  static final TextStyle medium28 = _style(28, FontWeight.w500);
+  static final TextStyle medium24 = _style(24, FontWeight.w500);
+  static final TextStyle medium20 = _style(20, FontWeight.w500);
+  static final TextStyle medium18 = _style(18, FontWeight.w500);
+  static final TextStyle medium16 = _style(16, FontWeight.w500);
+  static final TextStyle medium14 = _style(14, FontWeight.w500);
+  static final TextStyle medium12 = _style(12, FontWeight.w500);
+  static final TextStyle medium10 = _style(10, FontWeight.w500);
 
-  static final TextStyle regular40 =
-      TextStyle(fontSize: _scaled(40), fontWeight: FontWeight.normal);
-  static final TextStyle regular36 =
-      TextStyle(fontSize: _scaled(36), fontWeight: FontWeight.normal);
-  static final TextStyle regular34 =
-      TextStyle(fontSize: _scaled(34), fontWeight: FontWeight.normal);
-  static final TextStyle regular32 =
-      TextStyle(fontSize: _scaled(32), fontWeight: FontWeight.normal);
-  static final TextStyle regular28 =
-      TextStyle(fontSize: _scaled(28), fontWeight: FontWeight.normal);
-  static final TextStyle regular24 =
-      TextStyle(fontSize: _scaled(24), fontWeight: FontWeight.normal);
-  static final TextStyle regular20 =
-      TextStyle(fontSize: _scaled(20), fontWeight: FontWeight.normal);
-  static final TextStyle regular18 =
-      TextStyle(fontSize: _scaled(18), fontWeight: FontWeight.normal);
-  static final TextStyle regular16 =
-      TextStyle(fontSize: _scaled(16), fontWeight: FontWeight.normal);
-  static final TextStyle regular14 =
-      TextStyle(fontSize: _scaled(14), fontWeight: FontWeight.normal);
-  static final TextStyle regular12 =
-      TextStyle(fontSize: _scaled(12), fontWeight: FontWeight.normal);
-  static final TextStyle regular10 =
-      TextStyle(fontSize: _scaled(10), fontWeight: FontWeight.normal);
+  static final TextStyle regular40 = _style(40, FontWeight.normal);
+  static final TextStyle regular36 = _style(36, FontWeight.normal);
+  static final TextStyle regular34 = _style(34, FontWeight.normal);
+  static final TextStyle regular32 = _style(32, FontWeight.normal);
+  static final TextStyle regular28 = _style(28, FontWeight.normal);
+  static final TextStyle regular24 = _style(24, FontWeight.normal);
+  static final TextStyle regular20 = _style(20, FontWeight.normal);
+  static final TextStyle regular18 = _style(18, FontWeight.normal);
+  static final TextStyle regular16 = _style(16, FontWeight.normal);
+  static final TextStyle regular14 = _style(14, FontWeight.normal);
+  static final TextStyle regular12 = _style(12, FontWeight.normal);
+  static final TextStyle regular10 = _style(10, FontWeight.normal);
 }

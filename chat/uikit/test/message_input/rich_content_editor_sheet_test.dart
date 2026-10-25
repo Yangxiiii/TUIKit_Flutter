@@ -836,7 +836,10 @@ void main() {
               colorScheme: SemanticColorScheme.of(context),
             ).build(
               '**粗体** ~~删除~~ *斜体* ~下划线~ [链接](https://example.com) ```code```',
-              textStyle: const TextStyle(fontSize: 16),
+              textStyle: const TextStyle(
+                fontSize: 16,
+                fontFamily: AppThemeFactory.fontFamily,
+              ),
             );
             return const SizedBox.shrink();
           },
@@ -867,7 +870,7 @@ void main() {
     );
     expect(
       spans.singleWhere((span) => span.text == 'code').style?.fontFamily,
-      'monospace',
+      AppThemeFactory.fontFamily,
     );
   });
 
