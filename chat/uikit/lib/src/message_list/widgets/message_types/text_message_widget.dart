@@ -7,6 +7,7 @@ import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../message_actions_scope.dart';
 
 typedef BackgroundBuilder = Widget Function(Widget child);
 
@@ -131,24 +132,43 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
     );
   }
 
+  /// 保留正文的链接及表情解析，仅在SDK附加数据已确认编辑后追加展示标签。
   Widget _buildTextContent(SemanticColorScheme colorsTheme) {
     final text =
         (widget.message.messagePayload as TextMessagePayload?)?.text ?? '';
 
-    return ExtendedText(
-      _getContentSpan(text, colorsTheme),
-      specialTextSpanBuilder: ChatSpecialTextSpanBuilder(
-        colorScheme: colorsTheme,
-        onTapUrl: _launchUrl,
-        showAtBackground: true,
-      ),
-      style: FontScheme.caption1Regular.copyWith(
-        height: 1.5,
-        color: widget.isSelf
-            ? colorsTheme.textColorAntiPrimary
-            : colorsTheme.textColorPrimary,
-      ),
+    final edited = MessageActionsScope.maybeOf(context)
+            ?.config
+            .editedMessageIds
+            .contains(widget.message.msgID) ??
+        false;
+    // 编辑标识仅是展示文本，复制、引用和SDK正文仍使用原messagePayload。
+    final style = FontScheme.caption1Regular.copyWith(
+      height: 1.5,
+      color: widget.isSelf
+          ? colorsTheme.textColorAntiPrimary
+          : colorsTheme.textColorPrimary,
     );
+    final builder = ChatSpecialTextSpanBuilder(
+      colorScheme: colorsTheme,
+      onTapUrl: _launchUrl,
+      showAtBackground: true,
+    );
+    final content = _getContentSpan(text, colorsTheme);
+    if (!edited) {
+      return ExtendedText(content,
+          specialTextSpanBuilder: builder, style: style);
+    }
+    // 此版本ExtendedText.rich不能同时使用specialTextSpanBuilder，先构建正文再附加标签。
+    return ExtendedText.rich(
+        TextSpan(children: [
+          builder.build(content, textStyle: style),
+          TextSpan(
+              text: ' (已编辑)',
+              style: TextStyle(
+                  fontSize: 12, color: colorsTheme.textColorSecondary)),
+        ]),
+        style: style);
   }
 
   void _launchUrl(String url) async {

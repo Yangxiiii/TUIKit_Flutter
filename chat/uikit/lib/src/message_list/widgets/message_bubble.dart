@@ -17,6 +17,7 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/forward/forward_serv
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_read_receipt_view.dart';
 
 import 'message_tooltip.dart';
+import 'message_actions_scope.dart';
 import 'quote_message_preview.dart';
 import 'message_types/call_message_widget.dart';
 import 'message_types/file_message_widget.dart';
@@ -194,6 +195,7 @@ class MessageBubble extends StatefulWidget {
 /// 管理消息气泡的高亮动画与菜单生命周期，并渲染对应消息类型。
 class _MessageBubbleState extends State<MessageBubble>
     with SingleTickerProviderStateMixin {
+  /// 当前消息及列表模式的菜单回调，保留气泡状态时仍随Widget更新替换。
   late MessageMenuCallbacks _menuCallbacks;
   final GlobalKey _messageKey = GlobalKey();
   SuperTooltip? tooltip;
@@ -205,14 +207,7 @@ class _MessageBubbleState extends State<MessageBubble>
   @override
   void initState() {
     super.initState();
-    _menuCallbacks = widget.menuCallbacks ??
-        DefaultMessageMenuCallbacks(
-          context: context,
-          messageListStore: widget.messageListStore,
-          messageActionStore: MessageActionStore.create(widget.message),
-          conversationID: widget.conversationID,
-          config: widget.config,
-        );
+    _menuCallbacks = _resolveMenuCallbacks();
 
     _highlightAnimationController = AnimationController(
       vsync: this,
@@ -242,11 +237,24 @@ class _MessageBubbleState extends State<MessageBubble>
   @override
   void didUpdateWidget(MessageBubble oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // 模式切换保留气泡状态后，菜单仍需使用当前消息和当前列表提供的业务回调。
+    _menuCallbacks = _resolveMenuCallbacks();
 
     if (widget.isHighlighted && !_highlightAnimationController.isAnimating) {
       _highlightAnimationController.forward(from: 0.0);
     }
   }
+
+  /// 菜单回调随消息或列表模式更新；未由宿主提供时沿用SDK默认操作。
+  MessageMenuCallbacks _resolveMenuCallbacks() =>
+      widget.menuCallbacks ??
+      DefaultMessageMenuCallbacks(
+        context: context,
+        messageListStore: widget.messageListStore,
+        messageActionStore: MessageActionStore.create(widget.message),
+        conversationID: widget.conversationID,
+        config: widget.config,
+      );
 
   @override
   void dispose() {
@@ -701,7 +709,20 @@ class _MessageBubbleState extends State<MessageBubble>
         peak;
   }
 
+  /// 宿主启用编辑后使用底部操作面板，其余场景继续使用既有菜单。
   void _onOpenToolTip() {
+    final scope = MessageActionsScope.maybeOf(context);
+    if (scope != null) {
+      scope.showActions(
+          widget.message,
+          _messageKey,
+          _buildMenuItems(),
+          widget.config.isSupportReaction &&
+                  widget.message.status != MessageStatus.violation
+              ? _handleReactionSelected
+              : null);
+      return;
+    }
     if (tooltip != null && tooltip!.isOpen) {
       tooltip!.close();
       return;
@@ -1255,6 +1276,7 @@ class _MessageBubbleState extends State<MessageBubble>
     if (widget.config.isSupportMultiSelect) {
       items.add(MessageMenuItem(
         title: _getMultiSelectText(),
+        id: 'multiSelect',
         assetName: 'chat_assets/icon/multi_select.svg',
         package: 'tencent_chat_uikit',
         icon: Icons.checklist,
@@ -1274,6 +1296,7 @@ class _MessageBubbleState extends State<MessageBubble>
       if (isSentSuccess && isNotViolation) {
         items.add(MessageMenuItem(
           title: atomicLocal.forward,
+          id: 'forward',
           assetName: 'chat_assets/icon/forward.svg',
           package: 'tencent_chat_uikit',
           icon: Icons.shortcut,
@@ -1291,6 +1314,7 @@ class _MessageBubbleState extends State<MessageBubble>
       if (isSentSuccess && isNotViolation) {
         items.add(MessageMenuItem(
           title: atomicLocal.quote,
+          id: 'reply',
           assetName: 'chat_assets/icon/quote.svg',
           package: 'tencent_chat_uikit',
           icon: Icons.format_quote,
@@ -1308,6 +1332,7 @@ class _MessageBubbleState extends State<MessageBubble>
         widget.message.status != MessageStatus.violation) {
       items.add(MessageMenuItem(
         title: atomicLocal.copy,
+        id: 'copy',
         assetName: 'chat_assets/icon/copy.svg',
         package: 'tencent_chat_uikit',
         icon: Icons.copy,
@@ -1331,6 +1356,7 @@ class _MessageBubbleState extends State<MessageBubble>
       if (isWithin2Minutes && isSentSuccess && isNotViolation) {
         items.add(MessageMenuItem(
           title: atomicLocal.recall,
+          id: 'recall',
           assetName: 'chat_assets/icon/revoke.svg',
           package: 'tencent_chat_uikit',
           icon: Icons.undo,
@@ -1345,6 +1371,7 @@ class _MessageBubbleState extends State<MessageBubble>
     if (widget.config.isSupportDelete) {
       items.add(MessageMenuItem(
         title: atomicLocal.delete,
+        id: 'delete',
         assetName: 'chat_assets/icon/delete.svg',
         package: 'tencent_chat_uikit',
         icon: Icons.delete_outline,

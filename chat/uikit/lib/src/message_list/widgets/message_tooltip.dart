@@ -7,16 +7,26 @@ import 'package:flutter_svg/svg.dart';
 import 'package:tencent_chat_uikit/src/emoji_picker/emoji_picker_model.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/reaction_emoji_picker.dart';
 
+/// 统一承载消息操作及稳定动作标识，既有浮动菜单和底部面板共享同一业务回调。
 class MessageMenuItem {
+  /// 用于底部面板分组和自动化定位，未知扩展操作可留空。
+  final String? id;
+  /// 操作在菜单中显示的文案。
   final String title;
+  /// 字体图标或既有资源加载失败时使用的图标。
   final IconData? icon;
+  /// 既有第三方菜单资源路径，底部新面板使用AppIcons。
   final String? assetName;
+  /// 资源所属包，避免相对宿主查找第三方资源。
   final String? package;
+  /// 面板关闭后执行的原有业务回调。
   final VoidCallback onTap;
+  /// 是否使用危险操作样式，不改变对应操作的权限。
   final bool isDestructive;
 
   const MessageMenuItem({
     required this.title,
+    this.id,
     this.icon,
     this.assetName,
     this.package,

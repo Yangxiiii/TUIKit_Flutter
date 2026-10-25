@@ -6,6 +6,8 @@ import 'package:flutter/cupertino.dart';
 
 import 'package:flutter/material.dart' hide AlertDialog;
 import 'package:flutter/services.dart';
+import 'widgets/message_actions_scope.dart';
+import 'widgets/message_overlay_avoider.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_list/message_list_config.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/at_mention_utils.dart';
@@ -153,7 +155,11 @@ class MessageList extends StatefulWidget {
   /// 进入聊天时从 ConversationInfo 获取的初始未读计数
   final int initialUnreadCount;
 
+  /// 浮层仅改变列表绘制位置，逻辑分页和离开会话时的锚点保持原值。
+  final MessageOverlayController? overlayController;
+
   const MessageList({
+    this.overlayController,
     super.key,
     required this.conversationID,
     this.config = const ChatMessageListConfig(),
@@ -369,10 +375,10 @@ class _MessageListState extends State<MessageList>
   // 阈值：当接近最旧消息的这么多项目时自动加载旧消息
   static const int _loadOlderMessagesThreshold = 5;
 
-  // Multi-select mode state
-  //
-  // 多选模式状态
+  /// 显式点击多选操作后进入的列表模式；进入模式不等于勾选消息。
   bool _isMultiSelectMode = false;
+
+  /// 本次由用户逐条勾选的消息标识，每次进入或退出多选都清空。
   final Set<String> _selectedMessageIDs = {};
 
   // Tongue (小舌头) state
@@ -478,6 +484,7 @@ class _MessageListState extends State<MessageList>
     _messageEventSubscription =
         _messageListStore.messageEventStream.listen(_onMessageEvent);
     _itemPositionsListener.itemPositions.addListener(_scrollListenerCallback);
+    _notifyEditWindow();
 
     if (widget.conversationID.startsWith(groupConversationIDPrefix)) {
       // Initial pull for call banner; subsequent attribute pushes arrive via
@@ -786,6 +793,7 @@ class _MessageListState extends State<MessageList>
   }
 
   void _onMessageListStateChanged() {
+    _notifyEditWindow();
     final state = _messageListStore.state;
 
     debugPrint('messageList, _onMessageListStateChanged, '
@@ -1200,6 +1208,14 @@ class _MessageListState extends State<MessageList>
     });
   }
 
+  /// 本帧消息窗口更新结束后再通知宿主，缓存首帧与SDK分页共用同一路径。
+  void _notifyEditWindow() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      MessageActionsScope.maybeOf(context)?.onMessagesChanged(_messages);
+    });
+  }
+
   String _getMessageKey(MessageInfo message) {
     return '${message.msgID}-${message.timestamp}';
   }
@@ -1276,8 +1292,7 @@ class _MessageListState extends State<MessageList>
             isMultiSelectMode: _isMultiSelectMode,
             isSelected: isMessageSelected(message),
             onToggleSelection: () => toggleMessageSelection(message),
-            onEnterMultiSelectMode: () =>
-                enterMultiSelectMode(initialMessage: message),
+            onEnterMultiSelectMode: enterMultiSelectMode,
             asrDisplayManager: _asrDisplayManager,
             onAsrBubbleLongPress: _showAsrTextMenu,
             translationDisplayManager: _translationDisplayManager,
@@ -1333,92 +1348,96 @@ class _MessageListState extends State<MessageList>
     final colorsTheme = SemanticColorScheme.of(context);
 
     return Expanded(
-      child: Container(
-        color: colorsTheme.bgColorOperate,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: Align(
-                alignment: Alignment.topCenter,
-                child: Container(
-                  padding: EdgeInsets.only(
-                    left: 16,
-                    right: 16,
-                    top: _callStatusWidget != null ? 70 : 16,
-                    bottom: 8,
+      child: MessageOverlayAvoider(
+        controller: widget.overlayController,
+        child: Container(
+          color: colorsTheme.bgColorOperate,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: Container(
+                    padding: EdgeInsets.only(
+                      left: 16,
+                      right: 16,
+                      top: _callStatusWidget != null ? 70 : 16,
+                      bottom: 8,
+                    ),
+                    // 缓存会话会在 initState 直接就绪；无缓存时等待首批消息和目标索引同时准备完成。
+                    child: !_isInitialViewportReady
+                        ? const SizedBox.shrink()
+                        : ScrollablePositionedList.builder(
+                            reverse: true,
+                            // 短会话由外层顶部对齐；内容超出视口时仍保留反向分页与最新端锚点。
+                            shrinkWrap: true,
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            itemScrollController: _itemScrollController,
+                            itemPositionsListener: _itemPositionsListener,
+                            initialScrollIndex: _initialScrollIndex,
+                            initialAlignment: _initialScrollAlignment,
+                            itemCount: _messages.length,
+                            itemBuilder: _renderItem,
+                            addRepaintBoundaries: true,
+                            addAutomaticKeepAlives: true,
+                            addSemanticIndexes: false,
+                          ),
                   ),
-                  // 缓存会话会在 initState 直接就绪；无缓存时等待首批消息和目标索引同时准备完成。
-                  child: !_isInitialViewportReady
-                      ? const SizedBox.shrink()
-                      : ScrollablePositionedList.builder(
-                          reverse: true,
-                          // 短会话由外层顶部对齐；内容超出视口时仍保留反向分页与最新端锚点。
-                          shrinkWrap: true,
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          itemScrollController: _itemScrollController,
-                          itemPositionsListener: _itemPositionsListener,
-                          initialScrollIndex: _initialScrollIndex,
-                          initialAlignment: _initialScrollAlignment,
-                          itemCount: _messages.length,
-                          itemBuilder: _renderItem,
-                          addRepaintBoundaries: true,
-                          addAutomaticKeepAlives: true,
-                          addSemanticIndexes: false,
-                        ),
                 ),
               ),
-            ),
-            if (_callStatusWidget != null)
-              Positioned(
-                top: 8,
-                left: 8,
-                right: 8,
-                child: _callStatusWidget!,
-              ),
-            // Top-right unread messages tongue
-            //
-            // 右上角未读消息标签
-            if (widget.config.isSupportTongue &&
-                _unreadTongueType == TongueType.unreadMessages)
-              Positioned(
-                top: _callStatusWidget != null ? 78 : 16,
-                right: 16,
-                child: MessageTongueWidget(
-                  tongueState: TongueState(
-                    type: TongueType.unreadMessages,
-                    unreadCount: _unreadTongueCount,
-                    isLoading: _navigationState is _NavToUnread,
-                  ),
-                  onTap: _onUnreadTongueTap,
-                  backToLatestText: _atomicLocale.backToLatest,
-                  newMessageCountText: (count) =>
-                      _atomicLocale.newMessageCount(count),
+              if (_callStatusWidget != null)
+                Positioned(
+                  top: 8,
+                  left: 8,
+                  right: 8,
+                  child: _callStatusWidget!,
                 ),
-              ),
-            // Bottom-right tongue (back to latest / new messages / @mention)
-            //
-            // 右下角气泡（返回到最新/新的消息/@提及）
-            if (widget.config.isSupportTongue && _tongueType != TongueType.none)
-              Positioned(
-                bottom: 16,
-                right: 16,
-                child: MessageTongueWidget(
-                  tongueState: TongueState(
-                    type: _tongueType,
-                    newMessageCount: _newMessageCount,
-                    atMentionText: _atMentionText,
-                    atMessageSeq: _atMessageSeq,
-                    isLoading: _navigationState is _NavToAtMention ||
-                        _navigationState is _NavReloadingLatest,
+              // Top-right unread messages tongue
+              //
+              // 右上角未读消息标签
+              if (widget.config.isSupportTongue &&
+                  _unreadTongueType == TongueType.unreadMessages)
+                Positioned(
+                  top: _callStatusWidget != null ? 78 : 16,
+                  right: 16,
+                  child: MessageTongueWidget(
+                    tongueState: TongueState(
+                      type: TongueType.unreadMessages,
+                      unreadCount: _unreadTongueCount,
+                      isLoading: _navigationState is _NavToUnread,
+                    ),
+                    onTap: _onUnreadTongueTap,
+                    backToLatestText: _atomicLocale.backToLatest,
+                    newMessageCountText: (count) =>
+                        _atomicLocale.newMessageCount(count),
                   ),
-                  onTap: _onTongueTap,
-                  backToLatestText: _atomicLocale.backToLatest,
-                  newMessageCountText: (count) =>
-                      _atomicLocale.newMessageCount(count),
-                  backToQuoteText: _atomicLocale.backToQuotePosition,
                 ),
-              ),
-          ],
+              // Bottom-right tongue (back to latest / new messages / @mention)
+              //
+              // 右下角气泡（返回到最新/新的消息/@提及）
+              if (widget.config.isSupportTongue &&
+                  _tongueType != TongueType.none)
+                Positioned(
+                  bottom: 16,
+                  right: 16,
+                  child: MessageTongueWidget(
+                    tongueState: TongueState(
+                      type: _tongueType,
+                      newMessageCount: _newMessageCount,
+                      atMentionText: _atMentionText,
+                      atMessageSeq: _atMessageSeq,
+                      isLoading: _navigationState is _NavToAtMention ||
+                          _navigationState is _NavReloadingLatest,
+                    ),
+                    onTap: _onTongueTap,
+                    backToLatestText: _atomicLocale.backToLatest,
+                    newMessageCountText: (count) =>
+                        _atomicLocale.newMessageCount(count),
+                    backToQuoteText: _atomicLocale.backToQuotePosition,
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -2242,16 +2261,11 @@ class _MessageListState extends State<MessageList>
   //
   // ==================== 多选模式 ====================
 
-  /// Enter multi-select mode
-  ///
-  /// 进入多选模式
-  void enterMultiSelectMode({MessageInfo? initialMessage}) {
+  /// 以零条选择进入多选模式，只有用户后续点击消息才改变选中集合。
+  void enterMultiSelectMode() {
     setState(() {
       _isMultiSelectMode = true;
       _selectedMessageIDs.clear();
-      if (initialMessage != null && initialMessage.msgID != null) {
-        _selectedMessageIDs.add(initialMessage.msgID!);
-      }
     });
     _notifyMultiSelectModeChanged();
   }

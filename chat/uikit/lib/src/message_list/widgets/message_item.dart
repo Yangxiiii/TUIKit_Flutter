@@ -14,7 +14,7 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/message_status_mixin
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_read_receipt_view.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_tooltip.dart';
 
-/// 组合消息头像、正文、发送提示与阅读回执，列表负责消息项之间的间距。
+/// 组合消息头像、正文与回执；多选切换保留气泡锚点，消息项间距由列表负责。
 class MessageItem extends StatelessWidget with MessageStatusMixin {
   /// 当前消息、发送状态及阅读回执，状态标记和正文共用此数据。
   final MessageInfo message;
@@ -56,12 +56,16 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   /// 宿主指定的布局、头像、气泡和回执能力。
   final MessageListConfigProtocol config;
 
-  // Multi-select mode related
-  //
-  // 多选模式相关
+  /// 当前列表是否处于多选，仅改变复选框和点击行为，不重建消息气泡。
   final bool isMultiSelectMode;
+
+  /// 当前消息是否被显式选中，不由长按自动设置。
   final bool isSelected;
+
+  /// 多选模式内点击消息切换选中状态。
   final VoidCallback? onToggleSelection;
+
+  /// 仅由操作面板中的“多选”动作调用，长按本身不调用此入口。
   final VoidCallback? onEnterMultiSelectMode;
 
   // Merged detail view mode - disables long press menu and read receipt
@@ -216,38 +220,26 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
             context, messageBubble, isSelf, avatarURL, senderName);
     }
 
-    // Add checkbox in multi-select mode
-    //
-    // 在多选模式下添加复选框
-    if (isMultiSelectMode) {
-      return _buildMultiSelectRow(messageRow, isSelf);
-    }
-
-    return messageRow;
+    // 模式切换保持相同父级结构，防止气泡重建后丢失弹窗避让所用的锚点。
+    return _buildSelectableRow(messageRow);
   }
 
-  /// Build row layout in multi-select mode
-  ///
-  /// 在多选模式下构建行布局
-  Widget _buildMultiSelectRow(Widget messageRow, bool isSelf) {
+  /// 多选只增加复选框及点击行为，正文使用稳定键保留气泡状态和定位锚点。
+  Widget _buildSelectableRow(Widget messageRow) {
     return GestureDetector(
-      onTap: onToggleSelection,
+      onTap: isMultiSelectMode ? onToggleSelection : null,
       behavior: HitTestBehavior.opaque,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // Checkbox always on the left
-          //
-          // 复选框始终在左侧
-          MessageCheckbox(
-            isSelected: isSelected,
-            isEnabled: true,
+          if (isMultiSelectMode) ...[
+            MessageCheckbox(isSelected: isSelected, isEnabled: true),
+            const SizedBox(width: 8),
+          ],
+          Expanded(
+            key: const ValueKey('messageContent'),
+            child: messageRow,
           ),
-          const SizedBox(width: 8),
-          // Message content
-          //
-          // 消息内容
-          Expanded(child: messageRow),
         ],
       ),
     );

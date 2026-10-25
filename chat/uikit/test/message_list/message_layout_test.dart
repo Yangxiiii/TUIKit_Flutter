@@ -1,3 +1,6 @@
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:tencent_chat_uikit/src/message_list/widgets/message_action_sheet.dart';
+import 'package:tencent_chat_uikit/src/message_input/widget/message_edit_composer.dart';
 import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
@@ -21,6 +24,124 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/text_m
 import 'package:tencent_chat_uikit/src/third_party/extended_text/extended_text.dart';
 
 void main() {
+  testWidgets('长按和松手只打开操作面板，点击多选才进入多选', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    TencentImSDKPlugin.v2TIMManager = _Sdk('/single');
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    await tester.pumpWidget(MaterialApp(
+      theme: AppThemeFactory.create(
+          const AppNormalColorScheme(), Brightness.light),
+      home: ChatPage(
+        conversation: ConversationInfo(
+            conversationID: 'c2c_visual', type: ConversationType.c2c),
+        messageEditConfig: ChatMessageEditConfig(
+          canEdit: (_) => true,
+          prepare: (_) async => (text: 'original', error: null),
+          save: (id, text) async => null,
+          onMessageWindowChanged: (_) {},
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    final bubble = find.byType(TextMessageWidget).first;
+    final bubbleState = tester.state(find.byType(MessageBubble).first);
+    // 保持长按再松手，两阶段都只能展示操作面板，不能选中消息。
+    final gesture = await tester.startGesture(tester.getCenter(bubble));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pumpAndSettle();
+    expect(find.byType(MessageActionSheet), findsOneWidget);
+    expect(
+        tester
+            .widgetList<MessageItem>(find.byType(MessageItem))
+            .any((w) => w.isMultiSelectMode),
+        isFalse);
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(find.byType(MessageActionSheet), findsOneWidget);
+    expect(
+        tester
+            .widgetList<MessageItem>(find.byType(MessageItem))
+            .any((w) => w.isMultiSelectMode),
+        isFalse);
+    final multiSelect = find.byWidgetPredicate((w) =>
+        w is Semantics &&
+        w.properties.identifier == 'tim.message.action.multiSelect');
+    // 明确点击面板动作后才允许进入多选，气泡实例和锚点应保持不变。
+    await tester.tap(multiSelect);
+    await tester.pumpAndSettle();
+    expect(find.byType(MessageActionSheet), findsNothing);
+    expect(
+        tester
+            .widgetList<MessageItem>(find.byType(MessageItem))
+            .every((w) => w.isMultiSelectMode),
+        isTrue);
+    expect(find.byType(MessageEditComposer), findsNothing);
+    expect(
+        tester
+            .widgetList<MessageItem>(find.byType(MessageItem))
+            .where((w) => w.isSelected),
+        isEmpty);
+    // 初始零条，只有手动点击复选框才增减选择，不能沿用长按目标。
+    await tester.tap(find.byType(MessageCheckbox).first);
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widgetList<MessageItem>(find.byType(MessageItem))
+            .where((w) => w.isSelected),
+        hasLength(1));
+    await tester.tap(find.byType(MessageCheckbox).first);
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widgetList<MessageItem>(find.byType(MessageItem))
+            .where((w) => w.isSelected),
+        isEmpty);
+    expect(tester.state(find.byType(MessageBubble).first), same(bubbleState));
+    // 已有多选状态不能跟随下一次长按进入操作面板，编辑和多选互斥。
+    await tester.longPress(find.byType(TextMessageWidget).first);
+    await tester.pumpAndSettle();
+    expect(find.byType(MessageActionSheet), findsOneWidget);
+    expect(
+        tester
+            .widgetList<MessageItem>(find.byType(MessageItem))
+            .any((w) => w.isMultiSelectMode),
+        isFalse);
+    await tester.tap(find.byWidgetPredicate((w) =>
+        w is Semantics &&
+        w.properties.identifier == 'tim.message.action.edit'));
+    await tester.pumpAndSettle();
+    expect(find.byType(MessageEditComposer), findsOneWidget);
+    expect(tester.state(find.byType(MessageBubble).first), same(bubbleState));
+    expect(
+        tester
+            .widgetList<MessageItem>(find.byType(MessageItem))
+            .any((w) => w.isMultiSelectMode),
+        isFalse);
+    await tester.tap(find.byWidgetPredicate((w) =>
+        w is Semantics && w.properties.identifier == 'tim.message.editCancel'));
+    // 编辑取消后再用菜单，验证保留的气泡没有继续使用上一模式的旧回调。
+    await tester.pumpAndSettle();
+    await tester.longPress(find.byType(TextMessageWidget).first);
+    await tester.pumpAndSettle();
+    await tester.tap(multiSelect);
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widgetList<MessageItem>(find.byType(MessageItem))
+            .every((w) => w.isMultiSelectMode),
+        isTrue);
+    expect(
+        tester
+            .widgetList<MessageItem>(find.byType(MessageItem))
+            .where((w) => w.isSelected),
+        isEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   for (final type in [TongueType.newMessages, TongueType.unreadMessages]) {
     testWidgets('新消息提示保持44高与同源箭头：${type.name}', (tester) async {
       await tester.pumpWidget(MaterialApp(
