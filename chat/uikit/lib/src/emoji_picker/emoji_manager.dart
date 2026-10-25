@@ -3,7 +3,39 @@ import 'dart:core';
 
 import 'package:flutter/widgets.dart';
 
+import 'emoji_picker_data.dart';
+
+/// 维护聊天表情编码、本地化名称和既有资源的展示映射。
 class EmojiManager {
+  /// 摘要沿用聊天表情原资源；只替换已知编码，未知内容保持原文而不创建占位图。
+  static List<InlineSpan> buildInlineSpans(String text, {double size = 18}) {
+    final spans = <InlineSpan>[];
+    var offset = 0;
+    for (final match in RegExp(r'\[TUIEmoji_[^\]]+\]').allMatches(text)) {
+      if (match.start > offset) {
+        spans.add(TextSpan(text: text.substring(offset, match.start)));
+      }
+      final code = match.group(0)!;
+      final assets =
+          emojiPickerDataDefault.entries.where((entry) => entry.value == code);
+      if (assets.isEmpty) {
+        spans.add(TextSpan(text: code));
+      } else {
+        spans.add(WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Image.asset(assets.first.key,
+              package: 'tencent_chat_uikit',
+              width: size,
+              height: size,
+              semanticLabel: code),
+        ));
+      }
+      offset = match.end;
+    }
+    if (offset < text.length) spans.add(TextSpan(text: text.substring(offset)));
+    return spans;
+  }
+
   static Map<String, String> getEmojiMap(BuildContext context) {
     final atomicLocale = AppLocalization.of(context);
     return {

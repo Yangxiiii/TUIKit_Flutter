@@ -17,6 +17,7 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/forward/forward_serv
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_read_receipt_view.dart';
 
 import 'message_tooltip.dart';
+import '../utils/sticky_message_event.dart';
 import 'message_actions_scope.dart';
 import 'message_recall_scope.dart';
 import 'message_recall_notice.dart';
@@ -63,9 +64,21 @@ class DefaultMessageMenuCallbacks implements MessageMenuCallbacks {
         text: (message.messagePayload as TextMessagePayload?)?.text ?? ""));
   }
 
+  /// 保护置顶操作提示；只有SDK明确删除成功才通知宿主清理原文对应的置顶。
   @override
-  void onDeleteMessage(MessageInfo message) {
-    messageActionStore.delete();
+  void onDeleteMessage(MessageInfo message) async {
+    if (StickyMessageEvent.fromMessage(message) != null) return;
+    final scope = MessageActionsScope.maybeOf(context);
+    try {
+      final result = await messageActionStore.delete();
+      if (result.isSuccess) {
+        scope?.onMessagesDeleted?.call([message.msgID]);
+      } else if (context.mounted) {
+        Toast.error(context, '删除失败，请稍后重试');
+      }
+    } on Object {
+      if (context.mounted) Toast.error(context, '删除失败，请稍后重试');
+    }
   }
 
   /// 宿主接入时先确认并重查SDK；未接入的会话沿用UIKit原动作。
@@ -737,6 +750,8 @@ class _MessageBubbleState extends State<MessageBubble>
 
   /// 宿主启用编辑后使用底部操作面板，其余场景继续使用既有菜单。
   void _onOpenToolTip() {
+    // 操作提示不可删除、撤回或再次置顶，不能进入普通消息菜单。
+    if (StickyMessageEvent.fromMessage(widget.message) != null) return;
     final scope = MessageActionsScope.maybeOf(context);
     if (scope != null) {
       scope.showActions(

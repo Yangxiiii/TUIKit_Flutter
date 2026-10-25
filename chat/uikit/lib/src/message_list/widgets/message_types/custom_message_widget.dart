@@ -1,3 +1,5 @@
+import '../../utils/sticky_message_event.dart';
+import 'package:app_ui/app_ui.dart' as app;
 import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -37,6 +39,16 @@ class CustomMessageWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final event = StickyMessageEvent.fromMessage(message);
+    if (event != null) {
+      if (event.isControl) return const SizedBox.shrink();
+      final colors = app.AppColorBuildContext(context).appColors;
+      // 系统提示只展示姓名和动作，不增加头像、普通气泡或编辑入口。
+      return Center(child: Text.rich(TextSpan(children: [
+        TextSpan(text: event.operatorName, style: TextStyle(color: colors.primary)),
+        TextSpan(text: ' ${event.actionText}', style: TextStyle(color: colors.textSecondary)),
+      ]), textAlign: TextAlign.center, style: const TextStyle(fontSize: 12, height: 19 / 12)));
+    }
     final colors = SemanticColorScheme.of(context);
     final atomicLocale = AppLocalization.of(context);
     final customMessage = (message.messagePayload as CustomMessagePayload?);

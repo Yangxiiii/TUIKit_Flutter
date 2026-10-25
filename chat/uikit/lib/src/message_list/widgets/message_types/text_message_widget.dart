@@ -139,7 +139,7 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
 
     final edited = MessageActionsScope.maybeOf(context)
             ?.config
-            .editedMessageIds
+            ?.editedMessageIds
             .contains(widget.message.msgID) ??
         false;
     // 编辑标识仅是展示文本，复制、引用和SDK正文仍使用原messagePayload。

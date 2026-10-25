@@ -40,6 +40,9 @@ class ChatPage extends StatefulWidget {
   /// 宿主提供的单聊撤回与原设备重新编辑能力；为空时沿用UIKit原行为。
   final ChatMessageRecallConfig? messageRecallConfig;
 
+  /// 宿主提供单聊唯一置顶、横幅及状态变化；群聊不传此配置。
+  final ChatMessageStickyConfig? messageStickyConfig;
+
   /// 是否显示现有会话设置入口，不改变设置页面权限。
   final bool isShowAppBarActions;
 
@@ -55,6 +58,7 @@ class ChatPage extends StatefulWidget {
     this.messageListConfig = const ChatMessageListConfig(),
     this.messageEditConfig,
     this.messageRecallConfig,
+    this.messageStickyConfig,
     this.isShowAppBarActions = true,
   });
 
@@ -74,6 +78,9 @@ class _ChatPageState extends State<ChatPage> {
 
   /// 本次开始时的原文快照，用于判断输入是否发生变化，不随SDK回调覆盖输入。
   String _editingText = '';
+
+  /// 仅记录用户本次定位意图，不另存置顶业务状态。
+  MessageInfo? _stickyLocateMessage;
 
   /// 原列表持有的目标气泡锚点，用于键盘或面板尺寸变化后的实测避让。
   GlobalKey? _editingBubble;
@@ -101,6 +108,10 @@ class _ChatPageState extends State<ChatPage> {
       _messageInputKey.currentState?.collapseAllPanels();
       FocusScope.of(context).unfocus();
       final items = [...original];
+      if (widget.messageStickyConfig != null && StickyMessageEvent.canPin(message)) {
+        items.add(MessageMenuItem(id: 'top', title: '置顶消息', icon: AppIcons.topMessage,
+          onTap: () => unawaited(_pinStickyMessage(message))));
+      }
       if (widget.messageEditConfig?.canEdit(message) ?? false) {
         items.add(MessageMenuItem(
             id: 'edit',
@@ -150,6 +161,21 @@ class _ChatPageState extends State<ChatPage> {
     unawaited(guard == null
         ? open()
         : guard.singleFlight<void>('tim.message.actions', open));
+  }
+
+  /// 防重保护完整反馈过程，重复调用方不能各自展示相同提示。
+  Future<void> _pinStickyMessage(MessageInfo message) async {
+    Future<void> submit() async {
+      final error = await widget.messageStickyConfig?.pin(message);
+      if (mounted && error != null) AppToast.show(error);
+    }
+    final guard = widget.messageInputConfig.actionGuard;
+    if (guard == null) {
+      await submit();
+    } else {
+      await guard.singleFlight<void>(
+          'tim.sticky.ui.${widget.conversation.conversationID}', submit);
+    }
   }
 
   /// SDK校验完成后进入编辑；普通输入保持隐藏挂载，原草稿不会被原文替换。
@@ -466,7 +492,10 @@ class _ChatPageState extends State<ChatPage> {
               overlayController: _overlay,
               conversationID: widget.conversation.conversationID,
               config: widget.messageListConfig,
-              locateMessage: widget.message,
+              locateMessage: _stickyLocateMessage ?? widget.message,
+              localNoticeRevision: widget.messageStickyConfig?.localNoticeRevision ?? 0,
+              onMessagesChanged: widget.messageStickyConfig?.onMessagesChanged,
+              onMessagesDeleted: widget.messageStickyConfig?.onMessagesDeleted,
               onInitialMessagesLoaded: widget.onInitialMessagesLoaded,
               onUserClick: (String userID) => _onUserClick(userID),
               onUserLongPress: (String userID, String displayName) {
@@ -521,6 +550,12 @@ class _ChatPageState extends State<ChatPage> {
           _buildConversation(),
           // 聆听浮层保持原有全屏收起手势；编辑区随后绘制，优先接收编辑交互。
           const Positioned.fill(child: ListenPlaybackBar()),
+          // 置顶横幅覆盖消息列表上部，不挤压原消息窗口和输入区。
+          if (widget.messageStickyConfig case final sticky?)
+            Positioned(left: 8, right: 8, top: 8,
+              child: sticky.bannerBuilder(context, (target) {
+                if (mounted) setState(() => _stickyLocateMessage = target);
+              })),
           // 编辑区独立浮在键盘上方，列表原始布局尺寸不因打开编辑而变化。
           if (_editingMessage != null)
             Positioned(
@@ -552,12 +587,13 @@ class _ChatPageState extends State<ChatPage> {
       child: page,
     );
     final config = widget.messageEditConfig;
-    final editPage = config == null
+    final editPage = config == null && widget.messageStickyConfig == null
         ? guardedPage
         : MessageActionsScope(
             config: config,
             showActions: _showActions,
             onMessagesChanged: _onEditWindowChanged,
+            onMessagesDeleted: widget.messageStickyConfig?.onMessagesDeleted,
             child: guardedPage);
     final recallConfig = widget.messageRecallConfig;
     return recallConfig == null ? editPage : MessageRecallScope(

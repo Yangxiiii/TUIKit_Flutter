@@ -1,5 +1,6 @@
 import 'package:app_ui/app_ui.dart';
 import 'dart:async';
+import 'utils/sticky_message_event.dart';
 
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/cupertino.dart';
@@ -135,6 +136,15 @@ class MessageList extends StatefulWidget {
   final void Function(MessageInfo message)? onQuoteMessage;
   final List<MessageCustomAction> customActions;
 
+  /// 本机提示成功后的修订号；仅触发SDK读取，不添加第二份本地消息。
+  final int localNoticeRevision;
+
+  /// 当前窗口更新后由宿主核查置顶原文；分页不代表删除。
+  final ValueChanged<List<MessageInfo>>? onMessagesChanged;
+
+  /// SDK批量删除成功后向宿主发布明确的删除事实。
+  final ValueChanged<List<String>>? onMessagesDeleted;
+
   /// Multi-select mode change callback
   ///
   /// 多选模式变化回调
@@ -170,6 +180,9 @@ class MessageList extends StatefulWidget {
     this.onCallMessageClick,
     this.onQuoteMessage,
     this.customActions = const [],
+    this.localNoticeRevision = 0,
+    this.onMessagesChanged,
+    this.onMessagesDeleted,
     this.onMultiSelectModeChanged,
     this.onMultiSelectStateChanged,
     this.groupAtInfoList,
@@ -298,6 +311,46 @@ class _MessageListState extends State<MessageList>
 
   static String _viewportKey(String userID, String conversationID) =>
       '$userID\u0000$conversationID';
+
+  /// 横幅定位沿用已有分页和高亮；本机操作提示成功后从SDK读取最新历史。
+  @override
+  void didUpdateWidget(covariant MessageList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(widget.locateMessage, oldWidget.locateMessage)) {
+      unawaited(_updateStickyWindow(widget.locateMessage));
+    } else if (widget.localNoticeRevision != oldWidget.localNoticeRevision) {
+      unawaited(_updateStickyWindow(null));
+    }
+  }
+
+  /// SDK异常不能成为未处理Future；定位或刷新失败保留列表并给出可重试反馈。
+  Future<void> _updateStickyWindow(MessageInfo? target) async {
+    try {
+      if (target == null) {
+        if (!await _loadLatestMessages() && mounted) {
+          Toast.error(context, '消息刷新失败，请稍后重试');
+        }
+      } else if (_messages.any((message) => message.msgID == target.msgID)) {
+        _scrollToMessageAndHighlight(target.msgID);
+      } else {
+        await _loadAndNavigateToMessage(
+          cursorMessage: target,
+          targetMsgID: target.msgID,
+          tongueAfter: TongueType.backToLatest,
+          highlightTarget: true,
+          debugLabel: 'sticky',
+        );
+      }
+    } on Object {
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+          _navigationState = const _NavIdle();
+        });
+        Toast.error(context, '消息加载失败，请稍后重试');
+      }
+    }
+  }
 
   late MessageListStore _messageListStore;
 
@@ -1055,8 +1108,10 @@ class _MessageListState extends State<MessageList>
   void _onMessageEvent(MessageEvent event) {
     switch (event) {
       case OnReceiveNewMessage(:final message):
+        // 静默失效包只驱动宿主查询，不增加历史提示、未读舌标或反应请求。
+        if (StickyMessageEvent.fromMessage(message)?.isControl == true) return;
         debugPrint('messageList, onReceiveNewMessage: ${message.msgID}');
-        _clearUnreadCount();
+        if (StickyMessageEvent.fromMessage(message) == null) _clearUnreadCount();
         final isAtBottom = _isUserAtBottom();
         if (!isLoading && isAtBottom) {
           _scrollToBottom();
@@ -1213,6 +1268,7 @@ class _MessageListState extends State<MessageList>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       MessageActionsScope.maybeOf(context)?.onMessagesChanged(_messages);
+      widget.onMessagesChanged?.call(_messages);
     });
   }
 
@@ -1225,19 +1281,22 @@ class _MessageListState extends State<MessageList>
     if (index >= _messages.length) return Container();
     final message = _messages[index];
 
-    if (!widget.config.isShowSystemMessage && _isSystemMessage(message)) {
+    if (StickyMessageEvent.fromMessage(message)?.isControl == true ||
+        (!widget.config.isShowSystemMessage && _isSystemMessage(message))) {
       return const SizedBox.shrink();
     }
     final colors = SemanticColorScheme.of(context);
 
-    final timeString = _getMessageTimeString(index);
+    final timeString = StickyMessageEvent.fromMessage(message) == null
+      ? _getMessageTimeString(index) : null;
     final shouldShowTime =
         widget.config.isShowTimeMessage && timeString != null;
     // 反向列表中较大的索引更旧；跳过隐藏系统消息后再判断是否为首个可见项。
     var olderIndex = index + 1;
     while (olderIndex < _messages.length &&
-        !widget.config.isShowSystemMessage &&
-        _isSystemMessage(_messages[olderIndex])) {
+        (StickyMessageEvent.fromMessage(_messages[olderIndex])?.isControl == true ||
+            (!widget.config.isShowSystemMessage &&
+                _isSystemMessage(_messages[olderIndex])))) {
       olderIndex++;
     }
     final topSpacing = olderIndex == _messages.length
@@ -2286,6 +2345,8 @@ class _MessageListState extends State<MessageList>
   ///
   /// 切换消息选择状态
   void toggleMessageSelection(MessageInfo message) {
+    // 置顶操作记录不是可编辑内容，多选入口和最终删除边界均须保护。
+    if (StickyMessageEvent.fromMessage(message) != null) return;
     final msgID = message.msgID;
     if (msgID == null) return;
 
@@ -2347,9 +2408,12 @@ class _MessageListState extends State<MessageList>
           text: _atomicLocale.confirm,
           type: TextColorPreset.red,
           onClick: () async {
-            final messagesToDelete = selectedMessages;
-            await _messageListStore.deleteMessages(
+            // 即使旧选择集合保留了操作提示，也不能把它提交给SDK删除。
+            final messagesToDelete = selectedMessages
+              .where((message) => StickyMessageEvent.fromMessage(message) == null).toList();
+            final result = await _messageListStore.deleteMessages(
                 messageList: messagesToDelete);
+            if (result.isSuccess) widget.onMessagesDeleted?.call(messagesToDelete.map((message) => message.msgID).toList());
             exitMultiSelectMode();
           },
         ),
@@ -2469,8 +2533,9 @@ class _MessageListState extends State<MessageList>
     while (prevIndex < _messages.length) {
       final candidate = _messages[prevIndex];
 
-      // If system messages are hidden, skip them when calculating time intervals
-      if (!widget.config.isShowSystemMessage && _isSystemMessage(candidate)) {
+      // 静默控制包始终不可见，不能影响相邻可见消息的时间分组。
+      if (StickyMessageEvent.fromMessage(candidate)?.isControl == true ||
+          (!widget.config.isShowSystemMessage && _isSystemMessage(candidate))) {
         prevIndex++;
         continue;
       }

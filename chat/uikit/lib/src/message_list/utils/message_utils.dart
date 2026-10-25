@@ -1,3 +1,4 @@
+import 'sticky_message_event.dart';
 import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
@@ -351,6 +352,8 @@ class MessageUtil {
           return provider.content;
         }
 
+        final event = StickyMessageEvent.fromMessage(messageInfo);
+        if (event != null) return event.isControl ? '' : event.preview;
         final customInfo =
             ChatUtil.jsonData2Dictionary(customPayload.customData);
         if (customInfo?['businessID'] == RichContentMessage.businessID) {
@@ -443,8 +446,10 @@ class MessageUtil {
     return timeStr;
   }
 
+  /// 系统业务事件采用独立提示行，避免附加普通消息头像与气泡。
   static bool isSystemStyleCustomMessagePayload(
       MessageInfo message, BuildContext context) {
+    if (StickyMessageEvent.fromMessage(message) != null) return true;
     if (message.messageType == MessageType.custom) {
       try {
         final customPayloadData =
