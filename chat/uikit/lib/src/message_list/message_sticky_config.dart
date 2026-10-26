@@ -10,8 +10,7 @@ final class ChatMessageStickyConfig {
       {required this.pin,
       required this.bannerBuilder,
       required this.onMessagesChanged,
-      required this.onMessagesDeleted,
-      this.localNoticeRevision = 0});
+      required this.onMessagesDeleted});
 
   /// 提交置顶；返回null表示成功，否则由页面显示业务反馈。
   final Future<String?> Function(MessageInfo message) pin;
@@ -25,9 +24,6 @@ final class ChatMessageStickyConfig {
 
   /// SDK明确删除成功的消息ID，与分页窗口缺失分开处理。
   final ValueChanged<List<String>> onMessagesDeleted;
-
-  /// 本机发送提示成功后递增，列表从SDK重新获取历史，不维护第二份消息集合。
-  final int localNoticeRevision;
 }
 
 /// 从真实SDK内容派生横幅摘要，不以操作人信息代替原发送人。

@@ -493,7 +493,6 @@ class _ChatPageState extends State<ChatPage> {
               conversationID: widget.conversation.conversationID,
               config: widget.messageListConfig,
               locateMessage: _stickyLocateMessage ?? widget.message,
-              localNoticeRevision: widget.messageStickyConfig?.localNoticeRevision ?? 0,
               onMessagesChanged: widget.messageStickyConfig?.onMessagesChanged,
               onMessagesDeleted: widget.messageStickyConfig?.onMessagesDeleted,
               onInitialMessagesLoaded: widget.onInitialMessagesLoaded,

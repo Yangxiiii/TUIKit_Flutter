@@ -136,9 +136,6 @@ class MessageList extends StatefulWidget {
   final void Function(MessageInfo message)? onQuoteMessage;
   final List<MessageCustomAction> customActions;
 
-  /// 本机提示成功后的修订号；仅触发SDK读取，不添加第二份本地消息。
-  final int localNoticeRevision;
-
   /// 当前窗口更新后由宿主核查置顶原文；分页不代表删除。
   final ValueChanged<List<MessageInfo>>? onMessagesChanged;
 
@@ -180,7 +177,6 @@ class MessageList extends StatefulWidget {
     this.onCallMessageClick,
     this.onQuoteMessage,
     this.customActions = const [],
-    this.localNoticeRevision = 0,
     this.onMessagesChanged,
     this.onMessagesDeleted,
     this.onMultiSelectModeChanged,
@@ -312,14 +308,12 @@ class _MessageListState extends State<MessageList>
   static String _viewportKey(String userID, String conversationID) =>
       '$userID\u0000$conversationID';
 
-  /// 横幅定位沿用已有分页和高亮；本机操作提示成功后从SDK读取最新历史。
+  /// 横幅定位沿用已有分页和高亮；系统提示由SDK收消息链路更新。
   @override
   void didUpdateWidget(covariant MessageList oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(widget.locateMessage, oldWidget.locateMessage)) {
       unawaited(_updateStickyWindow(widget.locateMessage));
-    } else if (widget.localNoticeRevision != oldWidget.localNoticeRevision) {
-      unawaited(_updateStickyWindow(null));
     }
   }
 
