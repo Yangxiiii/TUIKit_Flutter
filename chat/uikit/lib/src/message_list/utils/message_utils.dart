@@ -6,6 +6,7 @@ import 'package:flutter/cupertino.dart';
 
 import 'calling_message_data_provider.dart';
 import 'rich_content_message.dart';
+import 'rich_content_markdown_parser.dart';
 import 'big_file_message.dart';
 
 /// 汇总消息的展示文案，并为会话列表提供统一的消息摘要。
@@ -364,10 +365,11 @@ class MessageUtil {
           final richContent =
               RichContentMessage.tryParse(customPayload.customData);
           if (richContent != null) {
-            // 会话摘要优先展示首段非空文字，无文字时使用第一个附件的信息。
+            // 摘要与气泡共用 Markdown 语法，首段没有可见文字时继续查找文字或附件。
             for (final block in richContent.blocks) {
-              if (block is RichTextBlock && block.text.trim().isNotEmpty) {
-                return block.text.trim();
+              if (block is RichTextBlock) {
+                final text = richContentMarkdownPlainText(block.text);
+                if (text.isNotEmpty) return text;
               }
             }
             for (final block in richContent.blocks) {

@@ -1,7 +1,8 @@
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
 import 'package:tencent_chat_uikit/src/emoji_picker/emoji_picker_data.dart';
-import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
+import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_markdown_format.dart';
+import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_markdown_span.dart';
 import 'package:tencent_chat_uikit/src/third_party/extended_text/extended_text.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -26,9 +27,7 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
     required this.colorScheme,
   });
 
-  /// whether show background for @somebody
-  ///
-  /// 是否为 @某人 显示背景
+  /// 是否为 @ 提醒显示输入背景。
   final bool showAtBackground;
 
   @override
@@ -74,15 +73,17 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
     final spans = <InlineSpan>[];
     var offset = 0;
     var plainStart = 0;
+    // 仅隐藏已经完整配对的共享格式片段，未闭合的输入和普通文字必须原样保留。
     while (offset < text.length) {
-      final combined = _nestedFormatAt(text, offset, sourceStart, baseStyle);
+      final combined = _formatAt(text, offset, sourceStart, baseStyle);
       final match = richContentMarkdownPattern.matchAsPrefix(text, offset);
       if (combined == null && match == null) {
         offset++;
         continue;
       }
       if (plainStart < offset) {
-        spans.add(TextSpan(text: text.substring(plainStart, offset)));
+        spans.add(TextSpan(
+            text: text.substring(plainStart, offset), style: baseStyle));
       }
       if (combined != null) {
         spans.add(combined.span);
@@ -94,31 +95,26 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
       plainStart = offset;
     }
     if (plainStart < text.length) {
-      spans.add(TextSpan(text: text.substring(plainStart)));
+      spans.add(TextSpan(text: text.substring(plainStart), style: baseStyle));
     }
-    return spans.isEmpty ? [TextSpan(text: text)] : spans;
+    return spans.isEmpty ? [TextSpan(text: text, style: baseStyle)] : spans;
   }
 
-  /// 识别任意顺序的多层格式，并把全部样式叠加到同一段文字。
-  _CombinedFormatMatch? _nestedFormatAt(
+  /// 用共用格式边界叠加样式，隐藏标签仍保留编辑器所需的原文偏移。
+  _CombinedFormatMatch? _formatAt(
     String text,
     int start,
     int sourceStart,
     TextStyle? baseStyle,
   ) {
-    final nested = parseNestedMarkdownFormat(text, start);
+    final nested = parseRichContentMarkdownFormatAt(text, start);
     if (nested == null) return null;
     final markers = nested.markers;
     final closing = markers.reversed.join();
 
-    final decorations = <TextDecoration>[];
-    if (markers.contains('~~')) decorations.add(TextDecoration.lineThrough);
-    if (markers.contains('~')) decorations.add(TextDecoration.underline);
-    final contentStyle = (baseStyle ?? const TextStyle()).copyWith(
-      fontWeight: markers.contains('**') ? FontWeight.bold : null,
-      fontStyle: markers.contains('*') ? FontStyle.italic : null,
-      decoration:
-          decorations.isEmpty ? null : TextDecoration.combine(decorations),
+    final contentStyle = richContentMarkdownStyle(
+      baseStyle ?? const TextStyle(),
+      markers,
     );
     final hiddenStyle = (baseStyle ?? const TextStyle()).copyWith(
       color: Colors.transparent,
@@ -135,8 +131,13 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
             hiddenStyle,
           ),
           TextSpan(
-            text: text.substring(nested.contentStart, nested.contentEnd),
             style: contentStyle,
+            // 子格式继续使用同一解析入口，原文偏移累加以保留选择和删除位置。
+            children: _buildMarkdownSpans(
+              text.substring(nested.contentStart, nested.contentEnd),
+              contentStyle,
+              sourceStart + nested.contentStart,
+            ),
           ),
           _hiddenMarkdownMarker(
             closing,
@@ -148,7 +149,7 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
     );
   }
 
-  /// 把单个 Markdown 匹配转换为带正文样式和隐藏标签的片段。
+  /// 为链接和代码保留隐藏标记及原文偏移，正文格式由共用入口递归处理。
   InlineSpan _buildMarkdownSpan(
     Match match,
     int sourceStart,
@@ -159,56 +160,19 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
       fontSize: 0.01,
       height: 0.01,
     );
-    if (match.group(2) case final content?) {
-      return _markedSpan(
-        '**',
-        content,
-        sourceStart + match.start,
-        baseStyle?.copyWith(fontWeight: FontWeight.bold) ??
-            const TextStyle(fontWeight: FontWeight.bold),
-        hiddenStyle,
-      );
-    }
-    if (match.group(4) case final content?) {
-      return _markedSpan(
-        '~~',
-        content,
-        sourceStart + match.start,
-        baseStyle?.copyWith(decoration: TextDecoration.lineThrough) ??
-            const TextStyle(decoration: TextDecoration.lineThrough),
-        hiddenStyle,
-      );
-    }
-    if (match.group(6) case final content?) {
-      return _markedSpan(
-        '*',
-        content,
-        sourceStart + match.start,
-        baseStyle?.copyWith(fontStyle: FontStyle.italic) ??
-            const TextStyle(fontStyle: FontStyle.italic),
-        hiddenStyle,
-      );
-    }
-    if (match.group(8) case final content?) {
-      return _markedSpan(
-        '~',
-        content,
-        sourceStart + match.start,
-        baseStyle?.copyWith(decoration: TextDecoration.underline) ??
-            const TextStyle(decoration: TextDecoration.underline),
-        hiddenStyle,
-      );
-    }
+    // 链接的标签正文可以继续嵌套格式，地址仍作为不可见原文保存，避免影响编辑位置。
     if (match.group(10) case final label?) {
+      final linkStyle = richContentMarkdownStyle(
+        baseStyle ?? const TextStyle(),
+        const ['~'],
+      ).copyWith(color: colorScheme.textColorLink);
       return TextSpan(
         children: [
           _hiddenMarkdownMarker('[', sourceStart + match.start, hiddenStyle),
           TextSpan(
-            text: label,
-            style: (baseStyle ?? const TextStyle()).copyWith(
-              color: colorScheme.textColorLink,
-              decoration: TextDecoration.underline,
-            ),
+            style: linkStyle,
+            children: _buildMarkdownSpans(
+                label, linkStyle, sourceStart + match.start + 1),
           ),
           _hiddenMarkdownMarker(
             '](${match.group(11)})',
@@ -218,6 +182,7 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
         ],
       );
     }
+    // 代码内容不进入格式解析，星号及波浪号在这里都是用户需要保留的字面内容。
     final code = match.group(13) ?? '';
     return TextSpan(
       children: [
@@ -230,27 +195,6 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
           ),
         ),
         _hiddenMarkdownMarker('```', sourceStart + match.end - 3, hiddenStyle),
-      ],
-    );
-  }
-
-  /// 组合一对相同标签及其中的可见正文。
-  TextSpan _markedSpan(
-    String marker,
-    String content,
-    int start,
-    TextStyle contentStyle,
-    TextStyle hiddenStyle,
-  ) {
-    return TextSpan(
-      children: [
-        _hiddenMarkdownMarker(marker, start, hiddenStyle),
-        TextSpan(text: content, style: contentStyle),
-        _hiddenMarkdownMarker(
-          marker,
-          start + marker.length + content.length,
-          hiddenStyle,
-        ),
       ],
     );
   }

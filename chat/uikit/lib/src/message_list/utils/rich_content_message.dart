@@ -70,11 +70,10 @@ final class RichContentMessage {
         final url = data['url'];
         final width = data['width'];
         final height = data['height'];
+        // 图片仅要求地址；旧消息的尺寸作为可选布局提示，不再阻断无尺寸消息。
         if (!_isWebUrl(url) ||
-            width is! int ||
-            width <= 0 ||
-            height is! int ||
-            height <= 0) {
+            (width != null && (width is! int || width <= 0)) ||
+            (height != null && (height is! int || height <= 0))) {
           return null;
         }
         return RichImageBlock(url, width, height);
@@ -103,18 +102,16 @@ final class RichContentMessage {
     return switch (block) {
       RichTextBlock block => {'type': 'text', 'text': block.text},
       RichImageBlock block => {
-        'type': 'image',
-        'url': block.url,
-        'width': block.width,
-        'height': block.height,
-      },
+          'type': 'image',
+          'url': block.url,
+        },
       RichFileBlock block => {
-        'type': 'file',
-        'url': block.url,
-        'name': block.name,
-        'size': block.size,
-        'mimeType': block.mimeType,
-      },
+          'type': 'file',
+          'url': block.url,
+          'name': block.name,
+          'size': block.size,
+          'mimeType': block.mimeType,
+        },
     };
   }
 
@@ -147,13 +144,13 @@ final class RichImageBlock extends RichContentBlock {
   /// 已上传图片的可访问地址。
   final String url;
 
-  /// 原图宽度，单位为像素，用于计算气泡中的展示比例。
-  final int width;
+  /// 旧消息可选的原图宽度，单位为像素；新消息不发送，缺省时使用图片实际比例。
+  final int? width;
 
-  /// 原图高度，单位为像素，用于计算气泡中的展示比例。
-  final int height;
+  /// 旧消息可选的原图高度，单位为像素；新消息不发送，缺省时使用图片实际比例。
+  final int? height;
 
-  const RichImageBlock(this.url, this.width, this.height);
+  const RichImageBlock(this.url, [this.width, this.height]);
 }
 
 /// 使用远端 URL 下载的文件段。

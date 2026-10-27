@@ -143,30 +143,33 @@ class CustomMessageWidget extends StatelessWidget {
   /// 根据原图比例约束预览大小，图片加载失败时仍保留可识别的占位内容。
   Widget _buildImage(
     String url,
-    int width,
-    int height,
+    int? width,
+    int? height,
     SemanticColorScheme colors,
   ) {
     final displayWidth = math.max(1.0, maxWidth * 0.7 - 24);
-    final displayHeight = math.max(
-      1.0,
-      math.min(240.0, displayWidth * height / width),
-    );
+    // 无尺寸消息交由图片解码确定比例，仍限制最大高度，避免长图撑满聊天窗口。
+    final displayHeight = width != null && height != null
+        ? math.max(1.0, math.min(240.0, displayWidth * height / width))
+        : null;
     return GestureDetector(
       onTap: () =>
           launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),
-        child: CachedNetworkImage(
-          imageUrl: url,
-          width: displayWidth,
-          height: displayHeight,
-          fit: BoxFit.cover,
-          errorWidget: (_, __, ___) => SizedBox(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: displayWidth, maxHeight: 240),
+          child: CachedNetworkImage(
+            imageUrl: url,
             width: displayWidth,
             height: displayHeight,
-            child: Icon(Icons.broken_image_outlined,
-                color: colors.textColorTertiary),
+            fit: displayHeight == null ? BoxFit.contain : BoxFit.cover,
+            errorWidget: (_, __, ___) => SizedBox(
+              width: displayWidth,
+              height: displayHeight ?? 120,
+              child: Icon(Icons.broken_image_outlined,
+                  color: colors.textColorTertiary),
+            ),
           ),
         ),
       ),

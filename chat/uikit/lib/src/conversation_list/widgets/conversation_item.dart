@@ -1,12 +1,11 @@
-import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart' hide CompletionHandler;
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tuikit_atomic_x/base_component/utils/time_util.dart';
 import 'package:tencent_chat_uikit/src/conversation_list/conversation_list.dart';
-import 'package:tencent_chat_uikit/src/conversation_list/conversation_list_config.dart';
 import 'package:tencent_chat_uikit/src/conversation_list/conversation_preview.dart';
+import 'package:tencent_chat_uikit/src/conversation_list/rich_content_preview.dart';
 import 'package:tencent_chat_uikit/src/emoji_picker/emoji_manager.dart';
 import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_utils.dart';
@@ -287,34 +286,46 @@ class _ConversationItemState extends State<ConversationItem> {
         : '';
   }
 
-  /// 富文本草稿为空或不存在时展示最后一条消息摘要。
+  /// 展示末条消息的单行摘要，富文本保留样式并与提醒前缀统一省略。
   Widget _buildLastMessageSubtitle(
     BuildContext context,
     SemanticColorScheme colorsTheme,
   ) {
     final atPrefix = _buildAtMentionPrefix();
-    String replaceText = EmojiManager.getEmojiMap(context).keys.fold(
-        MessageUtil.getMessageAbstract(
-            widget.conversation.lastMessage, context), (previous, key) {
-      return previous.replaceAll(key, EmojiManager.getEmojiMap(context)[key]!);
-    });
+    final style = FontScheme.caption2Regular.copyWith(
+      color: colorsTheme.textColorSecondary,
+    );
+    final richPreview = richContentConversationPreview(
+      context,
+      widget.conversation.lastMessage,
+      style,
+    );
+    String replaceText = richPreview != null
+        ? ''
+        : EmojiManager.getEmojiMap(context).keys.fold(
+            MessageUtil.getMessageAbstract(
+                widget.conversation.lastMessage, context), (previous, key) {
+            return previous.replaceAll(
+                key, EmojiManager.getEmojiMap(context)[key]!);
+          });
 
     replaceText = singleLineConversationPreview(replaceText);
     final unreadPrefix = _unreadPrefix();
 
-    // If there's @ mention, show with red color
-    if (atPrefix.isNotEmpty) {
+    // 富文本与提醒前缀合并到同一个文字段落，统一按剩余宽度省略。
+    if (atPrefix.isNotEmpty || richPreview != null) {
       return RichText(
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         text: TextSpan(
           children: [
-            TextSpan(
-              text: atPrefix,
-              style: FontScheme.caption2Regular.copyWith(
-                color: colorsTheme.textColorError,
+            if (atPrefix.isNotEmpty)
+              TextSpan(
+                text: atPrefix,
+                style: FontScheme.caption2Regular.copyWith(
+                  color: colorsTheme.textColorError,
+                ),
               ),
-            ),
             if (unreadPrefix.isNotEmpty)
               TextSpan(
                 text: unreadPrefix,
@@ -322,12 +333,13 @@ class _ConversationItemState extends State<ConversationItem> {
                   color: colorsTheme.textColorSecondary,
                 ),
               ),
-            TextSpan(
-              text: replaceText,
-              style: FontScheme.caption2Regular.copyWith(
-                color: colorsTheme.textColorSecondary,
-              ),
-            ),
+            richPreview ??
+                TextSpan(
+                  text: replaceText,
+                  style: FontScheme.caption2Regular.copyWith(
+                    color: colorsTheme.textColorSecondary,
+                  ),
+                ),
           ],
         ),
       );

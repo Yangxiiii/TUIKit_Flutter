@@ -3,83 +3,12 @@ import 'dart:convert';
 import 'message_input_config.dart';
 import 'message_text.dart';
 import '../message_list/utils/rich_content_message.dart';
+import '../message_list/utils/rich_content_markdown_format.dart';
 import 'package:flutter/services.dart';
 
-const _markdownFormatOrder = ['**', '~~', '*', '~'];
+/// 与消息展示共用标记优先级，避免输入状态与渲染边界不一致。
+const _markdownFormatOrder = richContentMarkdownFormatOrder;
 const _richContentDraftPrefix = 'oa-rich-content-draft-v1:';
-
-/// 富文本输入与摘要共用的 Markdown 行内格式规则。
-final richContentMarkdownPattern = RegExp(
-  r'(\*\*([^*\n]+)\*\*)|(~~([^~\n]+)~~)|(\*([^*\n]+)\*)|(~([^~\n]+)~)|(\[([^\]\n]+)\]\((https?://[^)\s]+)\))|(```([\s\S]*?)```)',
-);
-
-/// 从指定位置识别任意顺序的多层 Markdown 格式标签。
-///
-/// 打开标签不能重复，关闭标签必须与打开顺序相反，正文不能跨行。
-({
-  List<String> markers,
-  int contentStart,
-  int contentEnd,
-  int closeEnd,
-})? parseNestedMarkdownFormat(String text, int start) {
-  var contentStart = start;
-  final markers = <String>[];
-  while (true) {
-    String? matched;
-    for (final marker in _markdownFormatOrder) {
-      if (!markers.contains(marker) && text.startsWith(marker, contentStart)) {
-        matched = marker;
-        break;
-      }
-    }
-    if (matched == null) break;
-    markers.add(matched);
-    contentStart += matched.length;
-  }
-  if (markers.length < 2) return null;
-
-  final closing = markers.reversed.join();
-  final contentEnd = text.indexOf(closing, contentStart);
-  if (contentEnd <= contentStart ||
-      text.substring(contentStart, contentEnd).contains('\n')) {
-    return null;
-  }
-  return (
-    markers: List.unmodifiable(markers),
-    contentStart: contentStart,
-    contentEnd: contentEnd,
-    closeEnd: contentEnd + closing.length,
-  );
-}
-
-/// 移除富文本格式标签，只保留会话摘要需要展示的可见文字。
-String richContentMarkdownToPlainText(String text) {
-  final output = StringBuffer();
-  var offset = 0;
-  while (offset < text.length) {
-    final nested = parseNestedMarkdownFormat(text, offset);
-    final match = richContentMarkdownPattern.matchAsPrefix(text, offset);
-    if (nested != null) {
-      output.write(text.substring(nested.contentStart, nested.contentEnd));
-      offset = nested.closeEnd;
-    } else if (match != null) {
-      output.write(
-        match.group(2) ??
-            match.group(4) ??
-            match.group(6) ??
-            match.group(8) ??
-            match.group(10) ??
-            match.group(13) ??
-            '',
-      );
-      offset = match.end;
-    } else {
-      output.writeCharCode(text.codeUnitAt(offset));
-      offset++;
-    }
-  }
-  return output.toString();
-}
 
 /// 富文本附件在编辑和上传过程中的状态。
 enum RichContentAttachmentStatus { pending, uploading, uploaded, failed }
@@ -283,7 +212,7 @@ final class RichContentDraft {
           final url = block.remoteUrl!;
           if (attachment.type == RichContentAttachmentType.image) {
             messageBlocks.add(
-              RichImageBlock(url, attachment.width!, attachment.height!),
+              RichImageBlock(url, attachment.width, attachment.height),
             );
           } else {
             messageBlocks.add(
@@ -361,7 +290,8 @@ RichContentDraftBlock? _draftBlockFromJson(Map<String, dynamic> json) {
       localPath is! String ||
       // 撤回回填的附件只有远端URL；仅已上传且地址合法时允许没有本地文件。
       (localPath.isEmpty &&
-          !(status == RichContentAttachmentStatus.uploaded && isValidRichContentUrl(remoteUrl))) ||
+          !(status == RichContentAttachmentStatus.uploaded &&
+              isValidRichContentUrl(remoteUrl))) ||
       fileName is! String ||
       fileName.isEmpty ||
       fileSize is! int ||
@@ -375,7 +305,7 @@ RichContentDraftBlock? _draftBlockFromJson(Map<String, dynamic> json) {
     return null;
   }
   if (attachmentType == RichContentAttachmentType.image &&
-      ((width ?? 0) <= 0 || (height ?? 0) <= 0)) {
+      ((width != null && width <= 0) || (height != null && height <= 0))) {
     return null;
   }
   return RichContentDraftAttachmentBlock(
@@ -397,6 +327,7 @@ RichContentDraftBlock? _draftBlockFromJson(Map<String, dynamic> json) {
   );
 }
 
+/// 附件须已上传且元数据有效；图片尺寸不参与发送就绪判断。
 bool _isReadyAttachment(RichContentDraftAttachmentBlock block) {
   if (block.status != RichContentAttachmentStatus.uploaded ||
       !isValidRichContentUrl(block.remoteUrl)) {
@@ -408,8 +339,8 @@ bool _isReadyAttachment(RichContentDraftAttachmentBlock block) {
       attachment.mimeType.isEmpty) {
     return false;
   }
-  return attachment.type != RichContentAttachmentType.image ||
-      ((attachment.width ?? 0) > 0 && (attachment.height ?? 0) > 0);
+  // 图片地址已就绪即可发送，撤回回填的远端图片不要求预先读取尺寸。
+  return true;
 }
 
 /// 只接受不含凭证信息的 HTTP(S) 附件地址。
@@ -777,61 +708,23 @@ TextRange? _insertedRange(String oldText, String newText) {
 
 /// 按原文顺序定位格式范围，支持单层、多层嵌套及紧密相邻的格式段。
 _MarkdownMarkerRange? _markerRangeAt(String text, int offset, String marker) {
+  // 读取共用格式边界，光标移动、删除和发送后的展示不能各自配对相邻标签。
   for (var start = 0; start < text.length; start++) {
-    final nested = parseNestedMarkdownFormat(text, start);
-    if (nested != null) {
-      final range = _MarkdownMarkerRange(
+    final format = parseRichContentMarkdownFormatAt(text, start);
+    if (format == null) continue;
+    if (format.markers.contains(marker) &&
+        offset >= format.contentStart &&
+        offset <= format.contentEnd) {
+      return _MarkdownMarkerRange(
         openStart: start,
-        contentStart: nested.contentStart,
-        contentEnd: nested.contentEnd,
-        closeEnd: nested.closeEnd,
+        contentStart: format.contentStart,
+        contentEnd: format.contentEnd,
+        closeEnd: format.closeEnd,
       );
-      if (nested.markers.contains(marker) &&
-          offset >= range.contentStart &&
-          offset <= range.contentEnd) {
-        return range;
-      }
-      start = range.closeEnd - 1;
-      continue;
     }
-    _MarkdownMarkerRange? range;
-    String? matchedMarker;
-    for (final candidate in _markdownFormatOrder) {
-      range = _singleMarkdownMarkerRangeAt(text, start, candidate);
-      if (range != null) {
-        matchedMarker = candidate;
-        break;
-      }
-    }
-    if (range == null) continue;
-    if (matchedMarker == marker &&
-        offset >= range.contentStart &&
-        offset <= range.contentEnd) {
-      return range;
-    }
-    start = range.closeEnd - 1;
+    start = format.closeEnd - 1;
   }
   return null;
-}
-
-/// 按文本顺序识别单层格式，使相邻段的连续标记仍按前后两段分割。
-_MarkdownMarkerRange? _singleMarkdownMarkerRangeAt(
-  String text,
-  int start,
-  String marker,
-) {
-  if (!text.startsWith(marker, start)) return null;
-  final contentStart = start + marker.length;
-  final contentEnd = text.indexOf(marker, contentStart);
-  if (contentEnd <= contentStart) return null;
-  final content = text.substring(contentStart, contentEnd);
-  if (content.contains('\n') || content.contains(marker[0])) return null;
-  return _MarkdownMarkerRange(
-    openStart: start,
-    contentStart: contentStart,
-    contentEnd: contentEnd,
-    closeEnd: contentEnd + marker.length,
-  );
 }
 
 final class _MarkdownMarkerRange {
