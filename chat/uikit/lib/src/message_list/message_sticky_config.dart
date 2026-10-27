@@ -72,7 +72,8 @@ final class ChatStickyPreview {
         .map((block) => switch (block) {
               RichTextBlock b => b.text,
               RichImageBlock _ => '[图片]',
-              RichFileBlock b => '[文件]${b.name}',
+              RichFileBlock b =>
+                '${b.mimeType.startsWith('video/') ? '[视频]' : '[文件]'}${b.name}',
             })
         .join();
     return ChatStickyPreview(text: text);

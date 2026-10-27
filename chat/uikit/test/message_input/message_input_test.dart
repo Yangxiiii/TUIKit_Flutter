@@ -5,7 +5,7 @@ import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
+import 'package:tencent_chat_uikit/tencent_chat_uikit.dart' hide IconButton;
 import 'package:tencent_chat_uikit/src/third_party/extended_text_field/extended_text_field.dart';
 import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_message.dart';
@@ -113,6 +113,129 @@ void main() {
     state.invalidateRecalledQuote([message]);
     await tester.pump();
     expect(find.textContaining('应被清除的引用原文'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('富文本展开时文件按钮禁用，收起后恢复普通文件选择', (tester) async {
+    final semantics = tester.ensureSemantics();
+    var requests = 0;
+    await tester.pumpWidget(MaterialApp(
+      theme: AppThemeFactory.create(
+          const AppNormalColorScheme(), Brightness.light),
+      home: Scaffold(
+        body: Column(children: [
+          const Expanded(child: SizedBox()),
+          MessageInput(
+            conversationID: 'c2c_test',
+            config: ChatMessageInputConfig(fileSelector: (_) async {
+              requests++;
+              return [];
+            }),
+          ),
+        ]),
+      ),
+    ));
+    sdk.conversations.completeDraft('');
+    await tester.pump();
+    final normalFile =
+        find.bySemanticsIdentifier('tim.message_input_toolbar.file');
+    expect(normalFile, findsOneWidget);
+    expect(
+        tester
+            .getSemantics(normalFile)
+            .getSemanticsData()
+            .hasAction(SemanticsAction.tap),
+        isTrue);
+    await tester.tap(normalFile);
+    await tester.pump();
+    expect(requests, 1);
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    final overlayFile =
+        find.bySemanticsIdentifier('tim.rich_content_overlay_toolbar.file');
+    for (final file in [normalFile, overlayFile]) {
+      expect(file, findsOneWidget);
+      expect(
+          tester
+              .getSemantics(file)
+              .getSemanticsData()
+              .hasAction(SemanticsAction.tap),
+          isFalse);
+    }
+    await tester.tap(overlayFile);
+    await tester.pump();
+    expect(requests, 1);
+    await tester.tap(find.byTooltip('收起富文本编辑器'));
+    await tester.pumpAndSettle();
+    expect(overlayFile, findsNothing);
+    expect(
+        tester
+            .getSemantics(normalFile)
+            .getSemanticsData()
+            .hasAction(SemanticsAction.tap),
+        isTrue);
+    await tester.tap(normalFile);
+    await tester.pump();
+    expect(requests, 2);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    semantics.dispose();
+  });
+
+  testWidgets('聊天输入框移动光标同步嵌套格式，末尾沿用且主动切换有效', (tester) async {
+    const source = '**粗体** 普通 ~**~~*组合*~~**~';
+    await mount(tester);
+    sdk.conversations.completeDraft('');
+    await tester.pump();
+    tester
+        .state<MessageInputState>(find.byType(MessageInput))
+        .restoreRecalledDraft(ChatMessageRecallDraft(
+            richContent: const RichContentMessage([RichTextBlock(source)])
+                .toCustomData()));
+    await tester.pump();
+    await tester.tap(find.byTooltip('文字格式'));
+    await tester.pumpAndSettle();
+    final controller = tester
+        .widget<ExtendedTextField>(find.byType(ExtendedTextField).first)
+        .controller!;
+    bool selected(String label) =>
+        tester
+            .widget<IconButton>(find.ancestor(
+                of: find.byTooltip(label), matching: find.byType(IconButton)))
+            .isSelected ??
+        false;
+    for (final offset in [3, source.indexOf('体') + 1, source.indexOf(' ')]) {
+      controller.selection = TextSelection.collapsed(offset: offset);
+      await tester.pump();
+      expect(selected('粗体'), isTrue, reason: '光标 $offset');
+    }
+    for (final offset in [0, source.indexOf('粗')]) {
+      controller.selection = TextSelection.collapsed(offset: offset);
+      await tester.pump();
+      expect(selected('粗体'), isFalse, reason: '格式正文前 $offset');
+    }
+    controller.selection =
+        TextSelection.collapsed(offset: source.indexOf('普') + 1);
+    await tester.pump();
+    expect(selected('粗体'), isFalse);
+    controller.selection =
+        TextSelection.collapsed(offset: source.indexOf('组') + 1);
+    await tester.pump();
+    for (final label in ['粗体', '斜体', '下划线', '删除线']) {
+      expect(selected(label), isTrue);
+    }
+    controller.selection =
+        TextSelection.collapsed(offset: source.indexOf('组'));
+    await tester.pump();
+    for (final label in ['粗体', '斜体', '下划线', '删除线']) {
+      expect(selected(label), isFalse, reason: '嵌套正文前');
+    }
+    controller.selection = const TextSelection.collapsed(offset: 3);
+    await tester.pump();
+    await tester.tap(find.byTooltip('粗体'));
+    await tester.pump();
+    expect(selected('粗体'), isFalse);
+    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 

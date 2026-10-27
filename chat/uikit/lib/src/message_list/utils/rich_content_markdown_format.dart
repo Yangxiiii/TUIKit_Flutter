@@ -1,6 +1,57 @@
 /// 编辑器写入和读取格式标签时的固定优先级，也是消息展示的格式识别顺序。
 const richContentMarkdownFormatOrder = ['**', '~~', '*', '~'];
 
+/// 按原文光标返回显式格式；正文起点不选中、末尾沿用左侧样式，嵌套叠加，忽略代码及链接地址。
+Set<String> richContentMarkdownFormatsAt(String text, int offset) {
+  if (offset < 0 || offset > text.length) return const {};
+  var cursor = 0;
+  while (cursor < text.length) {
+    // 转义和代码中的字面标记不代表编辑格式，不能点入这些内容后误选工具条。
+    if (text[cursor] == '\\') {
+      cursor += 2;
+      continue;
+    }
+    if (text[cursor] == '`') {
+      final run = RegExp(r'`+').matchAsPrefix(text, cursor)!.group(0)!;
+      final end = text.indexOf(run, cursor + run.length);
+      cursor = end < 0 ? text.length : end + run.length;
+      continue;
+    }
+    final link = richContentMarkdownPattern.matchAsPrefix(text, cursor);
+    final label = link?.group(10);
+    if (link != null && label != null) {
+      final labelStart = cursor + 1;
+      if (offset >= labelStart && offset <= labelStart + label.length) {
+        return richContentMarkdownFormatsAt(label, offset - labelStart);
+      }
+      if (offset == link.end) {
+        return richContentMarkdownFormatsAt(label, label.length);
+      }
+      cursor = link.end;
+      continue;
+    }
+    final format = parseRichContentMarkdownFormatAt(text, cursor);
+    if (format == null) {
+      cursor++;
+      continue;
+    }
+    // 左开右闭：正文前不继承右侧格式，末尾及隐藏闭合标签后仍沿用左侧样式。
+    if (offset > format.contentStart && offset <= format.closeEnd) {
+      final innerOffset =
+          offset.clamp(format.contentStart, format.contentEnd).toInt() -
+              format.contentStart;
+      return {
+        ...format.markers,
+        ...richContentMarkdownFormatsAt(
+            text.substring(format.contentStart, format.contentEnd),
+            innerOffset),
+      };
+    }
+    cursor = format.closeEnd;
+  }
+  return const {};
+}
+
 /// 编辑器和消息展示共用的单段格式规则；匹配结果保留原文边界。
 final richContentMarkdownPattern = RegExp(
   r'(\*\*([^*\n]+)\*\*)|(~~([^~\n]+)~~)|(\*([^*\n]+)\*)|(~([^~\n]+)~)|(\[([^\]\n]+)\]\((https?://[^)\s]+)\))|(```([\s\S]*?)```)',

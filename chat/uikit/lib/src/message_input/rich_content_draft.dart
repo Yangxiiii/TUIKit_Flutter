@@ -37,6 +37,9 @@ final class RichContentDraftAttachmentBlock extends RichContentDraftBlock {
   /// 上传完成后的远端 URL；只有 uploaded 状态允许非空。
   final String? remoteUrl;
 
+  /// 已上传视频首帧封面地址；收起、草稿恢复和再次发送均保留。
+  final String? thumbnailUrl;
+
   /// 当前上传状态，决定发送按钮是否可用。
   final RichContentAttachmentStatus status;
 
@@ -44,17 +47,20 @@ final class RichContentDraftAttachmentBlock extends RichContentDraftBlock {
     super.id, {
     required this.attachment,
     this.remoteUrl,
+    this.thumbnailUrl,
     this.status = RichContentAttachmentStatus.pending,
   });
 
   RichContentDraftAttachmentBlock copyWith({
     String? remoteUrl,
+    String? thumbnailUrl,
     RichContentAttachmentStatus? status,
   }) {
     return RichContentDraftAttachmentBlock(
       id,
       attachment: attachment,
       remoteUrl: remoteUrl ?? this.remoteUrl,
+      thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
       status: status ?? this.status,
     );
   }
@@ -98,6 +104,7 @@ final class RichContentDraft {
             height: image?.height,
           ),
           remoteUrl: url,
+          thumbnailUrl: file?.thumbnailUrl,
           status: RichContentAttachmentStatus.uploaded,
         ),
       );
@@ -168,7 +175,9 @@ final class RichContentDraft {
           values.add(
             block.attachment.type == RichContentAttachmentType.image
                 ? '[图片]'
-                : block.attachment.fileName,
+                : block.attachment.mimeType.startsWith('video/')
+                    ? '[视频]'
+                    : block.attachment.fileName,
           );
       }
     }
@@ -221,6 +230,7 @@ final class RichContentDraft {
                 attachment.fileName,
                 attachment.fileSize,
                 attachment.mimeType,
+                thumbnailUrl: block.thumbnailUrl,
               ),
             );
           }
@@ -255,6 +265,8 @@ Map<String, Object?> _draftBlockToJson(RichContentDraftBlock block) {
         'fileName': block.attachment.fileName,
         'fileSize': block.attachment.fileSize,
         'mimeType': block.attachment.mimeType,
+        'thumbnailPath': block.attachment.thumbnailPath,
+        'thumbnailUrl': block.thumbnailUrl,
         'width': block.attachment.width,
         'height': block.attachment.height,
         'remoteUrl': block.remoteUrl,
@@ -279,6 +291,8 @@ RichContentDraftBlock? _draftBlockFromJson(Map<String, dynamic> json) {
   final fileName = json['fileName'];
   final fileSize = json['fileSize'];
   final mimeType = json['mimeType'];
+  final thumbnailPath = json['thumbnailPath'];
+  final thumbnailUrl = json['thumbnailUrl'];
   final width = json['width'];
   final height = json['height'];
   final remoteUrl = json['remoteUrl'];
@@ -298,13 +312,18 @@ RichContentDraftBlock? _draftBlockFromJson(Map<String, dynamic> json) {
       fileSize < 0 ||
       mimeType is! String ||
       mimeType.isEmpty ||
+      thumbnailPath is! String? ||
+      (thumbnailUrl != null &&
+          !isValidRichContentUrl(
+              thumbnailUrl is String ? thumbnailUrl : null)) ||
       width is! int? ||
       height is! int? ||
       remoteUrl is! String? ||
       status == null) {
     return null;
   }
-  if (attachmentType == RichContentAttachmentType.image &&
+  if ((attachmentType == RichContentAttachmentType.image ||
+          mimeType.startsWith('video/')) &&
       ((width != null && width <= 0) || (height != null && height <= 0))) {
     return null;
   }
@@ -316,10 +335,12 @@ RichContentDraftBlock? _draftBlockFromJson(Map<String, dynamic> json) {
       fileName: fileName,
       fileSize: fileSize,
       mimeType: mimeType,
+      thumbnailPath: thumbnailPath,
       width: width,
       height: height,
     ),
     remoteUrl: remoteUrl,
+    thumbnailUrl: thumbnailUrl as String?,
     // 进程退出后没有仍在执行的上传任务，恢复为待上传避免永久卡住。
     status: status == RichContentAttachmentStatus.uploading
         ? RichContentAttachmentStatus.pending
@@ -334,6 +355,12 @@ bool _isReadyAttachment(RichContentDraftAttachmentBlock block) {
     return false;
   }
   final attachment = block.attachment;
+  // 新选择的视频须同时完成首帧封面上传；没有封面字段的旧远端消息保持兼容。
+  if (attachment.isVideo &&
+      attachment.thumbnailPath != null &&
+      !isValidRichContentUrl(block.thumbnailUrl)) {
+    return false;
+  }
   if (attachment.fileName.isEmpty ||
       attachment.fileSize < 0 ||
       attachment.mimeType.isEmpty) {
@@ -401,6 +428,7 @@ final class _ActiveMarkdownFormatInputFormatter extends TextInputFormatter {
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
+    // 删除先维护隐藏标签边界，避免后续格式补齐把已删除的内容恢复出来。
     final valueWithoutMarkerDeletion = _replaceMarkerDeletionWithContent(
       oldValue,
       newValue,
@@ -416,11 +444,11 @@ final class _ActiveMarkdownFormatInputFormatter extends TextInputFormatter {
     if (valueWithoutEmptyFormat != null) return valueWithoutEmptyFormat;
 
     final markers = _activeMarkers();
-    if (markers.isEmpty) return newValue;
     if (newValue.composing.isValid && !newValue.composing.isCollapsed) {
       return newValue;
     }
 
+    // 候选词提交和直接输入统一定位实际变更范围，光标偏移始终基于原始Markdown。
     var start = 0;
     var insertedEnd = 0;
     if (oldValue.composing.isValid &&
@@ -438,10 +466,21 @@ final class _ActiveMarkdownFormatInputFormatter extends TextInputFormatter {
 
     final inserted = newValue.text.substring(start, insertedEnd);
     if (inserted.isEmpty) return newValue;
-    if (inserted == '\n') {
-      return _splitMarkdownRangeAtNewline(oldValue, newValue, start) ??
+    if (inserted.contains('\n') || inserted.contains('\r')) {
+      final parts = RegExp(r'\r\n|\r|\n|[^\r\n]+')
+          .allMatches(inserted)
+          .map((match) => match.group(0)!)
+          .toList();
+      // 粘贴及输入法可一次提交多行；逐段复用单行规则，不能生成跨行的行内标签。
+      if (parts.length > 1) {
+        return _formatMultilineInsertion(
+            oldValue, newValue, start, insertedEnd, parts);
+      }
+      // 已有格式必须拆行，即使工具条已关闭或草稿回填后没有选中任何格式。
+      return _splitMarkdownRangeAtNewline(newValue, start, inserted) ??
           newValue;
     }
+    if (markers.isEmpty) return newValue;
     final missingMarkers = _markdownFormatOrder
         .where(
           (marker) =>
@@ -465,39 +504,78 @@ final class _ActiveMarkdownFormatInputFormatter extends TextInputFormatter {
       composing: TextRange.empty,
     );
   }
+
+  /// 将一次多行提交依次应用到当前选区，保留每次拆行后重新映射的正文光标。
+  TextEditingValue _formatMultilineInsertion(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+    int start,
+    int insertedEnd,
+    List<String> parts,
+  ) {
+    var value = oldValue;
+    var replaceStart = start;
+    var replaceEnd =
+        oldValue.text.length - (newValue.text.length - insertedEnd);
+    // 首段替换原选区，后续段落插入上一步的视觉光标位置，避免闭合标签被拆坏。
+    for (final part in parts) {
+      value = formatEditUpdate(
+          value,
+          value.copyWith(
+            text: value.text.replaceRange(replaceStart, replaceEnd, part),
+            selection:
+                TextSelection.collapsed(offset: replaceStart + part.length),
+            composing: TextRange.empty,
+          ));
+      replaceStart = replaceEnd = value.selection.extentOffset;
+    }
+    return value;
+  }
 }
 
-/// 换行时结束当前行内格式；若光标位于段落中间，则在下一行恢复剩余正文格式。
+/// 按换行前后实际保留的正文拆分格式，替换选区时不能重新插回被删除的文字。
 TextEditingValue? _splitMarkdownRangeAtNewline(
-  TextEditingValue oldValue,
   TextEditingValue newValue,
   int offset,
+  String lineBreak,
 ) {
-  for (final marker in _markdownFormatOrder) {
-    final range = _markerRangeAt(oldValue.text, offset, marker);
-    if (range == null) continue;
-    final opening =
-        oldValue.text.substring(range.openStart, range.contentStart);
-    final closing = oldValue.text.substring(range.contentEnd, range.closeEnd);
-    final before = oldValue.text.substring(range.contentStart, offset);
-    final after = oldValue.text.substring(offset, range.contentEnd);
+  final text =
+      newValue.text.replaceRange(offset, offset + lineBreak.length, '');
+  final split = _splitMarkdownTextAt(text, offset);
+  if (split == null) return null;
+  return newValue.copyWith(
+    text: '${split.before}$lineBreak${split.after}',
+    selection: TextSelection.collapsed(
+        offset: split.before.length + lineBreak.length + split.openingLength),
+    composing: TextRange.empty,
+  );
+}
+
+/// 递归关闭光标左侧的各层格式并在右侧恢复，紧邻标签和空行不生成空格式段。
+({String before, String after, int openingLength})? _splitMarkdownTextAt(
+    String text, int offset) {
+  for (var start = 0; start < text.length; start++) {
+    final format = parseRichContentMarkdownFormatAt(text, start);
+    if (format == null) continue;
+    if (offset < format.contentStart || offset > format.contentEnd) {
+      start = format.closeEnd - 1;
+      continue;
+    }
+    // 内层先拆，再分别包回外层标签，防止只关闭最外层而留下断开的斜体或下划线。
+    final content = text.substring(format.contentStart, format.contentEnd);
+    final relativeOffset = offset - format.contentStart;
+    final inner = _splitMarkdownTextAt(content, relativeOffset);
+    final opening = text.substring(start, format.contentStart);
+    final closing = text.substring(format.contentEnd, format.closeEnd);
+    final before = inner?.before ?? content.substring(0, relativeOffset);
+    final after = inner?.after ?? content.substring(relativeOffset);
     final left = before.isEmpty ? '' : '$opening$before$closing';
     final right = after.isEmpty ? '' : '$opening$after$closing';
-    final replacement = '$left\n$right';
-    final text = oldValue.text.replaceRange(
-      range.openStart,
-      range.closeEnd,
-      replacement,
-    );
-    return newValue.copyWith(
-      text: text,
-      selection: TextSelection.collapsed(
-        offset: range.openStart +
-            left.length +
-            1 +
-            (after.isEmpty ? 0 : opening.length),
-      ),
-      composing: TextRange.empty,
+    return (
+      before: text.substring(0, start) + left,
+      after: right + text.substring(format.closeEnd),
+      openingLength:
+          after.isEmpty ? 0 : opening.length + (inner?.openingLength ?? 0),
     );
   }
   return null;
@@ -707,7 +785,8 @@ TextRange? _insertedRange(String oldText, String newText) {
 }
 
 /// 按原文顺序定位格式范围，支持单层、多层嵌套及紧密相邻的格式段。
-_MarkdownMarkerRange? _markerRangeAt(String text, int offset, String marker) {
+_MarkdownMarkerRange? _markerRangeAt(String text, int offset, String marker,
+    {int sourceStart = 0}) {
   // 读取共用格式边界，光标移动、删除和发送后的展示不能各自配对相邻标签。
   for (var start = 0; start < text.length; start++) {
     final format = parseRichContentMarkdownFormatAt(text, start);
@@ -716,11 +795,20 @@ _MarkdownMarkerRange? _markerRangeAt(String text, int offset, String marker) {
         offset >= format.contentStart &&
         offset <= format.contentEnd) {
       return _MarkdownMarkerRange(
-        openStart: start,
-        contentStart: format.contentStart,
-        contentEnd: format.contentEnd,
-        closeEnd: format.closeEnd,
+        openStart: sourceStart + start,
+        contentStart: sourceStart + format.contentStart,
+        contentEnd: sourceStart + format.contentEnd,
+        closeEnd: sourceStart + format.closeEnd,
       );
+    }
+    // 局部嵌套必须继续查找内层，光标自动选中的格式不能在下一次输入时被重复套用。
+    if (offset >= format.contentStart && offset <= format.contentEnd) {
+      final inner = _markerRangeAt(
+          text.substring(format.contentStart, format.contentEnd),
+          offset - format.contentStart,
+          marker,
+          sourceStart: sourceStart + format.contentStart);
+      if (inner != null) return inner;
     }
     start = format.closeEnd - 1;
   }

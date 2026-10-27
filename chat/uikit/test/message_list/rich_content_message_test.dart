@@ -5,8 +5,158 @@ import 'package:flutter/widgets.dart';
 import 'package:tencent_chat_uikit/src/message_input/message_input_config.dart';
 import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_message.dart';
+import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_markdown_format.dart';
 
 void main() {
+  test('视频封面协议往返和草稿回填，旧消息可缺省且拒绝非法封面地址', () {
+    const video = RichFileBlock(
+        'https://example.com/video.mp4', '视频.mp4', 12, 'video/mp4',
+        thumbnailUrl: 'https://example.com/cover.jpg');
+    const message = RichContentMessage([video]);
+    final parsed = RichContentMessage.tryParse(message.toCustomData())!;
+    expect((parsed.blocks.single as RichFileBlock).thumbnailUrl,
+        video.thumbnailUrl);
+    final draft = RichContentDraft.fromMessage(parsed);
+    final restored =
+        RichContentDraft.tryParsePersisted(draft.toPersistedString())!;
+    expect(restored.canSend, isTrue);
+    expect(restored.toMessage()!.toCustomData(), message.toCustomData());
+    final base = <String, Object?>{
+      'type': 'file',
+      'url': video.url,
+      'name': video.name,
+      'size': video.size,
+      'mimeType': video.mimeType
+    };
+    String encode(Map<String, Object?> block) => jsonEncode({
+          'businessID': RichContentMessage.businessID,
+          'version': 1,
+          'payload': {
+            'blocks': [block]
+          }
+        });
+    expect(RichContentMessage.tryParse(encode(base)), isNotNull);
+    for (final value in [
+      'file:///tmp/a.jpg',
+      'javascript:alert(1)',
+      '',
+      1,
+      false
+    ]) {
+      expect(
+          RichContentMessage.tryParse(encode({...base, 'thumbnailUrl': value})),
+          isNull);
+    }
+  });
+
+  test('光标在格式正文前不选中，仅中间及末尾选中，内层起点保留外层样式', () {
+    for (final marker in richContentMarkdownFormatOrder) {
+      final source = '普通$marker甲乙$marker';
+      final start = source.indexOf('甲');
+      for (var offset = 2; offset <= start; offset++) {
+        expect(richContentMarkdownFormatsAt(source, offset), isEmpty,
+            reason: '$marker 起点 $offset');
+      }
+      for (var offset = start + 1; offset <= source.length; offset++) {
+        expect(richContentMarkdownFormatsAt(source, offset), {marker},
+            reason: '$marker 中间及末尾 $offset');
+      }
+    }
+    const nested = '**前*内文*后**';
+    expect(richContentMarkdownFormatsAt(nested, nested.indexOf('前')), isEmpty);
+    expect(richContentMarkdownFormatsAt(nested, nested.indexOf('内')), {'**'});
+    const combined = '~**~~*组合*~~**~';
+    expect(
+        richContentMarkdownFormatsAt(combined, combined.indexOf('组')), isEmpty);
+    const link = '[**链接**](https://example.com)';
+    expect(richContentMarkdownFormatsAt(link, link.indexOf('链')), isEmpty);
+  });
+
+  test('光标识别共享格式边界，正文中间及末尾选中左侧样式，进入普通文字清除', () {
+    const source = '**前*内文*后**普通';
+    expect(richContentMarkdownFormatsAt(source, source.indexOf('内') + 1),
+        {'**', '*'});
+    expect(richContentMarkdownFormatsAt(source, source.indexOf('文') + 1),
+        {'**', '*'});
+    expect(
+        richContentMarkdownFormatsAt(source, source.indexOf('后')), {'**', '*'});
+    expect(
+        richContentMarkdownFormatsAt(source, source.indexOf('后') + 1), {'**'});
+    expect(richContentMarkdownFormatsAt(source, source.indexOf('普')), {'**'});
+    expect(
+        richContentMarkdownFormatsAt(source, source.indexOf('普') + 1), isEmpty);
+    const adjacent = '**粗***斜*';
+    expect(richContentMarkdownFormatsAt(adjacent, 5), {'**'});
+    expect(richContentMarkdownFormatsAt(adjacent, 7), {'*'});
+    const nested = '~**~~*组合*~~**~';
+    expect(richContentMarkdownFormatsAt(nested, nested.indexOf('组') + 1),
+        {'**', '~~', '*', '~'});
+    expect(richContentMarkdownFormatsAt(nested, nested.length),
+        {'**', '~~', '*', '~'});
+    expect(richContentMarkdownFormatsAt('**粗**\n普通', 6), isEmpty);
+  });
+
+  test('光标格式不误读转义、代码及链接地址，链接正文仍支持嵌套格式', () {
+    for (final source in [r'\*\*文字\*\*', '`**文字**`', '```\n**文字**\n```']) {
+      expect(
+          richContentMarkdownFormatsAt(source, source.indexOf('字')), isEmpty);
+    }
+    const link = '[**链接**](https://example.com/~路径~)';
+    expect(richContentMarkdownFormatsAt(link, link.indexOf('链') + 1), {'**'});
+    expect(richContentMarkdownFormatsAt(link, link.indexOf('路') + 1), isEmpty);
+    expect(richContentMarkdownFormatsAt(link, link.length), {'**'});
+    expect(richContentMarkdownFormatsAt('**文字**', -1), isEmpty);
+    expect(richContentMarkdownFormatsAt('**文字**', 99), isEmpty);
+  });
+
+  test('已有格式在未选中工具条时回车仍保持，支持嵌套及替换选区', () {
+    final formatter = activeMarkdownFormatInputFormatter(() => <String>{});
+    for (final lineBreak in ['\n', '\r\n', '\r']) {
+      const source = '**甲乙**';
+      final result = formatter.formatEditUpdate(
+        const TextEditingValue(
+            text: source, selection: TextSelection.collapsed(offset: 3)),
+        TextEditingValue(
+            text: '**甲$lineBreak乙**',
+            selection: TextSelection.collapsed(offset: 3 + lineBreak.length)),
+      );
+      expect(result.text, '**甲**$lineBreak**乙**');
+      expect(result.selection.extentOffset, 5 + lineBreak.length + 2);
+    }
+    const nested = '**前*甲乙*后**';
+    final offset = nested.indexOf('乙');
+    final split = formatter.formatEditUpdate(
+      TextEditingValue(
+          text: nested, selection: TextSelection.collapsed(offset: offset)),
+      TextEditingValue(
+          text: nested.replaceRange(offset, offset, '\n'),
+          selection: TextSelection.collapsed(offset: offset + 1)),
+    );
+    expect(split.text, '**前*甲***\n***乙*后**');
+    const source = '**甲乙丙丁**';
+    final replaced = formatter.formatEditUpdate(
+      const TextEditingValue(
+          text: source,
+          selection: TextSelection(baseOffset: 3, extentOffset: 5)),
+      const TextEditingValue(
+          text: '**甲\n丁**', selection: TextSelection.collapsed(offset: 4)),
+    );
+    expect(replaced.text, '**甲**\n**丁**');
+  });
+
+  test('批量输入多行和连续回车不生成跨行格式或空格式段', () {
+    final formatter = activeMarkdownFormatInputFormatter(
+        () => <String>{'**', '~~', '*', '~'});
+    final value = formatter.formatEditUpdate(
+        const TextEditingValue(),
+        const TextEditingValue(
+          text: '第一行\n\n第二行',
+          selection: TextSelection.collapsed(offset: 8),
+        ));
+    expect(value.text, '**~~*~第一行~*~~**\n\n**~~*~第二行~*~~**');
+    expect(value.selection.extentOffset, value.text.length - 6);
+  });
+
   test('图文自定义消息按原顺序解析文字、图片和文件', () {
     final raw = jsonEncode({
       'businessID': 'oa_rich_content',

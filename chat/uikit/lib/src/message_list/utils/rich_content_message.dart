@@ -82,16 +82,19 @@ final class RichContentMessage {
         final name = data['name'];
         final size = data['size'];
         final mimeType = data['mimeType'];
+        final thumbnailUrl = data['thumbnailUrl'];
         if (!_isWebUrl(url) ||
             name is! String ||
             name.isEmpty ||
             size is! int ||
             size < 0 ||
             mimeType is! String ||
-            mimeType.isEmpty) {
+            mimeType.isEmpty ||
+            (thumbnailUrl != null && !_isWebUrl(thumbnailUrl))) {
           return null;
         }
-        return RichFileBlock(url, name, size, mimeType);
+        return RichFileBlock(url, name, size, mimeType,
+            thumbnailUrl: thumbnailUrl);
       default:
         return null;
     }
@@ -111,6 +114,7 @@ final class RichContentMessage {
           'name': block.name,
           'size': block.size,
           'mimeType': block.mimeType,
+          if (block.thumbnailUrl != null) 'thumbnailUrl': block.thumbnailUrl!,
         },
     };
   }
@@ -167,5 +171,9 @@ final class RichFileBlock extends RichContentBlock {
   /// 文件的 MIME 类型。
   final String mimeType;
 
-  const RichFileBlock(this.url, this.name, this.size, this.mimeType);
+  /// 视频可选的远端首帧封面；旧消息缺省时保留视频占位，不影响正文解析。
+  final String? thumbnailUrl;
+
+  const RichFileBlock(this.url, this.name, this.size, this.mimeType,
+      {this.thumbnailUrl});
 }

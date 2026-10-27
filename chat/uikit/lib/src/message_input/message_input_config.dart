@@ -1,4 +1,5 @@
 import 'package:app_core/app_core.dart';
+import 'package:flutter/painting.dart';
 import 'package:tuikit_atomic_x/base_component/utils/app_builder.dart';
 import 'chat_media_sender.dart';
 
@@ -22,10 +23,20 @@ final class RichContentLocalAttachment {
   /// 文件 MIME 类型；选择器无法确定时使用 `application/octet-stream`。
   final String mimeType;
 
-  /// 图片原始宽度，单位为像素；文件附件为 null。
+  /// 相册提供的视频首帧封面本地路径；图片和普通文件不设置。
+  final String? thumbnailPath;
+
+  /// 视频沿用文件协议，通过 MIME 区分，不新增消息块类型。
+  bool get isVideo =>
+      type == RichContentAttachmentType.file && mimeType.startsWith('video/');
+
+  /// 图片和视频均作为正文中的原子元素编辑；旧普通文件仍使用附件卡片。
+  bool get isInlineMedia => type == RichContentAttachmentType.image || isVideo;
+
+  /// 图片或视频封面宽度，单位为像素；普通文件附件为 null。
   final int? width;
 
-  /// 图片原始高度，单位为像素；文件附件为 null。
+  /// 图片或视频封面高度，单位为像素；普通文件附件为 null。
   final int? height;
 
   const RichContentLocalAttachment({
@@ -34,6 +45,7 @@ final class RichContentLocalAttachment {
     required this.fileName,
     required this.fileSize,
     required this.mimeType,
+    this.thumbnailPath,
     this.width,
     this.height,
   });
@@ -45,6 +57,9 @@ typedef RichContentAttachmentUploader = Future<String> Function(
 
 /// 定义 MessageInput 的可见能力和宿主业务扩展入口。
 abstract class MessageInputConfigProtocol {
+  /// 宿主提供的视频播放图标；缺省时使用 UIKit 字体图标。
+  ImageProvider? get videoPlayIcon;
+
   /// 宿主统一媒体大小分流；为空时保留UIKit原生发送。
   ChatMediaSender? get mediaSender;
 
@@ -76,6 +91,8 @@ abstract class MessageInputConfigProtocol {
 
 /// 提供聊天输入区的默认配置，并允许宿主按会话覆盖单项能力。
 class ChatMessageInputConfig implements MessageInputConfigProtocol {
+  @override
+  final ImageProvider? videoPlayIcon;
   @override
   final ChatMediaSender? mediaSender;
   @override
@@ -142,6 +159,7 @@ class ChatMessageInputConfig implements MessageInputConfigProtocol {
       _richContentAttachmentUploader;
 
   const ChatMessageInputConfig({
+    this.videoPlayIcon,
     this.mediaSender,
     this.fileSelector,
     this.actionGuard,

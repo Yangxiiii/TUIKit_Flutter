@@ -1,6 +1,6 @@
 part of 'package:tencent_chat_uikit/src/third_party/extended_text_field/src/extended/widgets/text_field.dart';
 
-/// [RenderEditable]
+/// 维护富文本原子元素的光标与绘制坐标，并向输入装饰层提供有效的视口基线。
 class ExtendedRenderEditable extends _RenderEditable {
   ExtendedRenderEditable({
     super.text,
@@ -78,6 +78,16 @@ class ExtendedRenderEditable extends _RenderEditable {
   @override
   String get plainText {
     return ExtendedTextLibraryUtils.textSpanToActualText(_textPainter.text!);
+  }
+
+  /// 对外基线必须落在滚动视口内，段落中高于视口的媒体仍按原尺寸绘制和滚动。
+  @override
+  double computeDistanceToActualBaseline(TextBaseline baseline) {
+    // InputDecorator 会按基线计算底部补偿，越界基线会把整个可滚动区域移出输入框。
+    return super
+        .computeDistanceToActualBaseline(baseline)
+        .clamp(0.0, size.height)
+        .toDouble();
   }
 
   /// 按实际视觉行校准光标：图片行居中到最高占位元素，其余折行恢复普通文字高度。

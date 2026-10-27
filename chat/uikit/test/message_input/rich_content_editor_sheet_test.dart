@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
 
 import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
@@ -16,6 +18,514 @@ import 'package:tuikit_atomic_x/base_component/base_component.dart'
 import 'package:tuikit_atomic_x/album_picker/album_picker.dart';
 
 void main() {
+  testWidgets('竖屏视频收起后按原比例绘制，视口基线有效且能滚动查看播放标识', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final thumbnailPath = await _createVideoThumbnail(tester);
+    const boundaryKey = Key('video_input_capture');
+    const playIcon =
+        AssetImage('assets/images/video_play.png', package: 'feature_tim');
+    await tester.pumpWidget(MaterialApp(
+        theme: AppThemeFactory.create(
+            const AppNormalColorScheme(), Brightness.light),
+        home: const Scaffold(
+            body: Column(children: [
+          Expanded(child: SizedBox()),
+          RepaintBoundary(
+              key: boundaryKey,
+              child: MessageInput(
+                  conversationID: 'c2c_vertical_video',
+                  config: ChatMessageInputConfig(videoPlayIcon: playIcon)))
+        ]))));
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    final editor = tester.state<RichContentEditorSheetState>(
+        find.byType(RichContentEditorSheet));
+    final editorContext = tester.element(find.byType(RichContentEditorSheet));
+    // 提前完成真实封面和图标解码，后续直接检查屏幕像素，避免只断言控件存在。
+    await tester.runAsync(() async {
+      await precacheImage(FileImage(File(thumbnailPath)), editorContext);
+      await precacheImage(playIcon, editorContext);
+    });
+    await editor.insertProcessedMedia(
+        AlbumMedia(
+            id: 33,
+            mediaType: AlbumMediaType.video,
+            mediaPath: '/tmp/portrait.mp4',
+            fileExtension: 'mp4',
+            fileSize: 12,
+            videoThumbnailPath: thumbnailPath),
+        readSize: (_) async => const ImageSize(540, 960));
+    await tester.pump();
+    final text = tester
+        .widget<ExtendedTextField>(find.byType(ExtendedTextField))
+        .controller!;
+    text.value = TextEditingValue(
+        text: '${text.text}\n',
+        selection: TextSelection.collapsed(offset: text.text.length + 1));
+    await tester.pump();
+    await tester.tap(find.byTooltip('收起富文本编辑器'));
+    await tester.pumpAndSettle();
+    final field = find.byKey(const Key('message_input_text_field'));
+    final preview = find.byKey(const Key('rich_content_inline_video_2'));
+    final scroll = tester.state<ScrollableState>(
+        find.descendant(of: field, matching: find.byType(Scrollable)));
+    final size = tester.getSize(preview);
+    expect(size.height - 8, closeTo(size.width * 960 / 540, .1));
+    expect(size.height, greaterThan(tester.getSize(field).height));
+    final render =
+        tester.allRenderObjects.whereType<ExtendedRenderEditable>().single;
+    expect(tester.getRect(field).contains(render.localToGlobal(Offset.zero)),
+        isTrue,
+        reason: '文字滚动视口不能因媒体基线过高而被移出输入框');
+    final boundary =
+        tester.renderObject<RenderRepaintBoundary>(find.byKey(boundaryKey));
+    Future<void> expectCoverPainted() async {
+      final count = await tester.runAsync(() async {
+        final image = await boundary.toImage();
+        final bytes =
+            (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+        final rgba =
+            bytes.buffer.asUint8List(bytes.offsetInBytes, bytes.lengthInBytes);
+        var colored = 0;
+        for (var i = 0; i < rgba.length; i += 4) {
+          if (rgba[i] == 24 && rgba[i + 1] == 68 && rgba[i + 2] == 232) {
+            colored++;
+          }
+        }
+        image.dispose();
+        return colored;
+      });
+      expect(count, greaterThan(1000), reason: '视频封面必须实际绘制，不能只有占位高度');
+    }
+
+    await expectCoverPainted();
+    // 通过真实手势移动滚动偏移，完整封面保持尺寸，播放图标可以滚动到可视区域。
+    scroll.position.jumpTo(0);
+    await tester.pump();
+    await tester.drag(field, const Offset(0, -80));
+    await tester.pump();
+    expect(scroll.position.pixels, greaterThan(0));
+    await expectCoverPainted();
+    final icon = find.byWidgetPredicate(
+        (widget) => widget is Image && widget.image == playIcon);
+    final paintedCenter =
+        tester.getCenter(icon) - Offset(0, scroll.position.pixels);
+    expect(tester.getRect(field).contains(paintedCenter), isTrue);
+    expect(tester.getSize(preview), size);
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(preview).height, greaterThan(size.height));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('收起及重开编辑器后视频封面仍使用普通输入框的同一原子令牌', (tester) async {
+    final thumbnailPath = await _createVideoThumbnail(tester);
+    await tester.pumpWidget(MaterialApp(
+        theme: AppThemeFactory.create(
+            const AppNormalColorScheme(), Brightness.light),
+        home: const Scaffold(
+            body: Column(children: [
+          Expanded(child: SizedBox()),
+          MessageInput(conversationID: 'c2c_inline_video_test')
+        ]))));
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    final editor = tester.state<RichContentEditorSheetState>(
+        find.byType(RichContentEditorSheet));
+    await editor.insertProcessedMedia(
+        AlbumMedia(
+            id: 10,
+            mediaType: AlbumMediaType.video,
+            mediaPath: '/tmp/video.mp4',
+            fileExtension: 'mp4',
+            fileSize: 12,
+            videoThumbnailPath: thumbnailPath),
+        readSize: (_) async => const ImageSize(100, 60));
+    await tester.pump();
+    expect(find.byIcon(AppIcons.videoPlay), findsOneWidget);
+    await tester.tap(find.byTooltip('收起富文本编辑器'));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(AppIcons.videoPlay), findsOneWidget);
+    final field = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('message_input_text_field')));
+    expect(richContentAttachmentTokenPattern.allMatches(field.controller!.text),
+        hasLength(1));
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(AppIcons.videoPlay), findsOneWidget);
+    expect(find.byTooltip('删除附件'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('视频与图片共用原子正文，首帧居中叠加播放标识且编辑器点击不播放', (tester) async {
+    const playIcon =
+        AssetImage('assets/images/video_play.png', package: 'feature_tim');
+    final thumbnailPath = await _createVideoThumbnail(tester);
+    final editorKey = GlobalKey<RichContentEditorSheetState>();
+    final pending = Completer<String>();
+    final uploaded = <RichContentLocalAttachment>[];
+    RichContentDraft? sent;
+    await tester.pumpWidget(_testApp(
+      const RichContentDraft(blocks: [RichContentDraftTextBlock(1, '前后')]),
+      editorKey: editorKey,
+      videoPlayIcon: playIcon,
+      attachmentUploader: (attachment) {
+        uploaded.add(attachment);
+        return attachment.type == RichContentAttachmentType.image
+            ? Future.value('https://example.com/cover.png')
+            : pending.future;
+      },
+      onSend: (draft) async {
+        sent = draft;
+        return false;
+      },
+    ));
+    await tester.pump();
+    final field = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('rich_content_text_1')));
+    field.controller!.selection = const TextSelection.collapsed(offset: 1);
+    final media = AlbumMedia(
+        id: 10,
+        mediaType: AlbumMediaType.video,
+        mediaPath: '/tmp/相册视频.mov',
+        fileSize: 1024,
+        fileExtension: 'MOV',
+        videoThumbnailPath: thumbnailPath);
+    final insertion = editorKey.currentState!.insertProcessedMedia(media,
+        readSize: (path) async {
+      expect(path, thumbnailPath);
+      return const ImageSize(100, 60);
+    });
+    await tester.pump();
+    expect(uploaded.map((a) => a.mimeType), ['image/png', 'video/quicktime']);
+    expect(uploaded.last.width, 100);
+    expect(find.byType(ExtendedTextField), findsOneWidget);
+    final preview = find.byKey(const Key('rich_content_inline_video_2'));
+    expect(preview, findsOneWidget);
+    final icon = find.descendant(
+        of: preview,
+        matching: find.byWidgetPredicate(
+            (widget) => widget is Image && widget.image == playIcon));
+    expect(tester.getCenter(icon), tester.getCenter(preview));
+    expect(find.descendant(of: preview, matching: find.byType(GestureDetector)),
+        findsNothing);
+    final original = field.controller!.text;
+    await tester.tap(preview);
+    await tester.pump();
+    expect(field.controller!.text, original);
+    expect(editorKey.currentState!.canSend, isFalse);
+    expect(await editorKey.currentState!.insertProcessedMedia(media), isFalse);
+    pending.complete('https://example.com/video.mov');
+    expect(await insertion, isTrue);
+    await tester.pump();
+    expect(editorKey.currentState!.canSend, isTrue);
+    await editorKey.currentState!.send();
+    expect(sent!.blocks, hasLength(3));
+    expect((sent!.blocks.first as RichContentDraftTextBlock).text, '前\n');
+    expect((sent!.blocks.last as RichContentDraftTextBlock).text, '后');
+    final restored =
+        RichContentDraft.tryParsePersisted(sent!.toPersistedString())!;
+    expect(restored.plainTextPreview, '前\n [视频] 后');
+    final video =
+        restored.blocks.whereType<RichContentDraftAttachmentBlock>().single;
+    expect(video.attachment.thumbnailPath, thumbnailPath);
+    expect(video.thumbnailUrl, 'https://example.com/cover.png');
+    final encoded = jsonDecode(restored.toMessage()!.toCustomData());
+    expect(encoded['payload']['blocks'][1], {
+      'type': 'file',
+      'url': 'https://example.com/video.mov',
+      'name': '相册视频.mov',
+      'size': 1024,
+      'mimeType': 'video/quicktime',
+      'thumbnailUrl': 'https://example.com/cover.png',
+    });
+    final button = tester.widget<IconButton>(find.ancestor(
+        of: find.byTooltip('插入文件'), matching: find.byType(IconButton)));
+    expect(button.onPressed, isNull);
+    // 重开草稿继续使用同一正文和封面，不能退回文件卡片。
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(_testApp(restored,
+        videoPlayIcon: playIcon, onSend: (_) async => false));
+    await tester.pump();
+    expect(find.byType(ExtendedTextField), findsOneWidget);
+    expect(
+        find.byWidgetPredicate(
+            (widget) => widget is Image && widget.image == playIcon),
+        findsOneWidget);
+    expect(find.byTooltip('删除附件'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('视频封面失败禁止发送，整块删除后迟到上传结果不能恢复视频', (tester) async {
+    final thumbnailPath = await _createVideoThumbnail(tester);
+    final editorKey = GlobalKey<RichContentEditorSheetState>();
+    final pending = Completer<String>(), delayed = Completer<String>();
+    var attempts = 0;
+    RichContentDraft? current;
+    await tester.pumpWidget(_testApp(const RichContentDraft(),
+        editorKey: editorKey,
+        attachmentUploader: (_) =>
+            attempts++ == 0 ? pending.future : delayed.future,
+        onDraftChanged: (draft) => current = draft,
+        onSend: (_) async => false));
+    await tester.pump();
+    AlbumMedia media(int id) => AlbumMedia(
+        id: id,
+        mediaType: AlbumMediaType.video,
+        mediaPath: '/tmp/video.mp4',
+        fileExtension: 'mp4',
+        fileSize: 123,
+        videoThumbnailPath: thumbnailPath);
+    final insertion = editorKey.currentState!.insertProcessedMedia(media(21),
+        readSize: (_) async => const ImageSize(100, 60));
+    await tester.pump();
+    pending.completeError(StateError('封面上传失败'));
+    await insertion;
+    await tester.pump();
+    expect(
+        current!.blocks
+            .whereType<RichContentDraftAttachmentBlock>()
+            .single
+            .status,
+        RichContentAttachmentStatus.failed);
+    expect(editorKey.currentState!.canSend, isFalse);
+    final controller = tester
+        .widget<ExtendedTextField>(find.byType(ExtendedTextField))
+        .controller!;
+    Future<void> backspaceVideo() async {
+      final token =
+          richContentAttachmentTokenPattern.firstMatch(controller.text)!;
+      controller.selection = TextSelection.collapsed(offset: token.end);
+      await tester.pump();
+      tester.testTextInput.updateEditingValue(TextEditingValue(
+          text: controller.text.replaceRange(token.end - 1, token.end, ''),
+          selection: TextSelection.collapsed(offset: token.end - 1)));
+      await tester.pump();
+      expect(
+          richContentAttachmentTokenPattern.hasMatch(controller.text), isFalse);
+    }
+
+    await backspaceVideo();
+    expect(
+        current!.blocks.whereType<RichContentDraftAttachmentBlock>(), isEmpty);
+    final second = editorKey.currentState!.insertProcessedMedia(media(22),
+        readSize: (_) async => const ImageSize(100, 60));
+    await tester.pump();
+    expect(find.byIcon(AppIcons.videoPlay), findsOneWidget);
+    await backspaceVideo();
+    delayed.complete('https://example.com/cover.png');
+    await second;
+    await tester.pump();
+    expect(find.byIcon(AppIcons.videoPlay), findsNothing);
+    expect(
+        current!.blocks.whereType<RichContentDraftAttachmentBlock>(), isEmpty);
+    expect(editorKey.currentState!.canSend, isFalse);
+  });
+
+  testWidgets('独立富文本编辑器文件入口保留位置但禁止点击', (tester) async {
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(_testApp(
+      const RichContentDraft(),
+      onSend: (_) async => false,
+    ));
+    await tester.pump();
+    final file = find.bySemanticsIdentifier('tim.rich_content_toolbar.file');
+    expect(file, findsOneWidget);
+    expect(
+        tester
+            .getSemantics(file)
+            .getSemanticsData()
+            .hasAction(SemanticsAction.tap),
+        isFalse);
+    final button = tester.widget<IconButton>(find.ancestor(
+        of: find.byTooltip('插入文件'), matching: find.byType(IconButton)));
+    expect(button.onPressed, isNull);
+    await tester.tap(file);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    semantics.dispose();
+  });
+
+  testWidgets('富文本工具条随光标识别格式及末尾样式，主动关闭粗体仍可继续输入普通文字', (tester) async {
+    const source = '**粗体** 普通 ~**~~*组合*~~**~';
+    await tester.pumpWidget(_testApp(
+        const RichContentDraft(blocks: [RichContentDraftTextBlock(1, source)]),
+        initialShowFormatting: true,
+        onSend: (_) async => false));
+    await tester.pump();
+    final controller = tester
+        .widget<ExtendedTextField>(find.byKey(const Key('rich_content_text_1')))
+        .controller!;
+    bool selected(String label) =>
+        tester
+            .widget<IconButton>(find.ancestor(
+                of: find.byTooltip(label), matching: find.byType(IconButton)))
+            .isSelected ??
+        false;
+    for (final offset in [
+      source.indexOf('粗') + 1,
+      source.indexOf('体') + 1,
+      source.indexOf(' ')
+    ]) {
+      controller.selection = TextSelection.collapsed(offset: offset);
+      await tester.pump();
+      expect(selected('粗体'), isTrue, reason: '光标 $offset');
+      expect(selected('斜体'), isFalse);
+    }
+    for (final offset in [0, source.indexOf('粗')]) {
+      controller.selection = TextSelection.collapsed(offset: offset);
+      await tester.pump();
+      expect(selected('粗体'), isFalse, reason: '格式正文前 $offset');
+    }
+    controller.selection =
+        TextSelection.collapsed(offset: source.indexOf('普') + 1);
+    await tester.pump();
+    expect(selected('粗体'), isFalse);
+    controller.selection =
+        TextSelection.collapsed(offset: source.indexOf('组') + 1);
+    await tester.pump();
+    for (final label in ['粗体', '斜体', '下划线', '删除线']) {
+      expect(selected(label), isTrue);
+    }
+    controller.selection = TextSelection.collapsed(offset: source.indexOf('组'));
+    await tester.pump();
+    for (final label in ['粗体', '斜体', '下划线', '删除线']) {
+      expect(selected(label), isFalse, reason: '嵌套正文前');
+    }
+    controller.selection = const TextSelection.collapsed(offset: 3);
+    await tester.pump();
+    await tester.tap(find.byTooltip('粗体'));
+    await tester.pump();
+    expect(selected('粗体'), isFalse);
+    final offset = controller.selection.extentOffset;
+    tester.testTextInput.updateEditingValue(TextEditingValue(
+        text: controller.text.replaceRange(offset, offset, '新'),
+        selection: TextSelection.collapsed(offset: offset + 1)));
+    await tester.pump();
+    expect(controller.text, '**粗体**新 普通 ~**~~*组合*~~**~');
+    expect(selected('粗体'), isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('已保存的嵌套富文本回车后仍正确渲染并保留发送内容', (tester) async {
+    const source = '**前*甲乙*后**';
+    final editorKey = GlobalKey<RichContentEditorSheetState>();
+    RichContentDraft? sent;
+    await tester.pumpWidget(_testApp(
+      const RichContentDraft(blocks: [RichContentDraftTextBlock(1, source)]),
+      editorKey: editorKey,
+      onSend: (draft) async {
+        sent = draft;
+        return false;
+      },
+    ));
+    await tester.pump();
+    final field = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('rich_content_text_1')));
+    final offset = source.indexOf('乙');
+    field.controller!.selection = TextSelection.collapsed(offset: offset);
+    await tester.pump();
+    // 使用输入连接提交真实回车，验证隐藏标签映射和格式器能共同维护原文。
+    tester.testTextInput.updateEditingValue(TextEditingValue(
+      text: source.replaceRange(offset, offset, '\n'),
+      selection: TextSelection.collapsed(offset: offset + 1),
+    ));
+    await tester.pump();
+    expect(field.controller!.text, '**前*甲***\n***乙*后**');
+    final rendered = field.specialTextSpanBuilder!
+        .build(field.controller!.text, textStyle: field.style);
+    expect(rendered.toPlainText(), '前甲\n乙后');
+    final offsetAfterNewline = field.controller!.selection.extentOffset;
+    // 继续输入必须落在换行后的正文，不能写进重新打开的隐藏标签。
+    tester.testTextInput.updateEditingValue(TextEditingValue(
+      text: field.controller!.text
+          .replaceRange(offsetAfterNewline, offsetAfterNewline, '新'),
+      selection: TextSelection.collapsed(offset: offsetAfterNewline + 1),
+    ));
+    await tester.pump();
+    expect(field.controller!.text, '**前*甲***\n***新乙*后**');
+    await editorKey.currentState!.send();
+    expect((sent!.blocks.single as RichContentDraftTextBlock).text,
+        field.controller!.text);
+    expect(sent!.characterCount, 6);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('未弹键盘时直接展开，工具栏跟随键盘高度变化及收起且保留格式状态', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
+    await tester.pumpWidget(MaterialApp(
+      theme: AppThemeFactory.create(
+          const AppNormalColorScheme(), Brightness.light),
+      home: const Scaffold(
+          body: Column(children: [
+        Expanded(child: SizedBox()),
+        MessageInput(conversationID: 'c2c_direct_rich_keyboard'),
+      ])),
+    ));
+    // 从空闲输入区直接展开，正文获得焦点后系统才开始改变键盘遮挡高度。
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    final field = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('rich_content_text_1')));
+    expect(field.focusNode!.hasFocus, isTrue);
+    final editorState = tester.state<RichContentEditorSheetState>(
+        find.byType(RichContentEditorSheet));
+    final overlayToolbar =
+        find.byKey(const Key('rich_content_overlay_toolbar'));
+    final normalToolbar = find.byKey(const Key('message_input_shared_toolbar'));
+    final original = tester.getRect(overlayToolbar);
+    expect(original, tester.getRect(normalToolbar));
+    for (final inset in [180.0, 300.0, 220.0, 0.0]) {
+      tester.view.viewInsets = FakeViewPadding(bottom: inset);
+      await tester.pumpAndSettle();
+      final toolbar = tester.getRect(overlayToolbar);
+      expect(toolbar, tester.getRect(normalToolbar), reason: '键盘高度 $inset');
+      expect(toolbar.bottom, closeTo(844 - inset, .01));
+      expect(
+          tester
+              .getRect(find.byKey(const Key('rich_content_editor_layer')))
+              .bottom,
+          closeTo(toolbar.top, .01));
+      expect(
+          tester.state<RichContentEditorSheetState>(
+              find.byType(RichContentEditorSheet)),
+          same(editorState));
+      expect(field.focusNode!.hasFocus, isTrue);
+    }
+    // 键盘再次弹出后，格式操作仍可点击且不能被编辑器遮挡。
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    await tester.pumpAndSettle();
+    await tester.tap(
+        find.descendant(of: overlayToolbar, matching: find.byTooltip('文字格式')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+        find.descendant(of: overlayToolbar, matching: find.byTooltip('粗体')));
+    await tester.pumpAndSettle();
+    expect(editorState.activeFormats, contains('**'));
+    expect(tester.getRect(overlayToolbar), tester.getRect(normalToolbar));
+    await tester.tap(find.byTooltip('收起富文本编辑器'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(overlayToolbar).bottom, closeTo(544, .01));
+    // 尺寸回调已排队时销毁输入区，迟到回调也不能操作已移除的覆盖层。
+    tester.view.viewInsets = const FakeViewPadding(bottom: 200);
+    await tester.pumpWidget(const SizedBox());
+    tester.view.viewInsets = const FakeViewPadding();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('发送期间的新编辑不会随旧快照成功而关闭', (tester) async {
     final editorKey = GlobalKey<RichContentEditorSheetState>();
     final pending = Completer<bool>();
@@ -202,7 +712,7 @@ void main() {
       selection: TextSelection.collapsed(offset: 1),
     );
     expect(
-      await editor.insertProcessedImage(
+      await editor.insertProcessedMedia(
         AlbumMedia(
           id: 8,
           mediaType: AlbumMediaType.image,
@@ -534,7 +1044,7 @@ void main() {
     );
 
     expect(
-      await editorKey.currentState!.insertProcessedImage(
+      await editorKey.currentState!.insertProcessedMedia(
         media,
         readSize: (_) async => const ImageSize(100, 250),
       ),
@@ -691,7 +1201,7 @@ void main() {
     expect(find.byType(ExtendedTextField), findsOneWidget);
     expect(input.controller!.text, '前\n后');
 
-    expect(await editorKey.currentState!.insertProcessedImage(media), isFalse);
+    expect(await editorKey.currentState!.insertProcessedMedia(media), isFalse);
   });
 
   testWidgets('持久化图片草稿通过本地路径恢复渲染', (tester) async {
@@ -784,11 +1294,8 @@ void main() {
       const TextSelection(baseOffset: 0, extentOffset: 4),
     );
 
-    await _enterExtendedText(
-      tester,
-      find.byKey(const Key('rich_content_text_1')),
-      '正文',
-    );
+    // 保持当前选区直接输入；重新点击正文属于移动光标，应重新按该处文字同步格式。
+    tester.testTextInput.enterText('正文');
     await tester.pump();
     expect(input.controller!.text, '***正文***');
   });
@@ -1181,6 +1688,9 @@ Widget _testApp(
   bool initialShowFormatting = false,
   ValueChanged<RichContentEditorResult>? onClose,
   Set<String> initialActiveFormats = const {},
+  RichContentAttachmentUploader? attachmentUploader,
+  ValueChanged<RichContentDraft>? onDraftChanged,
+  ImageProvider? videoPlayIcon,
 }) {
   return MaterialApp(
     theme: AppThemeFactory.create(
@@ -1197,7 +1707,22 @@ Widget _testApp(
         showToolbar: showToolbar,
         initialShowFormatting: initialShowFormatting,
         initialActiveFormats: initialActiveFormats,
+        attachmentUploader: attachmentUploader,
+        onDraftChanged: onDraftChanged,
+        videoPlayIcon: videoPlayIcon,
       ),
     ),
   );
+}
+
+/// 为视频封面预览提供可解码的本地像素，避免测试请求真实相册或网络。
+Future<String> _createVideoThumbnail(WidgetTester tester) async {
+  late Directory directory;
+  await tester.runAsync(() async {
+    directory = await Directory.systemTemp.createTemp('rich_video_cover_');
+    await File('${directory.path}/cover.png').writeAsBytes(base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOQcHnxHwAEAAJEfJjuTwAAAABJRU5ErkJggg=='));
+  });
+  addTearDown(() => directory.deleteSync(recursive: true));
+  return '${directory.path}/cover.png';
 }

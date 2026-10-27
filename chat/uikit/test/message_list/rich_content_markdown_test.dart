@@ -11,6 +11,60 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/rich_c
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
 
 void main() {
+  testWidgets('格式文字回车后编辑器、聊天和列表保留每行的嵌套样式', (tester) async {
+    const source = '**前*甲乙*后**';
+    final offset = source.indexOf('乙');
+    final value =
+        activeMarkdownFormatInputFormatter(() => <String>{}).formatEditUpdate(
+      TextEditingValue(
+          text: source, selection: TextSelection.collapsed(offset: offset)),
+      TextEditingValue(
+          text: source.replaceRange(offset, offset, '\n'),
+          selection: TextSelection.collapsed(offset: offset + 1)),
+    );
+    late BuildContext context;
+    late TextSpan editor;
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (valueContext) {
+      context = valueContext;
+      editor = ChatSpecialTextSpanBuilder(
+              onTapUrl: (_) {},
+              colorScheme: SemanticColorScheme.of(context),
+              mapMarkdownMarkers: true)
+          .build(value.text, textStyle: const TextStyle(fontSize: 14));
+      return RichContentMarkdown(
+          data: value.text, textStyle: const TextStyle(fontSize: 14));
+    })));
+    expect(editor.toPlainText(), '前甲\n乙后');
+    final bubble = tester
+        .widgetList<RichText>(find.byType(RichText))
+        .map((w) => w.text.toPlainText())
+        .join();
+    expect(bubble, '前甲\n乙后');
+    final preview = richContentConversationPreview(
+        context,
+        MessageInfo(
+            messageType: MessageType.custom,
+            messagePayload: CustomMessagePayload(
+                customData: RichContentMessage([RichTextBlock(value.text)])
+                    .toCustomData())),
+        const TextStyle(fontSize: 14))!;
+    expect(preview.toPlainText(), '前甲 乙后');
+    for (final spans in [
+      _textSpans(editor).toList(),
+      tester
+          .widgetList<RichText>(find.byType(RichText))
+          .expand((w) => _textSpans(w.text))
+          .toList(),
+      _textSpans(preview).toList()
+    ]) {
+      for (final word in ['甲', '乙']) {
+        final style = spans.singleWhere((s) => s.text == word).style!;
+        expect(style.fontWeight, FontWeight.bold);
+        expect(style.fontStyle, FontStyle.italic);
+      }
+    }
+  });
+
   testWidgets('编辑器发送的紧邻格式段在三处展示一致', (tester) async {
     const cases = [
       '**甲****乙**',

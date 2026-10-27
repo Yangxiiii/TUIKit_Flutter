@@ -7,6 +7,8 @@ import 'package:tencent_chat_uikit/src/message_input/message_input_config.dart';
 import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
 import 'package:tencent_chat_uikit/src/message_input/src/chat_special_text_span_builder.dart';
 import 'package:tencent_chat_uikit/src/message_input/utils/image_size_reader.dart';
+import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_markdown_format.dart';
+import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/rich_content_video_preview.dart';
 import 'package:tencent_chat_uikit/src/third_party/extended_text_field/extended_text_field.dart';
 import 'package:tuikit_atomic_x/album_picker/album_picker.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart'
@@ -14,6 +16,7 @@ import 'package:tuikit_atomic_x/base_component/base_component.dart'
 
 const _editorBodyTopPadding = 12.0;
 const _editorBodyBottomPadding = 20.0;
+
 const _editorImageVerticalMargin = 4.0;
 
 /// 附件令牌的起始字符。
@@ -31,7 +34,7 @@ final richContentAttachmentTokenPattern = RegExp(
 String richContentAttachmentToken(int id) =>
     '$richContentAttachmentTokenStart$id$richContentAttachmentTokenEnd';
 
-/// 按当前视觉行内最高图片计算光标高度，普通文字行返回 null。
+/// 按当前行内最高图片或视频封面计算光标高度，普通文字行返回 null。
 double? richContentAttachmentCursorHeight({
   required BuildContext context,
   required TextEditingController controller,
@@ -50,9 +53,9 @@ double? richContentAttachmentCursorHeight({
   double? imageLineHeight;
   for (final match in richContentAttachmentTokenPattern.allMatches(line)) {
     final block = attachments[int.parse(match.group(1)!)];
-    if (block?.attachment.type != RichContentAttachmentType.image) continue;
+    if (block == null || !block.attachment.isInlineMedia) continue;
     final height = richContentEditorImageSize(
-      block!.attachment,
+      block.attachment,
       maxImageWidth,
     ).height;
     if (imageLineHeight == null || height > imageLineHeight) {
@@ -244,8 +247,19 @@ final class RichContentInputToolbar extends StatelessWidget {
               _emojiTooltip, _onEmoji, colors),
           _iconButton(AppIcons.a, '提及成员', _onMention, colors),
           _iconButton(AppIcons.startVideoConference, '视频通话', _onVideo, colors),
-          _iconButton(AppIcons.photo, _imageTooltip, _onImage, colors),
-          _iconButton(AppIcons.flile, _fileTooltip, _onFile, colors),
+          MergeSemantics(
+            child: Semantics(
+              identifier: 'tim.$_keyPrefix.album',
+              child:
+                  _iconButton(AppIcons.photo, _imageTooltip, _onImage, colors),
+            ),
+          ),
+          MergeSemantics(
+            child: Semantics(
+              identifier: 'tim.$_keyPrefix.file',
+              child: _iconButton(AppIcons.flile, _fileTooltip, _onFile, colors),
+            ),
+          ),
           _iconButton(AppIcons.format, '文字格式', _onShowFormatting, colors),
         ],
         _buildSendButton(colors, _sendTooltip),
@@ -354,6 +368,9 @@ final class RichContentEditorSheet extends StatefulWidget {
   /// 业务附件上传入口；未配置时附件保持待上传并禁用发送。
   final RichContentAttachmentUploader? attachmentUploader;
 
+  /// 宿主提供的原色播放图标，同时用于展开编辑器和普通输入区。
+  final ImageProvider? videoPlayIcon;
+
   /// 把完整自定义消息交回 MessageInput 发送，成功时返回 true。
   final Future<bool> Function(RichContentDraft draft) onSend;
 
@@ -381,6 +398,7 @@ final class RichContentEditorSheet extends StatefulWidget {
     required this.initialDraft,
     required this.onSend,
     this.attachmentUploader,
+    this.videoPlayIcon,
     this.onClose,
     this.onToolbarChanged,
     this.onDraftChanged,
@@ -398,8 +416,8 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
   late final TextEditingController _titleController;
   final List<_EditorBlock> _blocks = [];
 
-  /// 输入框图片令牌对应的草稿块；令牌被删除时同步移除，避免已删图片参与发送。
-  final Map<int, RichContentDraftAttachmentBlock> _inlineImages = {};
+  /// 正文图片和视频令牌对应的草稿块；令牌被删除时同步移除，避免已删媒体参与发送。
+  final Map<int, RichContentDraftAttachmentBlock> _inlineMedia = {};
   final Set<int> _insertedAlbumMediaIds = {};
   int _nextBlockId = 1;
   int? _activeTextBlockId;
@@ -440,7 +458,9 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     _restoreDraft(widget.initialDraft);
     if (_blocks.isEmpty) _blocks.add(_newTextBlock());
     for (final block in _blocks.whereType<_TextEditorBlock>()) {
+      block.lastValue = block.controller.value;
       block.controller.addListener(_refresh);
+      block.focusNode.addListener(_refresh);
     }
     final initialBlock = _blocks.whereType<_TextEditorBlock>().first;
     _activeTextBlockId = initialBlock.id;
@@ -461,19 +481,42 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
       block.controller
         ..removeListener(_refresh)
         ..dispose();
-      block.focusNode.dispose();
+      block.focusNode
+        ..removeListener(_refresh)
+        ..dispose();
     }
     super.dispose();
   }
 
+  /// 同步当前正文块的光标样式并清理已删除附件，再刷新编辑器及外部工具栏。
   void _refresh() {
     if (!mounted) return;
+    // 只在实际移动光标或切换正文块时派生格式；文字提交不能覆盖用户刚选择的输入样式。
+    for (final block in _blocks.whereType<_TextEditorBlock>()) {
+      final value = block.controller.value;
+      final previous = block.lastValue;
+      block.lastValue = value;
+      final moved = value.text == previous.text &&
+          previous.selection.isValid &&
+          value.selection != previous.selection;
+      final activated =
+          block.focusNode.hasFocus && block.id != _activeTextBlockId;
+      if ((moved || activated) &&
+          value.selection.isValid &&
+          value.selection.isCollapsed) {
+        _activeTextBlockId = block.id;
+        _activeFormats
+          ..clear()
+          ..addAll(richContentMarkdownFormatsAt(
+              value.text, value.selection.extentOffset));
+      }
+    }
     final source = _blocks
         .whereType<_TextEditorBlock>()
         .map((block) => block.controller.text)
         .join();
     // ExtendedTextField 会整体删除图片令牌，此处以控制器原文为准回收图片状态。
-    _inlineImages.removeWhere(
+    _inlineMedia.removeWhere(
       (id, _) => !source.contains(richContentAttachmentToken(id)),
     );
     _setEditorState(() {});
@@ -487,7 +530,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     );
   }
 
-  /// 把已保存图片还原为同一文本控制器中的原子占位元素。
+  /// 把已保存图片和视频还原为同一文本控制器中的原子占位元素。
   void _restoreDraft(RichContentDraft draft) {
     for (final block in draft.blocks) {
       _nextBlockId = _nextBlockId > block.id ? _nextBlockId : block.id + 1;
@@ -504,10 +547,10 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
           if (!_blocks.contains(currentText)) _blocks.add(currentText);
           currentText.controller.text += block.text;
         case RichContentDraftAttachmentBlock block
-            when block.attachment.type == RichContentAttachmentType.image:
+            when block.attachment.isInlineMedia:
           currentText ??= _newTextBlock();
           if (!_blocks.contains(currentText)) _blocks.add(currentText);
-          _inlineImages[block.id] = block;
+          _inlineMedia[block.id] = block;
           currentText.controller.text += richContentAttachmentToken(block.id);
         case RichContentDraftAttachmentBlock block:
           currentText = null;
@@ -516,11 +559,11 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     }
   }
 
-  /// 按输入框中的文字和图片令牌顺序还原发送草稿。
+  /// 按正文中的文字和媒体令牌顺序还原发送草稿。
   RichContentDraft _buildDraft() {
     final draftBlocks = <RichContentDraftBlock>[];
     var nextDraftId = _nextBlockId;
-    // 图片令牌只用于编辑态；发送前拆回有序文字块和图片块。
+    // 媒体令牌只用于编辑态；发送前拆回有序文字块及各自的媒体协议。
     for (final block in _blocks) {
       if (block is _AttachmentEditorBlock) {
         draftBlocks.add(block.block);
@@ -535,7 +578,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
         if (text.isNotEmpty) {
           draftBlocks.add(RichContentDraftTextBlock(nextDraftId++, text));
         }
-        final image = _inlineImages[int.parse(match.group(1)!)];
+        final image = _inlineMedia[int.parse(match.group(1)!)];
         if (image != null) draftBlocks.add(image);
         offset = match.end;
       }
@@ -621,15 +664,34 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     return null;
   }
 
+  /// 点击正文时同步当前块的光标格式；空正文保留已手动选择、尚待输入的样式。
+  void _activateTextBlock(_TextEditorBlock block) {
+    if (_activeTextBlockId == block.id) return;
+    _setEditorState(() {
+      _activeTextBlockId = block.id;
+      final value = block.controller.value;
+      if (value.text.isNotEmpty &&
+          value.selection.isValid &&
+          value.selection.isCollapsed) {
+        _activeFormats
+          ..clear()
+          ..addAll(richContentMarkdownFormatsAt(
+              value.text, value.selection.extentOffset));
+      }
+    });
+  }
+
   /// 切换外部共享工具条指定的 Markdown 格式。
   void toggleFormat(String marker) {
     final block =
         _activeTextBlock ?? _blocks.whereType<_TextEditorBlock>().last;
     if (block.controller.selection.isCollapsed) {
-      block.controller.value = exitActiveMarkdownFormats(
+      final value = exitActiveMarkdownFormats(
         block.controller.value,
         _activeFormats,
       );
+      block.lastValue = value;
+      block.controller.value = value;
     }
     if (!_activeFormats.remove(marker)) {
       _activeFormats.add(marker);
@@ -642,23 +704,25 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
   void closeFormattingToolbar() {
     final block =
         _activeTextBlock ?? _blocks.whereType<_TextEditorBlock>().last;
-    block.controller.value = exitActiveMarkdownFormats(
+    final value = exitActiveMarkdownFormats(
       block.controller.value,
       _activeFormats,
     );
+    block.lastValue = value;
+    block.controller.value = value;
     _setEditorState(() {
       _activeFormats.clear();
       _showFormatting = false;
     });
   }
 
-  /// 选择图片并插入当前正文位置。
-  Future<void> pickImages() async {
+  /// 选择相册图片或视频，处理完成后按当前光标位置插入草稿。
+  Future<void> pickAlbumMedia() async {
     _insertedAlbumMediaIds.clear();
     final locale = Localizations.localeOf(context);
     await AlbumPicker.pickMedia(
       config: AlbumPickerConfig(
-        mediaFilter: AlbumPickerMediaFilter.imageOnly,
+        mediaFilter: AlbumPickerMediaFilter.imageAndVideo,
         maxSelectionCount: 9,
         itemsPerRow: 3,
         showsCameraItem: false,
@@ -673,36 +737,46 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
       // 确认事件只代表用户完成选择；统一等待处理完成，避免读取尚未生成的沙盒路径。
       onMediaProcessing: (media, progress, error) async {
         if (error || progress < 1) return;
-        await insertProcessedImage(media);
+        await insertProcessedMedia(media);
       },
     );
   }
 
-  /// 将相册处理完成的图片插入草稿；同一选择会话中的重复完成事件只消费一次。
+  /// 将处理完成的媒体插入草稿；同一选择会话中的重复完成事件只消费一次。
   @visibleForTesting
-  Future<bool> insertProcessedImage(
+  Future<bool> insertProcessedMedia(
     AlbumMedia media, {
     Future<ImageSize?> Function(String path)? readSize,
   }) async {
-    if (media.mediaType != AlbumMediaType.image ||
+    if (!mounted ||
         media.mediaPath.isEmpty ||
         !_insertedAlbumMediaIds.add(media.id)) {
       return false;
     }
-    final size = await (readSize ?? ImageSizeReader.read)(media.mediaPath);
+    final isImage = media.mediaType == AlbumMediaType.image;
+    // 相册返回视频首帧，图片和视频均用实际预览尺寸维护正文行高与光标。
+    final previewPath = isImage ? media.mediaPath : media.videoThumbnailPath;
+    final size = previewPath == null || previewPath.isEmpty
+        ? null
+        : await (readSize ?? ImageSizeReader.read)(previewPath);
     if (size == null || !mounted) {
       _insertedAlbumMediaIds.remove(media.id);
       return false;
     }
     await _insertAttachment(
       RichContentLocalAttachment(
-        type: RichContentAttachmentType.image,
+        type: isImage
+            ? RichContentAttachmentType.image
+            : RichContentAttachmentType.file,
         localPath: media.mediaPath,
         fileName: _fileName(media.mediaPath),
         fileSize: media.fileSize,
-        mimeType: _mimeType(media.fileExtension, image: true),
+        mimeType: isImage
+            ? _mimeType(media.fileExtension, image: true)
+            : _videoMimeType(media.fileExtension),
         width: size.width,
         height: size.height,
+        thumbnailPath: isImage ? null : previewPath,
       ),
     );
     return true;
@@ -744,12 +818,12 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
           ? RichContentAttachmentStatus.pending
           : RichContentAttachmentStatus.uploading,
     );
-    // 图片留在当前文字控制器内作为原子字符；文件仍沿用独立附件块。
-    if (attachment.type == RichContentAttachmentType.image) {
+    // 图片和视频共用原子令牌、换行、选区替换和删除；旧文件草稿仍保留独立块。
+    if (attachment.isInlineMedia) {
       final token = richContentAttachmentToken(attachmentBlock.id);
       final leadingBreak = before.isEmpty || before.endsWith('\n') ? '' : '\n';
       final inserted = '$leadingBreak$token';
-      _inlineImages[attachmentBlock.id] = attachmentBlock;
+      _inlineMedia[attachmentBlock.id] = attachmentBlock;
       active.controller.value = TextEditingValue(
         text: '$before$inserted$after',
         selection: TextSelection.collapsed(
@@ -761,6 +835,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
       final index = _blocks.indexOf(active);
       final trailing = _newTextBlock(after);
       trailing.controller.addListener(_refresh);
+      trailing.focusNode.addListener(_refresh);
       active.controller.text = before;
       _setEditorState(() {
         _blocks.insert(index + 1, _AttachmentEditorBlock(attachmentBlock));
@@ -774,6 +849,21 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     if (uploader == null) return;
     // 上传结果仅按稳定 ID 更新仍存在的元素，用户已删除时不会重新插回。
     try {
+      String? thumbnailUrl;
+      // 封面也需可被接收端访问；两份资源都成功后才把视频标为可发送。
+      if (attachment.isVideo && attachment.thumbnailPath != null) {
+        final thumbnail = File(attachment.thumbnailPath!);
+        thumbnailUrl = await uploader(RichContentLocalAttachment(
+          type: RichContentAttachmentType.image,
+          localPath: thumbnail.path,
+          fileName: _fileName(thumbnail.path),
+          fileSize: thumbnail.lengthSync(),
+          mimeType: _mimeType(thumbnail.path.split('.').last, image: true),
+          width: attachment.width,
+          height: attachment.height,
+        ));
+        if (!isValidRichContentUrl(thumbnailUrl)) throw StateError('视频封面上传失败');
+      }
       final url = await uploader(attachment);
       _finishUpload(
         attachmentBlock.id,
@@ -781,6 +871,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
         isValidRichContentUrl(url)
             ? RichContentAttachmentStatus.uploaded
             : RichContentAttachmentStatus.failed,
+        thumbnailUrl: thumbnailUrl,
       );
     } catch (_) {
       _finishUpload(
@@ -791,13 +882,16 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     }
   }
 
-  void _finishUpload(int id, String? url, RichContentAttachmentStatus status) {
+  /// 仅更新仍存在的原子媒体或旧附件块，上传结果不能复活已删除的正文。
+  void _finishUpload(int id, String? url, RichContentAttachmentStatus status,
+      {String? thumbnailUrl}) {
     if (!mounted) return;
-    final inlineImage = _inlineImages[id];
+    final inlineImage = _inlineMedia[id];
     if (inlineImage != null) {
       _setEditorState(() {
-        _inlineImages[id] = inlineImage.copyWith(
+        _inlineMedia[id] = inlineImage.copyWith(
           remoteUrl: url,
+          thumbnailUrl: thumbnailUrl,
           status: status,
         );
       });
@@ -845,14 +939,15 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
                 activeFormats: _activeFormats,
                 canSend: canSend,
                 emojiTooltip: '插入表情',
-                imageTooltip: '插入图片',
+                imageTooltip: '插入图片/视频',
                 fileTooltip: '插入文件',
                 sendTooltip: '发送富文本消息',
                 onEmoji: insertEmoji,
                 onMention: insertMention,
                 onVideo: null,
-                onImage: pickImages,
-                onFile: pickFiles,
+                onImage: pickAlbumMedia,
+                // 展开编辑器不提供文件插入，保留按钮位置并使用统一禁用样式。
+                onFile: null,
                 onShowFormatting: showFormattingToolbar,
                 onCloseFormatting: closeFormattingToolbar,
                 onToggleFormat: toggleFormat,
@@ -987,7 +1082,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
                     controller: block.controller,
                     focusNode: block.focusNode,
                     inputFormatters: [_formatInputFormatter],
-                    onTap: () => _activeTextBlockId = block.id,
+                    onTap: () => _activateTextBlock(block),
                     keyboardType: TextInputType.multiline,
                     minLines: defaultMinLines,
                     maxLines: null,
@@ -997,7 +1092,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
                     cursorHeight: richContentAttachmentCursorHeight(
                       context: context,
                       controller: block.controller,
-                      attachments: _inlineImages,
+                      attachments: _inlineMedia,
                       maxImageWidth: maxImageWidth,
                       textStyle: style,
                     ),
@@ -1013,7 +1108,8 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
                       contentPadding: const EdgeInsets.symmetric(vertical: 6),
                     ),
                     specialTextSpanBuilder: RichContentAttachmentSpanBuilder(
-                      attachments: _inlineImages,
+                      videoPlayIcon: widget.videoPlayIcon,
+                      attachments: _inlineMedia,
                       maxImageWidth: maxImageWidth,
                       onTapUrl: (_) {},
                       colorScheme: colors,
@@ -1029,6 +1125,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     );
   }
 
+  /// 展示旧文件草稿的名称和上传状态，图片和视频统一由行内预览处理。
   Widget _buildAttachment(
     RichContentDraftAttachmentBlock block,
     SemanticColorScheme colors,
@@ -1038,6 +1135,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Stack(
         children: [
+          // 旧文件保留附件卡片，图片和视频不进入此布局。
           Container(
             constraints: const BoxConstraints(minHeight: 72),
             padding: const EdgeInsets.all(10),
@@ -1063,13 +1161,17 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
               ],
             ),
           ),
+          // 删除按稳定块ID操作，迟到的上传结果找不到旧块时直接丢弃。
           Positioned(
             top: 0,
             right: 0,
-            child: IconButton(
-              tooltip: '删除附件',
-              onPressed: () => _removeAttachment(block.id),
-              icon: Icon(Icons.close, color: colors.textColorSecondary),
+            child: Semantics(
+              identifier: 'tim.rich.remove_attachment.${block.id}',
+              child: IconButton(
+                tooltip: '删除附件',
+                onPressed: () => _removeAttachment(block.id),
+                icon: Icon(Icons.close, color: colors.textColorSecondary),
+              ),
             ),
           ),
           Positioned(
@@ -1091,10 +1193,18 @@ sealed class _EditorBlock {
   const _EditorBlock(this.id);
 }
 
+/// 保存正文块的输入与光标状态，由编辑器统一注册监听并释放资源。
 final class _TextEditorBlock extends _EditorBlock {
+  /// 当前块的原文及选区，偏移包含隐藏的格式标签。
   final TextEditingController controller;
+
+  /// 当前块的输入焦点，用于切换共享工具条所对应的正文。
   final FocusNode focusNode;
-  _TextEditorBlock(super.id, this.controller, this.focusNode);
+
+  /// 上次原文与选区，用于区分光标移动和文字提交，并保护工具条的主动格式切换。
+  TextEditingValue lastValue;
+  _TextEditorBlock(super.id, this.controller, this.focusNode)
+      : lastValue = controller.value;
 }
 
 final class _AttachmentEditorBlock extends _EditorBlock {
@@ -1105,13 +1215,17 @@ final class _AttachmentEditorBlock extends _EditorBlock {
 /// 把附件令牌渲染为可由 ExtendedTextField 整体选择和删除的元素。
 final class RichContentAttachmentSpanBuilder
     extends ChatSpecialTextSpanBuilder {
+  /// 视频封面中央的原色播放图标；为空时沿用字体图标。
+  final ImageProvider? videoPlayIcon;
+
   /// 按稳定 ID 索引的附件草稿块。
   final Map<int, RichContentDraftAttachmentBlock> attachments;
 
-  /// 图片在当前输入区可使用的最大宽度。
+  /// 图片及视频封面在当前输入区可使用的最大宽度。
   final double maxImageWidth;
 
   RichContentAttachmentSpanBuilder({
+    this.videoPlayIcon,
     required this.attachments,
     required this.maxImageWidth,
     required super.onTapUrl,
@@ -1128,6 +1242,7 @@ final class RichContentAttachmentSpanBuilder
   }) {
     if (isStart(flag, richContentAttachmentTokenStart)) {
       return _EditorAttachmentText(
+        videoPlayIcon: videoPlayIcon,
         attachments: attachments,
         maxImageWidth: maxImageWidth,
         start: index!,
@@ -1145,11 +1260,15 @@ final class RichContentAttachmentSpanBuilder
 
 /// 将附件令牌转换成单个可编辑元素，actualText 保持控制器偏移可逆。
 final class _EditorAttachmentText extends SpecialText {
+  /// 从宿主配置透传的播放图标，不随文本颜色变化。
+  final ImageProvider? videoPlayIcon;
   final Map<int, RichContentDraftAttachmentBlock> attachments;
   final double maxImageWidth;
+
   final int start;
 
   _EditorAttachmentText({
+    this.videoPlayIcon,
     required this.attachments,
     required this.maxImageWidth,
     required this.start,
@@ -1166,7 +1285,7 @@ final class _EditorAttachmentText extends SpecialText {
     final block = id == null ? null : attachments[id];
     if (block == null) return TextSpan(text: toString(), style: textStyle);
     final attachment = block.attachment;
-    if (attachment.type != RichContentAttachmentType.image) {
+    if (!attachment.isInlineMedia) {
       return SpecialTextSpan(
         text: attachment.fileName,
         actualText: toString(),
@@ -1179,8 +1298,31 @@ final class _EditorAttachmentText extends SpecialText {
       attachment,
       maxImageWidth,
     );
+    if (attachment.isVideo) {
+      final path = attachment.thumbnailPath;
+      final ImageProvider? image = path != null && path.isNotEmpty
+          ? FileImage(File(path))
+          : block.thumbnailUrl != null
+              ? NetworkImage(block.thumbnailUrl!)
+              : null;
+      return ExtendedWidgetSpan(
+        actualText: toString(),
+        start: start,
+        deleteAll: true,
+        alignment: PlaceholderAlignment.bottom,
+        child: Padding(
+          key: Key('rich_content_inline_video_$id'),
+          padding:
+              const EdgeInsets.symmetric(vertical: _editorImageVerticalMargin),
+          child: RichContentVideoPreview(
+              image: image, size: size, playIcon: videoPlayIcon),
+        ),
+      );
+    }
     return ImageSpan(
-      FileImage(File(attachment.localPath)),
+      attachment.localPath.isNotEmpty || block.remoteUrl == null
+          ? FileImage(File(attachment.localPath))
+          : NetworkImage(block.remoteUrl!),
       key: Key('rich_content_inline_image_$id'),
       imageWidth: size.width,
       imageHeight: size.height,
@@ -1193,7 +1335,7 @@ final class _EditorAttachmentText extends SpecialText {
   }
 }
 
-/// 按图片原始比例计算编辑尺寸，只限制宽度以避免编辑器高度变化时缩放。
+/// 按图片或视频封面的比例计算编辑尺寸，只限制宽度以免随编辑器高度变化。
 Size richContentEditorImageSize(
   RichContentLocalAttachment attachment,
   double maxWidth,
@@ -1209,6 +1351,18 @@ Size richContentEditorImageSize(
 }
 
 String _fileName(String path) => path.split(Platform.pathSeparator).last;
+
+/// 视频媒体类型已由相册确认，扩展名只决定 MIME 子类型，不改变附件业务类型。
+String _videoMimeType(String extension) =>
+    switch (extension.toLowerCase().replaceFirst('.', '')) {
+      'mov' => 'video/quicktime',
+      'm4v' => 'video/x-m4v',
+      'avi' => 'video/x-msvideo',
+      'mkv' => 'video/x-matroska',
+      '3gp' => 'video/3gpp',
+      '' => 'video/*',
+      final value => 'video/$value',
+    };
 
 String _mimeType(String extension, {bool image = false}) {
   final normalized = extension.toLowerCase().replaceFirst('.', '');

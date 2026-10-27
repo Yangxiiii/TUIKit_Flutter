@@ -12,6 +12,8 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/rich_c
 import 'package:url_launcher/url_launcher.dart';
 import '../../utils/big_file_message.dart';
 import 'file_message_widget.dart';
+import 'rich_content_video_preview.dart';
+import '../../utils/rich_content_media_viewer.dart';
 
 /// 按业务标识展示自定义消息，并为未知协议保留通用气泡兜底。
 class CustomMessageWidget extends StatelessWidget {
@@ -88,14 +90,15 @@ class CustomMessageWidget extends StatelessWidget {
     );
   }
 
-  /// 在同一气泡中按协议顺序展示文字、图片和文件。
+  /// 按正文顺序展示文字、图片、视频及普通文件，媒体点击定位到共用预览器。
   Widget _buildRichContentMessage(
     BuildContext context,
     SemanticColorScheme colors,
     RichContentMessage content,
   ) {
-    final foreground =
-        isSelf ? colors.textColorAntiPrimary : colors.textColorPrimary;
+    final foreground = isSelf
+        ? colors.textColorAntiPrimary
+        : colors.textColorPrimary;
     // 文字气泡在不同对齐方式下的尾角方向必须保持一致。
     final tailOnRight =
         config.alignment == 'right' || (config.alignment != 'left' && isSelf);
@@ -106,8 +109,9 @@ class CustomMessageWidget extends StatelessWidget {
         constraints: BoxConstraints(maxWidth: maxWidth * 0.7),
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
         decoration: BoxDecoration(
-          color:
-              isSelf ? colors.bgColorBubbleOwn : colors.bgColorBubbleReciprocal,
+          color: isSelf
+              ? colors.bgColorBubbleOwn
+              : colors.bgColorBubbleReciprocal,
           borderRadius: BorderRadius.only(
             topLeft: Radius.circular(radius),
             topRight: Radius.circular(radius),
@@ -124,12 +128,36 @@ class CustomMessageWidget extends StatelessWidget {
               if (index > 0) const SizedBox(height: 8),
               switch (block) {
                 RichTextBlock(:final text) => RichContentMarkdown(
-                    data: text,
-                    textStyle:
-                        FontScheme.caption1Regular.copyWith(color: foreground),
+                  data: text,
+                  textStyle: FontScheme.caption1Regular.copyWith(
+                    color: foreground,
                   ),
+                ),
                 RichImageBlock(:final url, :final width, :final height) =>
-                  _buildImage(url, width, height, colors),
+                  _buildImage(
+                    url,
+                    width,
+                    height,
+                    colors,
+                    () => showRichContentMediaViewer(
+                      context,
+                      content,
+                      index,
+                      downloadVideo: config.fileDownloader,
+                    ),
+                  ),
+                RichFileBlock(:final url, :final mimeType, :final thumbnailUrl)
+                    when mimeType.startsWith('video/') =>
+                  _buildVideo(
+                    url,
+                    thumbnailUrl,
+                    () => showRichContentMediaViewer(
+                      context,
+                      content,
+                      index,
+                      downloadVideo: config.fileDownloader,
+                    ),
+                  ),
                 RichFileBlock(:final url, :final name, :final size) =>
                   _buildFile(url, name, size, foreground, colors),
               },
@@ -140,35 +168,41 @@ class CustomMessageWidget extends StatelessWidget {
     );
   }
 
-  /// 根据原图比例约束预览大小，图片加载失败时仍保留可识别的占位内容。
+  /// 按原图比例约束气泡尺寸，点击进入媒体预览，加载失败时保留可识别占位。
   Widget _buildImage(
     String url,
     int? width,
     int? height,
     SemanticColorScheme colors,
+    VoidCallback onPreview,
   ) {
     final displayWidth = math.max(1.0, maxWidth * 0.7 - 24);
     // 无尺寸消息交由图片解码确定比例，仍限制最大高度，避免长图撑满聊天窗口。
     final displayHeight = width != null && height != null
         ? math.max(1.0, math.min(240.0, displayWidth * height / width))
         : null;
-    return GestureDetector(
-      onTap: () =>
-          launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: displayWidth, maxHeight: 240),
-          child: CachedNetworkImage(
-            imageUrl: url,
-            width: displayWidth,
-            height: displayHeight,
-            fit: displayHeight == null ? BoxFit.contain : BoxFit.cover,
-            errorWidget: (_, __, ___) => SizedBox(
+    return Semantics(
+      identifier: 'tim.rich.image.${message.msgID}.${url.hashCode}',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onPreview,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: displayWidth, maxHeight: 240),
+            child: CachedNetworkImage(
+              imageUrl: url,
               width: displayWidth,
-              height: displayHeight ?? 120,
-              child: Icon(Icons.broken_image_outlined,
-                  color: colors.textColorTertiary),
+              height: displayHeight,
+              fit: displayHeight == null ? BoxFit.contain : BoxFit.cover,
+              errorWidget: (_, __, ___) => SizedBox(
+                width: displayWidth,
+                height: displayHeight ?? 120,
+                child: Icon(
+                  Icons.broken_image_outlined,
+                  color: colors.textColorTertiary,
+                ),
+              ),
             ),
           ),
         ),
@@ -176,7 +210,28 @@ class CustomMessageWidget extends StatelessWidget {
     );
   }
 
-  /// 文件块沿用普通文件消息的附件卡片层级，点击时使用协议 URL 打开。
+  /// 视频气泡点击进入共用媒体预览器，编辑器中的封面仍不提供播放交互。
+  Widget _buildVideo(String url, String? thumbnailUrl, VoidCallback onPreview) {
+    final width = math.max(1.0, maxWidth * 0.7 - 24);
+    // 消息与资源共同区分点击入口，资源地址只保留散列，避免把签名URL写入语义树。
+    return Semantics(
+      identifier: 'tim.rich.video.${message.msgID}.${url.hashCode}',
+      child: GestureDetector(
+        // 封面自身忽略指针以兼容编辑器，气泡需要由外层显式接管点击命中。
+        behavior: HitTestBehavior.opaque,
+        onTap: onPreview,
+        child: RichContentVideoPreview(
+          playIcon: config.videoPlayIcon,
+          image: thumbnailUrl == null
+              ? null
+              : CachedNetworkImageProvider(thumbnailUrl),
+          size: Size(width, math.min(240, width * 9 / 16)),
+        ),
+      ),
+    );
+  }
+
+  /// 普通文件沿用附件卡片，视频由共用封面组件展示，点击时打开协议 URL。
   Widget _buildFile(
     String url,
     String name,

@@ -1,8 +1,12 @@
 import 'package:tuikit_atomic_x/base_component/utils/app_builder.dart';
+import 'package:flutter/painting.dart';
 import '../message_input/chat_media_sender.dart';
 
 /// 约定消息列表的外观和可操作能力，具体默认值由聊天配置提供。
 abstract class MessageListConfigProtocol {
+  /// 宿主提供的视频播放图标；缺省时使用 UIKit 字体图标。
+  ImageProvider? get videoPlayIcon;
+
   /// 普通失败消息的重发也必须通过同一媒体大小分流入口。
   ChatMediaSender? get mediaSender;
 
@@ -43,6 +47,8 @@ abstract class MessageListConfigProtocol {
 
 /// 提供消息列表默认外观，并保留宿主显式传入的单项覆盖。
 class ChatMessageListConfig implements MessageListConfigProtocol {
+  @override
+  final ImageProvider? videoPlayIcon;
   @override
   final ChatMediaSender? mediaSender;
   @override
@@ -184,6 +190,7 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
   bool get isSupportQuote => _isSupportQuote;
 
   const ChatMessageListConfig({
+    this.videoPlayIcon,
     this.mediaSender,
     this.fileTransfers = const {},
     this.fileIconBuilder,

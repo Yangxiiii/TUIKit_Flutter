@@ -1,5 +1,6 @@
 import 'chat_media_sender.dart';
 import '../message_list/utils/big_file_message.dart';
+import '../message_list/utils/rich_content_markdown_format.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:app_core/app_core.dart';
@@ -80,7 +81,7 @@ class MessageInput extends StatefulWidget {
 
 /// 管理当前会话的输入模式、草稿、焦点和消息发送顺序。
 class MessageInputState extends State<MessageInput>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   /// Group conversation ID prefix
   ///
   /// 群聊 ID 前缀。
@@ -126,6 +127,9 @@ class MessageInputState extends State<MessageInput>
 
   /// 普通输入区格式栏中处于选中状态的 Markdown 标记。
   final Set<String> _activeInlineFormats = {};
+
+  /// 上次原文选区；仅光标移动时派生格式，程序切换按钮时先同步以保留下一次输入的选择。
+  TextSelection _lastFormatSelection = const TextSelection.collapsed(offset: -1);
   late final TextInputFormatter _inlineFormatInputFormatter =
       activeMarkdownFormatInputFormatter(() => _activeInlineFormats);
   int _morePanelPageIndex = 0;
@@ -213,6 +217,7 @@ class MessageInputState extends State<MessageInput>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _messageInputStore = MessageInputStore.create(
       conversationID: widget.conversationID,
     );
@@ -486,8 +491,19 @@ class MessageInputState extends State<MessageInput>
     }
   }
 
+  /// 键盘或窗口尺寸变化后重测覆盖层锚点，不能依赖已被Scaffold消费的底部Insets。
+  @override
+  void didChangeMetrics() {
+    if (_richContentEditorOverlay == null) return;
+    // 系统先通知尺寸变化，等Scaffold完成本帧避让后才能读取工具条的新坐标。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _richContentEditorOverlay?.markNeedsBuild();
+    });
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     unawaited(_localSendSubscription?.cancel());
     _richContentEditorOverlay?.remove();
     _richContentEditorOverlay = null;
@@ -600,6 +616,25 @@ class MessageInputState extends State<MessageInput>
   void _onTextChanged() {
     // 选区移动不推进编辑版本，避免仅聚焦就阻止旧草稿正常恢复。
     final text = _textEditingController.text;
+    final selection = _textEditingController.selection;
+    if (_inlineRichContentEnabled &&
+        !_isRichContentEditorOpen &&
+        text == _lastObservedText &&
+        _lastFormatSelection.isValid &&
+        selection.isValid &&
+        selection.isCollapsed &&
+        selection != _lastFormatSelection) {
+      final formats = richContentMarkdownFormatsAt(text, selection.extentOffset);
+      if (_activeInlineFormats.length != formats.length ||
+          !_activeInlineFormats.containsAll(formats)) {
+        setState(() {
+          _activeInlineFormats
+            ..clear()
+            ..addAll(formats);
+        });
+      }
+    }
+    _lastFormatSelection = selection;
     if (text != _lastObservedText) {
       _draftRevision++;
       _lastObservedText = text;
@@ -975,6 +1010,7 @@ class MessageInputState extends State<MessageInput>
                   _conversationInfo?.title ?? widget.conversationID,
               initialDraft: currentDraft,
               attachmentUploader: widget.config.richContentAttachmentUploader,
+              videoPlayIcon: widget.config.videoPlayIcon,
               onSend: _sendRichContentDraft,
               onClose: _closeRichContentEditor,
               onToolbarChanged: _refreshSharedToolbar,
@@ -1144,7 +1180,7 @@ class MessageInputState extends State<MessageInput>
   void _onPickAlbum() async {
     // 点击时重新判断模式，避免切换帧内残留的普通回调把图片作为独立消息发送。
     if (_isRichContentEditorOpen) {
-      await _richContentEditorKey.currentState?.pickImages();
+      await _richContentEditorKey.currentState?.pickAlbumMedia();
       return;
     }
     final locale = Localizations.localeOf(context);
@@ -1463,12 +1499,9 @@ class MessageInputState extends State<MessageInput>
     }
   }
 
+  /// 仅在普通输入模式选择并发送文件，富文本编辑器展开期间不接受文件操作。
   void _onPickFile() async {
-    // 文件与图片遵循同一隔离规则，富文本展开期间只能写入当前草稿。
-    if (_isRichContentEditorOpen) {
-      await _richContentEditorKey.currentState?.pickFiles();
-      return;
-    }
+    if (_isRichContentEditorOpen) return;
     final selector = widget.config.fileSelector;
     if (selector != null) {
       final messages = await selector(context);
@@ -1479,6 +1512,7 @@ class MessageInputState extends State<MessageInput>
       }
       return;
     }
+    // 宿主未接管文件选择时使用 SDK 选择器，仍按独立文件消息逐份发送。
     List<PickerResult> filePickerResults = await FilePicker.pickFiles(
       context: context,
       config: FilePickerConfig(maxCount: 10),
@@ -2231,7 +2265,10 @@ class MessageInputState extends State<MessageInput>
     return RichContentInputToolbar(
       key: key,
       switcherKey: const Key('message_input_toolbar_switcher'),
-      keyPrefix: 'message_input_toolbar',
+      // 覆盖层与底部工具条同时存在，使用不同前缀保持操作语义唯一。
+      keyPrefix: key == const Key('rich_content_overlay_toolbar')
+          ? 'rich_content_overlay_toolbar'
+          : 'message_input_toolbar',
       showFormatting: _isRichContentEditorOpen
           ? richEditor?.showFormatting ?? _showTextFormattingToolbar
           : _showTextFormattingToolbar,
@@ -2247,7 +2284,7 @@ class MessageInputState extends State<MessageInput>
       showKeyboard: !_isRichContentEditorOpen && _showEmojiPanel,
       emojiTooltip:
           !_isRichContentEditorOpen && _showEmojiPanel ? '显示键盘' : '表情',
-      imageTooltip: _isRichContentEditorOpen ? '插入图片' : atomicLocale.album,
+      imageTooltip: _isRichContentEditorOpen ? '插入图片/视频' : atomicLocale.album,
       fileTooltip: _isRichContentEditorOpen ? '插入文件' : atomicLocale.file,
       sendTooltip: _isRichContentEditorOpen ? '发送富文本消息' : atomicLocale.send,
       onEmoji: _isRichContentEditorOpen
@@ -2264,7 +2301,8 @@ class MessageInputState extends State<MessageInput>
       onImage: _isRichContentEditorOpen || widget.config.isShowAlbum
           ? _onPickAlbum
           : null,
-      onFile: _isRichContentEditorOpen || widget.config.isShowFile
+      // 展开编辑器时禁用文件；收起后恢复宿主配置的独立文件发送入口。
+      onFile: !_isRichContentEditorOpen && widget.config.isShowFile
           ? _onPickFile
           : null,
       onShowFormatting: _isRichContentEditorOpen
@@ -2317,10 +2355,12 @@ class MessageInputState extends State<MessageInput>
   /// 切换普通输入区的格式选中态，只影响下一次输入而不修改已有文字。
   void _toggleInlineFormat(String marker) {
     if (_textEditingController.selection.isCollapsed) {
-      _textEditingController.value = exitActiveMarkdownFormats(
+      final value = exitActiveMarkdownFormats(
         _textEditingController.value,
         _activeInlineFormats,
       );
+      _lastFormatSelection = value.selection;
+      _textEditingController.value = value;
     }
     if (!_activeInlineFormats.remove(marker)) {
       _activeInlineFormats.add(marker);
@@ -2331,10 +2371,12 @@ class MessageInputState extends State<MessageInput>
 
   /// 退出格式栏并结束当前格式范围，避免隐藏状态继续影响后续输入。
   void _closeInlineFormattingToolbar() {
-    _textEditingController.value = exitActiveMarkdownFormats(
+    final value = exitActiveMarkdownFormats(
       _textEditingController.value,
       _activeInlineFormats,
     );
+    _lastFormatSelection = value.selection;
+    _textEditingController.value = value;
     setState(() {
       _activeInlineFormats.clear();
       _showTextFormattingToolbar = false;
@@ -2482,6 +2524,7 @@ class MessageInputState extends State<MessageInput>
       focusNode: _textEditingFocusNode,
       inputFormatter: _inlineFormatInputFormatter,
       inlineAttachments: _inlineRichContentAttachments,
+      videoPlayIcon: widget.config.videoPlayIcon,
       colorsTheme: colorsTheme,
       hintText: '发送给 ${_conversationInfo?.title ?? widget.conversationID}',
       onExpand: _openRichContentEditor,
@@ -2740,6 +2783,9 @@ class _MentionTextField extends StatefulWidget {
   /// 编辑态令牌对应的附件，用于按真实图片高度布局正文。
   final Map<int, RichContentDraftAttachmentBlock> inlineAttachments;
 
+  /// 与展开编辑器共用的宿主播放图标。
+  final ImageProvider? videoPlayIcon;
+
   const _MentionTextField({
     required this.controller,
     required this.focusNode,
@@ -2749,6 +2795,7 @@ class _MentionTextField extends StatefulWidget {
     this.onExpand,
     this.inputFormatter,
     this.inlineAttachments = const {},
+    this.videoPlayIcon,
   });
 
   @override
@@ -2861,12 +2908,11 @@ class _MentionTextFieldState extends State<_MentionTextField> {
         );
         // 高度测量与实际输入使用同一行高，避免主题继承后五行正文被提前裁掉。
         final maxImageWidth = constraints.maxWidth / 2;
-        final maxInputHeight = TextPainter(
-                  text: TextSpan(text: ' ', style: style),
-                  textDirection: Directionality.of(context),
-                ).preferredLineHeight *
-                5 +
-            20;
+        final lineHeight = TextPainter(
+          text: TextSpan(text: ' ', style: style),
+          textDirection: Directionality.of(context),
+        ).preferredLineHeight;
+        final maxInputHeight = lineHeight * 5 + 20;
         // 展开按钮独立于文本滚动区，输入内容只由 ExtendedTextField 自身滚动。
         return ConstrainedBox(
           constraints: BoxConstraints(maxHeight: maxInputHeight),
@@ -2917,6 +2963,7 @@ class _MentionTextFieldState extends State<_MentionTextField> {
                         ),
                       ),
                       specialTextSpanBuilder: RichContentAttachmentSpanBuilder(
+                        videoPlayIcon: widget.videoPlayIcon,
                         attachments: widget.inlineAttachments,
                         maxImageWidth: maxImageWidth,
                         colorScheme: widget.colorsTheme,

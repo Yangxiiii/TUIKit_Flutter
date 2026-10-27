@@ -1,6 +1,7 @@
 import 'package:app_ui/app_ui.dart';
 import 'dart:async';
 import 'dart:io';
+import 'package:cached_network_image/cached_network_image.dart';
 
 import 'package:tuikit_atomic_x/base_component/base_component.dart'
     hide IconButton;
@@ -10,6 +11,20 @@ import 'package:tencent_chat_uikit/src/video_player/video_player_widget.dart';
 import 'package:flutter/material.dart';
 
 import 'image_element.dart';
+
+/// 普通消息使用本地文件，富文本使用已校验的HTTP(S)资源，二者共用缩放与浏览布局。
+ImageProvider? _previewImageProvider(String path) {
+  final uri = Uri.tryParse(path);
+  if (uri != null &&
+      (uri.scheme == 'http' || uri.scheme == 'https') &&
+      uri.host.isNotEmpty &&
+      uri.userInfo.isEmpty) {
+    return CachedNetworkImageProvider(path);
+  }
+  return path.isNotEmpty && File(path).existsSync()
+      ? FileImage(File(path))
+      : null;
+}
 
 typedef EventHandler = void Function(
     Map<String, dynamic> eventData, Function(dynamic) callback);
@@ -68,9 +83,7 @@ class _PlayButtonView extends StatelessWidget {
   }
 }
 
-/// Image item view (for images only) with pinch-to-zoom and double-tap-to-zoom
-///
-/// 图像项目视图（仅限图片）支持捏合缩放和双击缩放
+/// 对本地或远端图片提供捏合缩放、双击缩放及关闭交互。
 class _ImageItemView extends StatefulWidget {
   final ImageElement element;
   final VoidCallback onTap;
@@ -86,9 +99,14 @@ class _ImageItemView extends StatefulWidget {
   State<_ImageItemView> createState() => _ImageItemViewState();
 }
 
+/// 管理单张图片的缩放动画与解码尺寸监听，销毁时释放图片流和动画资源。
 class _ImageItemViewState extends State<_ImageItemView>
     with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
+
+  /// 用于获取图片原始比例的监听，必须随页面释放以免保留远端图片流。
+  ImageStream? _sizeStream;
+  ImageStreamListener? _sizeListener;
 
   // Current committed scale & offset (updated on gesture end / animation)
   //
@@ -145,30 +163,30 @@ class _ImageItemViewState extends State<_ImageItemView>
     _loadImageSize();
   }
 
-  /// Load the intrinsic image dimensions so we can correctly calculate
-  /// how much room the image actually occupies inside the viewport (BoxFit.contain).
-  ///
-  /// 加载图像的固有尺寸，这样我们可以正确计算图像在视口中实际占据的空间（BoxFit.contain）
+  /// 从实际图片来源读取固有尺寸，缩放边界不能假设远端资源存在于本地文件系统。
   void _loadImageSize() {
-    final file = File(widget.element.imagePath);
-    if (!file.existsSync()) return;
-    final image = Image.file(file);
-    image.image.resolve(const ImageConfiguration()).addListener(
-      ImageStreamListener((ImageInfo info, bool _) {
-        if (mounted) {
-          setState(() {
-            _imageSize = Size(
-              info.image.width.toDouble(),
-              info.image.height.toDouble(),
-            );
-          });
-        }
-      }),
-    );
+    final provider = _previewImageProvider(widget.element.imagePath);
+    if (provider == null) return;
+    _sizeStream = provider.resolve(const ImageConfiguration());
+    _sizeListener = ImageStreamListener((ImageInfo info, bool _) {
+      if (mounted) {
+        setState(() {
+          _imageSize = Size(
+            info.image.width.toDouble(),
+            info.image.height.toDouble(),
+          );
+        });
+      }
+      info.dispose();
+    }, onError: (Object error, StackTrace? stackTrace) {
+      // 可见图片组件负责展示错误占位，尺寸监听不重复上抛网络或解码错误。
+    });
+    _sizeStream!.addListener(_sizeListener!);
   }
 
   @override
   void dispose() {
+    if (_sizeListener != null) _sizeStream?.removeListener(_sizeListener!);
     _animationController.dispose();
     super.dispose();
   }
@@ -578,9 +596,10 @@ class _ImageItemViewState extends State<_ImageItemView>
   }
 
   Widget _buildImage() {
-    if (File(widget.element.imagePath).existsSync()) {
-      return Image.file(
-        File(widget.element.imagePath),
+    final provider = _previewImageProvider(widget.element.imagePath);
+    if (provider != null) {
+      return Image(
+        image: provider,
         fit: BoxFit.contain,
         errorBuilder: (context, error, stackTrace) => _buildErrorImage(),
       );
@@ -603,9 +622,7 @@ class _ImageItemViewState extends State<_ImageItemView>
   }
 }
 
-/// Video item view using VideoPlayerWidget
-///
-/// 使用 VideoPlayerWidget 的视频项视图
+/// 视频沿用单独消息的本地播放器；富文本封面可来自远端，下载由调用方处理。
 class _VideoItemView extends StatelessWidget {
   final ImageElement element;
   final bool isDownloading;
@@ -637,13 +654,14 @@ class _VideoItemView extends StatelessWidget {
       return _buildThumbnailWithSystemPlayerButton();
     }
 
-    // Video file exists - use VideoPlayerWidget
-    //
-    // 视频文件存在 - 使用 VideoPlayerWidget
+    // 视频下载后沿用单独消息的本地播放器，封面仍可使用远端资源。
+    final remoteThumbnail =
+        _previewImageProvider(element.imagePath) is CachedNetworkImageProvider;
     return VideoPlayerWidget(
       video: VideoData(
         localPath: element.videoPath,
-        snapshotLocalPath: element.imagePath,
+        snapshotLocalPath: remoteThumbnail ? null : element.imagePath,
+        snapshotUrl: remoteThumbnail ? element.imagePath : null,
       ),
       onClose: onClose,
       showCloseButton: true,
@@ -718,9 +736,10 @@ class _VideoItemView extends StatelessWidget {
   }
 
   Widget _buildThumbnail() {
-    if (File(element.imagePath).existsSync()) {
-      return Image.file(
-        File(element.imagePath),
+    final provider = _previewImageProvider(element.imagePath);
+    if (provider != null) {
+      return Image(
+        image: provider,
         fit: BoxFit.contain,
         errorBuilder: (context, error, stackTrace) => _buildErrorImage(),
       );
@@ -783,9 +802,15 @@ class _LoadingIndicatorView extends StatelessWidget {
   }
 }
 
+/// 普通媒体和富文本媒体共用的全屏预览，提供缩放、分页、视频下载与播放。
 class ImageViewerWidget extends StatefulWidget {
+  /// 按浏览顺序排列的媒体，支持本地文件和已校验的远端封面。
   final List<ImageElement> imageElements;
+
+  /// 首次打开的位置，由调用方保证位于媒体列表范围内。
   final int initialIndex;
+
+  /// 由调用方处理历史分页和视频下载，完成后交还预览器更新当前媒体。
   final EventHandler onEventTriggered;
 
   const ImageViewerWidget({
@@ -799,6 +824,7 @@ class ImageViewerWidget extends StatefulWidget {
   State<ImageViewerWidget> createState() => _ImageViewerWidgetState();
 }
 
+/// 管理预览页切换和视频下载状态，关闭后忽略仍在执行的下载回调。
 class _ImageViewerWidgetState extends State<ImageViewerWidget> {
   late List<ImageElement> _imageElements;
   late int _currentIndex;
@@ -812,6 +838,7 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
   bool _showLoadingIndicator = false;
   Timer? _loadingTimer;
 
+  /// 当前正在下载的媒体标识，不同视频不能因封面相同而共享下载状态。
   final Set<String> _downloadingVideoElements = {};
 
   Timer? _overscrollToastTimer;
@@ -860,10 +887,11 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
     });
   }
 
-  void _onDownloadVideo(String imagePath, Function(String?) completion) {
+  /// 普通消息传递本地封面路径，富文本额外传递资源标识，由各自调用方解析下载。
+  void _onDownloadVideo(ImageElement element, Function(String?) completion) {
     widget.onEventTriggered({
       'event': 'onDownloadVideo',
-      'param': {'path': imagePath}
+      'param': {'path': element.imagePath, 'mediaId': element.mediaId}
     }, (result) {
       if (result is List && result.isNotEmpty) {
         completion(result.first as String?);
@@ -1000,36 +1028,39 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
     });
   }
 
+  /// 合并同一媒体的下载交互，失败恢复入口，关闭后的迟到结果不再更新页面。
   void _downloadVideo(ImageElement element) {
     if (!element.isVideo ||
         element.hasVideoFile ||
-        _downloadingVideoElements.contains(element.imagePath)) {
+        _downloadingVideoElements.contains(element.resourceKey)) {
       return;
     }
 
     setState(() {
-      _downloadingVideoElements.add(element.imagePath);
+      _downloadingVideoElements.add(element.resourceKey);
     });
 
-    _onDownloadVideo(element.imagePath, (videoPath) {
+    _onDownloadVideo(element, (videoPath) {
+      if (!mounted) return;
       setState(() {
-        _downloadingVideoElements.remove(element.imagePath);
+        _downloadingVideoElements.remove(element.resourceKey);
       });
 
       if (videoPath != null && videoPath.isNotEmpty) {
-        final index =
-            _imageElements.indexWhere((e) => e.imagePath == element.imagePath);
+        final index = _imageElements
+            .indexWhere((e) => e.resourceKey == element.resourceKey);
         if (index != -1) {
           setState(() {
             _imageElements[index] = ImageElement(
               type: element.type,
               imagePath: element.imagePath,
               videoPath: videoPath,
+              mediaId: element.mediaId,
             );
           });
         }
       } else {
-        debugPrint('_onDownloadVideo failed');
+        Toast.error(context, '视频下载失败，请重试');
       }
     });
   }
@@ -1106,7 +1137,7 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
     } else if (element.isVideo) {
       return _VideoItemView(
         element: element,
-        isDownloading: _downloadingVideoElements.contains(element.imagePath),
+        isDownloading: _downloadingVideoElements.contains(element.resourceKey),
         isCurrentPage: isCurrentPage,
         onDownloadTap: () => _downloadVideo(element),
         onClose: _onImageTap,

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:app_ui/app_ui.dart' show AppIcons;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -28,6 +29,79 @@ String _customData({Map<String, Object?> dimensions = const {}}) => jsonEncode({
     });
 
 void main() {
+  testWidgets('接收端视频显示首帧封面且播放图标位于封面中央', (tester) async {
+    final cache = PaintingBinding.instance.imageCache;
+    addTearDown(() {
+      cache.clear();
+      cache.clearLiveImages();
+    });
+    const cover = 'https://example.com/first-frame.jpg';
+    final image =
+        await tester.runAsync(() => createTestImage(width: 160, height: 90));
+    cache.putIfAbsent(
+        const CachedNetworkImageProvider(cover),
+        () => OneFrameImageStreamCompleter(
+            Future.value(ImageInfo(image: image!))));
+    const content = RichContentMessage([
+      RichFileBlock(
+          'https://example.com/video.mp4', 'video.mp4', 123, 'video/mp4',
+          thumbnailUrl: cover),
+    ]);
+    final message = MessageInfo(
+        msgID: 'video_message',
+        messageType: MessageType.custom,
+        messagePayload:
+            CustomMessagePayload(customData: content.toCustomData()));
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: CustomMessageWidget(
+      message: message,
+      isSelf: false,
+      maxWidth: 400,
+    ))));
+    await tester.pumpAndSettle();
+    final frame = find.byType(Image);
+    expect(frame, findsOneWidget);
+    expect(tester.widget<Image>(frame).image,
+        const CachedNetworkImageProvider(cover));
+    expect(tester.getCenter(find.byIcon(AppIcons.videoPlay)),
+        tester.getCenter(frame));
+    expect(
+        find.bySemanticsIdentifier(
+            'tim.rich.video.video_message.${'https://example.com/video.mp4'.hashCode}'),
+        findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('富文本视频复用文件协议并显示播放图标，回填和置顶摘要仍识别为视频', (tester) async {
+    const content = RichContentMessage([
+      RichTextBlock('视频说明'),
+      RichFileBlock(
+          'https://example.com/video.mp4', '相册视频.mp4', 123, 'video/mp4'),
+    ]);
+    final parsed = RichContentMessage.tryParse(content.toCustomData())!;
+    final restored = RichContentDraft.fromMessage(parsed);
+    expect(restored.canSend, isTrue);
+    expect(restored.plainTextPreview, '视频说明 [视频]');
+    expect(restored.toMessage()!.toCustomData(), content.toCustomData());
+    final message = MessageInfo(
+        messageType: MessageType.custom,
+        messagePayload:
+            CustomMessagePayload(customData: content.toCustomData()));
+    expect(ChatStickyPreview.fromMessage(message).text, '视频说明[视频]相册视频.mp4');
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: CustomMessageWidget(
+      message: message,
+      isSelf: false,
+      maxWidth: 400,
+    ))));
+    expect(find.byIcon(AppIcons.videoPlay), findsOneWidget);
+    expect(find.text('相册视频.mp4'), findsNothing);
+    expect(find.byType(CachedNetworkImage), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   test('无尺寸图片完整解析且可回填、持久化及再次发送，发送协议仅包含地址', () {
     final content = RichContentMessage.tryParse(_customData())!;
     expect(content.blocks, hasLength(6));
