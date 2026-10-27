@@ -120,6 +120,9 @@ class MessageList extends StatefulWidget {
   /// 首次SDK消息窗口成功加载且非空后通知业务，失败或空窗口不清未读。
   final VoidCallback? onInitialMessagesLoaded;
 
+  /// 首屏请求完成且加载状态已发布后通知辅助能力，空结果或失败也触发，不能用于清未读。
+  final VoidCallback? onInitialLoadFinished;
+
   /// Callback when user long presses on avatar (for @ mention feature in group chat)
   ///
   /// 当用户长按头像时的回调（用于群聊中的@提及功能）
@@ -173,6 +176,7 @@ class MessageList extends StatefulWidget {
     this.locateMessage,
     this.onUserClick,
     this.onInitialMessagesLoaded,
+    this.onInitialLoadFinished,
     this.onUserLongPress,
     this.onCallMessageClick,
     this.onQuoteMessage,
@@ -819,6 +823,9 @@ class _MessageListState extends State<MessageList>
       _isInitialRenderComplete = initialRenderComplete;
       _isInitialViewportReady = true;
     });
+
+    // 先提交首屏显示，再启动置顶等辅助查询；清未读仍只接受后面的非空成功信号。
+    widget.onInitialLoadFinished?.call();
 
     // 只有真实非空消息窗口加载成功才能清未读，旧快照或空响应不能代替成功信号。
     if (loadSucceeded && _messageListStore.state.messageList.value.isNotEmpty) {

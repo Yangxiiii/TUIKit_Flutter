@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_action_sheet.dart';
 import 'package:tencent_chat_uikit/src/message_input/widget/message_edit_composer.dart';
@@ -24,6 +26,89 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/text_m
 import 'package:tencent_chat_uikit/src/third_party/extended_text/extended_text.dart';
 
 void main() {
+  testWidgets('首屏消息先加载，置顶辅助请求挂起或失败不影响消息显示', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/single');
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    final history = sdk.messages.historyGate =
+        Completer<V2TimValueCallback<List<V2TimMessage>>>();
+    final sticky = Completer<void>();
+    var stickyCalls = 0, stickyErrors = 0, loadedCalls = 0;
+    await tester.pumpWidget(MaterialApp(
+      theme: AppThemeFactory.create(
+          const AppNormalColorScheme(), Brightness.light),
+      home: ChatPage(
+        conversation: ConversationInfo(
+            conversationID: 'c2c_visual', type: ConversationType.c2c),
+        onInitialMessagesLoaded: () => loadedCalls++,
+        messageStickyConfig: ChatMessageStickyConfig(
+          pin: (_) async => null,
+          bannerBuilder: (_, __) => const SizedBox.shrink(),
+          onMessagesChanged: (_) {},
+          onMessagesDeleted: (_) {},
+          onInitialLoadFinished: () {
+            stickyCalls++;
+            unawaited(sticky.future.catchError((Object _) {
+              stickyErrors++;
+            }));
+          },
+        ),
+      ),
+    ));
+    await tester.pump();
+    expect(sdk.messages.historyCalls, 1);
+    expect(stickyCalls, 0);
+    history.complete(V2TimValueCallback<List<V2TimMessage>>(
+      code: 0,
+      desc: '',
+      data: [_Message('first')],
+    ));
+    await tester.pumpAndSettle();
+    expect(stickyCalls, 1);
+    expect(loadedCalls, 1);
+    expect(find.byType(TextMessageWidget), findsOneWidget);
+    sticky.completeError(StateError('StickyMessage/Get 超时'));
+    await tester.pumpAndSettle();
+    expect(stickyErrors, 1);
+    expect(find.byType(TextMessageWidget), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('首屏空结果和失败也结束辅助等待，但不能清未读', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    for (final code in [0, 1]) {
+      final sdk = _Sdk('/single');
+      TencentImSDKPlugin.v2TIMManager = sdk;
+      MessageList.clearViewportSnapshots();
+      final history = sdk.messages.historyGate =
+          Completer<V2TimValueCallback<List<V2TimMessage>>>();
+      var finished = 0, loaded = 0;
+      await tester.pumpWidget(MaterialApp(
+        theme: AppThemeFactory.create(
+            const AppNormalColorScheme(), Brightness.light),
+        home: Column(children: [
+          MessageList(
+            conversationID: 'c2c_visual',
+            onInitialLoadFinished: () => finished++,
+            onInitialMessagesLoaded: () => loaded++,
+          )
+        ]),
+      ));
+      history.complete(V2TimValueCallback<List<V2TimMessage>>(
+          code: code, desc: '', data: []));
+      await tester.pumpAndSettle();
+      expect(finished, 1);
+      expect(loaded, 0);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+
   testWidgets('长按和松手只打开操作面板，点击多选才进入多选', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final original = TencentImSDKPlugin.v2TIMManager;
@@ -360,6 +445,18 @@ final class _Conversations implements V2TIMConversationManager {
 final class _Messages implements V2TIMMessageManager {
   _Messages(this.scene);
   final String scene;
+  Completer<V2TimValueCallback<List<V2TimMessage>>>? historyGate;
+  int historyCalls = 0;
+
+  Future<V2TimValueCallback<List<V2TimMessage>>> _loadHistory() {
+    historyCalls++;
+    return historyGate?.future ??
+        Future.value(
+          V2TimValueCallback<List<V2TimMessage>>(
+              code: 0, desc: '', data: _history()),
+        );
+  }
+
   V2TimAdvancedMsgListener? listener;
   bool _historyLoaded = false;
   List<V2TimMessage> _history() {
@@ -373,13 +470,7 @@ final class _Messages implements V2TIMMessageManager {
 
   @override
   dynamic noSuchMethod(Invocation call) => switch (call.memberName) {
-        #getHistoryMessageList => Future.value(
-            V2TimValueCallback<List<V2TimMessage>>(
-              code: 0,
-              desc: '',
-              data: _history(),
-            ),
-          ),
+        #getHistoryMessageList => _loadHistory(),
         #addAdvancedMsgListener => Future<void>.sync(() {
             listener =
                 call.namedArguments[#listener] as V2TimAdvancedMsgListener;

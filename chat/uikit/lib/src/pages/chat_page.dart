@@ -496,6 +496,7 @@ class _ChatPageState extends State<ChatPage> {
               onMessagesChanged: widget.messageStickyConfig?.onMessagesChanged,
               onMessagesDeleted: widget.messageStickyConfig?.onMessagesDeleted,
               onInitialMessagesLoaded: widget.onInitialMessagesLoaded,
+              onInitialLoadFinished: widget.messageStickyConfig?.onInitialLoadFinished,
               onUserClick: (String userID) => _onUserClick(userID),
               onUserLongPress: (String userID, String displayName) {
                 _messageInputKey.currentState?.insertMention(

@@ -10,7 +10,11 @@ final class ChatMessageStickyConfig {
       {required this.pin,
       required this.bannerBuilder,
       required this.onMessagesChanged,
-      required this.onMessagesDeleted});
+      required this.onMessagesDeleted,
+      this.onInitialLoadFinished});
+
+  /// 首屏消息请求结束后启动辅助查询；成功、空窗口和失败都会通知，不用于清未读。
+  final VoidCallback? onInitialLoadFinished;
 
   /// 提交置顶；返回null表示成功，否则由页面显示业务反馈。
   final Future<String?> Function(MessageInfo message) pin;
