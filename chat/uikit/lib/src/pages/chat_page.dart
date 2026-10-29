@@ -46,6 +46,9 @@ class ChatPage extends StatefulWidget {
   /// 是否显示现有会话设置入口，不改变设置页面权限。
   final bool isShowAppBarActions;
 
+  /// 宿主自定义设置入口；返回命中消息时在原聊天窗口定位，未传时沿用UIKit设置。
+  final Future<MessageInfo?> Function()? onOpenSettings;
+
   const ChatPage({
     super.key,
     required this.conversation,
@@ -60,6 +63,7 @@ class ChatPage extends StatefulWidget {
     this.messageRecallConfig,
     this.messageStickyConfig,
     this.isShowAppBarActions = true,
+    this.onOpenSettings,
   });
 
   @override
@@ -79,8 +83,8 @@ class _ChatPageState extends State<ChatPage> {
   /// 本次开始时的原文快照，用于判断输入是否发生变化，不随SDK回调覆盖输入。
   String _editingText = '';
 
-  /// 仅记录用户本次定位意图，不另存置顶业务状态。
-  MessageInfo? _stickyLocateMessage;
+  /// 仅记录本窗口的搜索或置顶定位意图，不复制对应业务状态。
+  MessageInfo? _locateMessage;
 
   /// 原列表持有的目标气泡锚点，用于键盘或面板尺寸变化后的实测避让。
   GlobalKey? _editingBubble;
@@ -362,6 +366,22 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _onChatSettingsTap() async {
+    final open = widget.onOpenSettings;
+    if (open != null) {
+      Future<void> action() async {
+        final target = await open();
+        if (mounted && target != null) setState(() => _locateMessage = target);
+      }
+
+      // 守卫包含设置、搜索及返回定位，多个等待方不能重复应用同一导航结果。
+      final guard = widget.messageInputConfig.actionGuard;
+      if (guard != null) {
+        await guard.singleFlight<void>('chat.settings.open', action);
+      } else {
+        await action();
+      }
+      return;
+    }
     String userID = ChatUtil.getUserID(widget.conversation.conversationID);
     ContactInfo? contactInfo;
     if (userID.isNotEmpty) {
@@ -468,13 +488,18 @@ class _ChatPageState extends State<ChatPage> {
       ),
       actions: widget.isShowAppBarActions
           ? [
-              IconButton.buttonContent(
-                content: IconOnlyContent(
-                  Icon(AppIcons.more, color: colorsTheme.textColorPrimary),
+              Semantics(
+                identifier: 'tim.chat.settings',
+                label: '设置',
+                button: true,
+                child: IconButton.buttonContent(
+                  content: IconOnlyContent(
+                    Icon(AppIcons.more, color: colorsTheme.textColorPrimary),
+                  ),
+                  type: ButtonType.noBorder,
+                  size: ButtonSize.l,
+                  onClick: _onChatSettingsTap,
                 ),
-                type: ButtonType.noBorder,
-                size: ButtonSize.l,
-                onClick: _onChatSettingsTap,
               ),
             ]
           : null);
@@ -492,7 +517,7 @@ class _ChatPageState extends State<ChatPage> {
               overlayController: _overlay,
               conversationID: widget.conversation.conversationID,
               config: widget.messageListConfig,
-              locateMessage: _stickyLocateMessage ?? widget.message,
+              locateMessage: _locateMessage ?? widget.message,
               onMessagesChanged: widget.messageStickyConfig?.onMessagesChanged,
               onMessagesDeleted: widget.messageStickyConfig?.onMessagesDeleted,
               onInitialMessagesLoaded: widget.onInitialMessagesLoaded,
@@ -554,7 +579,7 @@ class _ChatPageState extends State<ChatPage> {
           if (widget.messageStickyConfig case final sticky?)
             Positioned(left: 8, right: 8, top: 8,
               child: sticky.bannerBuilder(context, (target) {
-                if (mounted) setState(() => _stickyLocateMessage = target);
+                if (mounted) setState(() => _locateMessage = target);
               })),
           // 编辑区独立浮在键盘上方，列表原始布局尺寸不因打开编辑而变化。
           if (_editingMessage != null)

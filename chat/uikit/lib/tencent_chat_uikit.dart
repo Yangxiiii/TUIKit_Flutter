@@ -25,6 +25,9 @@ export 'src/image_viewer/image_viewer_widget.dart';
 export 'src/message_input/message_input.dart';
 export 'src/message_input/chat_media_sender.dart';
 export 'src/message_list/utils/big_file_message.dart';
+export 'src/message_list/utils/rich_content_message.dart'
+    show RichContentMessage;
+export 'src/message_list/utils/message_utils.dart' show MessageUtil;
 export 'src/message_list/message_list.dart';
 export 'src/navigation/chat_uikit_navigation.dart';
 export 'src/pages/chat_page.dart';
