@@ -11,7 +11,18 @@ const _markdownFormatOrder = richContentMarkdownFormatOrder;
 const _richContentDraftPrefix = 'oa-rich-content-draft-v1:';
 
 /// 富文本附件在编辑和上传过程中的状态。
-enum RichContentAttachmentStatus { pending, uploading, uploaded, failed }
+enum RichContentAttachmentStatus {
+  pending,
+  uploading,
+  uploaded,
+  failed,
+
+  /// 相册仍在导出、压缩或读取尺寸，只能展示本地占位，不能发送。
+  preparing,
+
+  /// 本地处理失败或恢复了中断的处理，占位须删除后重新选择。
+  preparationFailed,
+}
 
 /// 富文本编辑器内按顺序排列的草稿块。
 sealed class RichContentDraftBlock {
@@ -40,7 +51,7 @@ final class RichContentDraftAttachmentBlock extends RichContentDraftBlock {
   /// 已上传视频首帧封面地址；收起、草稿恢复和再次发送均保留。
   final String? thumbnailUrl;
 
-  /// 当前上传状态，决定发送按钮是否可用。
+  /// 当前上传状态；仅 uploaded 状态可编码进消息，本地待上传附件仍可提交发送。
   final RichContentAttachmentStatus status;
 
   const RichContentDraftAttachmentBlock(
@@ -50,6 +61,9 @@ final class RichContentDraftAttachmentBlock extends RichContentDraftBlock {
     this.thumbnailUrl,
     this.status = RichContentAttachmentStatus.pending,
   });
+
+  /// 远端资源及视频封面均已就绪，可以直接编码进消息而不再上传。
+  bool get isReadyToSend => _isReadyAttachment(this);
 
   RichContentDraftAttachmentBlock copyWith({
     String? remoteUrl,
@@ -205,9 +219,50 @@ final class RichContentDraft {
             );
   }
 
+  /// 内容须符合字数限制；附件须有远端资源或已完成本地处理，加载中及加载失败均不能提交。
+  bool get canSubmit =>
+      hasContent &&
+      characterCount <= messageTextCharacterLimit &&
+      blocks.whereType<RichContentDraftAttachmentBlock>().every((block) =>
+          block.status != RichContentAttachmentStatus.preparing &&
+          block.status != RichContentAttachmentStatus.preparationFailed &&
+          (block.isReadyToSend || block.attachment.localPath.isNotEmpty));
+
+  /// 比较用户编辑的内容与附件身份，忽略上传状态和远端地址的变化。
+  bool hasSameContentAs(RichContentDraft other) {
+    if (title != other.title || blocks.length != other.blocks.length) {
+      return false;
+    }
+    // 上传只替换附件元数据，不能因此被误判为用户继续编辑，也不能忽略附件的删除或替换。
+    for (var i = 0; i < blocks.length; i++) {
+      switch ((blocks[i], other.blocks[i])) {
+        case (RichContentDraftTextBlock a, RichContentDraftTextBlock b):
+          if (a.text != b.text) return false;
+        case (
+            RichContentDraftAttachmentBlock a,
+            RichContentDraftAttachmentBlock b
+          ):
+          if (a.id != b.id || !identical(a.attachment, b.attachment)) {
+            return false;
+          }
+        default:
+          return false;
+      }
+    }
+    return true;
+  }
+
   /// 把可发送草稿转换成现有 oa_rich_content v1 消息。
   RichContentMessage? toMessage() {
     if (!canSend) return null;
+    return _buildContent();
+  }
+
+  /// 仅本地发送气泡使用本地媒体预览；该结果不能交给 SDK，发送仍须经过 toMessage 校验。
+  RichContentMessage get localPreview => _buildContent(localPreview: true);
+
+  /// 发送和预览保持同一排版，只有本地预览可使用文件路径代替远端地址。
+  RichContentMessage _buildContent({bool localPreview = false}) {
     final messageBlocks = <RichContentBlock>[];
     for (final block in blocks) {
       switch (block) {
@@ -218,7 +273,9 @@ final class RichContentDraft {
           break;
         case RichContentDraftAttachmentBlock block:
           final attachment = block.attachment;
-          final url = block.remoteUrl!;
+          final url = localPreview && attachment.localPath.isNotEmpty
+              ? Uri.file(attachment.localPath).toString()
+              : block.remoteUrl!;
           if (attachment.type == RichContentAttachmentType.image) {
             messageBlocks.add(
               RichImageBlock(url, attachment.width, attachment.height),
@@ -230,7 +287,9 @@ final class RichContentDraft {
                 attachment.fileName,
                 attachment.fileSize,
                 attachment.mimeType,
-                thumbnailUrl: block.thumbnailUrl,
+                thumbnailUrl: localPreview && attachment.thumbnailPath != null
+                    ? Uri.file(attachment.thumbnailPath!).toString()
+                    : block.thumbnailUrl,
               ),
             );
           }
@@ -266,6 +325,7 @@ Map<String, Object?> _draftBlockToJson(RichContentDraftBlock block) {
         'fileSize': block.attachment.fileSize,
         'mimeType': block.attachment.mimeType,
         'thumbnailPath': block.attachment.thumbnailPath,
+        'durationMs': block.attachment.durationMs,
         'thumbnailUrl': block.thumbnailUrl,
         'width': block.attachment.width,
         'height': block.attachment.height,
@@ -292,6 +352,7 @@ RichContentDraftBlock? _draftBlockFromJson(Map<String, dynamic> json) {
   final fileSize = json['fileSize'];
   final mimeType = json['mimeType'];
   final thumbnailPath = json['thumbnailPath'];
+  final durationMs = json['durationMs'];
   final thumbnailUrl = json['thumbnailUrl'];
   final width = json['width'];
   final height = json['height'];
@@ -302,8 +363,10 @@ RichContentDraftBlock? _draftBlockFromJson(Map<String, dynamic> json) {
       .firstOrNull;
   if (attachmentType == null ||
       localPath is! String ||
-      // 撤回回填的附件只有远端URL；仅已上传且地址合法时允许没有本地文件。
+      // 相册处理中还没有沙盒路径；远端回填则必须已有合法地址。
       (localPath.isEmpty &&
+          status != RichContentAttachmentStatus.preparing &&
+          status != RichContentAttachmentStatus.preparationFailed &&
           !(status == RichContentAttachmentStatus.uploaded &&
               isValidRichContentUrl(remoteUrl))) ||
       fileName is! String ||
@@ -313,6 +376,7 @@ RichContentDraftBlock? _draftBlockFromJson(Map<String, dynamic> json) {
       mimeType is! String ||
       mimeType.isEmpty ||
       thumbnailPath is! String? ||
+      (durationMs != null && (durationMs is! int || durationMs < 0)) ||
       (thumbnailUrl != null &&
           !isValidRichContentUrl(
               thumbnailUrl is String ? thumbnailUrl : null)) ||
@@ -336,15 +400,20 @@ RichContentDraftBlock? _draftBlockFromJson(Map<String, dynamic> json) {
       fileSize: fileSize,
       mimeType: mimeType,
       thumbnailPath: thumbnailPath,
+      durationMs: durationMs as int?,
       width: width,
       height: height,
     ),
     remoteUrl: remoteUrl,
     thumbnailUrl: thumbnailUrl as String?,
-    // 进程退出后没有仍在执行的上传任务，恢复为待上传避免永久卡住。
-    status: status == RichContentAttachmentStatus.uploading
-        ? RichContentAttachmentStatus.pending
-        : status,
+    // 本地处理不能跨进程恢复；保留失败占位供删除，避免一直转圈或误发原始路径。
+    status: switch (status) {
+      RichContentAttachmentStatus.preparing =>
+        RichContentAttachmentStatus.preparationFailed,
+      RichContentAttachmentStatus.uploading =>
+        RichContentAttachmentStatus.pending,
+      _ => status,
+    },
   );
 }
 

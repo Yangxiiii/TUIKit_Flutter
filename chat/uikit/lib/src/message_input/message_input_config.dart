@@ -26,6 +26,9 @@ final class RichContentLocalAttachment {
   /// 相册提供的视频首帧封面本地路径；图片和普通文件不设置。
   final String? thumbnailPath;
 
+  /// 相册返回的视频时长，单位为毫秒；旧草稿及非视频附件可以缺省。
+  final int? durationMs;
+
   /// 视频沿用文件协议，通过 MIME 区分，不新增消息块类型。
   bool get isVideo =>
       type == RichContentAttachmentType.file && mimeType.startsWith('video/');
@@ -46,6 +49,7 @@ final class RichContentLocalAttachment {
     required this.fileSize,
     required this.mimeType,
     this.thumbnailPath,
+    this.durationMs,
     this.width,
     this.height,
   });
@@ -85,7 +89,7 @@ abstract class MessageInputConfigProtocol {
   bool get isShowVideoCall;
   bool get isShowAudioCall;
 
-  /// 富文本附件上传入口；未配置时允许插入附件，但不允许发送。
+  /// 富文本附件上传入口，只在点击发送后调用；未配置时本地附件不能发送。
   RichContentAttachmentUploader? get richContentAttachmentUploader;
 }
 

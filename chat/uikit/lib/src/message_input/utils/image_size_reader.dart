@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:ui' as ui;
 
 /// Raw pixel dimensions of an image.
@@ -10,30 +9,24 @@ class ImageSize {
   const ImageSize(this.width, this.height);
 }
 
-/// Decodes a local image file and returns its width / height in pixels.
-///
-/// Used by the message-input send pipeline to populate
-/// [ImageMessagePayload.originalImageWidth] / `originalImageHeight` BEFORE the
-/// message is dispatched, so the in-flight (sending) bubble in `MessageList`
-/// renders with the correct aspect ratio instead of falling back to a
-/// 1:1 square placeholder.
-///
-/// 解码本地图片文件，并返回其像素宽高。
-///
-/// 在消息输入发送管道中使用，用于在消息发送前填充 [ImageMessagePayload.originalImageWidth] / `originalImageHeight`，这样
-/// `MessageList` 中发送中的气泡就能以正确的宽高比渲染，而不是退回到 1:1 的方形占位符。
+/// 读取本地图片的原始像素尺寸，供输入预览和发送中的气泡保持正确比例；不解码完整帧。
 class ImageSizeReader {
+  /// 路径为空、文件不可读或编码格式不支持时返回 null，并释放已创建的图像资源。
   static Future<ImageSize?> read(String filePath) async {
     if (filePath.isEmpty) return null;
     try {
-      final bytes = await File(filePath).readAsBytes();
-      final codec = await ui.instantiateImageCodec(bytes);
-      final frame = await codec.getNextFrame();
-      final image = frame.image;
-      final size = ImageSize(image.width, image.height);
-      image.dispose();
-      codec.dispose();
-      return size;
+      final buffer = await ui.ImmutableBuffer.fromFilePath(filePath);
+      try {
+        // 只查询编码元数据，避免为读取宽高分配原图大小的像素缓冲区。
+        final descriptor = await ui.ImageDescriptor.encoded(buffer);
+        try {
+          return ImageSize(descriptor.width, descriptor.height);
+        } finally {
+          descriptor.dispose();
+        }
+      } finally {
+        buffer.dispose();
+      }
     } catch (_) {
       return null;
     }

@@ -1,7 +1,8 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:app_ui/app_ui.dart' show AppIcons;
+import 'package:app_ui/app_ui.dart' show AppIcons, AppColorBuildContext;
 import 'package:tencent_chat_uikit/src/file_picker/file_picker.dart';
 import 'package:tencent_chat_uikit/src/message_input/message_input_config.dart';
 import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
@@ -17,7 +18,11 @@ import 'package:tuikit_atomic_x/base_component/base_component.dart'
 const _editorBodyTopPadding = 12.0;
 const _editorBodyBottomPadding = 20.0;
 
-const _editorImageVerticalMargin = 4.0;
+/// 媒体与相邻正文或媒体之间的间隔，单位为逻辑像素。
+const _editorImageVerticalMargin = 8.0;
+
+/// 在显示物理像素上保留清晰度余量，不改变媒体的逻辑展示尺寸。
+const _editorMediaDecodeScale = 1.5;
 
 /// 附件令牌的起始字符。
 const richContentAttachmentTokenStart = '\uFFF9';
@@ -365,13 +370,13 @@ final class RichContentEditorSheet extends StatefulWidget {
   /// 上次收起时保存的富文本草稿。
   final RichContentDraft initialDraft;
 
-  /// 业务附件上传入口；未配置时附件保持待上传并禁用发送。
-  final RichContentAttachmentUploader? attachmentUploader;
+  /// 宿主是否支持在点击发送后上传本地附件；远端草稿不依赖此能力。
+  final bool canUploadAttachments;
 
-  /// 宿主提供的原色播放图标，同时用于展开编辑器和普通输入区。
+  /// 保留宿主原有播放图标配置入口；展开和普通编辑态均使用视频时长角标。
   final ImageProvider? videoPlayIcon;
 
-  /// 把完整自定义消息交回 MessageInput 发送，成功时返回 true。
+  /// 把草稿交给 MessageInput 创建本地发送气泡，接管成功返回 true。
   final Future<bool> Function(RichContentDraft draft) onSend;
 
   /// 关闭时把最新草稿和发送结果交回输入区。
@@ -382,6 +387,10 @@ final class RichContentEditorSheet extends StatefulWidget {
 
   /// 编辑内容变化时把完整草稿交给输入区执行防抖持久化。
   final ValueChanged<RichContentDraft>? onDraftChanged;
+
+  /// 媒体处理结果交给宿主合并，编辑器收起或重开后仍只能替换原占位。
+  final void Function(RichContentDraftAttachmentBlock original,
+      RichContentDraftAttachmentBlock result)? onMediaPrepared;
 
   /// 是否在编辑器内嵌工具条；生产聊天页使用外部共享工具条。
   final bool showToolbar;
@@ -397,11 +406,12 @@ final class RichContentEditorSheet extends StatefulWidget {
     required this.conversationName,
     required this.initialDraft,
     required this.onSend,
-    this.attachmentUploader,
+    this.canUploadAttachments = false,
     this.videoPlayIcon,
     this.onClose,
     this.onToolbarChanged,
     this.onDraftChanged,
+    this.onMediaPrepared,
     this.showToolbar = true,
     this.initialShowFormatting = false,
     this.initialActiveFormats = const {},
@@ -411,13 +421,15 @@ final class RichContentEditorSheet extends StatefulWidget {
   State<RichContentEditorSheet> createState() => RichContentEditorSheetState();
 }
 
-/// 管理编辑器打开期间的输入、焦点和附件上传状态。
+/// 管理编辑器打开期间的输入、焦点与本地媒体处理占位；上传在发送时由宿主接管。
 final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
   late final TextEditingController _titleController;
   final List<_EditorBlock> _blocks = [];
 
   /// 正文图片和视频令牌对应的草稿块；令牌被删除时同步移除，避免已删媒体参与发送。
   final Map<int, RichContentDraftAttachmentBlock> _inlineMedia = {};
+
+  /// 已处理媒体兼容入口的去重记录；原生选择流程按各次选择会话单独去重。
   final Set<int> _insertedAlbumMediaIds = {};
   int _nextBlockId = 1;
   int? _activeTextBlockId;
@@ -439,7 +451,12 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
   Set<String> get activeFormats => Set.unmodifiable(_activeFormats);
 
   /// 当前草稿是否满足富文本发送条件。
-  bool get canSend => !_isSending && _buildDraft().canSend;
+  bool get canSend {
+    final draft = _buildDraft();
+    return !_isSending &&
+        draft.canSubmit &&
+        (widget.canUploadAttachments || draft.canSend);
+  }
 
   /// 应用编辑状态后同步最新草稿和共享工具条，保证持久化读取更新后的内容。
   void _setEditorState(VoidCallback change) {
@@ -603,19 +620,16 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     }
   }
 
-  /// 发送当前快照；成功只关闭未继续编辑的草稿，失败或异常均释放忙碌态。
+  /// 提交当前快照；本地气泡接管后关闭未继续编辑的草稿，提交失败时释放忙碌态。
   Future<void> send() async {
     final draft = _buildDraft();
-    if (_isSending || !draft.canSend) return;
-    final sentSnapshot = draft.toPersistedString();
+    if (!canSend) return;
     _setEditorState(() => _isSending = true);
     var closed = false;
     try {
       final sent = await widget.onSend(draft);
       // 发送期间允许继续编辑，旧消息成功不能带走用户新增的内容。
-      if (!mounted ||
-          !sent ||
-          _buildDraft().toPersistedString() != sentSnapshot) {
+      if (!mounted || !sent || !_buildDraft().hasSameContentAs(draft)) {
         return;
       }
       const result = RichContentEditorResult(
@@ -716,9 +730,20 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     });
   }
 
-  /// 选择相册图片或视频，处理完成后按当前光标位置插入草稿。
+  /// 确认选择即按光标顺序预留位置，导出、压缩和尺寸读取完成后只替换原占位。
   Future<void> pickAlbumMedia() async {
-    _insertedAlbumMediaIds.clear();
+    // 各次选择独立记录原占位，重叠选择同一媒体时不能把旧结果写入新位置。
+    final placeholders = <int, RichContentDraftAttachmentBlock>{};
+    final completed = <int>{};
+    void reserve(AlbumMedia media) {
+      if (!mounted ||
+          placeholders.containsKey(media.id) ||
+          completed.contains(media.id)) {
+        return;
+      }
+      placeholders[media.id] = beginMediaPreparation(media)!;
+    }
+
     final locale = Localizations.localeOf(context);
     await AlbumPicker.pickMedia(
       config: AlbumPickerConfig(
@@ -731,18 +756,67 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
             ? AlbumPickerLanguage.zhHans
             : AlbumPickerLanguage.en,
       ),
-      theme: AlbumPickerTheme(
-        primaryColor: Theme.of(context).colorScheme.primary,
-      ),
-      // 确认事件只代表用户完成选择；统一等待处理完成，避免读取尚未生成的沙盒路径。
+      theme:
+          AlbumPickerTheme(primaryColor: Theme.of(context).colorScheme.primary),
+      onPickConfirm: (media, _) {
+        for (final item in media) {
+          reserve(item);
+        }
+      },
       onMediaProcessing: (media, progress, error) async {
-        if (error || progress < 1) return;
-        await insertProcessedMedia(media);
+        if (completed.contains(media.id)) return;
+        // 兼容先到进度再到确认的系统回调，首次事件只预留一次，删除后不重新插入。
+        reserve(media);
+        final original = placeholders[media.id];
+        if (original == null || (!error && progress < 1)) return;
+        completed.add(media.id);
+        if (error) {
+          _publishPreparedMedia(
+              original,
+              original.copyWith(
+                  status: RichContentAttachmentStatus.preparationFailed));
+        } else {
+          await completeMediaPreparation(original, media);
+        }
+      },
+      onMediaProcessed: () {
+        // 原生流程已结束但没有成功结果的元素转为失败，不能永久显示 loading。
+        for (final entry in placeholders.entries) {
+          if (completed.add(entry.key)) {
+            _publishPreparedMedia(
+                entry.value,
+                entry.value.copyWith(
+                    status: RichContentAttachmentStatus.preparationFailed));
+          }
+        }
       },
     );
   }
 
-  /// 将处理完成的媒体插入草稿；同一选择会话中的重复完成事件只消费一次。
+  /// 在任何本地耗时处理之前插入可整体删除的占位，尚无沙盒路径时也可预留位置。
+  @visibleForTesting
+  RichContentDraftAttachmentBlock? beginMediaPreparation(AlbumMedia media) {
+    if (!mounted) return null;
+    final isImage = media.mediaType == AlbumMediaType.image;
+    return _insertAttachment(
+        RichContentLocalAttachment(
+          type: isImage
+              ? RichContentAttachmentType.image
+              : RichContentAttachmentType.file,
+          localPath: media.mediaPath,
+          fileName: media.mediaPath.isNotEmpty
+              ? _fileName(media.mediaPath)
+              : 'media_${media.id}',
+          fileSize: media.fileSize,
+          mimeType: isImage
+              ? _mimeType(media.fileExtension, image: true)
+              : _videoMimeType(media.fileExtension),
+          durationMs: isImage ? null : math.max(0, media.duration),
+        ),
+        status: RichContentAttachmentStatus.preparing);
+  }
+
+  /// 兼容已经取得沙盒文件的入口，读取尺寸期间同样先展示占位，重复完成事件不再插入。
   @visibleForTesting
   Future<bool> insertProcessedMedia(
     AlbumMedia media, {
@@ -753,33 +827,77 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
         !_insertedAlbumMediaIds.add(media.id)) {
       return false;
     }
-    final isImage = media.mediaType == AlbumMediaType.image;
-    // 相册返回视频首帧，图片和视频均用实际预览尺寸维护正文行高与光标。
-    final previewPath = isImage ? media.mediaPath : media.videoThumbnailPath;
-    final size = previewPath == null || previewPath.isEmpty
-        ? null
-        : await (readSize ?? ImageSizeReader.read)(previewPath);
-    if (size == null || !mounted) {
-      _insertedAlbumMediaIds.remove(media.id);
+    final original = beginMediaPreparation(media)!;
+    return completeMediaPreparation(original, media, readSize: readSize);
+  }
+
+  /// 用处理后的本地媒体替换原占位，结果晚到时保留当前正文及删除操作。
+  @visibleForTesting
+  Future<bool> completeMediaPreparation(
+      RichContentDraftAttachmentBlock original, AlbumMedia media,
+      {Future<ImageSize?> Function(String path)? readSize}) async {
+    try {
+      final isImage = media.mediaType == AlbumMediaType.image;
+      final previewPath = isImage ? media.mediaPath : media.videoThumbnailPath;
+      if (media.mediaPath.isEmpty ||
+          previewPath == null ||
+          previewPath.isEmpty) {
+        throw StateError('媒体预览不可用');
+      }
+      // 只在原生导出完成后读取实际预览尺寸；结果替换固定块 ID，不再移动光标或追加元素。
+      final size = await (readSize ?? ImageSizeReader.read)(previewPath);
+      if (size == null) throw StateError('媒体尺寸不可用');
+      _publishPreparedMedia(
+          original,
+          RichContentDraftAttachmentBlock(
+            original.id,
+            attachment: RichContentLocalAttachment(
+              type: isImage
+                  ? RichContentAttachmentType.image
+                  : RichContentAttachmentType.file,
+              localPath: media.mediaPath,
+              fileName: _fileName(media.mediaPath),
+              fileSize: media.fileSize,
+              mimeType: isImage
+                  ? _mimeType(media.fileExtension, image: true)
+                  : _videoMimeType(media.fileExtension),
+              width: size.width,
+              height: size.height,
+              thumbnailPath: isImage ? null : previewPath,
+              durationMs: isImage ? null : math.max(0, media.duration),
+            ),
+          ));
+      return true;
+    } on Object {
+      // 失败占位可继续删除，禁止把未处理的文件作为可发送媒体。
+      _publishPreparedMedia(
+          original,
+          original.copyWith(
+              status: RichContentAttachmentStatus.preparationFailed));
       return false;
     }
-    await _insertAttachment(
-      RichContentLocalAttachment(
-        type: isImage
-            ? RichContentAttachmentType.image
-            : RichContentAttachmentType.file,
-        localPath: media.mediaPath,
-        fileName: _fileName(media.mediaPath),
-        fileSize: media.fileSize,
-        mimeType: isImage
-            ? _mimeType(media.fileExtension, image: true)
-            : _videoMimeType(media.fileExtension),
-        width: size.width,
-        height: size.height,
-        thumbnailPath: isImage ? null : previewPath,
-      ),
-    );
-    return true;
+  }
+
+  /// 编辑器不再存活时把迟到结果交给宿主，宿主按相同附件实例检查是否仍在当前草稿中。
+  void _publishPreparedMedia(RichContentDraftAttachmentBlock original,
+      RichContentDraftAttachmentBlock result) {
+    final publish = widget.onMediaPrepared;
+    if (publish != null) {
+      publish(original, result);
+    } else {
+      applyPreparedMedia(original, result);
+    }
+  }
+
+  /// 只替换仍存在且身份相同的占位，删除、替换或重新选择后的旧结果不能复活元素。
+  void applyPreparedMedia(RichContentDraftAttachmentBlock original,
+      RichContentDraftAttachmentBlock result) {
+    if (!mounted ||
+        !identical(
+            _inlineMedia[original.id]?.attachment, original.attachment)) {
+      return;
+    }
+    _setEditorState(() => _inlineMedia[original.id] = result);
   }
 
   /// 选择文件并插入当前正文位置。
@@ -790,7 +908,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     );
     for (final file in files) {
       if (!mounted) return;
-      await _insertAttachment(
+      _insertAttachment(
         RichContentLocalAttachment(
           type: RichContentAttachmentType.file,
           localPath: file.filePath,
@@ -803,7 +921,10 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
   }
 
   /// 把附件插入当前光标位置，并用稳定块 ID 防止已删除附件被异步结果复活。
-  Future<void> _insertAttachment(RichContentLocalAttachment attachment) async {
+  RichContentDraftAttachmentBlock _insertAttachment(
+      RichContentLocalAttachment attachment,
+      {RichContentAttachmentStatus status =
+          RichContentAttachmentStatus.pending}) {
     final active =
         _activeTextBlock ?? _blocks.whereType<_TextEditorBlock>().last;
     final selection = active.controller.selection.isValid
@@ -814,20 +935,20 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     final attachmentBlock = RichContentDraftAttachmentBlock(
       _nextBlockId++,
       attachment: attachment,
-      status: widget.attachmentUploader == null
-          ? RichContentAttachmentStatus.pending
-          : RichContentAttachmentStatus.uploading,
+      status: status,
     );
     // 图片和视频共用原子令牌、换行、选区替换和删除；旧文件草稿仍保留独立块。
     if (attachment.isInlineMedia) {
       final token = richContentAttachmentToken(attachmentBlock.id);
       final leadingBreak = before.isEmpty || before.endsWith('\n') ? '' : '\n';
-      final inserted = '$leadingBreak$token';
+      // 媒体独占一行；复用后文已有换行，光标落到下一行继续输入。
+      final trailingBreak = after.startsWith('\n') ? '' : '\n';
+      final inserted = '$leadingBreak$token$trailingBreak';
       _inlineMedia[attachmentBlock.id] = attachmentBlock;
       active.controller.value = TextEditingValue(
         text: '$before$inserted$after',
         selection: TextSelection.collapsed(
-          offset: before.length + inserted.length,
+          offset: before.length + leadingBreak.length + token.length + 1,
         ),
       );
       active.focusNode.requestFocus();
@@ -844,67 +965,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
       });
       trailing.focusNode.requestFocus();
     }
-
-    final uploader = widget.attachmentUploader;
-    if (uploader == null) return;
-    // 上传结果仅按稳定 ID 更新仍存在的元素，用户已删除时不会重新插回。
-    try {
-      String? thumbnailUrl;
-      // 封面也需可被接收端访问；两份资源都成功后才把视频标为可发送。
-      if (attachment.isVideo && attachment.thumbnailPath != null) {
-        final thumbnail = File(attachment.thumbnailPath!);
-        thumbnailUrl = await uploader(RichContentLocalAttachment(
-          type: RichContentAttachmentType.image,
-          localPath: thumbnail.path,
-          fileName: _fileName(thumbnail.path),
-          fileSize: thumbnail.lengthSync(),
-          mimeType: _mimeType(thumbnail.path.split('.').last, image: true),
-          width: attachment.width,
-          height: attachment.height,
-        ));
-        if (!isValidRichContentUrl(thumbnailUrl)) throw StateError('视频封面上传失败');
-      }
-      final url = await uploader(attachment);
-      _finishUpload(
-        attachmentBlock.id,
-        url,
-        isValidRichContentUrl(url)
-            ? RichContentAttachmentStatus.uploaded
-            : RichContentAttachmentStatus.failed,
-        thumbnailUrl: thumbnailUrl,
-      );
-    } catch (_) {
-      _finishUpload(
-        attachmentBlock.id,
-        null,
-        RichContentAttachmentStatus.failed,
-      );
-    }
-  }
-
-  /// 仅更新仍存在的原子媒体或旧附件块，上传结果不能复活已删除的正文。
-  void _finishUpload(int id, String? url, RichContentAttachmentStatus status,
-      {String? thumbnailUrl}) {
-    if (!mounted) return;
-    final inlineImage = _inlineMedia[id];
-    if (inlineImage != null) {
-      _setEditorState(() {
-        _inlineMedia[id] = inlineImage.copyWith(
-          remoteUrl: url,
-          thumbnailUrl: thumbnailUrl,
-          status: status,
-        );
-      });
-      return;
-    }
-    final index = _blocks.indexWhere((block) => block.id == id);
-    if (index < 0) return;
-    final old = (_blocks[index] as _AttachmentEditorBlock).block;
-    _setEditorState(() {
-      _blocks[index] = _AttachmentEditorBlock(
-        old.copyWith(remoteUrl: url, status: status),
-      );
-    });
+    return attachmentBlock;
   }
 
   void _removeAttachment(int id) {
@@ -1072,7 +1133,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
                   color: colors.textColorPrimary,
                   fontSize: 16,
                 );
-                final maxImageWidth = constraints.maxWidth / 2;
+                final maxImageWidth = constraints.maxWidth;
                 final defaultMinLines =
                     _blocks.length == 1 && index == 0 ? 5 : 1;
                 return Semantics(
@@ -1111,6 +1172,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
                       videoPlayIcon: widget.videoPlayIcon,
                       attachments: _inlineMedia,
                       maxImageWidth: maxImageWidth,
+                      devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
                       onTapUrl: (_) {},
                       colorScheme: colors,
                       mapMarkdownMarkers: true,
@@ -1215,7 +1277,7 @@ final class _AttachmentEditorBlock extends _EditorBlock {
 /// 把附件令牌渲染为可由 ExtendedTextField 整体选择和删除的元素。
 final class RichContentAttachmentSpanBuilder
     extends ChatSpecialTextSpanBuilder {
-  /// 视频封面中央的原色播放图标；为空时沿用字体图标。
+  /// 保留宿主原有配置入口；编辑态统一使用右下角的视频字形。
   final ImageProvider? videoPlayIcon;
 
   /// 按稳定 ID 索引的附件草稿块。
@@ -1224,14 +1286,76 @@ final class RichContentAttachmentSpanBuilder
   /// 图片及视频封面在当前输入区可使用的最大宽度。
   final double maxImageWidth;
 
+  /// 当前屏幕的物理像素倍率，必须为正数；按显示尺寸计算媒体解码上限。
+  final double devicePixelRatio;
+
+  /// 本次构建中有效媒体令牌的结束偏移，用于合并连续媒体的上下间隔。
+  Set<int> _mediaEnds = {};
+
   RichContentAttachmentSpanBuilder({
     this.videoPlayIcon,
     required this.attachments,
     required this.maxImageWidth,
+    this.devicePixelRatio = 1,
     required super.onTapUrl,
     required super.colorScheme,
     required super.mapMarkdownMarkers,
-  });
+  }) : assert(devicePixelRatio > 0);
+
+  /// 媒体行只使用封面和间隔决定高度，文字行保留主题行距及原文偏移。
+  @override
+  TextSpan build(
+    String data, {
+    TextStyle? textStyle,
+    SpecialTextGestureTapCallback? onTap,
+  }) {
+    // 相邻媒体共用一份 8px 间隔，避免上下边距叠加成 16px。
+    _mediaEnds = {
+      for (final match in richContentAttachmentTokenPattern.allMatches(data))
+        if (attachments[int.parse(match.group(1)!)]?.attachment.isInlineMedia ==
+            true)
+          match.end,
+    };
+    final source = super.build(data, textStyle: textStyle, onTap: onTap);
+    if (_mediaEnds.isEmpty) return source;
+    final children = <InlineSpan>[];
+    var afterMedia = false;
+    for (final span in source.children ?? const <InlineSpan>[]) {
+      final isMedia =
+          span is ExtendedWidgetSpan && _mediaEnds.contains(span.textRange.end);
+      // 媒体行的高度由封面及边距决定，不叠加主题的文字行距。
+      if (isMedia) {
+        children
+            .add(TextSpan(style: const TextStyle(height: 1), children: [span]));
+      } else if (afterMedia &&
+          span is TextSpan &&
+          span.children == null &&
+          (span.text?.startsWith('\n') ?? false)) {
+        children.add(const TextSpan(text: '\n', style: TextStyle(height: 1)));
+        if (span.text!.length > 1) {
+          children.add(TextSpan(
+              text: span.text!.substring(1),
+              style: span.style ?? source.style));
+        }
+      } else {
+        children.add(TextSpan(style: source.style, children: [span]));
+      }
+      afterMedia = isMedia;
+    }
+    // 段落末尾只有换行时，引擎会把上一媒体行高再计入空行；用无原文的字形恢复正常文字行高。
+    if (data.endsWith('\n')) {
+      children.add(SpecialTextSpan(
+        text: '\u200B',
+        actualText: '',
+        start: data.length,
+        deleteAll: false,
+        style: source.style,
+      ));
+    }
+    return TextSpan(
+        style: (source.style ?? const TextStyle()).copyWith(height: 1),
+        children: children);
+  }
 
   @override
   SpecialText? createSpecialText(
@@ -1242,10 +1366,14 @@ final class RichContentAttachmentSpanBuilder
   }) {
     if (isStart(flag, richContentAttachmentTokenStart)) {
       return _EditorAttachmentText(
-        videoPlayIcon: videoPlayIcon,
         attachments: attachments,
         maxImageWidth: maxImageWidth,
+        devicePixelRatio: devicePixelRatio,
         start: index!,
+        margin: EdgeInsets.only(
+          top: _mediaEnds.contains(index - 1) ? 0 : _editorImageVerticalMargin,
+          bottom: _editorImageVerticalMargin,
+        ),
         textStyle: textStyle,
       );
     }
@@ -1260,18 +1388,27 @@ final class RichContentAttachmentSpanBuilder
 
 /// 将附件令牌转换成单个可编辑元素，actualText 保持控制器偏移可逆。
 final class _EditorAttachmentText extends SpecialText {
-  /// 从宿主配置透传的播放图标，不随文本颜色变化。
-  final ImageProvider? videoPlayIcon;
+  /// 按稳定块 ID 查找草稿，未知令牌保留原文以免误删内容。
   final Map<int, RichContentDraftAttachmentBlock> attachments;
+
+  /// 当前输入区可用宽度，最终媒体仍受 120×160 上限约束。
   final double maxImageWidth;
 
+  /// 将逻辑展示尺寸换算为解码所需的物理像素，避免缓存整张原图。
+  final double devicePixelRatio;
+
+  /// 令牌在控制器原文中的起始偏移，用于原子选择和删除。
   final int start;
 
+  /// 连续媒体的上边距已合并；与正文相邻的两侧各保留 8px。
+  final EdgeInsets margin;
+
   _EditorAttachmentText({
-    this.videoPlayIcon,
     required this.attachments,
     required this.maxImageWidth,
+    required this.devicePixelRatio,
     required this.start,
+    required this.margin,
     required TextStyle? textStyle,
   }) : super(
           richContentAttachmentTokenStart,
@@ -1298,13 +1435,71 @@ final class _EditorAttachmentText extends SpecialText {
       attachment,
       maxImageWidth,
     );
+    // 未完成本地处理时不读取原文件，黑色占位与真实媒体共用原子令牌及整体删除行为。
+    if (block.status == RichContentAttachmentStatus.preparing ||
+        block.status == RichContentAttachmentStatus.preparationFailed) {
+      final loading = block.status == RichContentAttachmentStatus.preparing;
+      return ExtendedWidgetSpan(
+        actualText: toString(),
+        start: start,
+        deleteAll: true,
+        alignment: PlaceholderAlignment.bottom,
+        child: Padding(
+          padding: margin,
+          child: Builder(
+              builder: (context) => Semantics(
+                    identifier:
+                        'tim.rich_content.media_${loading ? 'loading' : 'failed'}.$id',
+                    label: loading ? '媒体加载中' : '媒体加载失败，请删除后重新选择',
+                    child: IgnorePointer(
+                        child: Container(
+                      width: size.width,
+                      height: size.height,
+                      decoration: BoxDecoration(
+                        color: context.appColors.scrim.withAlpha(255),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      alignment: Alignment.center,
+                      child: loading
+                          ? SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: context.appColors.onScrim))
+                          : Icon(Icons.broken_image_outlined,
+                              color: context.appColors.onScrim, size: 20),
+                    )),
+                  )),
+        ),
+      );
+    }
+    final path = attachment.thumbnailPath;
+    final ImageProvider? original = attachment.isVideo
+        ? path != null && path.isNotEmpty
+            ? FileImage(File(path))
+            : block.thumbnailUrl != null
+                ? NetworkImage(block.thumbnailUrl!)
+                : null
+        : attachment.localPath.isNotEmpty || block.remoteUrl == null
+            ? FileImage(File(attachment.localPath))
+            : NetworkImage(block.remoteUrl!);
+    // 解码按展示物理像素的 1.5 倍保留清晰度；fit 保留原比例且不放大小图。
+    final image = original == null
+        ? null
+        : ResizeImage(
+            original,
+            width: math.max(
+                1,
+                (size.width * devicePixelRatio * _editorMediaDecodeScale)
+                    .ceil()),
+            height: math.max(
+                1,
+                (size.height * devicePixelRatio * _editorMediaDecodeScale)
+                    .ceil()),
+            policy: ResizeImagePolicy.fit,
+          );
     if (attachment.isVideo) {
-      final path = attachment.thumbnailPath;
-      final ImageProvider? image = path != null && path.isNotEmpty
-          ? FileImage(File(path))
-          : block.thumbnailUrl != null
-              ? NetworkImage(block.thumbnailUrl!)
-              : null;
       return ExtendedWidgetSpan(
         actualText: toString(),
         start: start,
@@ -1312,41 +1507,48 @@ final class _EditorAttachmentText extends SpecialText {
         alignment: PlaceholderAlignment.bottom,
         child: Padding(
           key: Key('rich_content_inline_video_$id'),
-          padding:
-              const EdgeInsets.symmetric(vertical: _editorImageVerticalMargin),
+          padding: margin,
           child: RichContentVideoPreview(
-              image: image, size: size, playIcon: videoPlayIcon),
+            image: image,
+            size: size,
+            isEditing: true,
+            durationMs: attachment.durationMs,
+          ),
         ),
       );
     }
     return ImageSpan(
-      attachment.localPath.isNotEmpty || block.remoteUrl == null
-          ? FileImage(File(attachment.localPath))
-          : NetworkImage(block.remoteUrl!),
+      image!,
       key: Key('rich_content_inline_image_$id'),
       imageWidth: size.width,
       imageHeight: size.height,
       actualText: toString(),
       start: start,
       alignment: PlaceholderAlignment.bottom,
-      fit: BoxFit.cover,
-      margin: const EdgeInsets.symmetric(vertical: _editorImageVerticalMargin),
+      fit: BoxFit.contain,
+      frameBuilder: (_, child, __, ___) => ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: child,
+      ),
+      margin: margin,
     );
   }
 }
 
-/// 按图片或视频封面的比例计算编辑尺寸，只限制宽度以免随编辑器高度变化。
+/// 在 120×160 及正文可用宽度内等比缩小媒体，小图保持原尺寸。
 Size richContentEditorImageSize(
   RichContentLocalAttachment attachment,
   double maxWidth,
 ) {
+  final widthLimit = math.min(maxWidth, 120.0);
   final sourceWidth = attachment.width ?? 0;
   final sourceHeight = attachment.height ?? 0;
   if (sourceWidth <= 0 || sourceHeight <= 0) {
-    return Size.square(maxWidth);
+    // 旧远端草稿可能缺少尺寸，在读取前用不超限的方形占位。
+    return Size.square(widthLimit);
   }
-  var scale = 1.0;
-  if (sourceWidth * scale > maxWidth) scale = maxWidth / sourceWidth;
+  final scale =
+      math.min(1.0, math.min(widthLimit / sourceWidth, 160.0 / sourceHeight));
   return Size(sourceWidth * scale, sourceHeight * scale);
 }
 
@@ -1386,5 +1588,7 @@ String _uploadStatusText(RichContentAttachmentStatus status) {
     RichContentAttachmentStatus.uploading => '上传中',
     RichContentAttachmentStatus.uploaded => '已上传',
     RichContentAttachmentStatus.failed => '上传失败',
+    RichContentAttachmentStatus.preparing => '加载中',
+    RichContentAttachmentStatus.preparationFailed => '加载失败，请删除后重新选择',
   };
 }

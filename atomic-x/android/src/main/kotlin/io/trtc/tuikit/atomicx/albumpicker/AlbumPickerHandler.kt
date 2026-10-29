@@ -21,8 +21,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.Executors
 
-/// Bridges Flutter method calls to the AlbumPicker AAR library,
-/// and relays listener callbacks back via EventChannel.
+/// 桥接 Flutter 与原生相册选择器，确认选择先通知占位，耗时媒体处理通过独立事件回传。
 class AlbumPickerHandler(
     private val flutterAssets: FlutterPlugin.FlutterAssets?,
     private val eventSink: (Map<String, Any>) -> Unit
@@ -158,6 +157,7 @@ class AlbumPickerHandler(
         context.startActivity(intent)
     }
 
+    /// 各回调绑定原选择会话，确认事件不能等待缩略图或导出完成。
     private fun createAlbumPickerListener(): AlbumPickerListener {
         val capturedSessionId = sessionId
 
@@ -167,24 +167,25 @@ class AlbumPickerHandler(
 
                 AlbumPickerHostActivity.currentInstance?.finish()
 
+                // 确认先到 Flutter 预留可删除占位；视频首帧提取不能阻塞用户看到所选媒体。
+                try {
+                    val event = mutableMapOf<String, Any>(
+                        "type" to "onPickConfirm",
+                        "pickedAlbumMedias" to pickedAlbumMedias.map { buildMediaDataMap(it) },
+                    )
+                    textMessage?.let { event["textMessage"] = it }
+                    capturedSessionId?.let { event["sessionId"] = it }
+                    mainHandler.post { eventSink(event) }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error building onPickConfirm event", e)
+                }
+
+                // 保留原有封面准备，处理结果仍按同一后台队列在确认事件之后发送。
                 executor.execute {
                     for (media in pickedAlbumMedias) {
                         if (media.videoThumbnailPath == null) {
                             media.videoThumbnailPath = generateThumbnailForMedia(media)
                         }
-                    }
-
-                    try {
-                        val event = mutableMapOf<String, Any>(
-                            "type" to "onPickConfirm",
-                            "pickedAlbumMedias" to pickedAlbumMedias.map { buildMediaDataMap(it) },
-                        )
-                        textMessage?.let { event["textMessage"] = it }
-                        capturedSessionId?.let { event["sessionId"] = it }
-                        Log.d(TAG, "onPickConfirm dispatching event to Flutter (sessionId=$capturedSessionId)")
-                        mainHandler.post { eventSink(event) }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error building onPickConfirm event", e)
                     }
                 }
 

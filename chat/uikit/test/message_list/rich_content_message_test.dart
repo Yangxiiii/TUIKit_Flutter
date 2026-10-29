@@ -8,6 +8,34 @@ import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_message.d
 import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_markdown_format.dart';
 
 void main() {
+  test('草稿视频时长可缺省并拒绝负数及错误类型', () {
+    const draft = RichContentDraft(blocks: [
+      RichContentDraftAttachmentBlock(1,
+          attachment: RichContentLocalAttachment(
+            type: RichContentAttachmentType.file,
+            localPath: '/tmp/video.mp4',
+            fileName: 'video.mp4',
+            fileSize: 1,
+            mimeType: 'video/mp4',
+            durationMs: 232000,
+          )),
+    ]);
+    final encoded = draft.toPersistedString();
+    const prefix = 'oa-rich-content-draft-v1:';
+    final json =
+        jsonDecode(encoded.substring(prefix.length)) as Map<String, dynamic>;
+    final attachment = (json['blocks'] as List).single as Map<String, dynamic>;
+    RichContentDraft? parse() =>
+        RichContentDraft.tryParsePersisted('$prefix${jsonEncode(json)}');
+    for (final invalid in [-1, '232000', 1.5]) {
+      attachment['durationMs'] = invalid;
+      expect(parse(), isNull);
+    }
+    attachment.remove('durationMs');
+    final restored = parse()!.blocks.single as RichContentDraftAttachmentBlock;
+    expect(restored.attachment.durationMs, isNull);
+  });
+
   test('视频封面协议往返和草稿回填，旧消息可缺省且拒绝非法封面地址', () {
     const video = RichFileBlock(
         'https://example.com/video.mp4', '视频.mp4', 12, 'video/mp4',
@@ -256,6 +284,7 @@ void main() {
       ],
     );
     expect(pending.canSend, isFalse);
+    expect(pending.canSubmit, isTrue);
     expect(pending.toMessage(), isNull);
 
     const uploaded = RichContentDraft(
@@ -271,6 +300,8 @@ void main() {
       ],
     );
     final encoded = uploaded.toMessage()!.toCustomData();
+    expect(uploaded.hasSameContentAs(pending), isTrue);
+    expect(const RichContentDraft().hasSameContentAs(pending), isFalse);
     final parsed = RichContentMessage.tryParse(encoded);
     expect(parsed, isNotNull);
     expect(

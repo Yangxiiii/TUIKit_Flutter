@@ -12,13 +12,564 @@ import 'package:tencent_chat_uikit/src/message_input/message_input.dart';
 import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
 import 'package:tencent_chat_uikit/src/message_input/widget/rich_content_editor_sheet.dart';
 import 'package:tencent_chat_uikit/src/message_input/utils/image_size_reader.dart';
+import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/rich_content_video_preview.dart';
 import 'package:tencent_chat_uikit/src/third_party/extended_text_field/extended_text_field.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart'
     show SemanticColorScheme;
 import 'package:tuikit_atomic_x/album_picker/album_picker.dart';
 
 void main() {
-  testWidgets('竖屏视频收起后按原比例绘制，视口基线有效且能滚动查看播放标识', (tester) async {
+  testWidgets('媒体处理期间先显示可整体删除的黑色 loading，占位删除后迟到结果不回填', (tester) async {
+    final key = GlobalKey<RichContentEditorSheetState>();
+    RichContentDraft? current;
+    await tester.pumpWidget(_testApp(const RichContentDraft(),
+        editorKey: key,
+        canUploadAttachments: true,
+        onDraftChanged: (draft) => current = draft,
+        onSend: (_) async => false));
+    await tester.pump();
+    final original = key.currentState!.beginMediaPreparation(
+        AlbumMedia(id: 1, mediaType: AlbumMediaType.video))!;
+    await tester.pump();
+    final loading = find
+        .bySemanticsIdentifier('tim.rich_content.media_loading.${original.id}');
+    expect(loading, findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    final rect = tester.getRect(loading);
+    expect(rect.width, lessThanOrEqualTo(120));
+    expect(rect.height, lessThanOrEqualTo(160));
+    final box = tester.widget<Container>(
+        find.descendant(of: loading, matching: find.byType(Container)));
+    final decoration = box.decoration! as BoxDecoration;
+    expect(decoration.color, const Color(0xFF000000));
+    expect(decoration.borderRadius, BorderRadius.circular(4));
+    expect(
+        tester.getCenter(find.byType(CircularProgressIndicator)), rect.center);
+    expect(current!.canSubmit, isFalse);
+    expect(key.currentState!.canSend, isFalse);
+    final dimensions = Completer<ImageSize?>();
+    final preparing = key.currentState!.completeMediaPreparation(
+        original,
+        AlbumMedia(
+            id: 1,
+            mediaType: AlbumMediaType.video,
+            mediaPath: '/tmp/video.mp4',
+            videoThumbnailPath: '/tmp/cover.png'),
+        readSize: (_) => dimensions.future);
+    final controller = tester
+        .widget<ExtendedTextField>(find.byType(ExtendedTextField))
+        .controller!;
+    final token =
+        richContentAttachmentTokenPattern.firstMatch(controller.text)!;
+    controller.selection = TextSelection.collapsed(offset: token.end);
+    await tester.pump();
+    // 模拟一次退格删除令牌边界，必须整体删除占位而不是留下半个隐藏令牌。
+    tester.testTextInput.updateEditingValue(TextEditingValue(
+        text: controller.text.replaceRange(token.end - 1, token.end, ''),
+        selection: TextSelection.collapsed(offset: token.end - 1)));
+    await tester.pump();
+    expect(loading, findsNothing);
+    dimensions.complete(const ImageSize(1920, 1080));
+    await tester.pump();
+    await preparing;
+    expect(
+        current!.blocks.whereType<RichContentDraftAttachmentBlock>(), isEmpty);
+    expect(find.byType(RichContentVideoPreview), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('多媒体占位按确认顺序插入，乱序完成不改变正文、光标和元素顺序', (tester) async {
+    final key = GlobalKey<RichContentEditorSheetState>();
+    final path = await _createVideoThumbnail(tester);
+    RichContentDraft? current;
+    await tester.pumpWidget(_testApp(
+        const RichContentDraft(blocks: [RichContentDraftTextBlock(1, '前后')]),
+        editorKey: key,
+        canUploadAttachments: true,
+        onDraftChanged: (draft) => current = draft,
+        onSend: (_) async => false));
+    await tester.pump();
+    final controller = tester
+        .widget<ExtendedTextField>(find.byType(ExtendedTextField))
+        .controller!;
+    controller.selection = const TextSelection.collapsed(offset: 1);
+    final first = key.currentState!.beginMediaPreparation(
+        AlbumMedia(id: 1, mediaType: AlbumMediaType.video))!;
+    final second = key.currentState!.beginMediaPreparation(
+        AlbumMedia(id: 2, mediaType: AlbumMediaType.image))!;
+    controller.selection = const TextSelection.collapsed(offset: 0);
+    final text = controller.text;
+    final dimensions = Completer<ImageSize?>();
+    final pending = key.currentState!.completeMediaPreparation(
+        first,
+        AlbumMedia(
+            id: 1,
+            mediaType: AlbumMediaType.video,
+            mediaPath: '/tmp/video.mp4',
+            videoThumbnailPath: path),
+        readSize: (_) => dimensions.future);
+    await key.currentState!.completeMediaPreparation(second,
+        AlbumMedia(id: 2, mediaType: AlbumMediaType.image, mediaPath: path),
+        readSize: (_) async => const ImageSize(100, 60));
+    await tester.pump();
+    expect(current!.canSubmit, isFalse);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    dimensions.complete(const ImageSize(100, 60));
+    await tester.pump();
+    await pending;
+    expect(controller.text, text);
+    expect(controller.selection, const TextSelection.collapsed(offset: 0));
+    expect(
+        current!.blocks
+            .whereType<RichContentDraftAttachmentBlock>()
+            .map((block) => block.id),
+        [first.id, second.id]);
+    expect(key.currentState!.canSend, isTrue);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.byType(RichContentVideoPreview), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('本地处理失败停止 loading，保留正文并禁止误发未处理媒体', (tester) async {
+    final key = GlobalKey<RichContentEditorSheetState>();
+    RichContentDraft? current;
+    await tester.pumpWidget(_testApp(
+        const RichContentDraft(blocks: [RichContentDraftTextBlock(1, '保留正文')]),
+        editorKey: key,
+        canUploadAttachments: true,
+        onDraftChanged: (draft) => current = draft,
+        onSend: (_) async => false));
+    await tester.pump();
+    final inserted = key.currentState!.insertProcessedMedia(
+        AlbumMedia(
+            id: 1,
+            mediaType: AlbumMediaType.image,
+            mediaPath: '/tmp/missing.png'),
+        readSize: (_) async => throw StateError('模拟解码失败'));
+    await tester.pump();
+    expect(await inserted, isFalse);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.byIcon(Icons.broken_image_outlined), findsOneWidget);
+    expect(current!.plainTextPreview, contains('保留正文'));
+    expect(current!.canSubmit, isFalse);
+    expect(current!.toMessage(), isNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  test('未取得沙盒路径的处理中草稿可保存，恢复后停止 loading 且仍禁止发送', () {
+    const draft = RichContentDraft(blocks: [
+      RichContentDraftTextBlock(1, '正文'),
+      RichContentDraftAttachmentBlock(2,
+          attachment: RichContentLocalAttachment(
+              type: RichContentAttachmentType.file,
+              localPath: '',
+              fileName: 'media_1',
+              fileSize: 0,
+              mimeType: 'video/mp4'),
+          status: RichContentAttachmentStatus.preparing)
+    ]);
+    final restored =
+        RichContentDraft.tryParsePersisted(draft.toPersistedString())!;
+    expect(restored.plainTextPreview, draft.plainTextPreview);
+    expect(
+        restored.blocks
+            .whereType<RichContentDraftAttachmentBlock>()
+            .single
+            .status,
+        RichContentAttachmentStatus.preparationFailed);
+    expect(restored.canSubmit, isFalse);
+    expect(restored.toMessage(), isNull);
+  });
+
+  testWidgets('普通输入框长正文滑动时显示右侧滚动条，停止后淡出且展开按钮不移动', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: AppThemeFactory.create(
+          const AppNormalColorScheme(), Brightness.light),
+      home: const Scaffold(
+          body: Column(children: [
+        Spacer(),
+        MessageInput(conversationID: 'c2c_scrollbar')
+      ])),
+    ));
+    await tester.tap(find.text('发送给 c2c_scrollbar'));
+    await tester.pump();
+    final field = find.byKey(const Key('message_input_text_field'));
+    final input = tester.widget<ExtendedTextField>(field);
+    final bar = find.byKey(const Key('message_input_scrollbar'));
+    final scrollbar = tester.widget<RawScrollbar>(bar);
+    expect(scrollbar.controller, same(input.scrollController));
+    expect(scrollbar.scrollbarOrientation, ScrollbarOrientation.right);
+    final button = find.byKey(const Key('open_rich_content_editor'));
+    input.controller!.text = List.filled(30, '可滚动正文').join('\n');
+    await tester.pumpAndSettle();
+    final buttonRect = tester.getRect(button);
+    expect(scrollbar.controller!.position.maxScrollExtent, greaterThan(0));
+    scrollbar.controller!.jumpTo(0);
+    await tester.pump();
+    await tester.drag(field, const Offset(0, -60));
+    await tester.pump(const Duration(milliseconds: 200));
+    final painter = tester
+        .widgetList<CustomPaint>(
+            find.descendant(of: bar, matching: find.byType(CustomPaint)))
+        .map((widget) => widget.foregroundPainter)
+        .whereType<ScrollbarPainter>()
+        .single;
+    expect(painter.fadeoutOpacityAnimation.value, greaterThan(0));
+    expect(tester.getRect(button), buttonRect);
+    // 直接拖动滑块到底，正文和可见滑块必须同时到达各自的底部。
+    for (final kind in [
+      ui.PointerDeviceKind.mouse,
+      ui.PointerDeviceKind.touch
+    ]) {
+      scrollbar.controller!.jumpTo(0);
+      await tester.pump();
+      final barRect = tester.getRect(bar);
+      await tester.dragFrom(
+        Offset(barRect.right - 1.5, barRect.top + 8),
+        Offset(0, barRect.height + 40),
+        kind: kind,
+      );
+      await tester.pump();
+      expect(scrollbar.controller!.offset,
+          closeTo(scrollbar.controller!.position.maxScrollExtent, .01));
+      expect(
+          painter.hitTestOnlyThumbInteractive(
+            Offset(barRect.width - 1.5, barRect.height - 1),
+            ui.PointerDeviceKind.mouse,
+          ),
+          isTrue);
+      final render =
+          tester.allRenderObjects.whereType<ExtendedRenderEditable>().single;
+      final lastLine = render.getBoxesForSelection(TextSelection(
+        baseOffset: input.controller!.text.lastIndexOf('\n') + 1,
+        extentOffset: input.controller!.text.length,
+      ));
+      expect(lastLine, isNotEmpty);
+      expect(lastLine.last.bottom, lessThanOrEqualTo(render.size.height + .1));
+      expect(lastLine.first.top, greaterThanOrEqualTo(-.1));
+    }
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+    expect(painter.fadeoutOpacityAnimation.value, 0);
+    input.controller!.text = '短正文';
+    await tester.pumpAndSettle();
+    expect(scrollbar.controller!.position.maxScrollExtent, 0);
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('编辑器与普通输入的图片和视频封面按显示物理像素的1.5倍解码', (tester) async {
+    tester.view.physicalSize = const Size(780, 1688);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final path = await _createVideoThumbnail(tester);
+    await tester.runAsync(() async {
+      // 使用真实大图验证解码结果，不能只断言缓存配置存在。
+      final recorder = ui.PictureRecorder();
+      Canvas(recorder).drawRect(
+          const Rect.fromLTWH(0, 0, 1200, 1600), Paint()..color = Colors.blue);
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(1200, 1600);
+      final bytes = (await image.toByteData(format: ui.ImageByteFormat.png))!;
+      await File(path).writeAsBytes(
+          bytes.buffer.asUint8List(bytes.offsetInBytes, bytes.lengthInBytes));
+      image.dispose();
+      picture.dispose();
+    });
+    await tester.pumpWidget(MaterialApp(
+      theme: AppThemeFactory.create(
+          const AppNormalColorScheme(), Brightness.light),
+      home: const Scaffold(
+          body: Column(children: [
+        Spacer(),
+        MessageInput(conversationID: 'c2c_decode_size')
+      ])),
+    ));
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    final editor = tester.state<RichContentEditorSheetState>(
+        find.byType(RichContentEditorSheet));
+    for (final type in AlbumMediaType.values) {
+      await editor.insertProcessedMedia(
+          AlbumMedia(
+              id: type.index + 10,
+              mediaType: type,
+              mediaPath: path,
+              videoThumbnailPath: path),
+          readSize: (_) async => const ImageSize(1200, 1600));
+    }
+    await tester.pump();
+    ResizeImage imageProvider() => tester
+        .widget<Image>(find.byKey(const Key('rich_content_inline_image_2')))
+        .image as ResizeImage;
+    final image = imageProvider();
+    final video = tester
+        .widget<RichContentVideoPreview>(find.byType(RichContentVideoPreview))
+        .image as ResizeImage;
+    for (final provider in [image, video]) {
+      expect(provider.width, 360);
+      expect(provider.height, 480);
+      expect(provider.policy, ResizeImagePolicy.fit);
+      expect(provider.allowUpscaling, isFalse);
+    }
+    final decodedSize = await tester.runAsync(() async {
+      // 清理构建阶段启动的异步缓存任务，让真实解码在当前异步测试区内完成。
+      await image.evict();
+      final decoded = Completer<Size>();
+      final stream = image.resolve(ImageConfiguration.empty);
+      final listener = ImageStreamListener((info, _) {
+        if (!decoded.isCompleted) {
+          decoded.complete(
+              Size(info.image.width.toDouble(), info.image.height.toDouble()));
+        }
+        info.dispose();
+      },
+          onError: (Object error, StackTrace? stack) =>
+              decoded.completeError(error, stack));
+      stream.addListener(listener);
+      try {
+        return await decoded.future;
+      } finally {
+        stream.removeListener(listener);
+      }
+    });
+    expect(decodedSize, const Size(360, 480));
+    final originalSize =
+        await tester.runAsync(() => ImageSizeReader.read(path));
+    expect(originalSize!.width, 1200);
+    expect(originalSize.height, 1600);
+    await tester.tap(find.byTooltip('收起富文本编辑器'));
+    await tester.pumpAndSettle();
+    expect(imageProvider().width, 360);
+    expect(imageProvider().height, 480);
+    expect(tester.takeException(), isNull);
+  });
+
+  test('图片尺寸读取兼容空路径、不存在文件和损坏的图片', () async {
+    final directory = await Directory.systemTemp.createTemp('rich_size_read_');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final broken = await File('${directory.path}/broken.png')
+        .writeAsString('invalid image');
+    expect(await ImageSizeReader.read(''), isNull);
+    expect(await ImageSizeReader.read('${directory.path}/missing.png'), isNull);
+    expect(await ImageSizeReader.read(broken.path), isNull);
+  });
+
+  testWidgets('视频时长角标在浅色和深色主题都使用白色图标与文字', (tester) async {
+    for (final brightness in Brightness.values) {
+      await tester.pumpWidget(MaterialApp(
+        theme: AppThemeFactory.create(
+          brightness == Brightness.dark
+              ? const AppDarkColorScheme()
+              : const AppNormalColorScheme(),
+          brightness,
+        ),
+        home: const Scaffold(
+            body: RichContentVideoPreview(
+          image: null,
+          size: Size(120, 160),
+          isEditing: true,
+          durationMs: 232000,
+        )),
+      ));
+      expect(tester.widget<Icon>(find.byIcon(AppIcons.cameraOn)).color,
+          Colors.white);
+      expect(tester.widget<Text>(find.text('3:52')).style!.color, Colors.white);
+    }
+  });
+
+  testWidgets('媒体后的空行使用文字行高，继续输入和反复收起不会撑高', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final path = await _createVideoThumbnail(tester);
+    await tester.pumpWidget(MaterialApp(
+      theme: AppThemeFactory.create(
+          const AppNormalColorScheme(), Brightness.light),
+      home: const Scaffold(
+          body: Column(children: [
+        Spacer(),
+        MessageInput(conversationID: 'c2c_media_height'),
+      ])),
+    ));
+    for (final sample in [
+      (AlbumMediaType.image, 160),
+      (AlbumMediaType.video, 160),
+      (AlbumMediaType.image, 40),
+      (AlbumMediaType.video, 40),
+    ]) {
+      await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+      await tester.pumpAndSettle();
+      final editor = tester.state<RichContentEditorSheetState>(
+          find.byType(RichContentEditorSheet));
+      await editor.insertProcessedMedia(
+        AlbumMedia(
+            id: 41,
+            mediaType: sample.$1,
+            mediaPath: path,
+            videoThumbnailPath: path),
+        readSize: (_) async => ImageSize(120, sample.$2),
+      );
+      await tester.pump();
+      await tester.tap(find.byTooltip('收起富文本编辑器'));
+      await tester.pumpAndSettle();
+      final field = find.byKey(const Key('message_input_text_field'));
+      final inputRow = find.byKey(const Key('message_input_normal_input_row'));
+      final height = tester.getSize(inputRow).height;
+      expect(height, sample.$2 == 160 ? equals(140) : equals(100));
+      final input = tester.widget<ExtendedTextField>(field);
+      final original = input.controller!.text;
+      final rendered =
+          input.specialTextSpanBuilder!.build(original, textStyle: input.style);
+      expect(ExtendedTextLibraryUtils.textSpanToActualText(rendered), original);
+      expect(original, isNot(contains('\u200B')));
+      // 空行的辅助字形只参与排版，不能进入输入连接或影响下一次输入与删除。
+      input.focusNode!.requestFocus();
+      await tester.pump();
+      tester.testTextInput.updateEditingValue(TextEditingValue(
+        text: '$original后',
+        selection: TextSelection.collapsed(offset: original.length + 1),
+      ));
+      await tester.pump();
+      expect(input.controller!.text, '$original后');
+      tester.testTextInput.updateEditingValue(TextEditingValue(
+        text: original,
+        selection: TextSelection.collapsed(offset: original.length),
+      ));
+      await tester.pump();
+      expect(input.controller!.text, original);
+      expect(tester.getSize(inputRow).height, height);
+      // 同一份媒体草稿重复展开、收起后保持相同高度。
+      await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('收起富文本编辑器'));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(inputRow).height, height);
+      expect(input.controller!.text, original);
+      // 删除全部媒体后应恢复普通单行高度，不保留上一份媒体行高。
+      input.controller!.clear();
+      await tester.pumpAndSettle();
+      expect(
+          tester
+              .getSize(find.byKey(const Key('message_input_normal_input_row')))
+              .height,
+          44);
+    }
+  });
+
+  test('媒体尺寸同时约束宽高，保留比例、小图及窄输入区', () {
+    for (final type in RichContentAttachmentType.values) {
+      for (final sample in [
+        (1200, 600, 300.0, const Size(120, 60)),
+        (600, 1200, 300.0, const Size(80, 160)),
+        (100, 100, 300.0, const Size(100, 100)),
+        (1200, 600, 60.0, const Size(60, 30)),
+        (0, 0, 300.0, const Size(120, 120)),
+      ]) {
+        final attachment = RichContentLocalAttachment(
+          type: type,
+          localPath: '/tmp/media',
+          fileName: 'media',
+          fileSize: 1,
+          mimeType: type == RichContentAttachmentType.image
+              ? 'image/png'
+              : 'video/mp4',
+          width: sample.$1,
+          height: sample.$2,
+        );
+        expect(richContentEditorImageSize(attachment, sample.$3), sample.$4);
+      }
+    }
+  });
+
+  testWidgets('媒体插入首尾、选区及已有换行时独占一行，光标进入下一行', (tester) async {
+    final thumbnailPath = await _createVideoThumbnail(tester);
+    for (final sample in [
+      ('前后', 1, 1, '前\n', '\n后'),
+      ('前后', 0, 0, '', '\n前后'),
+      ('前后', 2, 2, '前后\n', '\n'),
+      ('前\n后', 2, 2, '前\n', '\n后'),
+      ('前\n后', 1, 1, '前\n', '\n后'),
+      ('前选中后', 1, 3, '前\n', '\n后'),
+    ]) {
+      final editorKey = GlobalKey<RichContentEditorSheetState>();
+      await tester.pumpWidget(_testApp(
+        RichContentDraft(blocks: [RichContentDraftTextBlock(1, sample.$1)]),
+        editorKey: editorKey,
+        onSend: (_) async => false,
+      ));
+      await tester.pump();
+      final field = tester.widget<ExtendedTextField>(
+          find.byKey(const Key('rich_content_text_1')));
+      field.controller!.selection =
+          TextSelection(baseOffset: sample.$2, extentOffset: sample.$3);
+      await editorKey.currentState!.insertProcessedMedia(
+        AlbumMedia(
+            id: 1, mediaType: AlbumMediaType.image, mediaPath: thumbnailPath),
+        readSize: (_) async => const ImageSize(1200, 600),
+      );
+      await tester.pump();
+      final token = richContentAttachmentToken(2);
+      expect(field.controller!.text, '${sample.$4}$token${sample.$5}');
+      expect(field.controller!.selection.extentOffset,
+          sample.$4.length + token.length + 1);
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+
+  testWidgets('图片与视频各侧间隔为8且连续媒体不重复叠加', (tester) async {
+    final path = await _createVideoThumbnail(tester);
+    RichContentDraftAttachmentBlock media(int id, bool video) =>
+        RichContentDraftAttachmentBlock(
+          id,
+          attachment: RichContentLocalAttachment(
+            type: video
+                ? RichContentAttachmentType.file
+                : RichContentAttachmentType.image,
+            localPath: path,
+            fileName: 'media',
+            fileSize: 1,
+            mimeType: video ? 'video/mp4' : 'image/png',
+            thumbnailPath: video ? path : null,
+            width: 120,
+            height: 160,
+          ),
+        );
+    await tester.pumpWidget(_testApp(
+        RichContentDraft(blocks: [
+          const RichContentDraftTextBlock(1, '前\n'),
+          media(2, false),
+          const RichContentDraftTextBlock(3, '\n'),
+          media(4, true),
+          const RichContentDraftTextBlock(5, '\n后'),
+        ]),
+        onSend: (_) async => false));
+    await tester.pump();
+    final image = find.byKey(const Key('rich_content_inline_image_2'));
+    final video = find.byType(RichContentVideoPreview);
+    expect(
+        tester
+            .widget<Padding>(
+                find.byKey(const Key('rich_content_inline_video_4')))
+            .padding,
+        const EdgeInsets.only(bottom: 8));
+    final field = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('rich_content_text_1')));
+    final spans = _flattenInlineSpans(
+            field.specialTextSpanBuilder!.build(field.controller!.text))
+        .whereType<ExtendedWidgetSpan>()
+        .toList();
+    expect((spans.first.child as Container).padding,
+        const EdgeInsets.symmetric(vertical: 8));
+    expect((spans.last.child as Padding).padding,
+        const EdgeInsets.only(bottom: 8));
+    expect(tester.getRect(video).top - tester.getRect(image).bottom, 8,
+        reason: '图片 ${tester.getRect(image)}，视频 ${tester.getRect(video)}');
+  });
+
+  testWidgets('竖屏视频收起后保持尺寸上限，封面及右下角时长可滚动查看', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -44,10 +595,13 @@ void main() {
     final editor = tester.state<RichContentEditorSheetState>(
         find.byType(RichContentEditorSheet));
     final editorContext = tester.element(find.byType(RichContentEditorSheet));
-    // 提前完成真实封面和图标解码，后续直接检查屏幕像素，避免只断言控件存在。
+    // 提前完成真实封面解码，后续直接检查屏幕像素，避免只断言控件存在。
     await tester.runAsync(() async {
-      await precacheImage(FileImage(File(thumbnailPath)), editorContext);
-      await precacheImage(playIcon, editorContext);
+      await precacheImage(
+        ResizeImage(FileImage(File(thumbnailPath)),
+            width: 135, height: 240, policy: ResizeImagePolicy.fit),
+        editorContext,
+      );
     });
     await editor.insertProcessedMedia(
         AlbumMedia(
@@ -73,7 +627,7 @@ void main() {
     final scroll = tester.state<ScrollableState>(
         find.descendant(of: field, matching: find.byType(Scrollable)));
     final size = tester.getSize(preview);
-    expect(size.height - 8, closeTo(size.width * 960 / 540, .1));
+    expect(size.height - 16, closeTo(size.width * 960 / 540, .1));
     expect(size.height, greaterThan(tester.getSize(field).height));
     final render =
         tester.allRenderObjects.whereType<ExtendedRenderEditable>().single;
@@ -102,22 +656,23 @@ void main() {
     }
 
     await expectCoverPainted();
-    // 通过真实手势移动滚动偏移，完整封面保持尺寸，播放图标可以滚动到可视区域。
+    // 通过真实手势移动滚动偏移，完整封面保持尺寸，时长可以滚动到可视区域。
     scroll.position.jumpTo(0);
     await tester.pump();
-    await tester.drag(field, const Offset(0, -80));
+    await tester.drag(field, const Offset(0, -100));
     await tester.pump();
     expect(scroll.position.pixels, greaterThan(0));
     await expectCoverPainted();
-    final icon = find.byWidgetPredicate(
-        (widget) => widget is Image && widget.image == playIcon);
+    final icon = find.byIcon(AppIcons.cameraOn);
     final paintedCenter =
         tester.getCenter(icon) - Offset(0, scroll.position.pixels);
-    expect(tester.getRect(field).contains(paintedCenter), isTrue);
+    expect(tester.getRect(field).contains(paintedCenter), isTrue,
+        reason:
+            '视口 ${tester.getRect(field)}，图标 ${tester.getCenter(icon)}，滚动 ${scroll.position.pixels}');
     expect(tester.getSize(preview), size);
     await tester.tap(find.byKey(const Key('open_rich_content_editor')));
     await tester.pumpAndSettle();
-    expect(tester.getSize(preview).height, greaterThan(size.height));
+    expect(tester.getSize(preview), size);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -146,40 +701,33 @@ void main() {
             videoThumbnailPath: thumbnailPath),
         readSize: (_) async => const ImageSize(100, 60));
     await tester.pump();
-    expect(find.byIcon(AppIcons.videoPlay), findsOneWidget);
+    expect(find.byIcon(AppIcons.cameraOn), findsOneWidget);
     await tester.tap(find.byTooltip('收起富文本编辑器'));
     await tester.pumpAndSettle();
-    expect(find.byIcon(AppIcons.videoPlay), findsOneWidget);
+    expect(find.byIcon(AppIcons.cameraOn), findsOneWidget);
     final field = tester.widget<ExtendedTextField>(
         find.byKey(const Key('message_input_text_field')));
     expect(richContentAttachmentTokenPattern.allMatches(field.controller!.text),
         hasLength(1));
     await tester.tap(find.byKey(const Key('open_rich_content_editor')));
     await tester.pumpAndSettle();
-    expect(find.byIcon(AppIcons.videoPlay), findsOneWidget);
+    expect(find.byIcon(AppIcons.cameraOn), findsOneWidget);
     expect(find.byTooltip('删除附件'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('视频与图片共用原子正文，首帧居中叠加播放标识且编辑器点击不播放', (tester) async {
+  testWidgets('视频单独成行并在右下角显示时长，重开草稿保留且点击不播放', (tester) async {
     const playIcon =
         AssetImage('assets/images/video_play.png', package: 'feature_tim');
     final thumbnailPath = await _createVideoThumbnail(tester);
     final editorKey = GlobalKey<RichContentEditorSheetState>();
-    final pending = Completer<String>();
-    final uploaded = <RichContentLocalAttachment>[];
     RichContentDraft? sent;
     await tester.pumpWidget(_testApp(
       const RichContentDraft(blocks: [RichContentDraftTextBlock(1, '前后')]),
       editorKey: editorKey,
       videoPlayIcon: playIcon,
-      attachmentUploader: (attachment) {
-        uploaded.add(attachment);
-        return attachment.type == RichContentAttachmentType.image
-            ? Future.value('https://example.com/cover.png')
-            : pending.future;
-      },
+      canUploadAttachments: true,
       onSend: (draft) async {
         sent = draft;
         return false;
@@ -195,6 +743,7 @@ void main() {
         mediaPath: '/tmp/相册视频.mov',
         fileSize: 1024,
         fileExtension: 'MOV',
+        duration: 232000,
         videoThumbnailPath: thumbnailPath);
     final insertion = editorKey.currentState!.insertProcessedMedia(media,
         readSize: (path) async {
@@ -202,75 +751,84 @@ void main() {
       return const ImageSize(100, 60);
     });
     await tester.pump();
-    expect(uploaded.map((a) => a.mimeType), ['image/png', 'video/quicktime']);
-    expect(uploaded.last.width, 100);
+    expect(await insertion, isTrue);
+    expect(field.controller!.selection.extentOffset,
+        field.controller!.text.length - 1);
     expect(find.byType(ExtendedTextField), findsOneWidget);
     final preview = find.byKey(const Key('rich_content_inline_video_2'));
     expect(preview, findsOneWidget);
-    final icon = find.descendant(
-        of: preview,
-        matching: find.byWidgetPredicate(
-            (widget) => widget is Image && widget.image == playIcon));
-    expect(tester.getCenter(icon), tester.getCenter(preview));
+    final icon =
+        find.descendant(of: preview, matching: find.byIcon(AppIcons.cameraOn));
+    expect(find.byIcon(AppIcons.videoPlay), findsNothing);
+    expect(find.text('3:52'), findsOneWidget);
+    expect(
+        tester.getCenter(icon).dx, greaterThan(tester.getRect(preview).left));
+    expect(
+        tester.getCenter(icon).dy, greaterThan(tester.getCenter(preview).dy));
+    final clip = tester.widget<ClipRRect>(
+        find.descendant(of: preview, matching: find.byType(ClipRRect)));
+    expect(clip.borderRadius, BorderRadius.circular(4));
+    final badge = tester.widget<Positioned>(
+        find.descendant(of: preview, matching: find.byType(Positioned)));
+    expect(badge.right, 4);
+    expect(badge.bottom, 4);
+    expect(tester.widget<Icon>(icon).size, 16);
+    final badgeBox = tester.widget<Container>(
+        find.descendant(of: preview, matching: find.byType(Container)));
+    expect(badgeBox.constraints!.maxHeight, 18);
+    expect((badgeBox.decoration! as BoxDecoration).borderRadius,
+        BorderRadius.circular(4));
     expect(find.descendant(of: preview, matching: find.byType(GestureDetector)),
         findsNothing);
     final original = field.controller!.text;
-    await tester.tap(preview);
+    await tester.tap(preview, warnIfMissed: false);
     await tester.pump();
     expect(field.controller!.text, original);
-    expect(editorKey.currentState!.canSend, isFalse);
+    expect(editorKey.currentState!.canSend, isTrue);
     expect(await editorKey.currentState!.insertProcessedMedia(media), isFalse);
-    pending.complete('https://example.com/video.mov');
-    expect(await insertion, isTrue);
-    await tester.pump();
     expect(editorKey.currentState!.canSend, isTrue);
     await editorKey.currentState!.send();
     expect(sent!.blocks, hasLength(3));
     expect((sent!.blocks.first as RichContentDraftTextBlock).text, '前\n');
-    expect((sent!.blocks.last as RichContentDraftTextBlock).text, '后');
+    expect((sent!.blocks.last as RichContentDraftTextBlock).text, '\n后');
     final restored =
         RichContentDraft.tryParsePersisted(sent!.toPersistedString())!;
-    expect(restored.plainTextPreview, '前\n [视频] 后');
+    expect(restored.plainTextPreview, '前\n [视频] \n后');
     final video =
         restored.blocks.whereType<RichContentDraftAttachmentBlock>().single;
     expect(video.attachment.thumbnailPath, thumbnailPath);
-    expect(video.thumbnailUrl, 'https://example.com/cover.png');
-    final encoded = jsonDecode(restored.toMessage()!.toCustomData());
-    expect(encoded['payload']['blocks'][1], {
-      'type': 'file',
-      'url': 'https://example.com/video.mov',
-      'name': '相册视频.mov',
-      'size': 1024,
-      'mimeType': 'video/quicktime',
-      'thumbnailUrl': 'https://example.com/cover.png',
-    });
+    expect(video.attachment.durationMs, 232000);
+    expect(video.thumbnailUrl, isNull);
+    expect(video.status, RichContentAttachmentStatus.pending);
+    expect(video.attachment.mimeType, 'video/quicktime');
+    expect(restored.toMessage(), isNull);
     final button = tester.widget<IconButton>(find.ancestor(
         of: find.byTooltip('插入文件'), matching: find.byType(IconButton)));
     expect(button.onPressed, isNull);
     // 重开草稿继续使用同一正文和封面，不能退回文件卡片。
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpWidget(_testApp(restored,
-        videoPlayIcon: playIcon, onSend: (_) async => false));
+        videoPlayIcon: playIcon,
+        canUploadAttachments: true,
+        onSend: (_) async => false));
     await tester.pump();
     expect(find.byType(ExtendedTextField), findsOneWidget);
     expect(
         find.byWidgetPredicate(
             (widget) => widget is Image && widget.image == playIcon),
-        findsOneWidget);
+        findsNothing);
+    expect(find.text('3:52'), findsOneWidget);
     expect(find.byTooltip('删除附件'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('视频封面失败禁止发送，整块删除后迟到上传结果不能恢复视频', (tester) async {
+  testWidgets('本地视频不上传即可继续编辑并整体删除', (tester) async {
     final thumbnailPath = await _createVideoThumbnail(tester);
     final editorKey = GlobalKey<RichContentEditorSheetState>();
-    final pending = Completer<String>(), delayed = Completer<String>();
-    var attempts = 0;
     RichContentDraft? current;
     await tester.pumpWidget(_testApp(const RichContentDraft(),
         editorKey: editorKey,
-        attachmentUploader: (_) =>
-            attempts++ == 0 ? pending.future : delayed.future,
+        canUploadAttachments: true,
         onDraftChanged: (draft) => current = draft,
         onSend: (_) async => false));
     await tester.pump();
@@ -284,7 +842,6 @@ void main() {
     final insertion = editorKey.currentState!.insertProcessedMedia(media(21),
         readSize: (_) async => const ImageSize(100, 60));
     await tester.pump();
-    pending.completeError(StateError('封面上传失败'));
     await insertion;
     await tester.pump();
     expect(
@@ -292,8 +849,8 @@ void main() {
             .whereType<RichContentDraftAttachmentBlock>()
             .single
             .status,
-        RichContentAttachmentStatus.failed);
-    expect(editorKey.currentState!.canSend, isFalse);
+        RichContentAttachmentStatus.pending);
+    expect(editorKey.currentState!.canSend, isTrue);
     final controller = tester
         .widget<ExtendedTextField>(find.byType(ExtendedTextField))
         .controller!;
@@ -316,12 +873,11 @@ void main() {
     final second = editorKey.currentState!.insertProcessedMedia(media(22),
         readSize: (_) async => const ImageSize(100, 60));
     await tester.pump();
-    expect(find.byIcon(AppIcons.videoPlay), findsOneWidget);
+    expect(find.byIcon(AppIcons.cameraOn), findsOneWidget);
     await backspaceVideo();
-    delayed.complete('https://example.com/cover.png');
     await second;
     await tester.pump();
-    expect(find.byIcon(AppIcons.videoPlay), findsNothing);
+    expect(find.byIcon(AppIcons.cameraOn), findsNothing);
     expect(
         current!.blocks.whereType<RichContentDraftAttachmentBlock>(), isEmpty);
     expect(editorKey.currentState!.canSend, isFalse);
@@ -732,7 +1288,7 @@ void main() {
     final normalInput = tester.widget<ExtendedTextField>(
       find.byType(ExtendedTextField),
     );
-    expect(normalInput.controller!.text, '前\n$token后');
+    expect(normalInput.controller!.text, '前\n$token\n后');
     expect(
         find.byKey(const Key('rich_content_inline_image_2')), findsOneWidget);
     final inputField = find.byKey(const Key('message_input_text_field'));
@@ -753,7 +1309,12 @@ void main() {
     // 多行时展开入口锚定输入区顶部，不能随正文滚动或跟随高度居中。
     expect(
       tester.getTopLeft(expandButton).dy,
-      closeTo(tester.getTopLeft(inputField).dy, 0.1),
+      closeTo(
+          tester
+              .getTopLeft(
+                  find.byKey(const Key('message_input_normal_input_row')))
+              .dy,
+          0.1),
     );
     final buttonCenter = tester.getCenter(expandButton);
     expect(inputScrollable.position.maxScrollExtent, greaterThan(0));
@@ -1058,6 +1619,12 @@ void main() {
         tester.getSize(find.byKey(const Key('rich_content_body'))).width;
     expect(tester.getSize(imageFinder).width, lessThanOrEqualTo(bodyWidth / 2));
     final initialImageSize = tester.getSize(imageFinder);
+    expect(initialImageSize, const Size(64, 160));
+    final clip = tester.widget<ClipRRect>(find
+        .descendant(of: imageFinder, matching: find.byType(ClipRRect))
+        .first);
+    expect(clip.borderRadius, BorderRadius.circular(4));
+    expect(tester.widget<Image>(imageFinder).fit, BoxFit.contain);
     tester.view.physicalSize = const Size(390, 800);
     await tester.pump();
     expect(tester.getSize(imageFinder), initialImageSize);
@@ -1065,7 +1632,7 @@ void main() {
     final field = find.byKey(const Key('rich_content_text_1'));
     final input = tester.widget<ExtendedTextField>(field);
     const token = '\uFFF92\uFFFA';
-    expect(input.controller!.text, '前\n$token后');
+    expect(input.controller!.text, '前\n$token\n后');
     final rendered = input.specialTextSpanBuilder!.build(
       input.controller!.text,
       textStyle: input.style,
@@ -1075,7 +1642,7 @@ void main() {
       PlaceholderAlignment.bottom,
     );
     await tester.pumpAndSettle();
-    final imageRect = tester.getRect(imageFinder);
+    var imageRect = tester.getRect(imageFinder);
     final bodyRect = tester.getRect(find.byKey(const Key('rich_content_body')));
     final bodyScrollable = tester.state<ScrollableState>(
       find
@@ -1088,6 +1655,13 @@ void main() {
     expect(bodyScrollable.position.pixels, 0);
     final fieldRect = tester.getRect(field);
     expect(imageRect.top, greaterThanOrEqualTo(fieldRect.top));
+    // 后续继续覆盖旧草稿的行内媒体兼容性，新插入的独占行规则已在前面验证。
+    input.controller!.value = const TextEditingValue(
+      text: '前\n$token后',
+      selection: TextSelection.collapsed(offset: 5),
+    );
+    await tester.pump();
+    imageRect = tester.getRect(imageFinder);
     await tester.tapAt(Offset(imageRect.right + 4, imageRect.center.dy));
     await tester.pump();
     expect(input.focusNode!.hasFocus, isTrue);
@@ -1688,7 +2262,7 @@ Widget _testApp(
   bool initialShowFormatting = false,
   ValueChanged<RichContentEditorResult>? onClose,
   Set<String> initialActiveFormats = const {},
-  RichContentAttachmentUploader? attachmentUploader,
+  bool canUploadAttachments = false,
   ValueChanged<RichContentDraft>? onDraftChanged,
   ImageProvider? videoPlayIcon,
 }) {
@@ -1707,7 +2281,7 @@ Widget _testApp(
         showToolbar: showToolbar,
         initialShowFormatting: initialShowFormatting,
         initialActiveFormats: initialActiveFormats,
-        attachmentUploader: attachmentUploader,
+        canUploadAttachments: canUploadAttachments,
         onDraftChanged: onDraftChanged,
         videoPlayIcon: videoPlayIcon,
       ),

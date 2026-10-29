@@ -154,7 +154,8 @@ final class ChatFileTransferView {
   final Future<CompletionHandler> Function()? retry;
 }
 
-/// 普通发送与失败重发共用宿主分流入口，原生通知只在UIKit边界使用。
+/// 普通发送与失败重发共用宿主分流入口，原生通知只在 UIKit 边界使用。
+/// onMessageCreated 在 SDK 发布真实消息时回调，用于交接上传阶段的本地气泡。
 Future<CompletionHandler> sendChatMedia(
     {required MessageInfo message,
     required SendMessagePayload payload,
@@ -163,6 +164,7 @@ Future<CompletionHandler> sendChatMedia(
     ChatMediaSender? sender,
     MessageInputStore? store,
     Future<void> Function()? beforeSend,
+    void Function(MessageInfo message)? onMessageCreated,
     VoidCallback? onRetryFailure}) {
   final input =
       store ?? MessageInputStore.create(conversationID: conversationID);
@@ -197,10 +199,13 @@ Future<CompletionHandler> sendChatMedia(
       option.offlinePushInfo?.description = '[文件]';
     }
     // 普通发送不注册观察者，也不增加异步阶段，保留SDK原有完成与错误回调时序。
-    if (beforeSend == null && onCreated == null) {
+    if (beforeSend == null && onCreated == null && onMessageCreated == null) {
       return input.sendMessage(payload: next, option: option);
     }
-    return observedSend(next, onCreated);
+    return observedSend(next, (message) {
+      onMessageCreated?.call(message);
+      onCreated?.call(message);
+    });
   }
 
   if (sender == null) return send(payload);

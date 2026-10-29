@@ -1,4 +1,6 @@
 import '../../utils/sticky_message_event.dart';
+import 'dart:io';
+import '../../../message_input/pending_rich_content_message.dart';
 import 'package:app_ui/app_ui.dart' as app;
 import 'dart:math' as math;
 
@@ -56,6 +58,12 @@ class CustomMessageWidget extends StatelessWidget {
     final colors = SemanticColorScheme.of(context);
     final atomicLocale = AppLocalization.of(context);
     final customMessage = (message.messagePayload as CustomMessagePayload?);
+    // 发送中的本地气泡直接读取内存草稿，不放宽远端消息协议对 URL 的校验。
+    if (customMessage is PendingRichContentMessage) {
+      return _buildRichContentMessage(
+          context, colors, customMessage.draft.localPreview,
+          localPreview: true);
+    }
     final file = BigFileMessage.tryParse(customMessage?.customData);
     if (file != null) {
       return FileMessageWidget(
@@ -94,11 +102,11 @@ class CustomMessageWidget extends StatelessWidget {
   Widget _buildRichContentMessage(
     BuildContext context,
     SemanticColorScheme colors,
-    RichContentMessage content,
-  ) {
-    final foreground = isSelf
-        ? colors.textColorAntiPrimary
-        : colors.textColorPrimary;
+    RichContentMessage content, {
+    bool localPreview = false,
+  }) {
+    final foreground =
+        isSelf ? colors.textColorAntiPrimary : colors.textColorPrimary;
     // 文字气泡在不同对齐方式下的尾角方向必须保持一致。
     final tailOnRight =
         config.alignment == 'right' || (config.alignment != 'left' && isSelf);
@@ -109,9 +117,8 @@ class CustomMessageWidget extends StatelessWidget {
         constraints: BoxConstraints(maxWidth: maxWidth * 0.7),
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
         decoration: BoxDecoration(
-          color: isSelf
-              ? colors.bgColorBubbleOwn
-              : colors.bgColorBubbleReciprocal,
+          color:
+              isSelf ? colors.bgColorBubbleOwn : colors.bgColorBubbleReciprocal,
           borderRadius: BorderRadius.only(
             topLeft: Radius.circular(radius),
             topRight: Radius.circular(radius),
@@ -128,38 +135,47 @@ class CustomMessageWidget extends StatelessWidget {
               if (index > 0) const SizedBox(height: 8),
               switch (block) {
                 RichTextBlock(:final text) => RichContentMarkdown(
-                  data: text,
-                  textStyle: FontScheme.caption1Regular.copyWith(
-                    color: foreground,
+                    data: text,
+                    textStyle: FontScheme.caption1Regular.copyWith(
+                      color: foreground,
+                    ),
                   ),
-                ),
                 RichImageBlock(:final url, :final width, :final height) =>
                   _buildImage(
+                    context,
                     url,
                     width,
                     height,
                     colors,
-                    () => showRichContentMediaViewer(
-                      context,
-                      content,
-                      index,
-                      downloadVideo: config.fileDownloader,
-                    ),
+                    localPreview
+                        ? null
+                        : () => showRichContentMediaViewer(
+                              context,
+                              content,
+                              index,
+                              downloadVideo: config.fileDownloader,
+                            ),
+                    localPreview: localPreview,
                   ),
                 RichFileBlock(:final url, :final mimeType, :final thumbnailUrl)
                     when mimeType.startsWith('video/') =>
                   _buildVideo(
+                    context,
                     url,
                     thumbnailUrl,
-                    () => showRichContentMediaViewer(
-                      context,
-                      content,
-                      index,
-                      downloadVideo: config.fileDownloader,
-                    ),
+                    localPreview
+                        ? null
+                        : () => showRichContentMediaViewer(
+                              context,
+                              content,
+                              index,
+                              downloadVideo: config.fileDownloader,
+                            ),
+                    localPreview: localPreview,
                   ),
                 RichFileBlock(:final url, :final name, :final size) =>
-                  _buildFile(url, name, size, foreground, colors),
+                  _buildFile(url, name, size, foreground, colors,
+                      localPreview: localPreview),
               },
             ],
           ],
@@ -170,12 +186,14 @@ class CustomMessageWidget extends StatelessWidget {
 
   /// 按原图比例约束气泡尺寸，点击进入媒体预览，加载失败时保留可识别占位。
   Widget _buildImage(
+    BuildContext context,
     String url,
     int? width,
     int? height,
     SemanticColorScheme colors,
-    VoidCallback onPreview,
-  ) {
+    VoidCallback? onPreview, {
+    bool localPreview = false,
+  }) {
     final displayWidth = math.max(1.0, maxWidth * 0.7 - 24);
     // 无尺寸消息交由图片解码确定比例，仍限制最大高度，避免长图撑满聊天窗口。
     final displayHeight = width != null && height != null
@@ -190,20 +208,38 @@ class CustomMessageWidget extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: displayWidth, maxHeight: 240),
-            child: CachedNetworkImage(
-              imageUrl: url,
-              width: displayWidth,
-              height: displayHeight,
-              fit: displayHeight == null ? BoxFit.contain : BoxFit.cover,
-              errorWidget: (_, __, ___) => SizedBox(
-                width: displayWidth,
-                height: displayHeight ?? 120,
-                child: Icon(
-                  Icons.broken_image_outlined,
-                  color: colors.textColorTertiary,
-                ),
-              ),
-            ),
+            child: localPreview && Uri.tryParse(url)?.scheme == 'file'
+                ? Image(
+                    image: ResizeImage(FileImage(File.fromUri(Uri.parse(url))),
+                        width: (displayWidth *
+                                MediaQuery.devicePixelRatioOf(context) *
+                                1.5)
+                            .ceil(),
+                        height:
+                            (240 * MediaQuery.devicePixelRatioOf(context) * 1.5)
+                                .ceil(),
+                        policy: ResizeImagePolicy.fit),
+                    width: displayWidth,
+                    height: displayHeight,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => Icon(
+                        Icons.broken_image_outlined,
+                        color: colors.textColorTertiary),
+                  )
+                : CachedNetworkImage(
+                    imageUrl: url,
+                    width: displayWidth,
+                    height: displayHeight,
+                    fit: displayHeight == null ? BoxFit.contain : BoxFit.cover,
+                    errorWidget: (_, __, ___) => SizedBox(
+                      width: displayWidth,
+                      height: displayHeight ?? 120,
+                      child: Icon(
+                        Icons.broken_image_outlined,
+                        color: colors.textColorTertiary,
+                      ),
+                    ),
+                  ),
           ),
         ),
       ),
@@ -211,7 +247,9 @@ class CustomMessageWidget extends StatelessWidget {
   }
 
   /// 视频气泡点击进入共用媒体预览器，编辑器中的封面仍不提供播放交互。
-  Widget _buildVideo(String url, String? thumbnailUrl, VoidCallback onPreview) {
+  Widget _buildVideo(BuildContext context, String url, String? thumbnailUrl,
+      VoidCallback? onPreview,
+      {bool localPreview = false}) {
     final width = math.max(1.0, maxWidth * 0.7 - 24);
     // 消息与资源共同区分点击入口，资源地址只保留散列，避免把签名URL写入语义树。
     return Semantics(
@@ -224,7 +262,18 @@ class CustomMessageWidget extends StatelessWidget {
           playIcon: config.videoPlayIcon,
           image: thumbnailUrl == null
               ? null
-              : CachedNetworkImageProvider(thumbnailUrl),
+              : localPreview && Uri.tryParse(thumbnailUrl)?.scheme == 'file'
+                  ? ResizeImage(
+                      FileImage(File.fromUri(Uri.parse(thumbnailUrl))),
+                      width:
+                          (width * MediaQuery.devicePixelRatioOf(context) * 1.5)
+                              .ceil(),
+                      height: (math.min(240, width * 9 / 16) *
+                              MediaQuery.devicePixelRatioOf(context) *
+                              1.5)
+                          .ceil(),
+                      policy: ResizeImagePolicy.fit)
+                  : CachedNetworkImageProvider(thumbnailUrl),
           size: Size(width, math.min(240, width * 9 / 16)),
         ),
       ),
@@ -237,11 +286,14 @@ class CustomMessageWidget extends StatelessWidget {
     String name,
     int size,
     Color foreground,
-    SemanticColorScheme colors,
-  ) {
+    SemanticColorScheme colors, {
+    bool localPreview = false,
+  }) {
     return InkWell(
-      onTap: () =>
-          launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
+      onTap: localPreview
+          ? null
+          : () =>
+              launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:app_core/app_core.dart';
 import 'package:app_ui/app_ui.dart';
@@ -8,6 +10,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart' hide IconButton;
 import 'package:tencent_chat_uikit/src/third_party/extended_text_field/extended_text_field.dart';
 import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
+import 'package:tencent_chat_uikit/src/message_input/pending_rich_content_message.dart';
+import 'package:atomic_x_core/impl/message/message_input_store_impl.dart';
+import 'package:atomic_x_core/impl/message/message_list_store_impl.dart';
+import 'package:tencent_chat_uikit/src/message_input/widget/rich_content_editor_sheet.dart';
+import 'package:tencent_chat_uikit/src/message_input/utils/image_size_reader.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_message.dart';
 import 'package:tencent_cloud_chat_sdk/manager/v2_tim_conversation_manager.dart';
 import 'package:tencent_cloud_chat_sdk/manager/v2_tim_friendship_manager.dart';
@@ -31,17 +38,25 @@ void main() {
   });
   tearDown(() => TencentImSDKPlugin.v2TIMManager = original);
 
-  Future<void> mount(WidgetTester tester) => tester.pumpWidget(
+  Future<void> mount(WidgetTester tester,
+          {RichContentAttachmentUploader? uploader}) =>
+      tester.pumpWidget(
         MaterialApp(
           theme: AppThemeFactory.create(
             const AppNormalColorScheme(),
             Brightness.light,
           ),
           home: Scaffold(
-            body: MessageInput(
-              conversationID: 'c2c_test',
-              config: ChatMessageInputConfig(actionGuard: ActionGuard()),
-            ),
+            body: Column(children: [
+              const Spacer(),
+              MessageInput(
+                conversationID: 'c2c_test',
+                config: ChatMessageInputConfig(
+                    actionGuard: ActionGuard(),
+                    enableReadReceipt: false,
+                    richContentAttachmentUploader: uploader),
+              )
+            ]),
           ),
         ),
       );
@@ -60,18 +75,203 @@ void main() {
     await tester.pump();
   }
 
+  Future<String> createPreview(WidgetTester tester) async {
+    late Directory directory;
+    await tester.runAsync(() async {
+      directory = await Directory.systemTemp.createTemp('send_media_');
+      await File('${directory.path}/preview.png').writeAsBytes(base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOQcHnxHwAEAAJEfJjuTwAAAABJRU5ErkJggg=='));
+    });
+    addTearDown(() => directory.deleteSync(recursive: true));
+    return '${directory.path}/preview.png';
+  }
+
+  IconButton sendButton(WidgetTester tester) =>
+      tester.widget<IconButton>(find.ancestor(
+        of: find.descendant(
+            of: find.byKey(const Key('message_input_shared_toolbar')),
+            matching: find.byIcon(AppIcons.send1)),
+        matching: find.byType(IconButton),
+      ));
+
+  testWidgets('媒体加载时收起或重开仍可完成预览，普通输入区删除占位后不被迟到结果复活', (tester) async {
+    final path = await createPreview(tester);
+    for (final mode in ['normal', 'reopen', 'delete']) {
+      await mount(tester, uploader: (_) async => throw StateError('不应提前上传'));
+      if (mode == 'normal') sdk.conversations.completeDraft('');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+      await tester.pumpAndSettle();
+      final editor = tester.state<RichContentEditorSheetState>(
+          find.byType(RichContentEditorSheet));
+      final placeholder = editor.beginMediaPreparation(
+          AlbumMedia(id: 1, mediaType: AlbumMediaType.video))!;
+      final dimensions = Completer<ImageSize?>();
+      final preparing = editor.completeMediaPreparation(
+          placeholder,
+          AlbumMedia(
+              id: 1,
+              mediaType: AlbumMediaType.video,
+              mediaPath: '/tmp/video.mp4',
+              videoThumbnailPath: path),
+          readSize: (_) => dimensions.future);
+      await tester.pump();
+      expect(sendButton(tester).onPressed, isNull);
+      await tester.tap(find.byTooltip('收起富文本编辑器'));
+      await tester.pump();
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      if (mode == 'reopen') {
+        await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+        await tester.pump();
+      } else if (mode == 'delete') {
+        final input = tester.widget<ExtendedTextField>(
+            find.byKey(const Key('message_input_text_field')));
+        final token = richContentAttachmentTokenPattern
+            .firstMatch(input.controller!.text)!;
+        input.controller!.value = TextEditingValue(
+            text:
+                input.controller!.text.replaceRange(token.start, token.end, ''),
+            selection: TextSelection.collapsed(offset: token.start));
+        await tester.pump();
+      }
+      dimensions.complete(const ImageSize(120, 60));
+      await tester.pump();
+      await preparing;
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      if (mode == 'delete') {
+        expect(find.byIcon(AppIcons.cameraOn), findsNothing);
+        expect(sendButton(tester).onPressed, isNull);
+      } else {
+        expect(find.byIcon(AppIcons.cameraOn), findsOneWidget);
+        expect(sendButton(tester).onPressed, isNotNull);
+      }
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+
+  testWidgets('插入媒体只预览，点击发送后才上传全部资源并发送一次消息', (tester) async {
+    final path = await createPreview(tester);
+    for (final mode in [
+      'normal',
+      'expanded',
+      'dispose_during',
+      'edit_during'
+    ]) {
+      final local = <PendingRichContentMessage>[];
+      final subscription = notificationCenter.addListener<MessageSendEventData>(
+          MessageSendNotifyKey.messageSendBegin, (event) {
+        if ((event.message as MessageInfo).messagePayload
+            case final PendingRichContentMessage pending) {
+          local.add(pending);
+        }
+      });
+      final uploads = <RichContentLocalAttachment>[];
+      final results = List.generate(3, (_) => Completer<String>());
+      final createdBefore = sdk.messages.created;
+      await mount(tester, uploader: (attachment) {
+        uploads.add(attachment);
+        return results[uploads.length - 1].future;
+      });
+      if (mode == 'normal') sdk.conversations.completeDraft('');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+      await tester.pumpAndSettle();
+      final editor = tester.state<RichContentEditorSheetState>(
+          find.byType(RichContentEditorSheet));
+      await editor.insertProcessedMedia(
+          AlbumMedia(id: 1, mediaType: AlbumMediaType.image, mediaPath: path),
+          readSize: (_) async => const ImageSize(120, 60));
+      await editor.insertProcessedMedia(
+          AlbumMedia(
+              id: 2,
+              mediaType: AlbumMediaType.video,
+              mediaPath: '/tmp/video.mp4',
+              videoThumbnailPath: path),
+          readSize: (_) async => const ImageSize(120, 60));
+      expect(uploads, isEmpty);
+      expect(editor.canSend, isTrue);
+      await tester.pump();
+      if (mode == 'normal' || mode == 'edit_during') {
+        await tester.tap(find.byTooltip('收起富文本编辑器'));
+        await tester.pumpAndSettle();
+        final submit = sendButton(tester).onPressed!;
+        submit();
+        submit();
+      } else {
+        unawaited(editor.send());
+        unawaited(editor.send());
+      }
+      await tester.pump();
+      expect(uploads, hasLength(1));
+      expect(sdk.messages.created, createdBefore);
+      expect(sendButton(tester).onPressed, isNull);
+      expect(local, hasLength(1));
+      expect(local.single.message.status, MessageStatus.sending);
+      expect(find.byType(RichContentEditorSheet), findsNothing);
+      if (mode == 'dispose_during') {
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+      String? edited;
+      if (mode == 'edit_during') {
+        edited = '发送期间新增';
+        await enter(tester, edited);
+        expect(sendButton(tester).onPressed, isNotNull);
+      }
+      results[0].complete('https://example.com/image.png');
+      await tester.pump();
+      // 封面只读取本地文件元数据，让真实文件 IO 在异步测试区完成。
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+      expect(uploads, hasLength(2));
+      expect(sdk.messages.created, createdBefore);
+      results[1].complete('https://example.com/cover.png');
+      await tester.pump();
+      expect(uploads, hasLength(3));
+      expect(uploads.last.isVideo, isTrue);
+      expect(sdk.messages.created, createdBefore);
+      results[2].complete('https://example.com/video.mp4');
+      await tester.pump();
+      expect(sdk.messages.created, createdBefore + 1);
+      final message =
+          RichContentMessage.tryParse(sdk.messages.customData.last)!;
+      expect(message.blocks.whereType<RichImageBlock>().single.url,
+          'https://example.com/image.png');
+      expect(message.blocks.whereType<RichFileBlock>().single.thumbnailUrl,
+          'https://example.com/cover.png');
+      sdk.messages.completeSend();
+      await tester.pumpAndSettle();
+      expect(find.byType(RichContentEditorSheet), findsNothing);
+      final field = find.byKey(const Key('message_input_text_field'));
+      if (field.evaluate().isNotEmpty) {
+        expect(tester.widget<ExtendedTextField>(field).controller!.text,
+            edited ?? '');
+      } else if (mode != 'dispose_during') {
+        expect(edited, isNull);
+        expect(find.textContaining('发送给 '), findsOneWidget);
+      }
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      unawaited(subscription.cancel());
+      await tester.pump();
+    }
+  });
+
   testWidgets('撤回文本回填保留已有草稿，迟到加载不能覆盖回填内容', (tester) async {
     await mount(tester);
     final state = tester.state<MessageInputState>(find.byType(MessageInput));
     state.restoreRecalledDraft(const ChatMessageRecallDraft(text: '撤回原文'));
     sdk.conversations.completeDraft('迟到的旧草稿');
     await tester.pump();
-    var input = tester.widget<ExtendedTextField>(find.byType(ExtendedTextField).first);
+    var input =
+        tester.widget<ExtendedTextField>(find.byType(ExtendedTextField).first);
     expect(input.controller!.text, '撤回原文');
     input.controller!.text = '正在输入';
     state.restoreRecalledDraft(const ChatMessageRecallDraft(text: '再次回填'));
     await tester.pump();
-    input = tester.widget<ExtendedTextField>(find.byType(ExtendedTextField).first);
+    input =
+        tester.widget<ExtendedTextField>(find.byType(ExtendedTextField).first);
     expect(input.controller!.text, '正在输入\n再次回填');
     await tester.pumpWidget(const SizedBox.shrink());
     expect(sdk.conversations.saved.last, '正在输入\n再次回填');
@@ -82,20 +282,23 @@ void main() {
     sdk.conversations.completeDraft('已有草稿');
     await tester.pump();
     final state = tester.state<MessageInputState>(find.byType(MessageInput));
-    state.restoreRecalledDraft(ChatMessageRecallDraft(richContent:
-      const RichContentMessage([
-        RichTextBlock('**原消息**'),
-        RichFileBlock('https://example.com/file.pdf', '文档.pdf', 123, 'application/pdf'),
-      ]).toCustomData()));
+    state.restoreRecalledDraft(ChatMessageRecallDraft(
+        richContent: const RichContentMessage([
+      RichTextBlock('**原消息**'),
+      RichFileBlock(
+          'https://example.com/file.pdf', '文档.pdf', 123, 'application/pdf'),
+    ]).toCustomData()));
     await tester.pump();
     await tester.pumpWidget(const SizedBox.shrink());
-    final draft = RichContentDraft.tryParsePersisted(sdk.conversations.saved.last!);
+    final draft =
+        RichContentDraft.tryParsePersisted(sdk.conversations.saved.last!);
     expect(draft, isNotNull);
     expect(draft!.canSend, isTrue);
     final message = draft.toMessage()!;
     expect(message.plainTextPreview, contains('已有草稿'));
     expect(message.plainTextPreview, contains('**原消息**'));
-    expect(message.blocks.whereType<RichFileBlock>().single.url, 'https://example.com/file.pdf');
+    expect(message.blocks.whereType<RichFileBlock>().single.url,
+        'https://example.com/file.pdf');
     expect(sdk.messages.created, 0);
   });
 
@@ -104,8 +307,11 @@ void main() {
     sdk.conversations.completeDraft('');
     await tester.pump();
     final state = tester.state<MessageInputState>(find.byType(MessageInput));
-    final message = MessageInfo(msgID: 'quoted', messageType: MessageType.text,
-      messagePayload: TextMessagePayload(text: '应被清除的引用原文'), status: MessageStatus.sendSuccess);
+    final message = MessageInfo(
+        msgID: 'quoted',
+        messageType: MessageType.text,
+        messagePayload: TextMessagePayload(text: '应被清除的引用原文'),
+        status: MessageStatus.sendSuccess);
     state.setQuotedMessage(message);
     await tester.pump();
     expect(find.textContaining('应被清除的引用原文'), findsOneWidget);
@@ -224,8 +430,7 @@ void main() {
     for (final label in ['粗体', '斜体', '下划线', '删除线']) {
       expect(selected(label), isTrue);
     }
-    controller.selection =
-        TextSelection.collapsed(offset: source.indexOf('组'));
+    controller.selection = TextSelection.collapsed(offset: source.indexOf('组'));
     await tester.pump();
     for (final label in ['粗体', '斜体', '下划线', '删除线']) {
       expect(selected(label), isFalse, reason: '嵌套正文前');
@@ -525,6 +730,7 @@ final class _Conversations implements V2TIMConversationManager {
 
 final class _Messages implements V2TIMMessageManager {
   int created = 0;
+  final customData = <String>[];
   final pending = <Completer<V2TimValueCallback<V2TimMessage>>>[];
 
   void completeSend({int code = 0}) => pending.removeAt(0).complete(
@@ -536,6 +742,9 @@ final class _Messages implements V2TIMMessageManager {
     switch (call.memberName) {
       case #createTextMessage:
       case #createCustomMessage:
+        if (call.memberName == #createCustomMessage) {
+          customData.add(call.namedArguments[#data] as String);
+        }
         created++;
         return Future.value(
           V2TimValueCallback<V2TimMsgCreateInfoResult>(

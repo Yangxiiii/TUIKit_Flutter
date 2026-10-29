@@ -1,5 +1,6 @@
 import 'package:atomic_x_core/atomicxcore.dart';
 import '../../message_input/chat_media_sender.dart';
+import '../../message_input/pending_rich_content_message.dart';
 
 /// 校验失败消息后重新发送；实际调用SDK前才删除旧行，避免校验失败丢失记录。
 /// 引用信息无法由历史负载完整恢复，其余发送选项沿用原消息。
@@ -10,6 +11,11 @@ class MessageResender {
     required String conversationID,
     ChatMediaSender? mediaSender,
   }) async {
+    // 本地富文本尚未取得远端资源，只能重试原任务，不能把空 customData 发给 SDK。
+    if (message.messagePayload case final PendingRichContentMessage pending) {
+      await pending.send();
+      return;
+    }
     final payload = _convertToSendPayload(message.messagePayload);
     if (payload == null) return;
 
