@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
 import 'package:tencent_cloud_chat_sdk/tencent_im_sdk_plugin.dart';
 import 'package:tencent_cloud_chat_sdk/enum/V2TimAdvancedMsgListener.dart';
+import 'package:tencent_cloud_chat_sdk/enum/history_msg_get_type_enum.dart';
 import 'package:tencent_cloud_chat_sdk/manager/v2_tim_manager.dart';
 import 'package:tencent_cloud_chat_sdk/manager/v2_tim_message_manager.dart';
 import 'package:tencent_cloud_chat_sdk/manager/v2_tim_conversation_manager.dart';
@@ -26,6 +27,51 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/text_m
 import 'package:tencent_chat_uikit/src/third_party/extended_text/extended_text.dart';
 
 void main() {
+  testWidgets('退出短会话后收到新消息，再进入时消息仍连续排列', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/layout');
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    addTearDown(MessageList.clearViewportSnapshots);
+    sdk.messages.chronologicalHistory = [_Message('first'), _Message('second')];
+    Widget page() => MaterialApp(
+          theme: AppThemeFactory.create(
+              const AppNormalColorScheme(), Brightness.light),
+          home: const Scaffold(
+            body: Column(children: [MessageList(conversationID: 'c2c_visual')]),
+          ),
+        );
+    Rect bubble(String id) => tester.getRect(find.byWidgetPredicate(
+        (widget) => widget is TextMessageWidget && widget.message.msgID == id));
+
+    await tester.pumpWidget(page());
+    await tester.pumpAndSettle();
+    final previousTop = bubble('second').top;
+    // 销毁页面保存阅读快照，再在 SDK 历史中补入新消息，走实际重新入场流程。
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    sdk.messages.chronologicalHistory!.add(_Message('third'));
+    await tester.pumpWidget(page());
+    await tester.pumpAndSettle();
+    expect(bubble('third').top - bubble('second').bottom, closeTo(16, .01));
+    expect(bubble('second').top, closeTo(previousTop, .01));
+
+    // 相同消息首次进入与恢复快照的间距必须一致。
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    MessageList.clearViewportSnapshots();
+    await tester.pumpWidget(page());
+    await tester.pumpAndSettle();
+    expect(bubble('third').top - bubble('second').bottom, closeTo(16, .01));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('首屏消息先加载，置顶辅助请求挂起或失败不影响消息显示', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final original = TencentImSDKPlugin.v2TIMManager;
@@ -448,8 +494,28 @@ final class _Messages implements V2TIMMessageManager {
   Completer<V2TimValueCallback<List<V2TimMessage>>>? historyGate;
   int historyCalls = 0;
 
-  Future<V2TimValueCallback<List<V2TimMessage>>> _loadHistory() {
+  /// 按时间正序排列的可变历史，用于模拟页面关闭期间收到新消息。
+  List<V2TimMessage>? chronologicalHistory;
+
+  /// 可变历史按 SDK 游标分页，其他场景继续使用原有挂起或固定响应。
+  Future<V2TimValueCallback<List<V2TimMessage>>> _loadHistory(Invocation call) {
     historyCalls++;
+    final history = chronologicalHistory;
+    if (history != null) {
+      // SDK 旧消息页倒序、新消息页正序，且两页均不重复返回游标自身。
+      final cursor = (call.namedArguments[#lastMsg] as V2TimMessage?)?.msgID;
+      final index = history.indexWhere((message) => message.msgID == cursor);
+      assert(cursor == null || index >= 0);
+      final newer = call.namedArguments[#getType] ==
+          HistoryMsgGetTypeEnum.V2TIM_GET_CLOUD_NEWER_MSG;
+      final messages = cursor == null
+          ? history.reversed.toList()
+          : newer
+              ? history.skip(index + 1).toList()
+              : history.take(index).toList().reversed.toList();
+      return Future.value(
+          V2TimValueCallback(code: 0, desc: '', data: messages));
+    }
     return historyGate?.future ??
         Future.value(
           V2TimValueCallback<List<V2TimMessage>>(
@@ -470,7 +536,7 @@ final class _Messages implements V2TIMMessageManager {
 
   @override
   dynamic noSuchMethod(Invocation call) => switch (call.memberName) {
-        #getHistoryMessageList => _loadHistory(),
+        #getHistoryMessageList => _loadHistory(call),
         #addAdvancedMsgListener => Future<void>.sync(() {
             listener =
                 call.namedArguments[#listener] as V2TimAdvancedMsgListener;

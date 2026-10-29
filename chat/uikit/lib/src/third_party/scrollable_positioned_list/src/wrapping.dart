@@ -90,31 +90,7 @@ class CustomShrinkWrappingViewport extends CustomViewport {
   }
 }
 
-/// A render object that is bigger on the inside and shrink wraps its children
-/// in the main axis.
-///
-/// [RenderShrinkWrappingViewport] displays a subset of its children according
-/// to its own dimensions and the given [offset]. As the offset varies, different
-/// children are visible through the viewport.
-///
-/// [RenderShrinkWrappingViewport] differs from [RenderViewport] in that
-/// [RenderViewport] expands to fill the main axis whereas
-/// [RenderShrinkWrappingViewport] sizes itself to match its children in the
-/// main axis. This shrink wrapping behavior is expensive because the children,
-/// and hence the viewport, could potentially change size whenever the [offset]
-/// changes (e.g., because of a collapsing header).
-///
-/// [RenderShrinkWrappingViewport] cannot contain [RenderBox] children directly.
-/// Instead, use a [RenderSliverList], [RenderSliverFixedExtentList],
-/// [RenderSliverGrid], or a [RenderSliverToBoxAdapter], for example.
-///
-/// See also:
-///
-///  * [RenderViewport], a viewport that does not shrink-wrap its contents.
-///  * [RenderSliver], which explains more about the Sliver protocol.
-///  * [RenderBox], which explains more about the Box protocol.
-///  * [RenderSliverToBoxAdapter], which allows a [RenderBox] object to be
-///    placed inside a [RenderSliver] (the opposite of this class).
+/// 按内容收缩视口，并以同一实际高度布局锚点两侧的 Sliver，保持消息连续排列。
 class CustomRenderShrinkWrappingViewport extends CustomRenderViewport {
   /// Creates a viewport (for [RenderSliver] objects) that shrink-wraps its
   /// contents.
@@ -238,6 +214,11 @@ class CustomRenderShrinkWrappingViewport extends CustomRenderViewport {
           case Axis.horizontal:
             effectiveExtent = constraints.constrainWidth(_shrinkWrapExtent);
             break;
+        }
+        // 首轮用可用高度测量内容；收缩后必须重排两侧分段，避免剩余高度夹在消息之间。
+        if (mainAxisExtent != effectiveExtent) {
+          mainAxisExtent = effectiveExtent;
+          continue;
         }
         // *** Difference from [RenderViewport].
         final top = _minScrollExtent + mainAxisExtent * anchor;
