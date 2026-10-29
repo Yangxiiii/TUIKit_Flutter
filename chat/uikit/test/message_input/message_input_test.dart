@@ -240,6 +240,10 @@ void main() {
           'https://example.com/image.png');
       expect(message.blocks.whereType<RichFileBlock>().single.thumbnailUrl,
           'https://example.com/cover.png');
+      final image = message.blocks.whereType<RichImageBlock>().single;
+      final video = message.blocks.whereType<RichFileBlock>().single;
+      expect((image.width, image.height), (120, 60));
+      expect((video.width, video.height), (120, 60));
       sdk.messages.completeSend();
       await tester.pumpAndSettle();
       expect(find.byType(RichContentEditorSheet), findsNothing);

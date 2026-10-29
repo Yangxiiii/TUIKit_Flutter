@@ -114,8 +114,8 @@ final class RichContentDraft {
             fileName: file?.name ?? 'image',
             fileSize: file?.size ?? 0,
             mimeType: file?.mimeType ?? 'image/*',
-            width: image?.width,
-            height: image?.height,
+            width: image?.width ?? file?.width,
+            height: image?.height ?? file?.height,
           ),
           remoteUrl: url,
           thumbnailUrl: file?.thumbnailUrl,
@@ -219,13 +219,14 @@ final class RichContentDraft {
             );
   }
 
-  /// 内容须符合字数限制；附件须有远端资源或已完成本地处理，加载中及加载失败均不能提交。
+  /// 内容须符合字数限制，媒体须有正整数宽高；附件须有远端资源或已完成本地处理。
   bool get canSubmit =>
       hasContent &&
       characterCount <= messageTextCharacterLimit &&
       blocks.whereType<RichContentDraftAttachmentBlock>().every((block) =>
           block.status != RichContentAttachmentStatus.preparing &&
           block.status != RichContentAttachmentStatus.preparationFailed &&
+          block.attachment.hasRequiredDimensions &&
           (block.isReadyToSend || block.attachment.localPath.isNotEmpty));
 
   /// 比较用户编辑的内容与附件身份，忽略上传状态和远端地址的变化。
@@ -287,6 +288,8 @@ final class RichContentDraft {
                 attachment.fileName,
                 attachment.fileSize,
                 attachment.mimeType,
+                width: attachment.width,
+                height: attachment.height,
                 thumbnailUrl: localPreview && attachment.thumbnailPath != null
                     ? Uri.file(attachment.thumbnailPath!).toString()
                     : block.thumbnailUrl,
@@ -417,7 +420,7 @@ RichContentDraftBlock? _draftBlockFromJson(Map<String, dynamic> json) {
   );
 }
 
-/// 附件须已上传且元数据有效；图片尺寸不参与发送就绪判断。
+/// 附件须已上传且元数据有效，图片和视频发送前必须具有正整数宽高。
 bool _isReadyAttachment(RichContentDraftAttachmentBlock block) {
   if (block.status != RichContentAttachmentStatus.uploaded ||
       !isValidRichContentUrl(block.remoteUrl)) {
@@ -432,10 +435,10 @@ bool _isReadyAttachment(RichContentDraftAttachmentBlock block) {
   }
   if (attachment.fileName.isEmpty ||
       attachment.fileSize < 0 ||
-      attachment.mimeType.isEmpty) {
+      attachment.mimeType.isEmpty ||
+      !attachment.hasRequiredDimensions) {
     return false;
   }
-  // 图片地址已就绪即可发送，撤回回填的远端图片不要求预先读取尺寸。
   return true;
 }
 

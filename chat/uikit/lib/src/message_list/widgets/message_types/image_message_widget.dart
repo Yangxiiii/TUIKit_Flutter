@@ -8,7 +8,9 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/image_viewer_manager
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_status_mixin.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
+import '../chat_media_placeholder.dart';
 
+/// 展示普通图片消息，优先使用本地资源，加载时使用宿主占位图，点击进入共用预览器。
 class ImageMessageWidget extends StatefulWidget {
   final MessageInfo message;
   final String conversationID;
@@ -51,6 +53,7 @@ class ImageMessageWidget extends StatefulWidget {
   State<ImageMessageWidget> createState() => _ImageMessageWidgetState();
 }
 
+/// 管理图片消息预览入口，加载占位沿用气泡的固定尺寸。
 class _ImageMessageWidgetState extends State<ImageMessageWidget>
     with MessageStatusMixin {
   ImageViewerManager? _imageViewerManager;
@@ -174,12 +177,8 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget>
             color: colorsTheme.bgColorTopBar,
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Center(
-            child: CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(
-                  colorsTheme.buttonColorPrimaryDefault),
-            ),
-          ),
+          child: ChatMediaPlaceholder(
+              image: widget.config.imageLoadingPlaceholder, showLoading: true),
         );
       }
     }
@@ -238,15 +237,7 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget>
                 width: displayWidth,
                 height: displayHeight,
                 fit: BoxFit.cover,
-                loadingBuilder: (context, child, loadingProgress) {
-                  if (loadingProgress == null) return child;
-                  return Center(
-                    child: CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                          colorsTheme.buttonColorPrimaryDefault),
-                    ),
-                  );
-                },
+                frameBuilder: _buildLoadingFrame,
                 errorBuilder: (context, error, stackTrace) {
                   return Container(
                     color: colorsTheme.bgColorTopBar,
@@ -263,6 +254,7 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget>
                 width: displayWidth,
                 height: displayHeight,
                 fit: BoxFit.cover,
+                frameBuilder: _buildLoadingFrame,
                 errorBuilder: (context, error, stackTrace) {
                   return Container(
                     color: colorsTheme.bgColorTopBar,
@@ -287,6 +279,14 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget>
       ),
     );
   }
+
+  /// 以首帧是否完成判断加载，覆盖网络尚未返回字节及本地文件解码阶段。
+  Widget _buildLoadingFrame(
+          BuildContext context, Widget child, int? frame, bool synchronous) =>
+      synchronous || frame != null
+          ? child
+          : ChatMediaPlaceholder(
+              image: widget.config.imageLoadingPlaceholder, showLoading: true);
 
   Future<void> _showImageViewer() async {
     if (_imageViewerManager == null) return;

@@ -21,7 +21,8 @@ const video = 'https://example.com/movie.mp4';
 const content = RichContentMessage([
   RichTextBlock('媒体说明'),
   RichImageBlock(image1, 160, 90),
-  RichFileBlock(video, 'movie.mp4', 123, 'video/mp4', thumbnailUrl: cover),
+  RichFileBlock(video, 'movie.mp4', 123, 'video/mp4',
+      thumbnailUrl: cover, width: 160, height: 90),
   RichFileBlock('https://example.com/a.pdf', 'a.pdf', 12, 'application/pdf'),
   RichImageBlock(image2, 160, 90),
 ]);
@@ -42,6 +43,16 @@ void main() {
           CachedNetworkImageProvider(url),
           () => OneFrameImageStreamCompleter(
               Future.value(ImageInfo(image: image!))));
+      // 气泡使用缩小解码缓存，全屏预览仍单独保留原尺寸缓存。
+      final scale = tester.view.devicePixelRatio * 1.5;
+      final thumbnail = ResizeImage(CachedNetworkImageProvider(url),
+          width: (200 * scale).ceil(),
+          height: (112.5 * scale).ceil(),
+          policy: ResizeImagePolicy.fit);
+      cache.putIfAbsent(
+          await thumbnail.obtainKey(ImageConfiguration.empty),
+          () => OneFrameImageStreamCompleter(
+              Future.value(ImageInfo(image: image!.clone()))));
     }
     await tester.pumpWidget(MaterialApp(
         home: Scaffold(
@@ -75,8 +86,10 @@ void main() {
     final pending = Completer<String>();
     await mount(tester,
         messageContent: const RichContentMessage([
-          RichFileBlock(video, 'one.mp4', 1, 'video/mp4'),
-          RichFileBlock(second, 'second.mp4', 2, 'video/mp4'),
+          RichFileBlock(video, 'one.mp4', 1, 'video/mp4',
+              width: 160, height: 90),
+          RichFileBlock(second, 'second.mp4', 2, 'video/mp4',
+              width: 160, height: 90),
         ]), download: (file) {
       requested.add(file.url);
       if (requested.length == 1) return Future.error(StateError('下载失败'));

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import '../../message_list/widgets/chat_media_placeholder.dart';
 import 'package:app_ui/app_ui.dart' show AppIcons, AppColorBuildContext;
 import 'package:tencent_chat_uikit/src/file_picker/file_picker.dart';
 import 'package:tencent_chat_uikit/src/message_input/message_input_config.dart';
@@ -376,6 +377,12 @@ final class RichContentEditorSheet extends StatefulWidget {
   /// 保留宿主原有播放图标配置入口；展开和普通编辑态均使用视频时长角标。
   final ImageProvider? videoPlayIcon;
 
+  /// 图片导出或首帧解码期间展示的宿主占位图。
+  final ImageProvider? imageLoadingPlaceholder;
+
+  /// 视频导出或首帧封面解码期间展示的宿主占位图。
+  final ImageProvider? videoLoadingPlaceholder;
+
   /// 把草稿交给 MessageInput 创建本地发送气泡，接管成功返回 true。
   final Future<bool> Function(RichContentDraft draft) onSend;
 
@@ -408,6 +415,8 @@ final class RichContentEditorSheet extends StatefulWidget {
     required this.onSend,
     this.canUploadAttachments = false,
     this.videoPlayIcon,
+    this.imageLoadingPlaceholder,
+    this.videoLoadingPlaceholder,
     this.onClose,
     this.onToolbarChanged,
     this.onDraftChanged,
@@ -846,7 +855,9 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
       }
       // 只在原生导出完成后读取实际预览尺寸；结果替换固定块 ID，不再移动光标或追加元素。
       final size = await (readSize ?? ImageSizeReader.read)(previewPath);
-      if (size == null) throw StateError('媒体尺寸不可用');
+      if (size == null || size.width <= 0 || size.height <= 0) {
+        throw StateError('媒体尺寸不可用');
+      }
       _publishPreparedMedia(
           original,
           RichContentDraftAttachmentBlock(
@@ -1170,6 +1181,8 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
                     ),
                     specialTextSpanBuilder: RichContentAttachmentSpanBuilder(
                       videoPlayIcon: widget.videoPlayIcon,
+                      imageLoadingPlaceholder: widget.imageLoadingPlaceholder,
+                      videoLoadingPlaceholder: widget.videoLoadingPlaceholder,
                       attachments: _inlineMedia,
                       maxImageWidth: maxImageWidth,
                       devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
@@ -1280,6 +1293,12 @@ final class RichContentAttachmentSpanBuilder
   /// 保留宿主原有配置入口；编辑态统一使用右下角的视频字形。
   final ImageProvider? videoPlayIcon;
 
+  /// 图片导出或首帧解码期间展示的宿主占位图。
+  final ImageProvider? imageLoadingPlaceholder;
+
+  /// 视频导出或首帧封面解码期间展示的宿主占位图。
+  final ImageProvider? videoLoadingPlaceholder;
+
   /// 按稳定 ID 索引的附件草稿块。
   final Map<int, RichContentDraftAttachmentBlock> attachments;
 
@@ -1294,6 +1313,8 @@ final class RichContentAttachmentSpanBuilder
 
   RichContentAttachmentSpanBuilder({
     this.videoPlayIcon,
+    this.imageLoadingPlaceholder,
+    this.videoLoadingPlaceholder,
     required this.attachments,
     required this.maxImageWidth,
     this.devicePixelRatio = 1,
@@ -1367,6 +1388,8 @@ final class RichContentAttachmentSpanBuilder
     if (isStart(flag, richContentAttachmentTokenStart)) {
       return _EditorAttachmentText(
         attachments: attachments,
+        imageLoadingPlaceholder: imageLoadingPlaceholder,
+        videoLoadingPlaceholder: videoLoadingPlaceholder,
         maxImageWidth: maxImageWidth,
         devicePixelRatio: devicePixelRatio,
         start: index!,
@@ -1403,8 +1426,16 @@ final class _EditorAttachmentText extends SpecialText {
   /// 连续媒体的上边距已合并；与正文相邻的两侧各保留 8px。
   final EdgeInsets margin;
 
+  /// 图片处理及解码期间展示的占位图，和外层加载状态共用。
+  final ImageProvider? imageLoadingPlaceholder;
+
+  /// 视频处理及封面解码期间展示的占位图，和外层加载状态共用。
+  final ImageProvider? videoLoadingPlaceholder;
+
   _EditorAttachmentText({
     required this.attachments,
+    this.imageLoadingPlaceholder,
+    this.videoLoadingPlaceholder,
     required this.maxImageWidth,
     required this.devicePixelRatio,
     required this.start,
@@ -1435,7 +1466,9 @@ final class _EditorAttachmentText extends SpecialText {
       attachment,
       maxImageWidth,
     );
-    // 未完成本地处理时不读取原文件，黑色占位与真实媒体共用原子令牌及整体删除行为。
+    final loadingPlaceholder =
+        attachment.isVideo ? videoLoadingPlaceholder : imageLoadingPlaceholder;
+    // 未完成本地处理时不读取原文件，宿主占位与真实媒体共用原子令牌及整体删除行为。
     if (block.status == RichContentAttachmentStatus.preparing ||
         block.status == RichContentAttachmentStatus.preparationFailed) {
       final loading = block.status == RichContentAttachmentStatus.preparing;
@@ -1460,15 +1493,20 @@ final class _EditorAttachmentText extends SpecialText {
                         borderRadius: BorderRadius.circular(4),
                       ),
                       alignment: Alignment.center,
-                      child: loading
-                          ? SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: context.appColors.onScrim))
-                          : Icon(Icons.broken_image_outlined,
-                              color: context.appColors.onScrim, size: 20),
+                      child: loading && loadingPlaceholder != null
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: ChatMediaPlaceholder(
+                                  image: loadingPlaceholder, showLoading: true))
+                          : loading
+                              ? SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: context.appColors.onScrim))
+                              : Icon(Icons.broken_image_outlined,
+                                  color: context.appColors.onScrim, size: 20),
                     )),
                   )),
         ),
@@ -1510,6 +1548,7 @@ final class _EditorAttachmentText extends SpecialText {
           padding: margin,
           child: RichContentVideoPreview(
             image: image,
+            loadingPlaceholder: videoLoadingPlaceholder,
             size: size,
             isEditing: true,
             durationMs: attachment.durationMs,
@@ -1526,9 +1565,14 @@ final class _EditorAttachmentText extends SpecialText {
       start: start,
       alignment: PlaceholderAlignment.bottom,
       fit: BoxFit.contain,
-      frameBuilder: (_, child, __, ___) => ClipRRect(
+      frameBuilder: (_, child, frame, synchronous) => ClipRRect(
         borderRadius: BorderRadius.circular(4),
-        child: child,
+        child: synchronous || frame != null
+            ? child
+            : SizedBox(
+                width: size.width,
+                height: size.height,
+                child: ChatMediaPlaceholder(image: imageLoadingPlaceholder)),
       ),
       margin: margin,
     );

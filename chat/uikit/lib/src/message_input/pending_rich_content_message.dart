@@ -94,6 +94,8 @@ final class PendingRichContentMessage extends CustomMessagePayload {
             _checkAccount();
             message.status = MessageStatus.sending;
             _notify(MessageSendNotifyKey.messageSendBegin, message);
+            // 上传前阻止缺少媒体尺寸的草稿，不能上传完成后再生成不合规消息。
+            if (!_draft.canSubmit) throw StateError('消息内容或媒体尺寸尚未就绪');
             // 按正文顺序上传，阶段结果立即写回任务，后续失败仍能复用成功资源。
             for (var i = 0; i < _draft.blocks.length; i++) {
               final block = _draft.blocks[i];

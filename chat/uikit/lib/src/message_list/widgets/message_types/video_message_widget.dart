@@ -10,7 +10,9 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/image_viewer_manager
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_status_mixin.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
+import '../chat_media_placeholder.dart';
 
+/// 用视频封面构建普通视频气泡，加载时使用宿主占位图，播放由共用预览器承接。
 class VideoMessageWidget extends StatefulWidget {
   final MessageInfo message;
   final String conversationID;
@@ -49,6 +51,7 @@ class VideoMessageWidget extends StatefulWidget {
   State<VideoMessageWidget> createState() => _VideoMessageWidgetState();
 }
 
+/// 管理封面尺寸、下载去重及损坏缓存重试，保持发送前后的展示比例一致。
 class _VideoMessageWidgetState extends State<VideoMessageWidget>
     with MessageStatusMixin {
   ImageViewerManager? _imageViewerManager;
@@ -364,7 +367,13 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
         return _buildNetworkImage(
             remoteURL, width, height, fallback, colorsTheme);
       }
-      return _buildPlaceholder(width, height, fallback, colorsTheme);
+      return SizedBox(
+          width: width,
+          height: height,
+          child: widget.config.videoLoadingPlaceholder == null
+              ? _buildPlaceholder(width, height, fallback, colorsTheme)
+              : ChatMediaPlaceholder(
+                  image: widget.config.videoLoadingPlaceholder));
     }
 
     if (imagePath.startsWith('http')) {
@@ -385,6 +394,7 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
       width: width,
       height: height,
       fit: BoxFit.cover,
+      frameBuilder: _buildLoadingFrame,
       errorBuilder: (context, error, stackTrace) {
         // Two failure modes here, distinguished by whether we've
         // already retried this exact path on this State:
@@ -441,10 +451,18 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
       width: width,
       height: height,
       fit: BoxFit.cover,
+      frameBuilder: _buildLoadingFrame,
       errorBuilder: (context, error, stackTrace) =>
           _buildPlaceholder(width, height, fallback, colorsTheme),
     );
   }
+
+  /// 缩略图尚无解码首帧时显示同一张视频占位，播放按钮仍由气泡外层叠加。
+  Widget _buildLoadingFrame(
+          BuildContext context, Widget child, int? frame, bool synchronous) =>
+      synchronous || frame != null
+          ? child
+          : ChatMediaPlaceholder(image: widget.config.videoLoadingPlaceholder);
 
   Widget _buildPlaceholder(
     double width,

@@ -13,7 +13,7 @@ final class RichContentMessage {
 
   const RichContentMessage(this.blocks);
 
-  /// 编码为腾讯 IM 自定义消息的 customData。
+  /// 编码为腾讯 IM 自定义消息的 customData；图片和视频必须提供正整数宽高。
   String toCustomData() {
     return jsonEncode({
       'businessID': businessID,
@@ -70,7 +70,7 @@ final class RichContentMessage {
         final url = data['url'];
         final width = data['width'];
         final height = data['height'];
-        // 图片仅要求地址；旧消息的尺寸作为可选布局提示，不再阻断无尺寸消息。
+        // 历史消息可能只有地址，接收仍兼容缺省尺寸；新发送在编码边界强制补齐。
         if (!_isWebUrl(url) ||
             (width != null && (width is! int || width <= 0)) ||
             (height != null && (height is! int || height <= 0))) {
@@ -83,6 +83,8 @@ final class RichContentMessage {
         final size = data['size'];
         final mimeType = data['mimeType'];
         final thumbnailUrl = data['thumbnailUrl'];
+        final width = data['width'];
+        final height = data['height'];
         if (!_isWebUrl(url) ||
             name is! String ||
             name.isEmpty ||
@@ -90,11 +92,13 @@ final class RichContentMessage {
             size < 0 ||
             mimeType is! String ||
             mimeType.isEmpty ||
-            (thumbnailUrl != null && !_isWebUrl(thumbnailUrl))) {
+            (thumbnailUrl != null && !_isWebUrl(thumbnailUrl)) ||
+            (width != null && (width is! int || width <= 0)) ||
+            (height != null && (height is! int || height <= 0))) {
           return null;
         }
         return RichFileBlock(url, name, size, mimeType,
-            thumbnailUrl: thumbnailUrl);
+            thumbnailUrl: thumbnailUrl, width: width, height: height);
       default:
         return null;
     }
@@ -107,6 +111,8 @@ final class RichContentMessage {
       RichImageBlock block => {
           'type': 'image',
           'url': block.url,
+          'width': _requirePositiveDimension(block.width),
+          'height': _requirePositiveDimension(block.height),
         },
       RichFileBlock block => {
           'type': 'file',
@@ -115,8 +121,20 @@ final class RichContentMessage {
           'size': block.size,
           'mimeType': block.mimeType,
           if (block.thumbnailUrl != null) 'thumbnailUrl': block.thumbnailUrl!,
+          if (block.width != null || block.mimeType.startsWith('video/'))
+            'width': _requirePositiveDimension(block.width),
+          if (block.height != null || block.mimeType.startsWith('video/'))
+            'height': _requirePositiveDimension(block.height),
         },
     };
+  }
+
+  /// 发送边界拒绝缺省或无效尺寸，避免接收端只能等待解码后确定媒体比例。
+  static int _requirePositiveDimension(int? value) {
+    if (value == null || value <= 0) {
+      throw ArgumentError.value(value, 'dimension', '媒体宽高必须是正整数');
+    }
+    return value;
   }
 
   /// 只接受可供网络图片和文件组件访问的 HTTP(S) 地址。
@@ -148,10 +166,10 @@ final class RichImageBlock extends RichContentBlock {
   /// 已上传图片的可访问地址。
   final String url;
 
-  /// 旧消息可选的原图宽度，单位为像素；新消息不发送，缺省时使用图片实际比例。
+  /// 与 height 一起确定气泡中图片的展示比例；大于 0，单位为像素，历史消息可缺省。
   final int? width;
 
-  /// 旧消息可选的原图高度，单位为像素；新消息不发送，缺省时使用图片实际比例。
+  /// 与 width 一起确定气泡中图片的展示比例；大于 0，单位为像素，历史消息可缺省。
   final int? height;
 
   const RichImageBlock(this.url, [this.width, this.height]);
@@ -174,6 +192,14 @@ final class RichFileBlock extends RichContentBlock {
   /// 视频可选的远端首帧封面；旧消息缺省时保留视频占位，不影响正文解析。
   final String? thumbnailUrl;
 
+  /// 视频画面宽度，与 height 一起描述视频的宽高比；大于 0，单位为像素。
+  /// 新视频必填，历史消息及普通文件可缺省。
+  final int? width;
+
+  /// 视频画面高度，与 width 一起描述视频的宽高比；大于 0，单位为像素。
+  /// 新视频必填，历史消息及普通文件可缺省。
+  final int? height;
+
   const RichFileBlock(this.url, this.name, this.size, this.mimeType,
-      {this.thumbnailUrl});
+      {this.thumbnailUrl, this.width, this.height});
 }

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:app_ui/app_ui.dart' show AppIcons;
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -8,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tencent_chat_uikit/src/conversation_list/rich_content_preview.dart';
 import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_message.dart';
+import 'package:tencent_chat_uikit/src/message_list/widgets/chat_media_placeholder.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
 
 const _url = 'https://example.com/rich-content.png';
@@ -38,14 +40,19 @@ void main() {
     const cover = 'https://example.com/first-frame.jpg';
     final image =
         await tester.runAsync(() => createTestImage(width: 160, height: 90));
+    final scale = tester.view.devicePixelRatio * 1.5;
+    final provider = ResizeImage(const CachedNetworkImageProvider(cover),
+        width: (256 * scale).ceil(),
+        height: (144 * scale).ceil(),
+        policy: ResizeImagePolicy.fit);
     cache.putIfAbsent(
-        const CachedNetworkImageProvider(cover),
+        await provider.obtainKey(ImageConfiguration.empty),
         () => OneFrameImageStreamCompleter(
             Future.value(ImageInfo(image: image!))));
     const content = RichContentMessage([
       RichFileBlock(
           'https://example.com/video.mp4', 'video.mp4', 123, 'video/mp4',
-          thumbnailUrl: cover),
+          thumbnailUrl: cover, width: 160, height: 90),
     ]);
     final message = MessageInfo(
         msgID: 'video_message',
@@ -62,7 +69,7 @@ void main() {
     await tester.pumpAndSettle();
     final frame = find.byType(Image);
     expect(frame, findsOneWidget);
-    expect(tester.widget<Image>(frame).image,
+    expect((tester.widget<Image>(frame).image as ResizeImage).imageProvider,
         const CachedNetworkImageProvider(cover));
     expect(tester.getCenter(find.byIcon(AppIcons.videoPlay)),
         tester.getCenter(frame));
@@ -77,7 +84,8 @@ void main() {
     const content = RichContentMessage([
       RichTextBlock('视频说明'),
       RichFileBlock(
-          'https://example.com/video.mp4', '相册视频.mp4', 123, 'video/mp4'),
+          'https://example.com/video.mp4', '相册视频.mp4', 123, 'video/mp4',
+          width: 160, height: 90),
     ]);
     final parsed = RichContentMessage.tryParse(content.toCustomData())!;
     final restored = RichContentDraft.fromMessage(parsed);
@@ -102,7 +110,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  test('无尺寸图片完整解析且可回填、持久化及再次发送，发送协议仅包含地址', () {
+  test('历史无尺寸图片仍可解析及持久化，新图片发送协议必传宽高', () {
     final content = RichContentMessage.tryParse(_customData())!;
     expect(content.blocks, hasLength(6));
     final image = content.blocks[2] as RichImageBlock;
@@ -112,16 +120,17 @@ void main() {
         ['空行验证文字A', '\n', '\n', '\n', '空行验证文字B']);
 
     final draft = RichContentDraft.fromMessage(content);
-    expect(draft.canSend, isTrue);
+    expect(draft.canSend, isFalse);
+    expect(draft.canSubmit, isFalse);
     final restored =
         RichContentDraft.tryParsePersisted(draft.toPersistedString())!;
-    expect(restored.canSend, isTrue);
-    expect(restored.toMessage()!.toCustomData(), _customData());
+    expect(restored.canSend, isFalse);
+    expect(restored.toMessage(), isNull);
     final encoded = jsonDecode(const RichContentMessage([
       RichImageBlock(_url, 640, 360),
     ]).toCustomData());
     expect(encoded['payload']['blocks'], [
-      {'type': 'image', 'url': _url},
+      {'type': 'image', 'url': _url, 'width': 640, 'height': 360},
     ]);
   });
 
@@ -149,6 +158,60 @@ void main() {
         isNull);
   });
 
+  testWidgets('竖屏图片和视频按协议尺寸预先布局，首帧加载前后盒子大小一致', (tester) async {
+    final cache = PaintingBinding.instance.imageCache;
+    addTearDown(() {
+      cache.clear();
+      cache.clearLiveImages();
+    });
+    for (final video in [false, true]) {
+      final url = 'https://example.com/portrait-$video.png';
+      final frame = Completer<ImageInfo>();
+      final scale = tester.view.devicePixelRatio * 1.5;
+      final provider = ResizeImage(CachedNetworkImageProvider(url),
+          width: (135 * scale).ceil(),
+          height: (240 * scale).ceil(),
+          policy: ResizeImagePolicy.fit);
+      cache.putIfAbsent(await provider.obtainKey(ImageConfiguration.empty),
+          () => OneFrameImageStreamCompleter(frame.future));
+      final content = RichContentMessage([
+        if (video)
+          RichFileBlock('https://example.com/portrait.mp4', 'portrait.mp4', 1,
+              'video/mp4',
+              thumbnailUrl: url, width: 1080, height: 1920)
+        else
+          RichImageBlock(url, 1080, 1920),
+      ]);
+      final identifier = video
+          ? 'tim.rich.video.portrait.${'https://example.com/portrait.mp4'.hashCode}'
+          : 'tim.rich.image.portrait.${url.hashCode}';
+      await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+              body: CustomMessageWidget(
+        message: MessageInfo(
+            msgID: 'portrait',
+            messageType: MessageType.custom,
+            messagePayload:
+                CustomMessagePayload(customData: content.toCustomData())),
+        isSelf: false,
+        maxWidth: 400,
+      ))));
+      await tester.pump();
+      final media = find.bySemanticsIdentifier(identifier);
+      final before = tester.getRect(media);
+      expect(before.size, const Size(135, 240));
+      expect(tester.getRect(find.byType(ChatMediaPlaceholder)), before);
+      final image = (await tester
+          .runAsync(() => createTestImage(width: 108, height: 192)))!;
+      frame.complete(ImageInfo(image: image));
+      await tester.pumpAndSettle();
+      expect(find.byType(ChatMediaPlaceholder), findsNothing);
+      expect(tester.getRect(media), before);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+
   testWidgets('无尺寸图文显示正文及图片，列表展示图片占位，长图保持比例且限制高度', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final cache = PaintingBinding.instance.imageCache;
@@ -166,9 +229,14 @@ void main() {
       cache.clearLiveImages();
       final image = await tester.runAsync(() => createTestImage(
           width: size.width.toInt(), height: size.height.toInt()));
+      final scale = tester.view.devicePixelRatio * 1.5;
+      final provider = ResizeImage(const CachedNetworkImageProvider(_url),
+          width: (256 * scale).ceil(),
+          height: (240 * scale).ceil(),
+          policy: ResizeImagePolicy.fit);
       // 使用已解码的内存图片验证真实布局，测试不请求网络资源。
       cache.putIfAbsent(
-        const CachedNetworkImageProvider(_url),
+        await provider.obtainKey(ImageConfiguration.empty),
         () => OneFrameImageStreamCompleter(
             Future.value(ImageInfo(image: image!))),
       );
@@ -184,8 +252,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('空行验证文字A', findRichText: true), findsOneWidget);
       expect(find.text('空行验证文字B', findRichText: true), findsOneWidget);
-      final cached =
-          tester.widget<CachedNetworkImage>(find.byType(CachedNetworkImage));
+      final cached = tester.widget<Image>(find.byType(Image));
       expect(cached.height, isNull);
       final raw = tester.widget<RawImage>(find.byType(RawImage));
       expect(raw.image!.width, size.width.toInt());
@@ -205,10 +272,9 @@ void main() {
       expect(tester.takeException(), isNull);
     }
     // 失败占位不依赖图片尺寸，也不能使气泡布局抛出异常。
-    final cached =
-        tester.widget<CachedNetworkImage>(find.byType(CachedNetworkImage));
+    final cached = tester.widget<Image>(find.byType(Image));
     final context = tester.element(find.byType(CustomMessageWidget));
-    final error = cached.errorWidget!(context, _url, StateError('测试图片不可用'));
+    final error = cached.errorBuilder!(context, StateError('测试图片不可用'), null);
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: error)));
     expect(find.byIcon(Icons.broken_image_outlined), findsOneWidget);
     expect(tester.takeException(), isNull);

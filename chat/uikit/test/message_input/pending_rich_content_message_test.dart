@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:app_core/app_core.dart';
 import 'package:app_ui/app_ui.dart';
@@ -22,6 +23,34 @@ import 'package:tuikit_atomic_x/base_component/base_component.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+  test('缺少尺寸的媒体在上传前失败，不调用上传器或 SDK', () async {
+    final input = _Input();
+    var uploads = 0;
+    final task = PendingRichContentMessage(
+      draft: const RichContentDraft(blocks: [
+        RichContentDraftAttachmentBlock(1,
+            attachment: RichContentLocalAttachment(
+              type: RichContentAttachmentType.file,
+              localPath: '/tmp/video.mp4',
+              fileName: 'video.mp4',
+              fileSize: 1,
+              mimeType: 'video/mp4',
+            )),
+      ]),
+      conversationID: 'c2c_peer',
+      option: SendMessageOption(),
+      guard: ActionGuard(),
+      store: input,
+      uploader: (_) async {
+        uploads++;
+        return 'https://example.com/video.mp4';
+      },
+    );
+    expect((await task.send()).isSuccess, isFalse);
+    expect(task.message.status, MessageStatus.sendFail);
+    expect(uploads, 0);
+    expect(input.payloads, isEmpty);
+  });
   testWidgets('上传前即有本地媒体气泡，上传和 SDK 发送全程复用转圈，交接后只有一行', (tester) async {
     late Directory directory;
     await tester.runAsync(() async {
@@ -88,6 +117,12 @@ void main() {
     expect(input.payloads.single.customData, isNot(contains(path)));
     expect(RichContentMessage.tryParse(input.payloads.single.customData),
         isNotNull);
+    final image = RichContentMessage.tryParse(input.payloads.single.customData)!
+        .blocks
+        .whereType<RichImageBlock>()
+        .single;
+    expect(image.width, 120);
+    expect(image.height, 60);
     await tester
         .pumpWidget(MaterialApp(home: Scaffold(body: _Bubble(input.actual!))));
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
@@ -100,6 +135,96 @@ void main() {
     expect(rows.messages, hasLength(1));
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(input.actual!.status, MessageStatus.sendSuccess);
+  });
+
+  testWidgets('富文本气泡的本地图片及视频封面实际按展示物理尺寸的 1.5 倍解码', (tester) async {
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final cache = PaintingBinding.instance.imageCache;
+    addTearDown(() {
+      cache.clear();
+      cache.clearLiveImages();
+    });
+    late Directory directory;
+    late String path;
+    await tester.runAsync(() async {
+      directory = await Directory.systemTemp.createTemp('rich_bubble_decode_');
+      path = '${directory.path}/large.png';
+      final recorder = ui.PictureRecorder();
+      Canvas(recorder).drawRect(const Rect.fromLTWH(0, 0, 1200, 1600), Paint());
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(1200, 1600);
+      final bytes = (await image.toByteData(format: ui.ImageByteFormat.png))!;
+      await File(path).writeAsBytes(
+          bytes.buffer.asUint8List(bytes.offsetInBytes, bytes.lengthInBytes));
+      image.dispose();
+      picture.dispose();
+    });
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final task = PendingRichContentMessage(
+      draft: RichContentDraft(blocks: [
+        for (final video in [false, true])
+          RichContentDraftAttachmentBlock(video ? 2 : 1,
+              attachment: RichContentLocalAttachment(
+                type: video
+                    ? RichContentAttachmentType.file
+                    : RichContentAttachmentType.image,
+                localPath: video ? '/tmp/video.mp4' : path,
+                fileName: video ? 'video.mp4' : 'large.png',
+                fileSize: 1,
+                mimeType: video ? 'video/mp4' : 'image/png',
+                thumbnailPath: video ? path : null,
+                width: 1200,
+                height: 1600,
+              )),
+      ]),
+      conversationID: 'c2c_peer',
+      option: SendMessageOption(),
+      guard: ActionGuard(),
+      store: _Input(),
+    );
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: SingleChildScrollView(
+      child: CustomMessageWidget(
+          message: task.message, isSelf: true, maxWidth: 400),
+    ))));
+    final providers = tester
+        .widgetList<Image>(find.byType(Image))
+        .map((image) => image.image as ResizeImage)
+        .toList();
+    expect(providers, hasLength(2));
+    for (final provider in providers) {
+      expect(provider.width, 540);
+      expect(provider.height, 720);
+      expect(provider.policy, ResizeImagePolicy.fit);
+      expect(provider.allowUpscaling, isFalse);
+    }
+    final decodedSize = await tester.runAsync(() async {
+      // 使用真实编码文件验证像素缓冲区已缩小，而不只检查组件参数。
+      await providers.first.evict();
+      final stream = providers.first.resolve(ImageConfiguration.empty);
+      final result = Completer<Size>();
+      final listener = ImageStreamListener((info, _) {
+        if (!result.isCompleted) {
+          result.complete(
+              Size(info.image.width.toDouble(), info.image.height.toDouble()));
+        }
+        info.dispose();
+      },
+          onError: (Object error, StackTrace? stack) =>
+              result.completeError(error, stack));
+      stream.addListener(listener);
+      try {
+        return await result.future;
+      } finally {
+        stream.removeListener(listener);
+      }
+    });
+    expect(decodedSize, const Size(540, 720));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   test('视频上传失败保留原气泡，重复重试合并且复用已上传封面', () async {
@@ -122,6 +247,8 @@ void main() {
               fileSize: 1,
               mimeType: 'video/mp4',
               thumbnailPath: cover.path,
+              width: 1080,
+              height: 1920,
             ))
       ]),
       conversationID: 'c2c_peer',
@@ -160,6 +287,8 @@ void main() {
         .whereType<RichFileBlock>()
         .single;
     expect(video.thumbnailUrl, 'https://example.com/cover.png');
+    expect(video.width, 1080);
+    expect(video.height, 1920);
     input.complete();
     await Future.wait([retry, duplicate]);
     expect(rows.messages.values.single.status, MessageStatus.sendSuccess);
@@ -178,7 +307,9 @@ void main() {
                 localPath: '/tmp/image.png',
                 fileName: 'image.png',
                 fileSize: 1,
-                mimeType: 'image/png'))
+                mimeType: 'image/png',
+                width: 100,
+                height: 60))
       ]),
       conversationID: 'c2c_peer',
       option: SendMessageOption(),

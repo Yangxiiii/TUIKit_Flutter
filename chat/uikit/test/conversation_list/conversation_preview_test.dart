@@ -62,7 +62,8 @@ void main() {
       RichTextBlock('**后续**'),
       RichFileBlock(
           'https://example.com/a.pdf', '报告.pdf', 1024, 'application/pdf'),
-      RichFileBlock('https://example.com/a.mp4', '视频.mp4', 1024, 'video/mp4'),
+      RichFileBlock('https://example.com/a.mp4', '视频.mp4', 1024, 'video/mp4',
+          width: 160, height: 90),
     ]);
     var openCount = 0;
     await tester.pumpWidget(MaterialApp(

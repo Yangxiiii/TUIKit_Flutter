@@ -1017,6 +1017,8 @@ class MessageInputState extends State<MessageInput>
               canUploadAttachments:
                   widget.config.richContentAttachmentUploader != null,
               videoPlayIcon: widget.config.videoPlayIcon,
+              imageLoadingPlaceholder: widget.config.imageLoadingPlaceholder,
+              videoLoadingPlaceholder: widget.config.videoLoadingPlaceholder,
               onSend: _sendRichContentDraft,
               onClose: _closeRichContentEditor,
               onToolbarChanged: _refreshSharedToolbar,
@@ -2586,6 +2588,8 @@ class MessageInputState extends State<MessageInput>
       inputFormatter: _inlineFormatInputFormatter,
       inlineAttachments: _inlineRichContentAttachments,
       videoPlayIcon: widget.config.videoPlayIcon,
+      imageLoadingPlaceholder: widget.config.imageLoadingPlaceholder,
+      videoLoadingPlaceholder: widget.config.videoLoadingPlaceholder,
       colorsTheme: colorsTheme,
       hintText: '发送给 ${_conversationInfo?.title ?? widget.conversationID}',
       onExpand: _openRichContentEditor,
@@ -2847,6 +2851,12 @@ class _MentionTextField extends StatefulWidget {
   /// 与展开编辑器共用的宿主播放图标。
   final ImageProvider? videoPlayIcon;
 
+  /// 普通输入区与展开编辑器共用的图片加载占位图。
+  final ImageProvider? imageLoadingPlaceholder;
+
+  /// 普通输入区与展开编辑器共用的视频加载占位图。
+  final ImageProvider? videoLoadingPlaceholder;
+
   const _MentionTextField({
     required this.controller,
     required this.focusNode,
@@ -2857,6 +2867,8 @@ class _MentionTextField extends StatefulWidget {
     this.inputFormatter,
     this.inlineAttachments = const {},
     this.videoPlayIcon,
+    this.imageLoadingPlaceholder,
+    this.videoLoadingPlaceholder,
   });
 
   @override
@@ -3048,6 +3060,10 @@ class _MentionTextFieldState extends State<_MentionTextField> {
                             specialTextSpanBuilder:
                                 RichContentAttachmentSpanBuilder(
                               videoPlayIcon: widget.videoPlayIcon,
+                              imageLoadingPlaceholder:
+                                  widget.imageLoadingPlaceholder,
+                              videoLoadingPlaceholder:
+                                  widget.videoLoadingPlaceholder,
                               attachments: widget.inlineAttachments,
                               maxImageWidth: maxImageWidth,
                               devicePixelRatio:

@@ -16,6 +16,7 @@ import '../../utils/big_file_message.dart';
 import 'file_message_widget.dart';
 import 'rich_content_video_preview.dart';
 import '../../utils/rich_content_media_viewer.dart';
+import '../chat_media_placeholder.dart';
 
 /// 按业务标识展示自定义消息，并为未知协议保留通用气泡兜底。
 class CustomMessageWidget extends StatelessWidget {
@@ -50,10 +51,18 @@ class CustomMessageWidget extends StatelessWidget {
       if (event.isControl) return const SizedBox.shrink();
       final colors = app.AppColorBuildContext(context).appColors;
       // 系统提示只展示姓名和动作，不增加头像、普通气泡或编辑入口。
-      return Center(child: Text.rich(TextSpan(children: [
-        TextSpan(text: event.operatorName, style: TextStyle(color: colors.primary)),
-        TextSpan(text: ' ${event.actionText}', style: TextStyle(color: colors.textSecondary)),
-      ]), textAlign: TextAlign.center, style: const TextStyle(fontSize: 12, height: 19 / 12)));
+      return Center(
+          child: Text.rich(
+              TextSpan(children: [
+                TextSpan(
+                    text: event.operatorName,
+                    style: TextStyle(color: colors.primary)),
+                TextSpan(
+                    text: ' ${event.actionText}',
+                    style: TextStyle(color: colors.textSecondary)),
+              ]),
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12, height: 19 / 12)));
     }
     final colors = SemanticColorScheme.of(context);
     final atomicLocale = AppLocalization.of(context);
@@ -157,12 +166,20 @@ class CustomMessageWidget extends StatelessWidget {
                             ),
                     localPreview: localPreview,
                   ),
-                RichFileBlock(:final url, :final mimeType, :final thumbnailUrl)
+                RichFileBlock(
+                  :final url,
+                  :final mimeType,
+                  :final thumbnailUrl,
+                  :final width,
+                  :final height,
+                )
                     when mimeType.startsWith('video/') =>
                   _buildVideo(
                     context,
                     url,
                     thumbnailUrl,
+                    width,
+                    height,
                     localPreview
                         ? null
                         : () => showRichContentMediaViewer(
@@ -194,11 +211,12 @@ class CustomMessageWidget extends StatelessWidget {
     VoidCallback? onPreview, {
     bool localPreview = false,
   }) {
-    final displayWidth = math.max(1.0, maxWidth * 0.7 - 24);
-    // 无尺寸消息交由图片解码确定比例，仍限制最大高度，避免长图撑满聊天窗口。
-    final displayHeight = width != null && height != null
-        ? math.max(1.0, math.min(240.0, displayWidth * height / width))
+    final size = width != null && height != null
+        ? _mediaDisplaySize(width, height)
         : null;
+    final displayWidth = size?.width ?? math.max(1.0, maxWidth * 0.7 - 24);
+    // 无尺寸消息交由图片解码确定比例，仍限制最大高度，避免长图撑满聊天窗口。
+    final displayHeight = size?.height;
     return Semantics(
       identifier: 'tim.rich.image.${message.msgID}.${url.hashCode}',
       child: GestureDetector(
@@ -208,49 +226,68 @@ class CustomMessageWidget extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: displayWidth, maxHeight: 240),
-            child: localPreview && Uri.tryParse(url)?.scheme == 'file'
-                ? Image(
-                    image: ResizeImage(FileImage(File.fromUri(Uri.parse(url))),
-                        width: (displayWidth *
-                                MediaQuery.devicePixelRatioOf(context) *
-                                1.5)
-                            .ceil(),
-                        height:
-                            (240 * MediaQuery.devicePixelRatioOf(context) * 1.5)
-                                .ceil(),
-                        policy: ResizeImagePolicy.fit),
-                    width: displayWidth,
-                    height: displayHeight,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => Icon(
-                        Icons.broken_image_outlined,
-                        color: colors.textColorTertiary),
-                  )
-                : CachedNetworkImage(
-                    imageUrl: url,
-                    width: displayWidth,
-                    height: displayHeight,
-                    fit: displayHeight == null ? BoxFit.contain : BoxFit.cover,
-                    errorWidget: (_, __, ___) => SizedBox(
-                      width: displayWidth,
-                      height: displayHeight ?? 120,
-                      child: Icon(
-                        Icons.broken_image_outlined,
-                        color: colors.textColorTertiary,
-                      ),
-                    ),
-                  ),
+            child: Image(
+              image: _resizeMediaImage(
+                context,
+                localPreview && Uri.tryParse(url)?.scheme == 'file'
+                    ? FileImage(File.fromUri(Uri.parse(url)))
+                    : CachedNetworkImageProvider(url),
+                Size(displayWidth, displayHeight ?? 240),
+              ),
+              width: displayWidth,
+              height: displayHeight,
+              fit: BoxFit.contain,
+              frameBuilder: (_, child, frame, synchronous) =>
+                  synchronous || frame != null
+                      ? child
+                      : _buildImagePlaceholder(displayWidth, displayHeight),
+              errorBuilder: (_, __, ___) => SizedBox(
+                width: displayWidth,
+                height: displayHeight ?? 120,
+                child: Icon(Icons.broken_image_outlined,
+                    color: colors.textColorTertiary),
+              ),
+            ),
           ),
         ),
       ),
     );
   }
 
+  /// 消息携带尺寸时，加载占位和资源共用同一个盒子，避免加载完成后气泡跳动。
+  Widget _buildImagePlaceholder(double width, double? height) => SizedBox(
+        width: width,
+        height: height ?? 120,
+        child: ChatMediaPlaceholder(image: config.imageLoadingPlaceholder),
+      );
+
+  /// 宽高只用于比例，在气泡的宽高上限内等比缩放，避免长图或竖屏视频被裁剪。
+  Size _mediaDisplaySize(int width, int height) => applyBoxFit(
+        BoxFit.contain,
+        Size(width.toDouble(), height.toDouble()),
+        Size(math.max(1.0, maxWidth * 0.7 - 24), 240),
+      ).destination;
+
+  /// 与编辑器一致，按展示物理像素的 1.5 倍解码；保持比例且不放大小图。
+  ResizeImage _resizeMediaImage(
+      BuildContext context, ImageProvider original, Size size) {
+    final scale = MediaQuery.devicePixelRatioOf(context) * 1.5;
+    return ResizeImage(
+      original,
+      width: math.max(1, (size.width * scale).ceil()),
+      height: math.max(1, (size.height * scale).ceil()),
+      policy: ResizeImagePolicy.fit,
+    );
+  }
+
   /// 视频气泡点击进入共用媒体预览器，编辑器中的封面仍不提供播放交互。
   Widget _buildVideo(BuildContext context, String url, String? thumbnailUrl,
-      VoidCallback? onPreview,
+      int? width, int? height, VoidCallback? onPreview,
       {bool localPreview = false}) {
-    final width = math.max(1.0, maxWidth * 0.7 - 24);
+    // 历史视频没有尺寸时沿用横屏占位，新消息在解码封面前即可确定真实比例。
+    final size = width != null && height != null
+        ? _mediaDisplaySize(width, height)
+        : _mediaDisplaySize(16, 9);
     // 消息与资源共同区分点击入口，资源地址只保留散列，避免把签名URL写入语义树。
     return Semantics(
       identifier: 'tim.rich.video.${message.msgID}.${url.hashCode}',
@@ -260,21 +297,17 @@ class CustomMessageWidget extends StatelessWidget {
         onTap: onPreview,
         child: RichContentVideoPreview(
           playIcon: config.videoPlayIcon,
+          loadingPlaceholder: config.videoLoadingPlaceholder,
           image: thumbnailUrl == null
               ? null
-              : localPreview && Uri.tryParse(thumbnailUrl)?.scheme == 'file'
-                  ? ResizeImage(
-                      FileImage(File.fromUri(Uri.parse(thumbnailUrl))),
-                      width:
-                          (width * MediaQuery.devicePixelRatioOf(context) * 1.5)
-                              .ceil(),
-                      height: (math.min(240, width * 9 / 16) *
-                              MediaQuery.devicePixelRatioOf(context) *
-                              1.5)
-                          .ceil(),
-                      policy: ResizeImagePolicy.fit)
-                  : CachedNetworkImageProvider(thumbnailUrl),
-          size: Size(width, math.min(240, width * 9 / 16)),
+              : _resizeMediaImage(
+                  context,
+                  localPreview && Uri.tryParse(thumbnailUrl)?.scheme == 'file'
+                      ? FileImage(File.fromUri(Uri.parse(thumbnailUrl)))
+                      : CachedNetworkImageProvider(thumbnailUrl),
+                  size,
+                ),
+          size: size,
         ),
       ),
     );

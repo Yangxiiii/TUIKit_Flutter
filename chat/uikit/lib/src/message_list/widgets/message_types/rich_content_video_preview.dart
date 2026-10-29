@@ -2,11 +2,15 @@ import 'package:app_ui/app_ui.dart' show AppIcons, AppColorBuildContext;
 import 'package:flutter/material.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart'
     show SemanticColorScheme;
+import '../chat_media_placeholder.dart';
 
 /// 共用视频封面；编辑态展示时长角标，消息气泡保留中央播放入口。
 final class RichContentVideoPreview extends StatelessWidget {
   /// 首帧封面来源；兼容无封面的旧消息及加载失败时的占位。
   final ImageProvider? image;
+
+  /// 视频封面首帧就绪之前使用的宿主占位图。
+  final ImageProvider? loadingPlaceholder;
 
   /// 已按当前正文宽度和封面比例限制的展示尺寸。
   final Size size;
@@ -23,6 +27,7 @@ final class RichContentVideoPreview extends StatelessWidget {
   const RichContentVideoPreview(
       {super.key,
       required this.image,
+      this.loadingPlaceholder,
       required this.size,
       this.playIcon,
       this.isEditing = false,
@@ -39,10 +44,16 @@ final class RichContentVideoPreview extends StatelessWidget {
           child: Stack(fit: StackFit.expand, children: [
             // 编辑尺寸已按原比例计算，完整显示封面；消息气泡沿用原展示方式。
             ColoredBox(color: colors.bgColorInput),
+            if (image == null && loadingPlaceholder != null)
+              ChatMediaPlaceholder(image: loadingPlaceholder),
             if (image != null)
               Image(
                   image: image!,
                   fit: isEditing ? BoxFit.contain : BoxFit.cover,
+                  frameBuilder: (_, child, frame, synchronous) =>
+                      synchronous || frame != null
+                          ? child
+                          : ChatMediaPlaceholder(image: loadingPlaceholder),
                   errorBuilder: (_, __, ___) => Icon(
                       Icons.broken_image_outlined,
                       color: colors.textColorTertiary)),

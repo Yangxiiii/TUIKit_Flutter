@@ -39,11 +39,16 @@ void main() {
   test('视频封面协议往返和草稿回填，旧消息可缺省且拒绝非法封面地址', () {
     const video = RichFileBlock(
         'https://example.com/video.mp4', '视频.mp4', 12, 'video/mp4',
-        thumbnailUrl: 'https://example.com/cover.jpg');
+        thumbnailUrl: 'https://example.com/cover.jpg',
+        width: 1080,
+        height: 1920);
     const message = RichContentMessage([video]);
     final parsed = RichContentMessage.tryParse(message.toCustomData())!;
     expect((parsed.blocks.single as RichFileBlock).thumbnailUrl,
         video.thumbnailUrl);
+    final parsedVideo = parsed.blocks.single as RichFileBlock;
+    expect(parsedVideo.width, 1080);
+    expect(parsedVideo.height, 1920);
     final draft = RichContentDraft.fromMessage(parsed);
     final restored =
         RichContentDraft.tryParsePersisted(draft.toPersistedString())!;
@@ -64,6 +69,19 @@ void main() {
           }
         });
     expect(RichContentMessage.tryParse(encode(base)), isNotNull);
+    final legacyDraft = RichContentDraft.fromMessage(
+        RichContentMessage.tryParse(encode(base))!);
+    expect(legacyDraft.canSubmit, isFalse);
+    expect(legacyDraft.canSend, isFalse);
+    for (final dimensions in <Map<String, Object?>>[
+      {'width': 0, 'height': 1920},
+      {'width': 1080, 'height': -1},
+      {'width': '1080', 'height': 1920},
+      {'width': 1080, 'height': 1920.5},
+    ]) {
+      expect(RichContentMessage.tryParse(encode({...base, ...dimensions})),
+          isNull);
+    }
     for (final value in [
       'file:///tmp/a.jpg',
       'javascript:alert(1)',
@@ -75,6 +93,60 @@ void main() {
           RichContentMessage.tryParse(encode({...base, 'thumbnailUrl': value})),
           isNull);
     }
+  });
+
+  test('图片与视频发送拒绝缺省、零及负数宽高，普通文件仍无需尺寸', () {
+    for (final (width, height) in <(int?, int?)>[
+      (null, null),
+      (120, null),
+      (null, 60),
+      (0, 60),
+      (120, -1),
+    ]) {
+      for (final video in [false, true]) {
+        final block = video
+            ? RichFileBlock(
+                'https://example.com/a.mp4', 'a.mp4', 1, 'video/mp4',
+                width: width, height: height)
+            : RichImageBlock('https://example.com/a.png', width, height);
+        expect(() => RichContentMessage([block]).toCustomData(),
+            throwsArgumentError);
+        final attachment = RichContentLocalAttachment(
+          type: video
+              ? RichContentAttachmentType.file
+              : RichContentAttachmentType.image,
+          localPath: '/tmp/media',
+          fileName: 'media',
+          fileSize: 1,
+          mimeType: video ? 'video/mp4' : 'image/png',
+          width: width,
+          height: height,
+        );
+        for (final uploaded in [false, true]) {
+          final draft = RichContentDraft(blocks: [
+            RichContentDraftAttachmentBlock(1,
+                attachment: attachment,
+                remoteUrl: uploaded ? 'https://example.com/media' : null,
+                status: uploaded
+                    ? RichContentAttachmentStatus.uploaded
+                    : RichContentAttachmentStatus.pending),
+          ]);
+          expect(draft.canSubmit, isFalse);
+          expect(draft.canSend, isFalse);
+          expect(draft.toMessage(), isNull);
+        }
+      }
+    }
+    const file = RichFileBlock(
+        'https://example.com/a.pdf', 'a.pdf', 1, 'application/pdf');
+    final data = const RichContentMessage([file]).toCustomData();
+    final block = (jsonDecode(data)['payload']['blocks'] as List).single as Map;
+    expect(block.containsKey('width'), isFalse);
+    expect(block.containsKey('height'), isFalse);
+    expect(
+        RichContentDraft.fromMessage(RichContentMessage.tryParse(data)!)
+            .canSend,
+        isTrue);
   });
 
   test('光标在格式正文前不选中，仅中间及末尾选中，内层起点保留外层样式', () {

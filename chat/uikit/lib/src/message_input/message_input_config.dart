@@ -42,6 +42,10 @@ final class RichContentLocalAttachment {
   /// 图片或视频封面高度，单位为像素；普通文件附件为 null。
   final int? height;
 
+  /// 图片及视频须在本地处理完成后取得正整数宽高，普通文件不要求尺寸。
+  bool get hasRequiredDimensions =>
+      !isInlineMedia || ((width ?? 0) > 0 && (height ?? 0) > 0);
+
   const RichContentLocalAttachment({
     required this.type,
     required this.localPath,
@@ -63,6 +67,12 @@ typedef RichContentAttachmentUploader = Future<String> Function(
 abstract class MessageInputConfigProtocol {
   /// 宿主提供的视频播放图标；缺省时使用 UIKit 字体图标。
   ImageProvider? get videoPlayIcon;
+
+  /// 图片导出或预览图加载期间使用的宿主占位图。
+  ImageProvider? get imageLoadingPlaceholder;
+
+  /// 视频导出及封面加载期间使用的宿主占位图。
+  ImageProvider? get videoLoadingPlaceholder;
 
   /// 宿主统一媒体大小分流；为空时保留UIKit原生发送。
   ChatMediaSender? get mediaSender;
@@ -97,6 +107,10 @@ abstract class MessageInputConfigProtocol {
 class ChatMessageInputConfig implements MessageInputConfigProtocol {
   @override
   final ImageProvider? videoPlayIcon;
+  @override
+  final ImageProvider? imageLoadingPlaceholder;
+  @override
+  final ImageProvider? videoLoadingPlaceholder;
   @override
   final ChatMediaSender? mediaSender;
   @override
@@ -164,6 +178,8 @@ class ChatMessageInputConfig implements MessageInputConfigProtocol {
 
   const ChatMessageInputConfig({
     this.videoPlayIcon,
+    this.imageLoadingPlaceholder,
+    this.videoLoadingPlaceholder,
     this.mediaSender,
     this.fileSelector,
     this.actionGuard,
