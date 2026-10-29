@@ -143,8 +143,20 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   @override
   Widget build(BuildContext context) {
     bool isSelf = message.isSentBySelf;
-    String? avatarURL = message.rawMessage?.faceUrl;
-    String senderName = ChatUtil.getMessageSenderName(message);
+    // SDK 创建及发送回调中的 faceUrl 可能为空或滞后，不能覆盖已填充的发送者头像。
+    final senderAvatarURL = message.from.avatarURL;
+    String? avatarURL = senderAvatarURL?.isNotEmpty == true
+        ? senderAvatarURL
+        : message.rawMessage?.faceUrl;
+    // 默认文字头像也依赖名称，上传占位没有原始消息，须沿用同一份发送者资料。
+    String senderName = [
+      message.from.nameCard,
+      message.from.friendRemark,
+      message.from.nickname,
+      ChatUtil.getMessageSenderName(message),
+      message.from.userID,
+    ].whereType<String>().firstWhere((name) => name.isNotEmpty,
+        orElse: () => '');
     CallingMessageDataProvider provider =
         CallingMessageDataProvider(message, context);
 
