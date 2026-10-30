@@ -1419,16 +1419,16 @@ class _MessageListState extends State<MessageList>
                 child: Align(
                   alignment: Alignment.topCenter,
                   child: Container(
-                    padding: EdgeInsets.only(
-                      left: 16,
-                      right: 16,
-                      top: _callStatusWidget != null ? 70 : 16,
-                      bottom: 8,
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
                     // 缓存会话会在 initState 直接就绪；无缓存时等待首批消息和目标索引同时准备完成。
                     child: !_isInitialViewportReady
                         ? const SizedBox.shrink()
                         : ScrollablePositionedList.builder(
+                            // 上下留白随消息滚动，避免导航和输入区旁出现固定的空白边。
+                            padding: EdgeInsets.only(
+                              top: _callStatusWidget != null ? 70 : 16,
+                              bottom: 8,
+                            ),
                             reverse: true,
                             // 短会话由外层顶部对齐；内容超出视口时仍保留反向分页与最新端锚点。
                             shrinkWrap: true,

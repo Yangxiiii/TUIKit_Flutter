@@ -9,6 +9,7 @@ import '../message_list/widgets/message_overlay_avoider.dart';
 import '../message_list/widgets/message_tooltip.dart';
 import '../message_list/widgets/message_recall_scope.dart';
 import 'package:flutter/material.dart' hide IconButton;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
 import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
 import 'package:tuikit_atomic_x/base_component/utils/tui_event_bus.dart';
@@ -17,8 +18,8 @@ import 'package:tencent_chat_uikit/src/message_list/listen/listen_playback_bar.d
 
 export 'chat_setting_page.dart' show ChatSettingPage;
 
-/// 展示完整聊天详情，并统一使用宿主 app_ui 提供的页面语义色。
-class ChatPage extends StatefulWidget {
+/// 使用应用页面基类承载聊天详情，消息窗口和输入状态由本页持有。
+class ChatPage extends AppBaseStatefulPage {
   /// 当前单聊或群聊的标题、类型与会话标识。
   final ConversationInfo conversation;
 
@@ -67,13 +68,11 @@ class ChatPage extends StatefulWidget {
   });
 
   @override
-  State<ChatPage> createState() => _ChatPageState();
+  ConsumerState<ChatPage> createState() => _ChatPageState();
 }
 
 /// 协调会话页的消息展示和输入交互。
-class _ChatPageState extends State<ChatPage> {
-  late SemanticColorScheme colorsTheme;
-
+class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
   /// 临时面板绘制偏移，不改动SDK消息窗口或普通输入草稿。
   final MessageOverlayController _overlay = MessageOverlayController();
 
@@ -353,12 +352,6 @@ class _ChatPageState extends State<ChatPage> {
     super.initState();
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    colorsTheme = SemanticColorScheme.of(context);
-  }
-
   void _onDestroyCallback() {
     if (mounted) {
       context.popChatUIKitPage();
@@ -461,32 +454,50 @@ class _ChatPageState extends State<ChatPage> {
     UIKitUtil.reportChatInvokeCall();
   }
 
-  /// 复用聊天导航与设置入口，编辑期间返回由PopScope先退出编辑。
-  PreferredSizeWidget _buildAppBar() => AppBar(
-      toolbarHeight: 48,
-      backgroundColor: colorsTheme.bgColorOperate,
-      // 导航栏底部保留主题分隔线，描边不额外占用消息区域高度。
-      shape: Border(
-        bottom: BorderSide(color: colorsTheme.strokeColorPrimary),
-      ),
-      titleSpacing: 4.0,
-      centerTitle: true,
-      title: Text(
+  @override
+  double get navigationBarHeight => 48;
+
+  @override
+  bool get showAppBarBottomDivider => true;
+
+  @override
+  bool get safeAreaTop => false;
+
+  @override
+  bool get safeAreaBottom => false;
+
+  @override
+  bool get dismissKeyboardOnTap => false;
+
+  @override
+  bool get resizeToAvoidBottomInset => _editingMessage == null;
+
+  @override
+  Color backgroundColorOf(BuildContext context) => context.appColors.surface;
+
+  @override
+  Color navigationBarBackgroundColorOf(BuildContext context) =>
+      context.appColors.surface;
+
+  @override
+  Widget titleWidgetOf(BuildContext context, Locale locale) => Text(
         widget.conversation.title ??
             AppLocalization.text(context, LocaleKeys.chat_title, '聊天'),
         style: FontScheme.caption1Medium,
         overflow: TextOverflow.ellipsis,
         maxLines: 1,
-      ),
-      scrolledUnderElevation: 0.0,
-      leading: IconButton.buttonContent(
-        content: IconOnlyContent(
-            Icon(AppIcons.back, color: colorsTheme.textColorPrimary)),
-        type: ButtonType.noBorder,
-        size: ButtonSize.l,
-        onClick: () => Navigator.of(context).pop(),
-      ),
-      actions: widget.isShowAppBarActions
+      );
+
+  @override
+  Widget leadingOf(BuildContext context, Locale locale) => Semantics(
+        identifier: 'tim.chat.back',
+        // maybePop遵守消息编辑的PopScope，首次返回只退出编辑，不离开会话。
+        child: BackButton(onPressed: () => Navigator.of(context).maybePop()),
+      );
+
+  @override
+  List<Widget>? actionsOf(BuildContext context, Locale locale) =>
+      widget.isShowAppBarActions
           ? [
               Semantics(
                 identifier: 'tim.chat.settings',
@@ -494,7 +505,7 @@ class _ChatPageState extends State<ChatPage> {
                 button: true,
                 child: IconButton.buttonContent(
                   content: IconOnlyContent(
-                    Icon(AppIcons.more, color: colorsTheme.textColorPrimary),
+                    Icon(AppIcons.more, color: context.appColors.textPrimary),
                   ),
                   type: ButtonType.noBorder,
                   size: ButtonSize.l,
@@ -502,7 +513,7 @@ class _ChatPageState extends State<ChatPage> {
                 ),
               ),
             ]
-          : null);
+          : null;
 
   /// 原列表与普通输入始终保持挂载，临时编辑区不替换草稿控制器。
   Widget _buildConversation() => GestureDetector(
@@ -521,7 +532,8 @@ class _ChatPageState extends State<ChatPage> {
               onMessagesChanged: widget.messageStickyConfig?.onMessagesChanged,
               onMessagesDeleted: widget.messageStickyConfig?.onMessagesDeleted,
               onInitialMessagesLoaded: widget.onInitialMessagesLoaded,
-              onInitialLoadFinished: widget.messageStickyConfig?.onInitialLoadFinished,
+              onInitialLoadFinished:
+                  widget.messageStickyConfig?.onInitialLoadFinished,
               onUserClick: (String userID) => _onUserClick(userID),
               onUserLongPress: (String userID, String displayName) {
                 _messageInputKey.currentState?.insertMention(
@@ -558,7 +570,8 @@ class _ChatPageState extends State<ChatPage> {
                   key: _messageInputKey,
                   conversationID: widget.conversation.conversationID,
                   config: widget.messageInputConfig,
-                  onLocalMessageSent: widget.messageRecallConfig?.onLocalMessageSent,
+                  onLocalMessageSent:
+                      widget.messageRecallConfig?.onLocalMessageSent,
                 ),
               ),
           ],
@@ -566,41 +579,40 @@ class _ChatPageState extends State<ChatPage> {
       );
 
   @override
-  Widget build(BuildContext context) {
-    final page = Scaffold(
-      resizeToAvoidBottomInset: _editingMessage == null,
-      appBar: _buildAppBar(),
-      body: Stack(
-        children: [
-          _buildConversation(),
-          // 聆听浮层保持原有全屏收起手势；编辑区随后绘制，优先接收编辑交互。
-          const Positioned.fill(child: ListenPlaybackBar()),
-          // 置顶横幅覆盖消息列表上部，不挤压原消息窗口和输入区。
-          if (widget.messageStickyConfig case final sticky?)
-            Positioned(left: 8, right: 8, top: 8,
+  Widget buildBody(BuildContext context, WidgetRef ref, Locale locale) {
+    final page = Stack(
+      children: [
+        _buildConversation(),
+        // 聆听浮层保持原有全屏收起手势；编辑区随后绘制，优先接收编辑交互。
+        const Positioned.fill(child: ListenPlaybackBar()),
+        // 置顶横幅覆盖消息列表上部，不挤压原消息窗口和输入区。
+        if (widget.messageStickyConfig case final sticky?)
+          Positioned(
+              left: 8,
+              right: 8,
+              top: 8,
               child: sticky.bannerBuilder(context, (target) {
                 if (mounted) setState(() => _locateMessage = target);
               })),
-          // 编辑区独立浮在键盘上方，列表原始布局尺寸不因打开编辑而变化。
-          if (_editingMessage != null)
-            Positioned(
-                left: 0,
-                right: 0,
-                bottom: MediaQuery.viewInsetsOf(context).bottom,
-                child: MessageEditComposer(
-                  key: ValueKey(_editingMessage!.msgID),
-                  text: _editingText,
-                  onCancel: _cancelEditing,
-                  onSave: _saveEdit,
-                  onBounds: (bounds) {
-                    final bubble = _editingBubble;
-                    if (mounted && bubble != null) {
-                      _overlay.avoid(bubble, bounds.top);
-                    }
-                  },
-                )),
-        ],
-      ),
+        // 编辑区独立浮在键盘上方，列表原始布局尺寸不因打开编辑而变化。
+        if (_editingMessage != null)
+          Positioned(
+              left: 0,
+              right: 0,
+              bottom: MediaQuery.viewInsetsOf(context).bottom,
+              child: MessageEditComposer(
+                key: ValueKey(_editingMessage!.msgID),
+                text: _editingText,
+                onCancel: _cancelEditing,
+                onSave: _saveEdit,
+                onBounds: (bounds) {
+                  final bubble = _editingBubble;
+                  if (mounted && bubble != null) {
+                    _overlay.avoid(bubble, bounds.top);
+                  }
+                },
+              )),
+      ],
     );
     final guardedPage = PopScope(
       canPop: _editingMessage == null,
@@ -621,9 +633,13 @@ class _ChatPageState extends State<ChatPage> {
             onMessagesDeleted: widget.messageStickyConfig?.onMessagesDeleted,
             child: guardedPage);
     final recallConfig = widget.messageRecallConfig;
-    return recallConfig == null ? editPage : MessageRecallScope(
-      config: recallConfig, onRecall: _recallMessage, onReedit: _reeditMessage,
-      child: editPage,
-    );
+    return recallConfig == null
+        ? editPage
+        : MessageRecallScope(
+            config: recallConfig,
+            onRecall: _recallMessage,
+            onReedit: _reeditMessage,
+            child: editPage,
+          );
   }
 }

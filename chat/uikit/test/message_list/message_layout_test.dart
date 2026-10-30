@@ -22,11 +22,91 @@ import 'package:tencent_cloud_chat_sdk/models/v2_tim_text_elem.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_message_reaction_result.dart';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:tencent_chat_uikit/src/message_list/widgets/message_overlay_avoider.dart';
 import 'package:tencent_chat_uikit/src/third_party/scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/text_message_widget.dart';
 import 'package:tencent_chat_uikit/src/third_party/extended_text/extended_text.dart';
 
 void main() {
+  testWidgets('聊天复用基类导航且列表紧贴导航和输入，编辑期间返回只退出编辑', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    TencentImSDKPlugin.v2TIMManager = _Sdk('/single');
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    final navigator = GlobalKey<NavigatorState>();
+    var settingsCalls = 0;
+    await tester.pumpWidget(ProviderScope(
+      child: MaterialApp(
+        navigatorKey: navigator,
+        home: const Scaffold(body: Text('会话列表')),
+      ),
+    ));
+    unawaited(navigator.currentState!.push(MaterialPageRoute<void>(
+      builder: (_) => ChatPage(
+        conversation: ConversationInfo(
+          conversationID: 'c2c_visual',
+          type: ConversationType.c2c,
+          title: '测试会话',
+        ),
+        onOpenSettings: () async {
+          settingsCalls++;
+          return null;
+        },
+        messageEditConfig: ChatMessageEditConfig(
+          canEdit: (_) => true,
+          prepare: (_) async => (text: 'original', error: null),
+          save: (_, __) async => null,
+          onMessageWindowChanged: (_) {},
+        ),
+      ),
+    )));
+    await tester.pumpAndSettle();
+    expect(find.byType(AppBaseNavigationBar), findsOneWidget);
+    expect(
+      tester.widget<AppBaseNavigationBar>(find.byType(AppBaseNavigationBar))
+          .showBottomDivider,
+      isTrue,
+    );
+    expect(find.text('测试会话'), findsOneWidget);
+    expect(find.byIcon(AppIcons.back), findsOneWidget);
+    expect(
+      tester.getCenter(find.text('测试会话')).dx,
+      closeTo(tester.getCenter(find.byType(AppBaseNavigationBar)).dx, .01),
+    );
+    final list = tester.getRect(find.byType(MessageOverlayAvoider));
+    expect(
+        list.top,
+        closeTo(
+            tester.getBottomLeft(find.byType(AppBaseNavigationBar)).dy, .01));
+    expect(list.bottom,
+        closeTo(tester.getTopLeft(find.byType(MessageInput)).dy, .01));
+    final viewport = find.byType(ScrollablePositionedList);
+    final outerPadding = tester.widget<Padding>(
+        find.ancestor(of: viewport, matching: find.byType(Padding)).first);
+    expect(outerPadding.padding.vertical, 0);
+    // 设置入口仍由原聊天状态处理，不因导航栏迁移丢失回调。
+    Finder control(String id) => find.byWidgetPredicate(
+        (w) => w is Semantics && w.properties.identifier == id);
+    await tester.tap(control('tim.chat.settings'));
+    await tester.pumpAndSettle();
+    expect(settingsCalls, 1);
+    await tester.longPress(find.byType(TextMessageWidget).first);
+    await tester.pumpAndSettle();
+    await tester.tap(control('tim.message.action.edit'));
+    await tester.pumpAndSettle();
+    expect(find.byType(MessageEditComposer), findsOneWidget);
+    await tester.tap(control('tim.chat.back'));
+    await tester.pumpAndSettle();
+    expect(find.byType(MessageEditComposer), findsNothing);
+    expect(find.byType(ChatPage), findsOneWidget);
+    await tester.tap(control('tim.chat.back'));
+    await tester.pumpAndSettle();
+    expect(find.text('会话列表'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('退出短会话后收到新消息，再进入时消息仍连续排列', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
@@ -86,7 +166,8 @@ void main() {
     await tester.pumpWidget(MaterialApp(
       theme: AppThemeFactory.create(
           const AppNormalColorScheme(), Brightness.light),
-      home: ChatPage(
+      home: ProviderScope(
+          child: ChatPage(
         conversation: ConversationInfo(
             conversationID: 'c2c_visual', type: ConversationType.c2c),
         onInitialMessagesLoaded: () => loadedCalls++,
@@ -102,7 +183,7 @@ void main() {
             }));
           },
         ),
-      ),
+      )),
     ));
     await tester.pump();
     expect(sdk.messages.historyCalls, 1);
@@ -164,7 +245,8 @@ void main() {
     await tester.pumpWidget(MaterialApp(
       theme: AppThemeFactory.create(
           const AppNormalColorScheme(), Brightness.light),
-      home: ChatPage(
+      home: ProviderScope(
+          child: ChatPage(
         conversation: ConversationInfo(
             conversationID: 'c2c_visual', type: ConversationType.c2c),
         messageEditConfig: ChatMessageEditConfig(
@@ -173,7 +255,7 @@ void main() {
           save: (id, text) async => null,
           onMessageWindowChanged: (_) {},
         ),
-      ),
+      )),
     ));
     await tester.pumpAndSettle();
     final bubble = find.byType(TextMessageWidget).first;
