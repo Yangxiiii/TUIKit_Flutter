@@ -1,4 +1,4 @@
-import 'package:atomic_x_core/atomicxcore.dart' hide CompletionHandler;
+import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
@@ -9,16 +9,15 @@ import 'package:tencent_chat_uikit/src/conversation_list/rich_content_preview.da
 import 'package:tencent_chat_uikit/src/emoji_picker/emoji_manager.dart';
 import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_utils.dart';
-import 'package:tencent_chat_uikit/src/third_party/flutter_swipe_action_cell/core/cell.dart';
 
-/// 展示单条会话，并通过左滑提供置顶和删除操作。
+/// 展示单条会话及摘要，仅通过点击和长按向宿主交接交互。
 class ConversationItem extends StatefulWidget {
   final ConversationInfo conversation;
 
-  /// 会话行和滑动层背景；为空时沿用 TUIKit 默认列表颜色。
+  /// 会话行背景；为空时沿用 TUIKit 默认列表颜色。
   final Color? backgroundColor;
 
-  /// 自定义行布局并复用SDK摘要，点击及左滑层继续由UIKit管理。
+  /// 自定义行布局并复用SDK摘要，点击及长按继续由UIKit管理。
   final Widget Function(BuildContext context, Widget subtitle)? contentBuilder;
 
   /// 业务传入的精确未读前缀，仅在接收但不通知时使用；空值保留SDK默认格式。
@@ -63,7 +62,7 @@ class ConversationItem extends StatefulWidget {
   State<StatefulWidget> createState() => _ConversationItemState();
 }
 
-/// 保留会话行的点击与左滑生命周期，可见布局允许业务按设计替换。
+/// 维护会话摘要解析和按压交互，可见布局允许业务按设计替换。
 class _ConversationItemState extends State<ConversationItem> {
   late AppLocalizedText atomicLocale;
 
@@ -79,57 +78,7 @@ class _ConversationItemState extends State<ConversationItem> {
     final backgroundColor =
         widget.backgroundColor ?? colorsTheme.listColorDefault;
 
-    return SwipeActionCell(
-      // SDK刷新可能生成内容相同的新ID字符串，按值保留滑动层及已加载头像。
-      key: ValueKey('conversation.swipe.${widget.conversation.conversationID}'),
-      trailingActions: _buildSwipeActions(colorsTheme),
-      backgroundColor: backgroundColor,
-      child: _buildConversationContent(context, backgroundColor),
-    );
-  }
-
-  List<SwipeAction> _buildSwipeActions(SemanticColorScheme colorsTheme) {
-    final actions = <SwipeAction>[];
-
-    if (widget.config.isSupportPin) {
-      actions.add(SwipeAction(
-        title: widget.conversation.isPinned
-            ? atomicLocale.unpin
-            : atomicLocale.pin,
-        onTap: (CompletionHandler handler) async {
-          widget.onPinToggle?.call();
-          handler(false);
-        },
-        color: colorsTheme.buttonColorPrimaryDefault,
-        icon: Icon(
-          Icons.push_pin_outlined,
-          color: colorsTheme.textColorButton,
-        ),
-        style: FontScheme.caption3Regular.copyWith(
-          color: colorsTheme.textColorButton,
-        ),
-      ));
-    }
-
-    if (widget.config.isSupportDelete) {
-      actions.add(SwipeAction(
-        title: atomicLocale.delete,
-        onTap: (CompletionHandler handler) async {
-          widget.onDelete?.call();
-          handler(false);
-        },
-        color: colorsTheme.textColorError,
-        icon: Icon(
-          Icons.delete_outline,
-          color: colorsTheme.textColorButton,
-        ),
-        style: FontScheme.caption3Regular.copyWith(
-          color: colorsTheme.textColorButton,
-        ),
-      ));
-    }
-
-    return actions;
+    return _buildConversationContent(context, backgroundColor);
   }
 
   Widget _buildConversationContent(
@@ -146,7 +95,7 @@ class _ConversationItemState extends State<ConversationItem> {
         onLongPress: widget.onLongPress,
         splashColor: primary.withValues(alpha: 0.12),
         highlightColor: primary.withValues(alpha: 0.08),
-        // 业务仅替换可见内容，保留原有点击、长按和左滑动作。
+        // 整行保留点击和长按入口，可见内容由业务替换。
         child: widget.contentBuilder
                 ?.call(context, _buildSubtitle(context, colorsTheme)) ??
             Padding(
