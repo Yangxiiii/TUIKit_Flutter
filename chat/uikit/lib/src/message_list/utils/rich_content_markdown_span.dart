@@ -36,7 +36,15 @@ TextSpan richContentMarkdownSpan(
         ? EmojiManager.createLocalizedStringFromEmojiCodes(
             context, singleLineConversationPreview(node.textContent))
         : node.textContent;
-    return TextSpan(text: text, style: style, recognizer: inheritedRecognizer);
+    final hasEmoji = !compact && EmojiManager.tokenPattern.hasMatch(text);
+    return TextSpan(
+        text: hasEmoji ? null : text,
+        // 富文本正文与普通气泡共享表情资源，格式和链接仍由父级样式继承。
+        children: hasEmoji
+            ? EmojiManager.buildInlineSpans(text, size: style.fontSize ?? 16)
+            : null,
+        style: style,
+        recognizer: inheritedRecognizer);
   }
   if (node.tag == 'img') {
     return TextSpan(

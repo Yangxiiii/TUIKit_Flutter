@@ -1,4 +1,4 @@
-import 'package:app_ui/app_ui.dart';
+import 'package:tencent_chat_uikit/src/emoji_picker/emoji_manager.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
@@ -212,6 +212,7 @@ class _ReactionTabRow extends StatelessWidget {
   }
 }
 
+/// 显示当前目录的回应分组图标，切换后由详情页加载对应用户。
 class _ReactionTab extends StatelessWidget {
   final MessageReaction reaction;
   final bool isSelected;
@@ -235,7 +236,7 @@ class _ReactionTab extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           color: isSelected
-              ? colors.buttonColorPrimaryDefault.withOpacity(0.1)
+              ? colors.buttonColorPrimaryDefault.withValues(alpha: 0.1)
               : colors.bgColorInput,
           borderRadius: BorderRadius.circular(16),
           border: isSelected
@@ -248,7 +249,7 @@ class _ReactionTab extends StatelessWidget {
             if (emoji != null)
               Image.asset(
                 emoji.path,
-                package: 'tencent_chat_uikit',
+                package: EmojiManager.assetPackage,
                 width: 18,
                 height: 18,
                 errorBuilder: (context, error, stackTrace) {

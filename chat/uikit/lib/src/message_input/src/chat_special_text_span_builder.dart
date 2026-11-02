@@ -1,6 +1,6 @@
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
-import 'package:tencent_chat_uikit/src/emoji_picker/emoji_picker_data.dart';
+import 'package:tencent_chat_uikit/src/emoji_picker/emoji_manager.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_markdown_format.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_markdown_span.dart';
 import 'package:tencent_chat_uikit/src/third_party/extended_text/extended_text.dart';
@@ -228,8 +228,6 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
       return null;
     }
 
-    ///index is end index of start flag, so text start index should be index-(flag.length-1)
-    ///
     /// index 是起始标记的结束索引，因此文本起始索引应为 index-(flag.length-1)
     if (isStart(flag, HttpText.flag)) {
       return HttpText(
@@ -257,9 +255,15 @@ final class _CombinedFormatMatch {
   const _CombinedFormatMatch(this.end, this.span);
 }
 
+/// 为已注册业务表情创建带原文偏移的图片，保留输入、复制与整项删除语义。
 class EmojiText extends SpecialText {
-  static const String flag = '[TUIEmoji_';
+  /// 仅识别业务表情命名空间，旧腾讯令牌不进入图片解析。
+  static const String flag = '[ZDEmoji_';
+
+  /// 令牌在原文中的UTF-16偏移，供输入框定位与删除。
   final int? start;
+
+  /// 当前语义颜色，由输入与正文渲染入口提供。
   SemanticColorScheme colorScheme;
 
   EmojiText(TextStyle? textStyle, {this.start, required this.colorScheme})
@@ -268,22 +272,16 @@ class EmojiText extends SpecialText {
   @override
   InlineSpan finishText() {
     final String key = toString();
-    String res = "";
-    if (emojiPickerDataDefault.containsValue(key)) {
-      emojiPickerDataDefault.forEach((emojiAssets, value) {
-        if (value == key) {
-          res = emojiAssets;
-        }
-      });
-    }
+    final emoji = EmojiManager.getEmoji(key);
+    // 未知令牌可能来自其他客户端，保留原文以避免空路径图片和错误的整项删除。
+    if (emoji == null) return TextSpan(text: key, style: textStyle);
 
     return ImageSpan(
-      AssetImage(res, package: 'tencent_chat_uikit'),
+      AssetImage(emoji.path, package: EmojiManager.assetPackage),
       actualText: key,
       imageWidth: 22,
       imageHeight: 22,
       start: start!,
-      // fit: BoxFit.cover,
       margin: const EdgeInsets.all(0),
     );
   }
@@ -325,51 +323,4 @@ class HttpText extends SpecialText {
           )
         : TextSpan(text: toString(), style: textStyle);
   }
-}
-
-String getMarkDownStringData({String? text}) {
-  String formattedText = _addSpaceAfterLeftBracket(
-    _addSpaceBeforeHttp(_replaceSingleNewlineWithTwo(text ?? "")),
-  );
-  RegExp emojiExp = RegExp(r"\[TUIEmoji_(\w{2,})\]");
-  formattedText = formattedText.replaceAllMapped(emojiExp, (match) {
-    String emojiName = match.group(0) ?? "";
-    if (emojiName.isNotEmpty) {
-      if (emojiPickerDataDefault.containsValue(emojiName)) {
-        emojiPickerDataDefault.forEach((emojiAssets, value) {
-          if (value == emojiName) {
-            emojiName = '![$value](resource:$emojiAssets#30x30)';
-          }
-        });
-      }
-    }
-
-    return emojiName;
-  });
-
-  return formattedText;
-}
-
-String _addSpaceAfterLeftBracket(String inputText) {
-  return inputText.splitMapJoin(
-    RegExp(r'<\w+[^<>]*>'),
-    onMatch: (match) {
-      return match.group(0)!.replaceFirst('<', '< ');
-    },
-    onNonMatch: (text) => text,
-  );
-}
-
-String _replaceSingleNewlineWithTwo(String inputText) {
-  return inputText.split('\n').join('\n\n');
-}
-
-String _addSpaceBeforeHttp(String inputText) {
-  return inputText.splitMapJoin(
-    RegExp(r'http'),
-    onMatch: (match) {
-      return ' http';
-    },
-    onNonMatch: (text) => text,
-  );
 }

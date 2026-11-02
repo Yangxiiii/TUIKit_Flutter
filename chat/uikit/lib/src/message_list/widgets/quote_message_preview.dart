@@ -275,11 +275,7 @@ class QuoteMessagePreview extends StatelessWidget {
           ],
         );
       default:
-        // Use ExtendedText so [TUIEmoji_*] tokens render as inline emoji
-        // images instead of being shown literally. This matches the bubble
-        // rendering and the merged-message preview.
-        //
-        // 使用 ExtendedText，这样 [TUIEmoji_*] 标记会以内联表情图像渲染，而不是直接显示文字。这与气泡渲染和合并消息预览保持一致。
+        // 使用共用解析器将ZDEmoji令牌显示为行内图片，原文用于引用与发送。
         return ExtendedText(
           _getContentSummary(payload, locale),
           specialTextSpanBuilder: ChatSpecialTextSpanBuilder(

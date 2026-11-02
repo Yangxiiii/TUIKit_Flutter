@@ -1,13 +1,15 @@
+import '../fixtures/emoji_fixture.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_chat_uikit/src/message_input/message_text.dart';
 import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
 
 void main() {
+  setUp(configureEmojiFixture);
   test('可见字素、SDK表情和换行使用同一计数口径', () {
     expect(messageTextCharacterCount('汉😀👍🏽👨‍👩‍👧‍👦'), 4);
-    expect(messageTextCharacterCount('[TUIEmoji_Smile]\r\n好\n'), 4);
-    expect(messageTextCharacterCount('[TUIEmoji_unknown]'), 18);
+    expect(messageTextCharacterCount('[ZDEmoji_Smile]\r\n好\n'), 4);
+    expect(messageTextCharacterCount('[ZDEmoji_unknown]'), 17);
   });
 
   test('普通与富文本的4000边界一致且隐藏格式不计数', () {
@@ -37,7 +39,7 @@ void main() {
   });
 
   test('退格完整删除原生组合表情和SDK令牌并正确放置光标', () {
-    for (final character in ['😀', '👍🏽', '👨‍👩‍👧‍👦', '[TUIEmoji_Smile]']) {
+    for (final character in ['😀', '👍🏽', '👨‍👩‍👧‍👦', '[ZDEmoji_Smile]']) {
       final value = TextEditingValue(
         text: '甲$character乙',
         selection: TextSelection.collapsed(offset: 1 + character.length),

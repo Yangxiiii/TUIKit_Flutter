@@ -1,131 +1,61 @@
 import 'package:flutter/widgets.dart';
 import 'package:tuikit_atomic_x/base_component/utils/storage_util.dart';
-import 'package:tencent_chat_uikit/src/emoji_picker/emoji_picker_config.dart';
-import 'package:tencent_chat_uikit/src/emoji_picker/emoji_picker_data.dart';
-import 'package:tencent_chat_uikit/src/emoji_picker/emoji_picker_model.dart';
+import '../../emoji_picker/emoji_manager.dart';
+import '../../emoji_picker/emoji_picker_model.dart';
 
-/// Manager for recent reaction emojis
-///
-/// 最近反应表情的管理器
+/// 为表情键盘和消息回应提供共用近期目录；旧编码不参与快捷项，也不提供回退。
 class RecentEmojiManager {
-  static const String _recentEmojiKey = 'recent_reaction_emojis';
+  /// 使用独立缓存键，弃用腾讯表情的近期排序。
+  static const String _recentEmojiKey = 'zd_emoji_v1_recent_reactions';
+
+  /// 最多保留二十项近期表情，避免缓存无限增长。
   static const int _maxRecentCount = 20;
+
+  /// 表情键盘常用行与消息操作栏共用六项快捷表情。
   static const int _quickEmojiCount = 6;
 
-  /// Get recent emoji IDs (reactionIDs)
-  ///
-  /// 获取最近的表情ID（reactionIDs）
+  /// 只返回仍在当前目录中的令牌，损坏或过期的存储项不会进入面板。
   static Future<List<String>> getRecentEmojiIds() async {
     final result = await StorageUtil.get(_recentEmojiKey);
-    if (result is List) {
-      return result.cast<String>();
-    }
-    return [];
+    if (result is! List) return [];
+    return result
+        .whereType<String>()
+        .where((id) => EmojiManager.getEmoji(id) != null)
+        .toSet()
+        .toList();
   }
 
-  /// Add emoji to recent list
-  ///
-  /// 将表情添加到最近列表
+  /// 当前目录之外的回应不写入缓存，成功选择的表情移到最前。
   static Future<void> addRecentEmoji(String emojiId) async {
-    final recent = (await getRecentEmojiIds()).toList();
+    if (EmojiManager.getEmoji(emojiId) == null) return;
+    final recent = await getRecentEmojiIds();
     recent.remove(emojiId);
     recent.insert(0, emojiId);
-    if (recent.length > _maxRecentCount) {
-      recent.removeLast();
-    }
-    await StorageUtil.set<List<String>>(_recentEmojiKey, recent);
+    await StorageUtil.set<List<String>>(
+        _recentEmojiKey, recent.take(_maxRecentCount).toList());
   }
 
-  /// Get quick emojis for reaction picker (6 recent + fill with defaults)
-  ///
-  /// 获取反应选择器的快捷表情（6个最近的 + 用默认填充）
+  /// 先展示当前目录的近期项，再按原始目录顺序补足六项。
   static Future<List<EmojiPickerModelItem>> getQuickEmojis(
       BuildContext context) async {
-    final allEmojis = _getAllEmojis(context);
-    if (allEmojis.isEmpty) return [];
-
-    final result = <EmojiPickerModelItem>[];
-    final recentIds = await getRecentEmojiIds();
-
-    // Add recent emojis first
-    //
-    // 优先添加最近的表情
-    for (final id in recentIds.take(_quickEmojiCount)) {
-      final emoji = allEmojis.firstWhere(
-        (e) => e.name == id,
-        orElse: () => EmojiPickerModelItem(name: '', path: ''),
-      );
-      if (emoji.name.isNotEmpty) {
-        result.add(emoji);
-      }
-    }
-
-    // Fill with default emojis if needed
-    //
-    // 如果需要，用默认表情填充
-    if (result.length < _quickEmojiCount) {
-      for (final emoji in allEmojis) {
-        if (result.length >= _quickEmojiCount) break;
-        if (!result.any((e) => e.name == emoji.name)) {
-          result.add(emoji);
-        }
-      }
-    }
-
-    return result.take(_quickEmojiCount).toList();
+    final recent = await getRecentEmojiIds();
+    final ids = {...recent, ...EmojiManager.emojis.map((emoji) => emoji.name)};
+    return ids
+        .take(_quickEmojiCount)
+        .map((id) => EmojiManager.getEmoji(id)!)
+        .toList();
   }
 
-  /// Get all available emojis
-  ///
-  /// 获取所有可用表情
-  static List<EmojiPickerModelItem> _getAllEmojis(BuildContext context) {
-    EmojiPickerConfig.loadData(context);
-    if (EmojiPickerConfig.customStickerLists.isNotEmpty) {
-      final firstGroup = EmojiPickerConfig.customStickerLists.first;
-      if (firstGroup.type == 0) {
-        // type 0 is default emoji
-        //
-        // 类型0是默认表情
-        return firstGroup.stickers;
-      }
-    }
-    return [];
-  }
+  /// 完整回应选择器与文字面板使用相同顺序。
+  static List<EmojiPickerModelItem> getAllEmojis(BuildContext context) =>
+      EmojiManager.emojis.toList();
 
-  /// Get all emojis for full picker
-  ///
-  /// 获取完整选择器的所有表情
-  static List<EmojiPickerModelItem> getAllEmojis(BuildContext context) {
-    return _getAllEmojis(context);
-  }
+  /// 仅返回当前目录资源，旧腾讯回应不解析成图片。
+  static String? getEmojiPath(String reactionID) =>
+      EmojiManager.getEmoji(reactionID)?.path;
 
-  /// Get emoji path by reactionID (name)
-  ///
-  /// 通过reactionID（名称）获取表情路径
-  static String? getEmojiPath(String reactionID) {
-    for (final entry in emojiPickerDataDefault.entries) {
-      if (entry.value == reactionID) {
-        return entry.key;
-      }
-    }
-    return null;
-  }
-
-  /// Get emoji item by reactionID
-  ///
-  /// 通过reactionID获取表情项
+  /// 回应标识与文字令牌使用同一精确查找入口。
   static EmojiPickerModelItem? getEmojiByReactionID(
-      BuildContext context, String reactionID) {
-    final allEmojis = _getAllEmojis(context);
-    try {
-      return allEmojis.firstWhere((e) => e.name == reactionID);
-    } catch (_) {
-      // If not found in loaded emojis, try to get path from default data
-      final path = getEmojiPath(reactionID);
-      if (path != null) {
-        return EmojiPickerModelItem(name: reactionID, path: path);
-      }
-      return null;
-    }
-  }
+          BuildContext context, String reactionID) =>
+      EmojiManager.getEmoji(reactionID);
 }

@@ -1,3 +1,4 @@
+import 'package:tencent_chat_uikit/src/emoji_picker/emoji_manager.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
@@ -95,6 +96,7 @@ class MessageReactionBar extends StatelessWidget {
   }
 }
 
+/// 根据当前目录显示回应图片与人数，添加或撤销交给外层消息流程。
 class _ReactionItem extends StatelessWidget {
   final MessageReaction reaction;
   final bool showCount;
@@ -122,7 +124,7 @@ class _ReactionItem extends StatelessWidget {
             if (emoji != null)
               Image.asset(
                 emoji.path,
-                package: 'tencent_chat_uikit',
+                package: EmojiManager.assetPackage,
                 width: 18,
                 height: 18,
                 errorBuilder: (context, error, stackTrace) {

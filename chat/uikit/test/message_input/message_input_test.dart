@@ -94,6 +94,121 @@ void main() {
         matching: find.byType(IconButton),
       ));
 
+  testWidgets('表情与系统键盘在同一区域切换，焦点选区和输入连接持续保留', (tester) async {
+    EmojiManager.configure(assetPackage: 'tuikit_atomic_x', emojis: const [
+      EmojiPickerModelItem(
+          name: '[ZDEmoji_Like]',
+          label: '点赞',
+          path: 'call_assets/handsfree_on.png'),
+    ]);
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
+    await mount(tester);
+    sdk.conversations.completeDraft('');
+    await tester.pump();
+    await enter(tester, '前中后');
+    final field = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('message_input_text_field')));
+    field.controller!.selection =
+        const TextSelection(baseOffset: 1, extentOffset: 2);
+    final focus = field.focusNode!;
+    tester.view.viewInsets = const FakeViewPadding(bottom: 320);
+    await tester.pumpAndSettle();
+    final toolbar = find.byKey(const Key('message_input_shared_toolbar'));
+    final top = tester.getRect(toolbar).bottom;
+    tester.testTextInput.log.clear();
+    await tester.tap(find.byTooltip('表情'));
+    await tester.pumpAndSettle();
+    expect(focus.hasFocus, isTrue);
+    expect(field.controller!.selection,
+        const TextSelection(baseOffset: 1, extentOffset: 2));
+    for (final inset in [200.0, 80.0, 0.0]) {
+      tester.view.viewInsets = FakeViewPadding(bottom: inset);
+      await tester.pumpAndSettle();
+      expect(tester.getRect(toolbar).bottom, closeTo(top, .01));
+    }
+    expect(tester.getSize(find.byType(EmojiPicker)).height, 320);
+    // 模拟隐藏IME会关闭原生连接的平台，焦点与选区仍须保留，切回时重新建立客户端。
+    tester
+        .state<ExtendedEditableTextState>(find.byType(ExtendedEditableText))
+        .connectionClosed();
+    await tester.pump();
+    expect(focus.hasFocus, isTrue);
+    expect(field.controller!.selection,
+        const TextSelection(baseOffset: 1, extentOffset: 2));
+    final emoji = find.byWidgetPredicate((widget) =>
+        widget is Semantics &&
+        widget.properties.identifier == 'tim.emoji.insert.[ZDEmoji_Like]');
+    await tester.tap(emoji);
+    await tester.pumpAndSettle();
+    expect(field.controller!.text, '前[ZDEmoji_Like]后');
+    expect(field.controller!.selection.baseOffset, 15);
+    expect(focus.hasFocus, isTrue);
+    expect(
+        tester.testTextInput.log.any((call) => call.method == 'TextInput.hide'),
+        isTrue);
+    expect(
+        tester.testTextInput.log.any((call) => call.method == 'TextInput.show'),
+        isFalse);
+    expect(
+        tester.testTextInput.log
+            .any((call) => call.method == 'TextInput.clearClient'),
+        isFalse);
+    await tester.tap(find.byTooltip('显示键盘'));
+    await tester.pumpAndSettle();
+    for (final inset in [100.0, 200.0, 320.0]) {
+      tester.view.viewInsets = FakeViewPadding(bottom: inset);
+      await tester.pump(const Duration(milliseconds: 16));
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(tester.getRect(toolbar).bottom, closeTo(top, .01));
+    }
+    expect(find.byType(EmojiPicker), findsNothing);
+    expect(
+        tester.testTextInput.log.any((call) => call.method == 'TextInput.show'),
+        isTrue);
+    expect(
+        tester.testTextInput.log
+            .any((call) => call.method == 'TextInput.clearClient'),
+        isFalse);
+    expect(focus.hasFocus, isTrue);
+    expect(field.controller!.selection.baseOffset, 15);
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('空闲区直接打开表情不闪现系统键盘，首次输入没有额外空格', (tester) async {
+    EmojiManager.configure(assetPackage: 'tuikit_atomic_x', emojis: const [
+      EmojiPickerModelItem(
+          name: '[ZDEmoji_Like]',
+          label: '点赞',
+          path: 'call_assets/handsfree_on.png'),
+    ]);
+    await mount(tester);
+    sdk.conversations.completeDraft('');
+    await tester.pump();
+    tester.testTextInput.log.clear();
+    await tester.tap(find.byTooltip('表情'));
+    await tester.pumpAndSettle();
+    final field = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('message_input_text_field')));
+    expect(field.focusNode!.hasFocus, isTrue);
+    expect(
+        tester.testTextInput.log.any((call) => call.method == 'TextInput.show'),
+        isFalse);
+    await tester.tap(find.byWidgetPredicate((widget) =>
+        widget is Semantics &&
+        widget.properties.identifier == 'tim.emoji.quick.[ZDEmoji_Like]'));
+    await tester.pumpAndSettle();
+    expect(field.controller!.text, '[ZDEmoji_Like]');
+    expect(field.controller!.selection.baseOffset, 14);
+    expect(field.focusNode!.hasFocus, isTrue);
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('媒体加载时收起或重开仍可完成预览，普通输入区删除占位后不被迟到结果复活', (tester) async {
     final path = await createPreview(tester);
     for (final mode in ['normal', 'reopen', 'delete']) {

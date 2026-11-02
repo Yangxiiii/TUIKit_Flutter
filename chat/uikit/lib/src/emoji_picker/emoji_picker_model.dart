@@ -1,31 +1,42 @@
+/// 表情目录项；令牌、展示名称和资源保持同源，不保存消息发送状态。
 class EmojiPickerModelItem {
-  String path = "";
-  String name = "";
+  /// 基准资源路径，加载时使用当前目录的所属包。
+  final String path;
 
-  EmojiPickerModelItem({
+  /// 包含方括号的完整令牌，同时作为文字消息内容和回应标识。
+  final String name;
+
+  /// 原始资源的展示名称，不用作消息传输键。
+  final String label;
+
+  const EmojiPickerModelItem({
     required this.name,
     required this.path,
+    required this.label,
   });
-  static EmojiPickerModelItem fromJson(json) {
-    return EmojiPickerModelItem(
-        name: json["name"] ?? "", path: json["path"] ?? "");
-  }
-
-  Map<String, dynamic> toJson() {
-    return Map<String, dynamic>.from({
-      "name": name,
-      "path": path,
-    });
-  }
 }
 
+/// 表情面板分组；由当前目录构建，不提供旧表情包配置。
 class EmojiPickerModel {
+  /// 分组展示名称。
   String name = "";
+
+  /// 按业务顺序排列的表情目录。
   List<EmojiPickerModelItem> stickers = [];
+
+  /// 每行表情数量，移动端默认七列。
   int rowNum = 7;
+
+  /// 分组标签使用的基准资源路径。
   String iconPath = "";
+
+  /// 标签图标逻辑尺寸。
   double? iconSize = 40;
-  int type = 0; // 0 default 1 custom
+
+  /// 发送类型；零表示插入文字令牌。
+  int type = 0;
+
+  /// 面板分组编号。
   int index = 0;
 
   EmojiPickerModel({
@@ -37,30 +48,4 @@ class EmojiPickerModel {
     required this.index,
     this.iconSize,
   });
-
-  Map<String, dynamic> toJson() {
-    return Map<String, dynamic>.from({
-      "name": name,
-      "stickers": stickers.map((e) => e.toJson()).toList(),
-      "iconPath": iconPath,
-      "rowNum": rowNum,
-      "type": type,
-      "index": index,
-      "iconSize": iconSize,
-    });
-  }
-
-  static EmojiPickerModel fromJson(json) {
-    return EmojiPickerModel(
-      name: json["name"] ?? "",
-      stickers: (List<Map<String, dynamic>>.from((json["stickers"] ?? [])))
-          .map((e) => EmojiPickerModelItem.fromJson(e))
-          .toList(),
-      iconPath: json["iconPath"] ?? "",
-      rowNum: json["rowNum"] ?? 7,
-      type: json["type"] ?? 0,
-      index: json["index"] ?? 0,
-      iconSize: json["iconSize"] ?? 40,
-    );
-  }
 }

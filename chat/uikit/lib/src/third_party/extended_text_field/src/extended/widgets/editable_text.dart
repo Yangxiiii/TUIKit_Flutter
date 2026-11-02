@@ -12,11 +12,14 @@ typedef ExtendedEditableTextContextMenuBuilder = Widget Function(
   ExtendedEditableTextState editableTextState,
 );
 
-/// [EditableText]
-///
+/// 为特殊文本编辑保留原文映射，并按当前实例的键盘模式控制平台输入行为。
 class ExtendedEditableText extends _EditableText {
+  /// 当前实例如何处理系统键盘请求与平台输入连接关闭事件。
+  final ExtendedKeyboardMode keyboardMode;
+
   ExtendedEditableText({
     super.key,
+    this.keyboardMode = ExtendedKeyboardMode.system,
     required super.controller,
     required super.focusNode,
     super.readOnly = false,
@@ -155,7 +158,54 @@ class ExtendedEditableText extends _EditableText {
   }
 }
 
+/// 保留特殊文本的编辑映射，并隔离自定义键盘期间的平台显示与失焦行为。
 class ExtendedEditableTextState extends _EditableTextState {
+  /// 自定义面板首次获取焦点时不建立可见IME，切回系统模式后再正常连接。
+  @override
+  void _openInputConnection() {
+    // 从空闲区直接打开表情时也保留焦点，但不能先闪现一次系统键盘。
+    if (extendedEditableText.keyboardMode == ExtendedKeyboardMode.custom)
+      return;
+    super._openInputConnection();
+  }
+
+  /// 选区和光标操作可保留焦点，只有系统模式才请求显示平台键盘。
+  @override
+  void requestKeyboard() {
+    if (extendedEditableText.keyboardMode == ExtendedKeyboardMode.custom) {
+      // 拖动光标和选择特殊文本仍需要焦点，但不能把当前自定义键盘替换掉。
+      if (!_hasFocus) widget.focusNode.requestFocus();
+      return;
+    }
+    super.requestKeyboard();
+  }
+
+  /// 平台结束原生连接时保留自定义面板的焦点，切回系统模式则恢复客户端。
+  @override
+  void connectionClosed() {
+    final mode = extendedEditableText.keyboardMode;
+    if (mode == ExtendedKeyboardMode.system) {
+      super.connectionClosed();
+      return;
+    }
+    // 部分平台隐藏IME时会结束原生连接，只清理连接身份，保留正文焦点与选区。
+    if (_hasInputConnection) {
+      _textInputConnection!.connectionClosedReceived();
+      _textInputConnection = null;
+      _lastKnownRemoteTextEditingValue = null;
+    }
+    if (mode == ExtendedKeyboardMode.returningToSystem) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted &&
+            extendedEditableText.keyboardMode ==
+                ExtendedKeyboardMode.returningToSystem) {
+          requestKeyboard();
+        }
+      });
+      WidgetsBinding.instance.scheduleFrame();
+    }
+  }
+
   ExtendedEditableText get extendedEditableText =>
       widget as ExtendedEditableText;
   ExtendedSpellCheckConfiguration get extendedSpellCheckConfiguration =>

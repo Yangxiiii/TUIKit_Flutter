@@ -26,9 +26,26 @@ part 'package:tencent_chat_uikit/src/third_party/extended_text_field/src/officia
 part 'package:tencent_chat_uikit/src/third_party/extended_text_field/src/official/widgets/spell_check.dart';
 part 'package:tencent_chat_uikit/src/third_party/extended_text_field/src/official/material/selectable_text.dart';
 
+/// 当前输入框的系统键盘策略，只作用于显式配置该模式的实例。
+enum ExtendedKeyboardMode {
+  /// 正常显示系统键盘，平台结束输入时沿用框架的失焦行为。
+  system,
+
+  /// 自定义面板显示期间保留焦点，选区操作不重新弹出系统键盘。
+  custom,
+
+  /// 切回系统键盘期间保留焦点，平台关闭旧连接时重新建立输入客户端。
+  returningToSystem,
+}
+
+/// 渲染带原文映射的特殊文本，并提供实例级键盘切换策略。
 class ExtendedTextField extends _TextField {
+  /// 未指定时沿用标准输入行为，聊天面板仅对自己的输入框切换此模式。
+  final ExtendedKeyboardMode keyboardMode;
+
   const ExtendedTextField({
     super.key,
+    this.keyboardMode = ExtendedKeyboardMode.system,
     super.groupId = EditableText,
     super.controller,
     super.focusNode,
@@ -483,6 +500,7 @@ class ExtendedTextFieldState extends _TextFieldState {
         bucket: bucket,
         child: ExtendedEditableText(
           key: editableTextKey,
+          keyboardMode: (widget as ExtendedTextField).keyboardMode,
           readOnly: widget.readOnly || !_isEnabled,
           toolbarOptions: widget.toolbarOptions,
           showCursor: widget.showCursor,

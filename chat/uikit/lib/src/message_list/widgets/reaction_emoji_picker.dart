@@ -1,3 +1,4 @@
+import 'package:tencent_chat_uikit/src/emoji_picker/emoji_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/emoji_picker/emoji_picker_model.dart';
@@ -20,6 +21,7 @@ class ReactionEmojiPicker extends StatefulWidget {
   State<ReactionEmojiPicker> createState() => _ReactionEmojiPickerState();
 }
 
+/// 在面板生命周期内加载近期回应，资源始终来自当前目录。
 class _ReactionEmojiPickerState extends State<ReactionEmojiPicker> {
   List<EmojiPickerModelItem> _quickEmojis = [];
   bool _isLoaded = false;
@@ -82,6 +84,7 @@ class _ReactionEmojiPickerState extends State<ReactionEmojiPicker> {
   }
 }
 
+/// 展示单个业务回应入口，点击后交由消息层处理。
 class _ReactionEmojiItem extends StatelessWidget {
   final EmojiPickerModelItem emoji;
   final VoidCallback onTap;
@@ -106,18 +109,23 @@ class _ReactionEmojiItem extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
         ),
         child: Center(
-          child: Image.asset(
-            emoji.path,
-            package: 'tencent_chat_uikit',
-            width: 26,
-            height: 26,
-            errorBuilder: (context, error, stackTrace) {
-              return Icon(
-                Icons.sentiment_satisfied_alt,
-                size: 26,
-                color: colors.textColorSecondary,
-              );
-            },
+          child: Semantics(
+            identifier: 'tim.reaction.quick.${emoji.name}',
+            label: emoji.label,
+            button: true,
+            child: Image.asset(
+              emoji.path,
+              package: EmojiManager.assetPackage,
+              width: 26,
+              height: 26,
+              errorBuilder: (context, error, stackTrace) {
+                return Icon(
+                  Icons.sentiment_satisfied_alt,
+                  size: 26,
+                  color: colors.textColorSecondary,
+                );
+              },
+            ),
           ),
         ),
       ),
@@ -177,15 +185,20 @@ class ReactionEmojiPickerSheet extends StatelessWidget {
                 final emoji = allEmojis[index];
                 return GestureDetector(
                   onTap: () => onEmojiClick(emoji),
-                  child: Image.asset(
-                    emoji.path,
-                    package: 'tencent_chat_uikit',
-                    errorBuilder: (context, error, stackTrace) {
-                      return Icon(
-                        Icons.sentiment_satisfied_alt,
-                        color: colors.textColorSecondary,
-                      );
-                    },
+                  child: Semantics(
+                    identifier: 'tim.reaction.select.${emoji.name}',
+                    label: emoji.label,
+                    button: true,
+                    child: Image.asset(
+                      emoji.path,
+                      package: EmojiManager.assetPackage,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Icon(
+                          Icons.sentiment_satisfied_alt,
+                          color: colors.textColorSecondary,
+                        );
+                      },
+                    ),
                   ),
                 );
               },

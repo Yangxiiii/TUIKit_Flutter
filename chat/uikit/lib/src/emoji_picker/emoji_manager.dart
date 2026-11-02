@@ -1,174 +1,99 @@
-import 'package:app_ui/app_ui.dart';
-import 'dart:core';
-
 import 'package:flutter/widgets.dart';
 
-import 'emoji_picker_data.dart';
+import 'emoji_picker_model.dart';
 
-/// 维护聊天表情编码、本地化名称和既有资源的展示映射。
+/// 管理业务注入的唯一表情目录，供面板、输入、正文、摘要和回应共同使用。
+///
+/// 不包含内置表情或旧编码映射；未注册的令牌始终按普通文字处理。
 class EmojiManager {
-  /// 摘要沿用聊天表情原资源；只替换已知编码，未知内容保持原文而不创建占位图。
+  /// 当前已注册的完整目录，替换时整体更新，避免各展示入口持有不同映射。
+  static Map<String, EmojiPickerModelItem> _emojis = const {};
+
+  /// 目录资源统一所属包，在开放页面前由业务设置。
+  static String _assetPackage = '';
+
+  /// 仅匹配已注册的完整令牌；空目录必须无匹配，避免计数和退格误处理普通文字。
+  static RegExp _tokenPattern = RegExp(r'(?!)');
+
+  /// 当前唯一目录，顺序由业务提供；外部不能修改全局映射。
+  static Iterable<EmojiPickerModelItem> get emojis => _emojis.values;
+
+  /// 表情资源所属包，图片加载必须与业务声明一致。
+  static String get assetPackage => _assetPackage;
+
+  /// 输入、计数和预览共用的已知令牌匹配规则。
+  static RegExp get tokenPattern => _tokenPattern;
+
+  /// 在开放聊天页面前一次性安装业务表情，不保留上一版目录或隐式回退。
+  static void configure({
+    required List<EmojiPickerModelItem> emojis,
+    required String assetPackage,
+  }) {
+    // 先校验完整目录再替换，防止错误配置产生只更新一部分的全局状态。
+    final items = <String, EmojiPickerModelItem>{};
+    for (final emoji in emojis) {
+      if (!RegExp(r'^\[ZDEmoji_[A-Z][A-Za-z0-9]*\]$').hasMatch(emoji.name) ||
+          emoji.path.isEmpty ||
+          emoji.label.isEmpty ||
+          items.containsKey(emoji.name)) {
+        throw ArgumentError('表情编码必须唯一且符合ZDEmoji规范，名称和资源不能为空');
+      }
+      items[emoji.name] = emoji;
+    }
+    if (assetPackage.isEmpty) throw ArgumentError('表情资源所属包不能为空');
+    // 验证通过后整体替换目录和匹配规则，所有展示与输入入口立即使用相同版本。
+    _emojis = Map.unmodifiable(items);
+    _assetPackage = assetPackage;
+    _tokenPattern = RegExp(
+        items.isEmpty ? r'(?!)' : items.keys.map(RegExp.escape).join('|'));
+  }
+
+  /// 从当前目录精确查找令牌，未知内容不替换成其他表情。
+  static EmojiPickerModelItem? getEmoji(String code) => _emojis[code];
+
+  /// 会话行沿用名称映射入口，内容仅由当前业务目录生成。
+  static Map<String, String> getEmojiMap(BuildContext context) => {
+        for (final emoji in emojis) emoji.name: '[${emoji.label}]',
+      };
+
+  /// 将已知令牌显示为业务资源；保留未知编码和相邻原文。
   static List<InlineSpan> buildInlineSpans(String text, {double size = 18}) {
     final spans = <InlineSpan>[];
     var offset = 0;
-    for (final match in RegExp(r'\[TUIEmoji_[^\]]+\]').allMatches(text)) {
+    // 仅把已知令牌替换为图片，令牌之间的文字及旧编码均按原文保留。
+    for (final match in tokenPattern.allMatches(text)) {
       if (match.start > offset) {
         spans.add(TextSpan(text: text.substring(offset, match.start)));
       }
-      final code = match.group(0)!;
-      final assets =
-          emojiPickerDataDefault.entries.where((entry) => entry.value == code);
-      if (assets.isEmpty) {
-        spans.add(TextSpan(text: code));
-      } else {
-        spans.add(WidgetSpan(
-          alignment: PlaceholderAlignment.middle,
-          child: Image.asset(assets.first.key,
-              package: 'tencent_chat_uikit',
-              width: size,
-              height: size,
-              semanticLabel: code),
-        ));
-      }
+      final emoji = getEmoji(match.group(0)!)!;
+      spans.add(WidgetSpan(
+        alignment: PlaceholderAlignment.middle,
+        child: Image.asset(emoji.path,
+            package: assetPackage,
+            width: size,
+            height: size,
+            semanticLabel: emoji.label),
+      ));
       offset = match.end;
     }
     if (offset < text.length) spans.add(TextSpan(text: text.substring(offset)));
     return spans;
   }
 
-  static Map<String, String> getEmojiMap(BuildContext context) {
-    final atomicLocale = AppLocalization.of(context);
-    return {
-      '[TUIEmoji_Smile]': atomicLocale.tuiEmojiSmile,
-      '[TUIEmoji_Expect]': atomicLocale.tuiEmojiExpect,
-      '[TUIEmoji_Blink]': atomicLocale.tuiEmojiBlink,
-      '[TUIEmoji_Guffaw]': atomicLocale.tuiEmojiGuffaw,
-      '[TUIEmoji_KindSmile]': atomicLocale.tuiEmojiKindSmile,
-      '[TUIEmoji_Haha]': atomicLocale.tuiEmojiHaha,
-      '[TUIEmoji_Cheerful]': atomicLocale.tuiEmojiCheerful,
-      '[TUIEmoji_Speechless]': atomicLocale.tuiEmojiSpeechless,
-      '[TUIEmoji_Amazed]': atomicLocale.tuiEmojiAmazed,
-      '[TUIEmoji_Sorrow]': atomicLocale.tuiEmojiSorrow,
-      '[TUIEmoji_Complacent]': atomicLocale.tuiEmojiComplacent,
-      '[TUIEmoji_Silly]': atomicLocale.tuiEmojiSilly,
-      '[TUIEmoji_Lustful]': atomicLocale.tuiEmojiLustful,
-      '[TUIEmoji_Giggle]': atomicLocale.tuiEmojiGiggle,
-      '[TUIEmoji_Kiss]': atomicLocale.tuiEmojiKiss,
-      '[TUIEmoji_Wail]': atomicLocale.tuiEmojiWail,
-      '[TUIEmoji_TearsLaugh]': atomicLocale.tuiEmojiTearsLaugh,
-      '[TUIEmoji_Trapped]': atomicLocale.tuiEmojiTrapped,
-      '[TUIEmoji_Mask]': atomicLocale.tuiEmojiMask,
-      '[TUIEmoji_Fear]': atomicLocale.tuiEmojiFear,
-      '[TUIEmoji_BareTeeth]': atomicLocale.tuiEmojiBareTeeth,
-      '[TUIEmoji_FlareUp]': atomicLocale.tuiEmojiFlareUp,
-      '[TUIEmoji_Yawn]': atomicLocale.tuiEmojiYawn,
-      '[TUIEmoji_Tact]': atomicLocale.tuiEmojiTact,
-      '[TUIEmoji_Stareyes]': atomicLocale.tuiEmojiStareyes,
-      '[TUIEmoji_ShutUp]': atomicLocale.tuiEmojiShutUp,
-      '[TUIEmoji_Sigh]': atomicLocale.tuiEmojiSigh,
-      '[TUIEmoji_Hehe]': atomicLocale.tuiEmojiHehe,
-      '[TUIEmoji_Silent]': atomicLocale.tuiEmojiSilent,
-      '[TUIEmoji_Surprised]': atomicLocale.tuiEmojiSurprised,
-      '[TUIEmoji_Askance]': atomicLocale.tuiEmojiAskance,
-      '[TUIEmoji_Ok]': atomicLocale.tuiEmojiOk,
-      '[TUIEmoji_Shit]': atomicLocale.tuiEmojiShit,
-      '[TUIEmoji_Monster]': atomicLocale.tuiEmojiMonster,
-      '[TUIEmoji_Daemon]': atomicLocale.tuiEmojiDaemon,
-      '[TUIEmoji_Rage]': atomicLocale.tuiEmojiRage,
-      '[TUIEmoji_Fool]': atomicLocale.tuiEmojiFool,
-      '[TUIEmoji_Pig]': atomicLocale.tuiEmojiPig,
-      '[TUIEmoji_Cow]': atomicLocale.tuiEmojiCow,
-      '[TUIEmoji_Ai]': atomicLocale.tuiEmojiAi,
-      '[TUIEmoji_Skull]': atomicLocale.tuiEmojiSkull,
-      '[TUIEmoji_Bombs]': atomicLocale.tuiEmojiBombs,
-      '[TUIEmoji_Coffee]': atomicLocale.tuiEmojiCoffee,
-      '[TUIEmoji_Cake]': atomicLocale.tuiEmojiCake,
-      '[TUIEmoji_Beer]': atomicLocale.tuiEmojiBeer,
-      '[TUIEmoji_Flower]': atomicLocale.tuiEmojiFlower,
-      '[TUIEmoji_Watermelon]': atomicLocale.tuiEmojiWatermelon,
-      '[TUIEmoji_Rich]': atomicLocale.tuiEmojiRich,
-      '[TUIEmoji_Heart]': atomicLocale.tuiEmojiHeart,
-      '[TUIEmoji_Moon]': atomicLocale.tuiEmojiMoon,
-      '[TUIEmoji_Sun]': atomicLocale.tuiEmojiSun,
-      '[TUIEmoji_Star]': atomicLocale.tuiEmojiStar,
-      '[TUIEmoji_RedPacket]': atomicLocale.tuiEmojiRedPacket,
-      '[TUIEmoji_Celebrate]': atomicLocale.tuiEmojiCelebrate,
-      '[TUIEmoji_Bless]': atomicLocale.tuiEmojiBless,
-      '[TUIEmoji_Fortune]': atomicLocale.tuiEmojiFortune,
-      '[TUIEmoji_Convinced]': atomicLocale.tuiEmojiConvinced,
-      '[TUIEmoji_Prohibit]': atomicLocale.tuiEmojiProhibit,
-      '[TUIEmoji_666]': atomicLocale.tuiEmoji666,
-      '[TUIEmoji_857]': atomicLocale.tuiEmoji857,
-      '[TUIEmoji_Knife]': atomicLocale.tuiEmojiKnife,
-      '[TUIEmoji_Like]': atomicLocale.tuiEmojiLike,
-    };
-  }
-
-  /// Convert emoji codes in text to localized names
-  /// e.g., "abc[TUIEmoji_Smile]def" -> "abc[微笑]def" (Chinese) or "abc[Smile]def" (English)
-  ///
-  /// 将文本中的表情代码转换为本地化名称
+  /// 为纯文字摘要把已知令牌转换为带方括号的展示名称，未知编码保留原文。
   static String createLocalizedStringFromEmojiCodes(
       BuildContext context, String text) {
-    if (text.isEmpty) {
-      return text;
-    }
-
-    final emojiMap = getEmojiMap(context);
-    String result = text;
-
-    // Sort by key length descending to handle longer keys first
-    //
-    // 按键长度降序排序，优先处理较长的键
-    final sortedKeys = emojiMap.keys.toList()
-      ..sort((a, b) => b.length.compareTo(a.length));
-
-    for (final key in sortedKeys) {
-      if (result.contains(key)) {
-        result = result.replaceAll(key, emojiMap[key]!);
-      }
-    }
-
-    return result;
+    return text.replaceAllMapped(
+        tokenPattern, (match) => '[${getEmoji(match.group(0)!)!.label}]');
   }
 
-  static List<String> findEmojiKeyListFromText(String text) {
-    if (text.isEmpty) {
-      return [];
-    }
-
-    List<String> emojiKeyList = [];
-    // TUIKit custom emoji.
-    //
-    // TUIKit自定义表情
-    String regexOfCustomEmoji = "\\[(\\S+?)\\]";
-    Pattern patternOfCustomEmoji = RegExp(regexOfCustomEmoji);
-    Iterable<Match> matcherOfCustomEmoji =
-        patternOfCustomEmoji.allMatches(text);
-
-    for (Match match in matcherOfCustomEmoji) {
-      String? emojiName = match.group(0);
-      if (emojiName != null && emojiName.isNotEmpty) {
-        emojiKeyList.add(emojiName);
-      }
-    }
-
-    // Universal standard emoji.
-    //
-    // 通用标准表情
-    RegExp patternOfUniversalEmoji = getUniversalEmojiRegex();
-    Iterable<Match> matcherOfUniversalEmoji =
-        patternOfUniversalEmoji.allMatches(text);
-
-    for (Match match in matcherOfUniversalEmoji) {
-      String? emojiKey = match.group(0);
-      if (text.isNotEmpty && emojiKey != null && emojiKey.isNotEmpty) {
-        emojiKeyList.add(emojiKey);
-      }
-    }
-
-    return emojiKeyList;
-  }
+  /// 提取已注册业务令牌及系统Unicode表情，供翻译分段保留原始表情内容。
+  static List<String> findEmojiKeyListFromText(String text) => [
+        ...tokenPattern.allMatches(text).map((match) => match.group(0)!),
+        ...getUniversalEmojiRegex()
+            .allMatches(text)
+            .map((match) => match.group(0)!),
+      ];
 
   static String getRegexOfUniversalEmoji() {
     // Note: Dart uses \u{XXXX} syntax for Unicode code points, not \UXXXXXXXX like Java.
@@ -262,6 +187,7 @@ class EmojiManager {
     return regexEmoji;
   }
 
+  /// 缓存固定的Unicode表情规则，与业务目录的可变令牌规则分开维护。
   static RegExp? _universalEmojiRegex;
 
   static RegExp getUniversalEmojiRegex() {

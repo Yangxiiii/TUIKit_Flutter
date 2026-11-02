@@ -120,11 +120,7 @@ class QuotePreviewBar extends StatelessWidget {
 
     final contentText = _getContentSummary(locale);
     final displayText = '$prefix$contentText';
-    // Use ExtendedText so [TUIEmoji_*] tokens in the quoted text render as
-    // inline emoji images instead of literal text, matching the message
-    // bubble's quote preview.
-    //
-    // 使用扩展文本，这样被引用文本中的[TUIEmoji_*]标记会呈现为行内表情图片，而不是文本，匹配消息气泡的引用预览。
+    // 使用共用解析器将ZDEmoji令牌显示为行内图片，原文用于引用与发送。
     return ExtendedText(
       displayText,
       specialTextSpanBuilder: ChatSpecialTextSpanBuilder(

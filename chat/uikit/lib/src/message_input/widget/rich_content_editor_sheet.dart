@@ -2,6 +2,10 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import '../../emoji_picker/emoji_manager.dart';
+import '../../emoji_picker/emoji_picker.dart';
+import '../message_text.dart';
+import '../input_keyboard_panel.dart';
 import '../../message_list/widgets/chat_media_placeholder.dart';
 import 'package:app_ui/app_ui.dart' show AppIcons, AppColorBuildContext;
 import 'package:tencent_chat_uikit/src/file_picker/file_picker.dart';
@@ -408,6 +412,15 @@ final class RichContentEditorSheet extends StatefulWidget {
   /// 打开前共享工具条已选中的 Markdown 标记。
   final Set<String> initialActiveFormats;
 
+  /// 从普通输入展开时沿用表情模式，避免正文首次聚焦触发系统键盘。
+  final bool initialShowEmojiPanel;
+
+  /// 上一个编辑区的键盘高度，单位为逻辑像素；未提供时使用当前系统遮挡或默认值。
+  final double? initialKeyboardHeight;
+
+  /// 普通输入区扁平原文中的UTF-16选区，附件按编辑态令牌长度计算。
+  final TextSelection? initialSelection;
+
   const RichContentEditorSheet({
     super.key,
     required this.conversationName,
@@ -424,15 +437,24 @@ final class RichContentEditorSheet extends StatefulWidget {
     this.showToolbar = true,
     this.initialShowFormatting = false,
     this.initialActiveFormats = const {},
+    this.initialShowEmojiPanel = false,
+    this.initialKeyboardHeight,
+    this.initialSelection,
   });
 
   @override
   State<RichContentEditorSheet> createState() => RichContentEditorSheetState();
 }
 
-/// 管理编辑器打开期间的输入、焦点与本地媒体处理占位；上传在发送时由宿主接管。
+/// 管理编辑器的正文、焦点、表情键盘与本地媒体占位；上传在发送时由宿主接管。
 final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
   late final TextEditingController _titleController;
+
+  /// 标题也能主动切回系统键盘，焦点生命周期与编辑器一致。
+  final FocusNode _titleFocusNode = FocusNode();
+
+  /// 当前窗口的输入区域过渡，宿主通过只读入口复用几何，不复制其状态。
+  InputKeyboardPanel? _keyboardPanel;
   final List<_EditorBlock> _blocks = [];
 
   /// 正文图片和视频令牌对应的草稿块；令牌被删除时同步移除，避免已删媒体参与发送。
@@ -444,6 +466,9 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
   int? _activeTextBlockId;
   late bool _showFormatting;
 
+  /// 当前编辑器是否使用表情键盘，宿主只读取该状态，不维护第二份展开标志。
+  bool _showEmojiPanel = false;
+
   /// 仅限制本编辑器的提交交互；跨入口业务防重仍由宿主发送入口处理。
   bool _isSending = false;
 
@@ -452,6 +477,34 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
   late final _formatInputFormatter = activeMarkdownFormatInputFormatter(
     () => _activeFormats,
   );
+
+  /// 外部共享工具条和底部面板共同读取的表情键盘状态。
+  bool get showEmojiPanel => _showEmojiPanel;
+
+  /// 当前正文选区在普通输入扁平原文中的偏移，失效选区交给宿主按末尾回填。
+  TextSelection? get inlineSelection {
+    var offset = 0;
+    // 非内联附件在普通输入中占一个完整令牌，不能把其前缀误算成可见字符数。
+    for (final block in _blocks) {
+      if (block is _TextEditorBlock) {
+        if (block.id == _activeTextBlockId) {
+          final selection = block.controller.selection;
+          return selection.isValid
+              ? selection.copyWith(
+                  baseOffset: offset + selection.baseOffset,
+                  extentOffset: offset + selection.extentOffset)
+              : null;
+        }
+        offset += block.controller.text.length;
+      } else if (block is _AttachmentEditorBlock) {
+        offset += richContentAttachmentToken(block.block.id).length;
+      }
+    }
+    return null;
+  }
+
+  /// 普通输入区复用展开编辑器的面板高度与切回系统键盘的过渡占位。
+  InputKeyboardPanel? get keyboardPanel => _keyboardPanel;
 
   /// 外部共享工具条当前是否显示文字格式操作。
   bool get showFormatting => _showFormatting;
@@ -478,18 +531,20 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
   void initState() {
     super.initState();
     _showFormatting = widget.initialShowFormatting;
+    _showEmojiPanel = widget.initialShowEmojiPanel;
     _activeFormats.addAll(widget.initialActiveFormats);
     _titleController = TextEditingController(text: widget.initialDraft.title)
       ..addListener(_refresh);
     _restoreDraft(widget.initialDraft);
     if (_blocks.isEmpty) _blocks.add(_newTextBlock());
+    // 初始选区先于监听器恢复，避免覆盖层首帧创建时反向触发宿主setState。
+    final initialBlock = _restoreInitialSelection();
+    _activeTextBlockId = initialBlock.id;
     for (final block in _blocks.whereType<_TextEditorBlock>()) {
       block.lastValue = block.controller.value;
       block.controller.addListener(_refresh);
       block.focusNode.addListener(_refresh);
     }
-    final initialBlock = _blocks.whereType<_TextEditorBlock>().first;
-    _activeTextBlockId = initialBlock.id;
     // 在弹层首帧建立输入连接后接管焦点，键盘已展开时不会先收起再弹出。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -499,7 +554,26 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final firstLayout = _keyboardPanel == null;
+    _keyboardPanel ??= InputKeyboardPanel(
+        view: View.of(context),
+        onChanged: () {
+          if (!mounted) return;
+          setState(() {});
+          widget.onToolbarChanged?.call();
+        });
+    if (firstLayout && _showEmojiPanel) {
+      _keyboardPanel!.showEmoji(_activeTextBlock!.focusNode,
+          previousHeight: widget.initialKeyboardHeight);
+    }
+  }
+
+  @override
   void dispose() {
+    _keyboardPanel?.dispose();
+    _titleFocusNode.dispose();
     _titleController
       ..removeListener(_refresh)
       ..dispose();
@@ -546,6 +620,32 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
       (id, _) => !source.contains(richContentAttachmentToken(id)),
     );
     _setEditorState(() {});
+  }
+
+  /// 将普通输入的选区定位到对应正文块；跨独立附件的端点钳制到该正文块边界。
+  _TextEditorBlock _restoreInitialSelection() {
+    final selection = widget.initialSelection;
+    final fallback = _blocks.whereType<_TextEditorBlock>().first;
+    if (selection == null || !selection.isValid) return fallback;
+    var offset = 0;
+    // 合并后的正文保留内联媒体令牌，独立文件按普通输入的令牌长度推进偏移。
+    for (final block in _blocks) {
+      if (block is _TextEditorBlock) {
+        if (selection.baseOffset <= offset + block.controller.text.length) {
+          block.controller.selection = selection.copyWith(
+            baseOffset: (selection.baseOffset - offset)
+                .clamp(0, block.controller.text.length),
+            extentOffset: (selection.extentOffset - offset)
+                .clamp(0, block.controller.text.length),
+          );
+          return block;
+        }
+        offset += block.controller.text.length;
+      } else if (block is _AttachmentEditorBlock) {
+        offset += richContentAttachmentToken(block.block.id).length;
+      }
+    }
+    return fallback;
   }
 
   _TextEditorBlock _newTextBlock([String text = '']) {
@@ -658,13 +758,45 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     }
   }
 
-  /// 在当前正文光标处插入表情。
-  void insertEmoji() => _insertText('😀');
+  /// 保留正文焦点与选区，只切换系统键盘和同一区域的ZDEmoji面板。
+  void toggleEmojiPanel() {
+    final focus =
+        (_activeTextBlock ?? _blocks.whereType<_TextEditorBlock>().last)
+            .focusNode;
+    if (_showEmojiPanel) {
+      _setEditorState(() => _showEmojiPanel = false);
+      _keyboardPanel!.showSystem(focus);
+    } else {
+      _setEditorState(() => _showEmojiPanel = true);
+      _keyboardPanel!.showEmoji(focus);
+    }
+  }
+
+  /// 在当前正文选区插入完整业务令牌，选择期间不重新唤起系统键盘。
+  void insertEmoji(String code) {
+    if (EmojiManager.getEmoji(code) == null) return;
+    _insertText(code, requestFocus: !_showEmojiPanel);
+  }
+
+  /// 表情键盘退格作用于当前正文，完整令牌与系统组合表情保持原子删除。
+  void deleteEmojiCharacter() {
+    final block =
+        _activeTextBlock ?? _blocks.whereType<_TextEditorBlock>().last;
+    final value = block.controller.value;
+    block.controller.value = value.selection.isValid &&
+            !value.selection.isCollapsed
+        ? TextEditingValue(
+            text: value.text
+                .replaceRange(value.selection.start, value.selection.end, ''),
+            selection: TextSelection.collapsed(offset: value.selection.start))
+        : deleteMessageCharacterBefore(value);
+  }
 
   /// 在当前正文光标处插入提及符号。
   void insertMention() => _insertText('@');
 
-  void _insertText(String value) {
+  /// 按原文选区替换正文；面板选择只更新内容和光标，其他插入入口保持焦点行为。
+  void _insertText(String value, {bool requestFocus = true}) {
     final block =
         _activeTextBlock ?? _blocks.whereType<_TextEditorBlock>().last;
     final current = block.controller.value;
@@ -677,7 +809,14 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
         offset: selection.start + value.length,
       ),
     );
-    block.focusNode.requestFocus();
+    if (requestFocus) {
+      if (_showEmojiPanel) {
+        _setEditorState(() => _showEmojiPanel = false);
+        _keyboardPanel!.showSystem(block.focusNode);
+      } else {
+        block.focusNode.requestFocus();
+      }
+    }
   }
 
   _TextEditorBlock? get _activeTextBlock {
@@ -689,8 +828,10 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
 
   /// 点击正文时同步当前块的光标格式；空正文保留已手动选择、尚待输入的样式。
   void _activateTextBlock(_TextEditorBlock block) {
-    if (_activeTextBlockId == block.id) return;
+    if (_activeTextBlockId == block.id && !_showEmojiPanel) return;
+    final returnToKeyboard = _showEmojiPanel;
     _setEditorState(() {
+      _showEmojiPanel = false;
       _activeTextBlockId = block.id;
       final value = block.controller.value;
       if (value.text.isNotEmpty &&
@@ -702,6 +843,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
               value.text, value.selection.extentOffset));
       }
     });
+    if (returnToKeyboard) _keyboardPanel!.showSystem(block.focusNode);
   }
 
   /// 切换外部共享工具条指定的 Markdown 格式。
@@ -992,6 +1134,8 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
   Widget build(BuildContext context) {
     final colors = SemanticColorScheme.of(context);
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+    final renderEmojis =
+        _showEmojiPanel || (_keyboardPanel?.returningToSystem ?? false);
     final panel = Material(
       color: colors.bgColorOperate,
       borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
@@ -1010,11 +1154,12 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
                 showFormatting: _showFormatting,
                 activeFormats: _activeFormats,
                 canSend: canSend,
-                emojiTooltip: '插入表情',
+                showKeyboard: _showEmojiPanel,
+                emojiTooltip: _showEmojiPanel ? '显示键盘' : '表情',
                 imageTooltip: '插入图片/视频',
                 fileTooltip: '插入文件',
                 sendTooltip: '发送富文本消息',
-                onEmoji: insertEmoji,
+                onEmoji: toggleEmojiPanel,
                 onMention: insertMention,
                 onVideo: null,
                 onImage: pickAlbumMedia,
@@ -1026,6 +1171,21 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
                 onSend: send,
               ),
             ),
+            if (renderEmojis)
+              SizedBox(
+                height: _keyboardPanel!.remainingHeight,
+                child: ClipRect(
+                    child: OverflowBox(
+                  alignment: Alignment.topCenter,
+                  minHeight: _keyboardPanel!.height,
+                  maxHeight: _keyboardPanel!.height,
+                  child: EmojiPicker(
+                    onEmojiClick: (data) => insertEmoji(data['name'] as String),
+                    onDeleteClick: deleteEmojiCharacter,
+                    onSendClick: send,
+                  ),
+                )),
+              ),
           ],
         ],
       ),
@@ -1098,6 +1258,13 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
               child: TextField(
                 key: const Key('rich_content_title'),
                 controller: _titleController,
+                focusNode: _titleFocusNode,
+                onTap: () {
+                  if (_showEmojiPanel) {
+                    _setEditorState(() => _showEmojiPanel = false);
+                    _keyboardPanel!.showSystem(_titleFocusNode);
+                  }
+                },
                 maxLines: 1,
                 style: TextStyle(
                   color: colors.textColorPrimary,
@@ -1153,6 +1320,11 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
                     key: Key('rich_content_text_${block.id}'),
                     controller: block.controller,
                     focusNode: block.focusNode,
+                    keyboardMode: _showEmojiPanel
+                        ? ExtendedKeyboardMode.custom
+                        : _keyboardPanel?.returningToSystem == true
+                            ? ExtendedKeyboardMode.returningToSystem
+                            : ExtendedKeyboardMode.system,
                     inputFormatters: [_formatInputFormatter],
                     onTap: () => _activateTextBlock(block),
                     keyboardType: TextInputType.multiline,

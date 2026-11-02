@@ -40,6 +40,7 @@ import 'mention/mention_info.dart';
 import 'mention/mention_member_picker.dart';
 import 'message_input_config.dart';
 import 'message_text.dart';
+import 'input_keyboard_panel.dart';
 import 'pending_rich_content_message.dart';
 import 'widget/audio_record_overlay.dart';
 import 'widget/quote_preview_bar.dart';
@@ -63,6 +64,9 @@ class MessageInput extends StatefulWidget {
   /// 当前输入和草稿所属的稳定会话标识。
   final String conversationID;
 
+  /// 与导航共享的宿主姓名及昵称；未提供时使用 SDK 会话标题。
+  final String? conversationDisplayName;
+
   /// 宿主配置的可见能力、附件上传器和统一操作守卫。
   final MessageInputConfigProtocol config;
 
@@ -72,6 +76,7 @@ class MessageInput extends StatefulWidget {
   const MessageInput({
     super.key,
     required this.conversationID,
+    this.conversationDisplayName,
     this.config = const ChatMessageInputConfig(),
     this.onLocalMessageSent,
   });
@@ -130,7 +135,8 @@ class MessageInputState extends State<MessageInput>
   final Set<String> _activeInlineFormats = {};
 
   /// 上次原文选区；仅光标移动时派生格式，程序切换按钮时先同步以保留下一次输入的选择。
-  TextSelection _lastFormatSelection = const TextSelection.collapsed(offset: -1);
+  TextSelection _lastFormatSelection =
+      const TextSelection.collapsed(offset: -1);
   late final TextInputFormatter _inlineFormatInputFormatter =
       activeMarkdownFormatInputFormatter(() => _activeInlineFormats);
   int _morePanelPageIndex = 0;
@@ -148,6 +154,9 @@ class MessageInputState extends State<MessageInput>
   bool _pendingConvertRecord = false;
 
   double _bottomPadding = 0.0;
+
+  /// 当前窗口的键盘区域过渡，普通输入持有，展开编辑器使用自己的同类实例。
+  InputKeyboardPanel? _keyboardPanel;
 
   /// Flag to indicate we are actively switching to emoji/more panel.
   /// When true, _onFocusChanged should NOT collapse panels.
@@ -307,8 +316,28 @@ class MessageInputState extends State<MessageInput>
     _textEditingFocusNode.requestFocus();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _keyboardPanel ??= InputKeyboardPanel(
+        view: View.of(context),
+        onChanged: () {
+          if (mounted) setState(() {});
+        });
+  }
+
+  @override
+  void didUpdateWidget(MessageInput oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.conversationDisplayName != widget.conversationDisplayName) {
+      // 资料异步返回时，已展开的富文本浮层也要使用与导航相同的名称。
+      _richContentEditorOverlay?.markNeedsBuild();
+    }
+  }
+
   void _onFocusChanged() {
     if (!_textEditingFocusNode.hasFocus) {
+      _keyboardPanel?.clear();
       // If we are actively switching to emoji/more panel, do NOT collapse panels.
       if (_isSwitchingPanel) {
         _isSwitchingPanel = false;
@@ -505,6 +534,7 @@ class MessageInputState extends State<MessageInput>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _keyboardPanel?.dispose();
     unawaited(_localSendSubscription?.cancel());
     _richContentEditorOverlay?.remove();
     _richContentEditorOverlay = null;
@@ -625,7 +655,8 @@ class MessageInputState extends State<MessageInput>
         selection.isValid &&
         selection.isCollapsed &&
         selection != _lastFormatSelection) {
-      final formats = richContentMarkdownFormatsAt(text, selection.extentOffset);
+      final formats =
+          richContentMarkdownFormatsAt(text, selection.extentOffset);
       if (_activeInlineFormats.length != formats.length ||
           !_activeInlineFormats.containsAll(formats)) {
         setState(() {
@@ -846,22 +877,31 @@ class MessageInputState extends State<MessageInput>
     _textEditingFocusNode.requestFocus();
   }
 
+  /// 共用键盘仅修改当前活动输入区，展开编辑器时不能写入隐藏的普通草稿。
   void _onEmojiClicked(Map<String, dynamic> data) {
-    if (data.containsKey("eventType")) {
-      if (data["eventType"] == "stickClick") {
-        if (data["type"] == 0) {
-          var space = "";
-          if (_textEditingController.text == "") {
-            space = " ";
-          }
-          _textEditingController.text =
-              "$space${_textEditingController.text}${data["name"]}";
-        }
-      }
+    if (_isRichContentEditorOpen) {
+      _richContentEditorKey.currentState?.insertEmoji(data['name'] as String);
+      return;
     }
+    if (data['eventType'] != 'stickClick' || data['type'] != 0) return;
+    final code = data['name'] as String;
+    if (EmojiManager.getEmoji(code) == null) return;
+    final current = _textEditingController.value;
+    final selection = current.selection.isValid
+        ? current.selection
+        : TextSelection.collapsed(offset: current.text.length);
+    _textEditingController.value = TextEditingValue(
+      text: current.text.replaceRange(selection.start, selection.end, code),
+      selection: TextSelection.collapsed(offset: selection.start + code.length),
+    );
   }
 
+  /// 将表情键盘退格交给当前输入区，普通输入仍保留提及和表情的原子删除。
   void _onDeleteClick() {
+    if (_isRichContentEditorOpen) {
+      _richContentEditorKey.currentState?.deleteEmojiCharacter();
+      return;
+    }
     final text = _textEditingController.text;
     if (text.isEmpty) return;
 
@@ -941,8 +981,12 @@ class MessageInputState extends State<MessageInput>
       draft.canSubmit &&
       (draft.canSend || widget.config.richContentAttachmentUploader != null);
 
-  /// 根据普通输入区的编辑模式选择文本或富文本发送链路。
+  /// 发送当前活动编辑区的草稿；展开编辑器继续负责校验和发送后的关闭行为。
   Future<void> _handleInputSend() async {
+    if (_isRichContentEditorOpen) {
+      await _richContentEditorKey.currentState?.send();
+      return;
+    }
     if (!_inlineRichContentEnabled) {
       await _handleTextSendMessagePayload();
       return;
@@ -980,10 +1024,12 @@ class MessageInputState extends State<MessageInput>
   /// 在现有工具条上方展开富文本编辑器，不重建键盘输入连接。
   void _openRichContentEditor() {
     if (_richContentEditorOverlay != null) return;
+    final keepEmoji = _showEmojiPanel;
+    final keyboardHeight = _keyboardPanel?.height;
+    final selection = _textEditingController.selection;
     // 输入框已聚焦时保留输入连接，等待展开编辑器的正文首帧直接接管焦点。
     if (_textEditingFocusNode.hasFocus) _isSwitchingPanel = true;
     setState(() {
-      _showEmojiPanel = false;
       _showMorePanel = false;
       _isRichContentEditorOpen = true;
     });
@@ -1011,8 +1057,9 @@ class MessageInputState extends State<MessageInput>
             toolbarRect: toolbarRect,
             editor: RichContentEditorSheet(
               key: _richContentEditorKey,
-              conversationName:
-                  _conversationInfo?.title ?? widget.conversationID,
+              conversationName: widget.conversationDisplayName ??
+                  _conversationInfo?.title ??
+                  widget.conversationID,
               initialDraft: _buildInlineRichContentDraft(),
               canUploadAttachments:
                   widget.config.richContentAttachmentUploader != null,
@@ -1027,6 +1074,9 @@ class MessageInputState extends State<MessageInput>
               showToolbar: false,
               initialShowFormatting: _showTextFormattingToolbar,
               initialActiveFormats: _activeInlineFormats,
+              initialShowEmojiPanel: keepEmoji,
+              initialKeyboardHeight: keyboardHeight,
+              initialSelection: selection,
             ),
             toolbar: Material(
               type: MaterialType.transparency,
@@ -1077,9 +1127,12 @@ class MessageInputState extends State<MessageInput>
     _scheduleDraftSave();
   }
 
-  /// 移除展开编辑器，并把其草稿同步回普通输入框。
+  /// 收起时向普通输入交接草稿、选区和键盘模式，成功发送则清空并关闭表情面板。
   void _closeRichContentEditor(RichContentEditorResult result) {
     final editor = _richContentEditorKey.currentState;
+    final keepEmoji = !result.sent && (editor?.showEmojiPanel ?? false);
+    final keyboardHeight = editor?.keyboardPanel?.height;
+    final selection = result.sent ? null : editor?.inlineSelection;
     if (editor != null) {
       _showTextFormattingToolbar = editor.showFormatting;
       _activeInlineFormats
@@ -1089,16 +1142,22 @@ class MessageInputState extends State<MessageInput>
     _richContentEditorOverlay?.remove();
     _richContentEditorOverlay = null;
     if (!mounted) return;
-    _restoreInlineRichContentDraft(result.draft);
+    _restoreInlineRichContentDraft(result.draft, selection: selection);
     if (result.sent) _clearDraft();
     setState(() {
       _isRichContentEditorOpen = false;
-      _inputMode = !result.sent && result.draft.hasContent
+      _showEmojiPanel = keepEmoji;
+      _inputMode = !result.sent && (result.draft.hasContent || keepEmoji)
           ? _InputMode.text
           : _inputMode;
       _inlineRichContentEnabled = !result.sent &&
           (result.draft.hasContent || _inlineRichContentEnabled);
     });
+    if (keepEmoji) {
+      // 接收方先按custom模式重建，再交接焦点，收起编辑器不能触发系统键盘。
+      _keyboardPanel!
+          .showEmoji(_textEditingFocusNode, previousHeight: keyboardHeight);
+    }
   }
 
   /// 把普通输入框的文字与附件令牌还原为有序富文本草稿。
@@ -1130,7 +1189,8 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// 把展开编辑器的有序块转为普通输入框可编辑的附件令牌。
-  void _restoreInlineRichContentDraft(RichContentDraft draft) {
+  void _restoreInlineRichContentDraft(RichContentDraft draft,
+      {TextSelection? selection}) {
     _richContentDraft = draft;
     _inlineRichContentAttachments.clear();
     final text = StringBuffer();
@@ -1148,7 +1208,12 @@ class MessageInputState extends State<MessageInput>
     final value = text.toString();
     _textEditingController.value = TextEditingValue(
       text: value,
-      selection: TextSelection.collapsed(offset: value.length),
+      // 草稿转换后校验选区边界，保留反向选区和光标位置，未提供时沿用末尾回填。
+      selection: selection?.isValid == true
+          ? selection!.copyWith(
+              baseOffset: selection.baseOffset.clamp(0, value.length),
+              extentOffset: selection.extentOffset.clamp(0, value.length))
+          : TextSelection.collapsed(offset: value.length),
     );
   }
 
@@ -2204,6 +2269,8 @@ class MessageInputState extends State<MessageInput>
     _bottomPadding = MediaQuery.paddingOf(context).bottom;
     atomicLocale = AppLocalization.of(context);
     final panelHeight = _getBottomContainerHeight();
+    final showEmoji = _isEmojiPanelVisible ||
+        (_activeKeyboardPanel?.returningToSystem ?? false);
     if (_richContentEditorOverlay != null) {
       // 键盘 Insets 改变后等待工具条完成布局，再校正编辑器底部锚点。
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2222,27 +2289,29 @@ class MessageInputState extends State<MessageInput>
                 onClose: clearQuotedMessage,
               ),
             AnimatedContainer(
-              // 键盘出现会逐帧改变底部安全区，不能再叠加高度补间；仅面板切换需要动画。
-              duration: (_showEmojiPanel || _showMorePanel)
+              // 表情与系统遮挡共同填满同一区域，按尺寸通知直接重排，不叠加第二份高度动画。
+              // 更多面板仍保留独立展开动画，富文本覆盖层继续使用工具条实测锚点。
+              duration: _showMorePanel
                   ? const Duration(milliseconds: 300)
                   : Duration.zero,
               curve: Curves.ease,
               clipBehavior: Clip.hardEdge,
               decoration: BoxDecoration(color: colors.bgColorInput),
               height: panelHeight,
-              constraints: (_showEmojiPanel || _showMorePanel)
+              constraints: (showEmoji || _showMorePanel)
                   ? BoxConstraints(minHeight: panelHeight)
                   : null,
-              child: _showEmojiPanel
-                  ? Center(
-                      child: FutureBuilder<bool>(
-                        future: getEmojiPanelWidget(),
-                        builder: (
-                          BuildContext context,
-                          AsyncSnapshot<bool> snapshot,
-                        ) {
-                          return stickerWidget;
-                        },
+              child: showEmoji
+                  ? ClipRect(
+                      child: OverflowBox(
+                        alignment: Alignment.topCenter,
+                        minHeight: _activeKeyboardPanel?.height ?? 280,
+                        maxHeight: _activeKeyboardPanel?.height ?? 280,
+                        child: EmojiPicker(
+                          onEmojiClick: _onEmojiClicked,
+                          onSendClick: _handleInputSend,
+                          onDeleteClick: _onDeleteClick,
+                        ),
                       ),
                     )
                   : _showMorePanel
@@ -2344,14 +2413,13 @@ class MessageInputState extends State<MessageInput>
               : _inlineRichContentEnabled
                   ? _canSubmitRichContentDraft(_buildInlineRichContentDraft())
                   : _showSendButton),
-      showKeyboard: !_isRichContentEditorOpen && _showEmojiPanel,
-      emojiTooltip:
-          !_isRichContentEditorOpen && _showEmojiPanel ? '显示键盘' : '表情',
+      showKeyboard: _isEmojiPanelVisible,
+      emojiTooltip: _isEmojiPanelVisible ? '显示键盘' : '表情',
       imageTooltip: _isRichContentEditorOpen ? '插入图片/视频' : atomicLocale.album,
       fileTooltip: _isRichContentEditorOpen ? '插入文件' : atomicLocale.file,
       sendTooltip: _isRichContentEditorOpen ? '发送富文本消息' : atomicLocale.send,
       onEmoji: _isRichContentEditorOpen
-          ? () => _richContentEditorKey.currentState?.insertEmoji()
+          ? () => _richContentEditorKey.currentState?.toggleEmojiPanel()
           : _toggleEmojiPanel,
       onMention: _isRichContentEditorOpen
           ? () => _richContentEditorKey.currentState?.insertMention()
@@ -2486,29 +2554,18 @@ class MessageInputState extends State<MessageInput>
     });
   }
 
-  /// Toggle emoji panel
-  ///
-  /// 切换表情面板
+  /// 保留正文焦点和选区，只切换平台键盘的可见性与同一区域的表情面板。
   void _toggleEmojiPanel() {
-    if (!_showEmojiPanel) {
-      // Opening emoji panel: hide keyboard
-      //
-      // 打开表情面板：隐藏键盘
-      _isSwitchingPanel = true;
-      _textEditingFocusNode.unfocus();
+    if (_showEmojiPanel) {
+      setState(() => _showEmojiPanel = false);
+      _keyboardPanel!.showSystem(_textEditingFocusNode);
+    } else {
       setState(() {
         _inputMode = _InputMode.text;
         _showEmojiPanel = true;
         _showMorePanel = false;
       });
-    } else {
-      // Closing emoji panel: show keyboard
-      //
-      // 关闭表情面板：显示键盘
-      setState(() {
-        _showEmojiPanel = false;
-      });
-      _textEditingFocusNode.requestFocus();
+      _keyboardPanel!.showEmoji(_textEditingFocusNode);
     }
   }
 
@@ -2566,7 +2623,7 @@ class MessageInputState extends State<MessageInput>
           children: [
             Expanded(
               child: Text(
-                '发送给 ${_conversationInfo?.title ?? widget.conversationID}',
+                '发送给 ${widget.conversationDisplayName ?? _conversationInfo?.title ?? widget.conversationID}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: FontScheme.caption1Regular.copyWith(
@@ -2585,13 +2642,19 @@ class MessageInputState extends State<MessageInput>
     return _MentionTextField(
       controller: _textEditingController,
       focusNode: _textEditingFocusNode,
+      keyboardMode: _showEmojiPanel
+          ? ExtendedKeyboardMode.custom
+          : _keyboardPanel?.returningToSystem == true
+              ? ExtendedKeyboardMode.returningToSystem
+              : ExtendedKeyboardMode.system,
       inputFormatter: _inlineFormatInputFormatter,
       inlineAttachments: _inlineRichContentAttachments,
       videoPlayIcon: widget.config.videoPlayIcon,
       imageLoadingPlaceholder: widget.config.imageLoadingPlaceholder,
       videoLoadingPlaceholder: widget.config.videoLoadingPlaceholder,
       colorsTheme: colorsTheme,
-      hintText: '发送给 ${_conversationInfo?.title ?? widget.conversationID}',
+      hintText:
+          '发送给 ${widget.conversationDisplayName ?? _conversationInfo?.title ?? widget.conversationID}',
       onExpand: _openRichContentEditor,
       onTap: () {
         if (_showEmojiPanel ||
@@ -2602,6 +2665,7 @@ class MessageInputState extends State<MessageInput>
             _showMorePanel = false;
             _inputMode = _InputMode.text;
           });
+          _keyboardPanel!.showSystem(_textEditingFocusNode);
         }
       },
     );
@@ -2629,12 +2693,23 @@ class MessageInputState extends State<MessageInput>
     );
   }
 
-  double _getBottomContainerHeight() {
-    if (_showEmojiPanel || _showMorePanel) {
-      return 280;
-    }
+  /// 展开编辑器持有自身面板状态，普通输入区只读取它来安排共用键盘区域。
+  bool get _isEmojiPanelVisible => _isRichContentEditorOpen
+      ? _richContentEditorKey.currentState?.showEmojiPanel ?? _showEmojiPanel
+      : _showEmojiPanel;
 
-    return _bottomPadding;
+  /// 当前活动输入区的过渡几何，宿主不复制展开编辑器的键盘状态。
+  InputKeyboardPanel? get _activeKeyboardPanel => _isRichContentEditorOpen
+      ? _richContentEditorKey.currentState?.keyboardPanel ?? _keyboardPanel
+      : _keyboardPanel;
+
+  /// 自定义面板与系统遮挡合计只占一份键盘区域，更多面板保留既有高度。
+  double _getBottomContainerHeight() {
+    if (_showMorePanel) return 280;
+    final keyboard = _activeKeyboardPanel;
+    return keyboard?.hasReservedSpace == true
+        ? keyboard!.remainingHeight
+        : _bottomPadding;
   }
 }
 
@@ -2830,6 +2905,9 @@ class _MentionTextField extends StatefulWidget {
   /// 由父输入区释放，切换编辑模式时保持同一焦点身份。
   final FocusNode focusNode;
 
+  /// 表情面板仅抑制此输入框的系统键盘显示，不修改全局输入绑定。
+  final ExtendedKeyboardMode keyboardMode;
+
   /// 当前宿主解析后的文字、占位和背景语义色。
   final SemanticColorScheme colorsTheme;
 
@@ -2860,6 +2938,7 @@ class _MentionTextField extends StatefulWidget {
   const _MentionTextField({
     required this.controller,
     required this.focusNode,
+    this.keyboardMode = ExtendedKeyboardMode.system,
     required this.colorsTheme,
     this.onTap,
     this.hintText,
@@ -3019,6 +3098,7 @@ class _MentionTextFieldState extends State<_MentionTextField> {
                             key: const Key('message_input_text_field'),
                             onTap: widget.onTap,
                             focusNode: widget.focusNode,
+                            keyboardMode: widget.keyboardMode,
                             controller: widget.controller,
                             scrollController: _scrollController,
                             minLines: 1,

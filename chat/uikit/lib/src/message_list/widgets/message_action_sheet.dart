@@ -1,3 +1,4 @@
+import 'package:tencent_chat_uikit/src/emoji_picker/emoji_manager.dart';
 import 'dart:async';
 import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
@@ -30,7 +31,7 @@ class MessageActionSheet extends StatefulWidget {
   /// SDK支持回应时复用原有添加/撤销回应流程。
   final void Function(EmojiPickerModelItem)? onReaction;
 
-  /// 打开TUIKit完整表情面板，表情资源不另外复制或导出。
+  /// 打开ZDEmoji完整表情面板，资源由业务目录统一管理。
   final VoidCallback? onMoreReactions;
 
   /// 原发送时间加五分钟；菜单已打开时到期只禁用编辑，不移除该行。
@@ -43,7 +44,7 @@ class MessageActionSheet extends StatefulWidget {
   State<MessageActionSheet> createState() => _MessageActionSheetState();
 }
 
-/// 加载TUIKit近期表情，并报告实际面板边界；不保存消息编辑业务状态。
+/// 加载当前目录近期表情，并报告实际面板边界；不保存消息编辑业务状态。
 class _MessageActionSheetState extends State<MessageActionSheet> {
   final GlobalKey _bounds = GlobalKey();
 
@@ -113,7 +114,7 @@ class _MessageActionSheetState extends State<MessageActionSheet> {
     }
     if (!_loaded) {
       _loaded = true;
-      // 近期记录读取失败仍保留默认TUIKit表情，不能阻断消息操作。
+      // 近期记录读取失败仍保留当前目录表情，不能阻断消息操作。
       _emojis = RecentEmojiManager.getAllEmojis(context).take(6).toList();
       unawaited(_loadRecentEmojis());
     }
@@ -255,7 +256,9 @@ class _MessageActionSheetState extends State<MessageActionSheet> {
                           widget.onReaction!(emoji);
                         },
                   child: Image.asset(emoji.path,
-                      package: 'tencent_chat_uikit', width: 32, height: 32)),
+                      package: EmojiManager.assetPackage,
+                      width: 32,
+                      height: 32)),
             ),
           Semantics(
               identifier: 'tim.message.reactionsMore',

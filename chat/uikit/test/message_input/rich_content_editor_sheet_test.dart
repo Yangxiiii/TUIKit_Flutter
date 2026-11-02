@@ -7,6 +7,8 @@ import 'package:flutter/rendering.dart';
 import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tencent_chat_uikit/tencent_chat_uikit.dart'
+    show EmojiManager, EmojiPicker, EmojiPickerModelItem;
 import 'package:tencent_chat_uikit/src/message_input/src/chat_special_text_span_builder.dart';
 import 'package:tencent_chat_uikit/src/message_input/message_input.dart';
 import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
@@ -19,6 +21,281 @@ import 'package:tuikit_atomic_x/base_component/base_component.dart'
 import 'package:tuikit_atomic_x/album_picker/album_picker.dart';
 
 void main() {
+  testWidgets('收起富文本时保留表情键盘高度和正文选区，普通输入继续原位插入', (tester) async {
+    _configureEditorEmojis();
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
+    await tester.pumpWidget(MaterialApp(
+      theme: AppThemeFactory.create(
+          const AppNormalColorScheme(), Brightness.light),
+      home: const Scaffold(
+          body: Column(children: [
+        Expanded(child: SizedBox()),
+        MessageInput(conversationID: 'c2c_emoji_editor_handoff'),
+      ])),
+    ));
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    final field = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('rich_content_text_1')));
+    field.controller!.value = const TextEditingValue(
+        text: '前中后', selection: TextSelection(baseOffset: 1, extentOffset: 2));
+    tester.view.viewInsets = const FakeViewPadding(bottom: 320);
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(
+        of: find.byKey(const Key('rich_content_overlay_toolbar')),
+        matching: find.byTooltip('表情')));
+    await tester.pump();
+    tester.view.viewInsets = const FakeViewPadding();
+    await tester.pumpAndSettle();
+    final keyboardRect = tester.getRect(find.byType(EmojiPicker));
+    tester.testTextInput.log.clear();
+    await tester.tap(find.byTooltip('收起富文本编辑器'));
+    await tester.pumpAndSettle();
+    expect(find.byType(EmojiPicker), findsOneWidget);
+    final normal = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('message_input_text_field')));
+    expect(normal.focusNode!.hasFocus, isTrue);
+    expect(normal.controller!.text, '前中后');
+    expect(normal.controller!.selection,
+        const TextSelection(baseOffset: 1, extentOffset: 2));
+    expect(tester.getRect(find.byType(EmojiPicker)), keyboardRect);
+    expect(
+        tester.testTextInput.log.any((call) => call.method == 'TextInput.show'),
+        isFalse);
+    await tester.tap(_emojiControl('tim.emoji.quick.[ZDEmoji_Like]'));
+    await tester.pumpAndSettle();
+    expect(normal.controller!.text, '前[ZDEmoji_Like]后');
+    expect(normal.controller!.selection.baseOffset, 15);
+    expect(normal.focusNode!.hasFocus, isTrue);
+    // 再次展开仍沿用当前表情模式和光标，不能只修复单向收起。
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    final reopened = tester.state<RichContentEditorSheetState>(
+        find.byType(RichContentEditorSheet));
+    final reopenedField = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('rich_content_text_1')));
+    expect(reopened.showEmojiPanel, isTrue);
+    expect(reopenedField.controller!.selection.baseOffset, 15);
+    expect(reopenedField.focusNode!.hasFocus, isTrue);
+    expect(tester.getRect(find.byType(EmojiPicker)), keyboardRect);
+    expect(
+        tester.testTextInput.log.any((call) => call.method == 'TextInput.show'),
+        isFalse);
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('空白草稿收起后仍保留表情键盘和可输入焦点', (tester) async {
+    _configureEditorEmojis();
+    await tester.pumpWidget(MaterialApp(
+      theme: AppThemeFactory.create(
+          const AppNormalColorScheme(), Brightness.light),
+      home: const Scaffold(
+          body: Column(children: [
+        Expanded(child: SizedBox()),
+        MessageInput(conversationID: 'c2c_empty_emoji_handoff'),
+      ])),
+    ));
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(
+        of: find.byKey(const Key('rich_content_overlay_toolbar')),
+        matching: find.byTooltip('表情')));
+    await tester.pumpAndSettle();
+    tester.testTextInput.log.clear();
+    await tester.tap(find.byTooltip('收起富文本编辑器'));
+    await tester.pumpAndSettle();
+    final normal = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('message_input_text_field')));
+    expect(normal.controller!.text, isEmpty);
+    expect(normal.controller!.selection.baseOffset, 0);
+    expect(normal.focusNode!.hasFocus, isTrue);
+    expect(find.byType(EmojiPicker), findsOneWidget);
+    expect(
+        tester.testTextInput.log.any((call) => call.method == 'TextInput.show'),
+        isFalse);
+    await tester.tap(_emojiControl('tim.emoji.quick.[ZDEmoji_Like]'));
+    await tester.pumpAndSettle();
+    expect(normal.controller!.text, '[ZDEmoji_Like]');
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('独立附件前缀计入交接选区，反向选择在正文块内保持方向', (tester) async {
+    final key = GlobalKey<RichContentEditorSheetState>();
+    final offset = 1 + richContentAttachmentToken(27).length;
+    final selection =
+        TextSelection(baseOffset: offset + 3, extentOffset: offset + 1);
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: RichContentEditorSheet(
+      key: key,
+      conversationName: '测试',
+      initialDraft: const RichContentDraft(blocks: [
+        RichContentDraftTextBlock(1, '前'),
+        RichContentDraftAttachmentBlock(27,
+            attachment: RichContentLocalAttachment(
+              type: RichContentAttachmentType.file,
+              localPath: '/tmp/test.pdf',
+              fileName: 'test.pdf',
+              fileSize: 12,
+              mimeType: 'application/pdf',
+            )),
+        RichContentDraftTextBlock(28, '后正文末'),
+      ]),
+      initialSelection: selection,
+      onSend: (_) async => false,
+    ))));
+    await tester.pumpAndSettle();
+    final field = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('rich_content_text_28')));
+    expect(field.focusNode!.hasFocus, isTrue);
+    expect(field.controller!.selection,
+        const TextSelection(baseOffset: 3, extentOffset: 1));
+    expect(key.currentState!.inlineSelection, selection);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('富文本表情键盘从覆盖层打开，插入和退格只修改正文，切换后草稿保留', (tester) async {
+    _configureEditorEmojis();
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
+    await tester.pumpWidget(MaterialApp(
+      theme: AppThemeFactory.create(
+          const AppNormalColorScheme(), Brightness.light),
+      home: const Scaffold(
+          body: Column(children: [
+        Expanded(child: SizedBox()),
+        MessageInput(conversationID: 'c2c_rich_emoji'),
+      ])),
+    ));
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    final editor = tester.state<RichContentEditorSheetState>(
+        find.byType(RichContentEditorSheet));
+    final field = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('rich_content_text_1')));
+    field.controller!.value = const TextEditingValue(
+        text: '前后', selection: TextSelection.collapsed(offset: 1));
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    await tester.pumpAndSettle();
+    final toolbar = find.byKey(const Key('rich_content_overlay_toolbar'));
+    final keyboardTop = tester.getRect(toolbar).bottom;
+    final originalSelection = field.controller!.selection;
+    tester.testTextInput.log.clear();
+    await tester
+        .tap(find.descendant(of: toolbar, matching: find.byTooltip('表情')));
+    await tester.pump();
+    for (final inset in [180.0, 60.0, 0.0]) {
+      tester.view.viewInsets = FakeViewPadding(bottom: inset);
+      await tester.pumpAndSettle();
+      expect(tester.getRect(toolbar).bottom, closeTo(keyboardTop, .01));
+    }
+    expect(field.controller!.selection, originalSelection);
+    expect(
+        tester.testTextInput.log.any((call) => call.method == 'TextInput.hide'),
+        isTrue);
+    expect(
+        tester.testTextInput.log
+            .any((call) => call.method == 'TextInput.clearClient'),
+        isFalse);
+    expect(find.byType(EmojiPicker), findsOneWidget);
+    expect(editor.showEmojiPanel, isTrue);
+    expect(field.controller!.text, '前后');
+    expect(field.focusNode!.hasFocus, isTrue);
+    expect(tester.getRect(find.byType(EmojiPicker)).top,
+        closeTo(tester.getRect(toolbar).bottom, .01));
+    expect(
+        tester
+            .getRect(find.byKey(const Key('rich_content_editor_layer')))
+            .bottom,
+        closeTo(tester.getRect(toolbar).top, .01));
+    await tester.tap(_emojiControl('tim.emoji.insert.[ZDEmoji_Like]'));
+    await tester.pumpAndSettle();
+    expect(field.controller!.text, '前[ZDEmoji_Like]后');
+    expect(field.controller!.selection.baseOffset, 15);
+    expect(field.focusNode!.hasFocus, isTrue);
+    await tester.tap(_emojiControl('tim.emoji.delete'));
+    await tester.pumpAndSettle();
+    expect(field.controller!.text, '前后');
+    await tester.tap(_emojiControl('tim.emoji.quick.[ZDEmoji_Like]'));
+    await tester.pumpAndSettle();
+    await tester
+        .tap(find.descendant(of: toolbar, matching: find.byTooltip('显示键盘')));
+    await tester.pumpAndSettle();
+    for (final inset in [120.0, 300.0]) {
+      tester.view.viewInsets = FakeViewPadding(bottom: inset);
+      await tester.pump(const Duration(milliseconds: 16));
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(tester.getRect(toolbar).bottom, closeTo(keyboardTop, .01));
+    }
+    expect(
+        tester.testTextInput.log.any((call) => call.method == 'TextInput.show'),
+        isTrue);
+    expect(
+        tester.testTextInput.log
+            .any((call) => call.method == 'TextInput.clearClient'),
+        isFalse);
+    expect(find.byType(EmojiPicker), findsNothing);
+    expect(field.focusNode!.hasFocus, isTrue);
+    await tester.tap(find.byTooltip('收起富文本编辑器'));
+    await tester.pumpAndSettle();
+    final normal = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('message_input_text_field')));
+    expect(normal.controller!.text, '前[ZDEmoji_Like]后');
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('独立富文本表情面板替换正文选区，发送交出完整令牌草稿', (tester) async {
+    _configureEditorEmojis();
+    addTearDown(tester.view.resetViewInsets);
+    final key = GlobalKey<RichContentEditorSheetState>();
+    RichContentDraft? sent;
+    await tester.pumpWidget(_testApp(const RichContentDraft(), editorKey: key,
+        onSend: (draft) async {
+      sent = draft;
+      return false;
+    }));
+    await tester.pumpAndSettle();
+    final field = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('rich_content_text_1')));
+    field.controller!.value = const TextEditingValue(
+        text: '甲中乙', selection: TextSelection(baseOffset: 1, extentOffset: 2));
+    tester.view.viewInsets = const FakeViewPadding(bottom: 280);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('表情'));
+    await tester.pumpAndSettle();
+    tester.view.viewInsets = const FakeViewPadding();
+    await tester.pumpAndSettle();
+    expect(find.byType(EmojiPicker), findsOneWidget);
+    expect(field.controller!.text, '甲中乙');
+    await tester.tap(_emojiControl('tim.emoji.quick.[ZDEmoji_Like]'));
+    await tester.pumpAndSettle();
+    expect(field.controller!.text, '甲[ZDEmoji_Like]乙');
+    expect(field.focusNode!.hasFocus, isTrue);
+    await tester.tap(_emojiControl('tim.emoji.send'));
+    await tester.pumpAndSettle();
+    expect((sent!.blocks.single as RichContentDraftTextBlock).text,
+        '甲[ZDEmoji_Like]乙');
+    expect(sent!.characterCount, 3);
+    expect(key.currentState!.showEmojiPanel, isTrue);
+    await tester.tap(find.byKey(const Key('rich_content_text_1')));
+    await tester.pumpAndSettle();
+    expect(key.currentState!.showEmojiPanel, isFalse);
+    tester.view.viewInsets = const FakeViewPadding(bottom: 280);
+    await tester.pumpAndSettle();
+    expect(find.byType(EmojiPicker), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('媒体处理期间先显示可整体删除的黑色 loading，占位删除后迟到结果不回填', (tester) async {
     final key = GlobalKey<RichContentEditorSheetState>();
     RichContentDraft? current;
@@ -2272,6 +2549,8 @@ Widget _testApp(
       Brightness.light,
     ),
     home: Scaffold(
+      // 独立编辑器自行处理系统遮挡，宿主不能重复缩减一次高度。
+      resizeToAvoidBottomInset: false,
       body: RichContentEditorSheet(
         key: editorKey,
         conversationName: '杨洋阳 (一只羊)',
@@ -2300,3 +2579,17 @@ Future<String> _createVideoThumbnail(WidgetTester tester) async {
   addTearDown(() => directory.deleteSync(recursive: true));
   return '${directory.path}/cover.png';
 }
+
+/// 点击和输入测试借用依赖包内已有PNG作为目录夹具，不复制或替换业务资源。
+void _configureEditorEmojis() {
+  EmojiManager.configure(assetPackage: 'tuikit_atomic_x', emojis: const [
+    EmojiPickerModelItem(
+        name: '[ZDEmoji_Like]',
+        label: '点赞',
+        path: 'call_assets/handsfree_on.png'),
+  ]);
+}
+
+/// 按实际语义节点定位表情操作，避免顶部常用项与网格图片重名。
+Finder _emojiControl(String identifier) => find.byWidgetPredicate((widget) =>
+    widget is Semantics && widget.properties.identifier == identifier);
