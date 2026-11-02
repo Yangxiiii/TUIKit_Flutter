@@ -1,4 +1,5 @@
 import 'package:atomic_x_core/atomicxcore.dart';
+import 'package:app_core/app_core.dart';
 import 'package:flutter/widgets.dart';
 import '../../emoji_picker/emoji_picker_model.dart';
 import '../message_edit_config.dart';
@@ -12,6 +13,8 @@ class MessageActionsScope extends InheritedWidget {
     required this.showActions,
     required this.onMessagesChanged,
     this.onMessagesDeleted,
+    this.enableSuccessfulDelete = false,
+    this.actionGuard,
     required super.child,
   });
 
@@ -28,11 +31,19 @@ class MessageActionsScope extends InheritedWidget {
   /// 单条删除经SDK确认后才通知宿主清理相关置顶，不把分页当删除。
   final ValueChanged<List<String>>? onMessagesDeleted;
 
+  /// 仅补齐成功消息删除入口，其他状态沿用原配置。
+  final bool enableSuccessfulDelete;
+
+  /// 完整确认与执行流程共用宿主守卫，防止重复弹窗和重复提交。
+  final ActionGuard? actionGuard;
+
   /// 气泡订阅宿主面板编排；编辑配置为空时仍可提供置顶与删除联动。
   static MessageActionsScope? maybeOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<MessageActionsScope>();
 
   @override
   bool updateShouldNotify(MessageActionsScope oldWidget) =>
-      oldWidget.config != config;
+      oldWidget.config != config ||
+      oldWidget.enableSuccessfulDelete != enableSuccessfulDelete ||
+      oldWidget.actionGuard != actionGuard;
 }

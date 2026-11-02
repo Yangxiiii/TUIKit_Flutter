@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import '../message_input/widget/message_edit_limit_dialog.dart';
 import 'package:app_ui/app_ui.dart';
 import '../emoji_picker/emoji_picker_model.dart';
@@ -22,6 +23,21 @@ export 'chat_setting_page.dart' show ChatSettingPage;
 class ChatPage extends AppBaseStatefulPage {
   /// 当前单聊或群聊的标题、类型与会话标识。
   final ConversationInfo conversation;
+
+  /// 宿主派生的姓名与昵称；为空时保留 SDK 会话标题。
+  final String? displayName;
+
+  /// SDK 全局真实未读数，仅显示封顶，不改变未读状态。
+  final ValueListenable<int>? totalUnreadCount;
+
+  /// 无显式定位或内存快照时先读取本机最新消息，不改变云端分页。
+  final Future<List<MessageInfo>> Function()? localMessagesLoader;
+
+  /// 单聊按发送人与相邻时间派生头像分组，默认保持原布局。
+  final bool aggregateMessages;
+
+  /// 仅为成功消息开放删除确认，不开启发送中或失败消息菜单。
+  final bool enableSuccessfulDelete;
 
   /// 搜索或引用进入时的定位消息；为空时恢复最新消息窗口。
   final MessageInfo? message;
@@ -53,6 +69,11 @@ class ChatPage extends AppBaseStatefulPage {
   const ChatPage({
     super.key,
     required this.conversation,
+    this.displayName,
+    this.totalUnreadCount,
+    this.localMessagesLoader,
+    this.aggregateMessages = false,
+    this.enableSuccessfulDelete = false,
     this.message,
     this.onInitialMessagesLoaded,
     this.messageInputConfig = const ChatMessageInputConfig(
@@ -481,7 +502,8 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
 
   @override
   Widget titleWidgetOf(BuildContext context, Locale locale) => Text(
-        widget.conversation.title ??
+        widget.displayName ??
+            widget.conversation.title ??
             AppLocalization.text(context, LocaleKeys.chat_title, '聊天'),
         style: FontScheme.caption1Medium,
         overflow: TextOverflow.ellipsis,
@@ -489,11 +511,74 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
       );
 
   @override
-  Widget leadingOf(BuildContext context, Locale locale) => Semantics(
-        identifier: 'tim.chat.back',
-        // maybePop遵守消息编辑的PopScope，首次返回只退出编辑，不离开会话。
-        child: BackButton(onPressed: () => Navigator.of(context).maybePop()),
-      );
+  double? get leadingWidth => widget.totalUnreadCount == null ? null : 84;
+
+  @override
+  Widget leadingOf(BuildContext context, Locale locale) {
+    final back = Semantics(
+      identifier: 'tim.chat.back',
+      // maybePop遵守消息编辑的PopScope，首次返回只退出编辑，不离开会话。
+      child: BackButton(
+          style: const ButtonStyle(
+            padding: WidgetStatePropertyAll(EdgeInsets.zero),
+            minimumSize: WidgetStatePropertyAll(Size(32, 48)),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          onPressed: () => Navigator.of(context).maybePop()),
+    );
+    final unread = widget.totalUnreadCount;
+    if (unread == null) return back;
+    // 返回入口保留完整点击高度，数量只作为实时信息，不截断原始未读值。
+    return Padding(
+      padding: const EdgeInsets.only(left: 8),
+      child: Row(children: [
+        SizedBox(width: 32, child: back),
+        Flexible(
+            child: ValueListenableBuilder<int>(
+          valueListenable: unread,
+          builder: (context, count, _) => count <= 0
+              ? const SizedBox.shrink()
+              : Semantics(
+                  identifier: 'tim.chat.unread',
+                  label: '$count',
+                  liveRegion: true,
+                  child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: _buildTotalUnreadBadge(context, count))),
+        )),
+      ]),
+    );
+  }
+
+  /// 与消息列表按实际文字宽高计算圆形或胶囊，圆角随字体缩放保持为高度的一半。
+  Widget _buildTotalUnreadBadge(BuildContext context, int count) {
+    final label = count > 99 ? '99+' : '$count';
+    final style = DefaultTextStyle.of(context).style.copyWith(
+          color: context.appColors.textPrimary,
+          fontSize: 12,
+          height: 1.5,
+        );
+    final metrics = TextPainter(
+      text: TextSpan(text: label, style: style),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout();
+    // 短数字不加横向留白，避免把本应为圆形的角标撑宽；长文本两侧各留4px。
+    final height = metrics.height;
+    final width = metrics.width <= height ? height : metrics.width + 8;
+    metrics.dispose();
+    return Container(
+      width: width,
+      height: height,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: context.appColors.controlBackground,
+        borderRadius: BorderRadius.circular(height / 2),
+      ),
+      child: Text(label, style: style, maxLines: 1, softWrap: false),
+    );
+  }
 
   @override
   List<Widget>? actionsOf(BuildContext context, Locale locale) =>
@@ -525,6 +610,8 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
         child: Column(
           children: [
             MessageList(
+              localMessagesLoader: widget.localMessagesLoader,
+              aggregateMessages: widget.aggregateMessages,
               overlayController: _overlay,
               conversationID: widget.conversation.conversationID,
               config: widget.messageListConfig,
@@ -567,6 +654,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
                 maintainAnimation: true,
                 maintainSize: true,
                 child: MessageInput(
+                  conversationDisplayName: widget.displayName,
                   key: _messageInputKey,
                   conversationID: widget.conversation.conversationID,
                   config: widget.messageInputConfig,
@@ -624,9 +712,13 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
       child: page,
     );
     final config = widget.messageEditConfig;
-    final editPage = config == null && widget.messageStickyConfig == null
+    final editPage = config == null &&
+            widget.messageStickyConfig == null &&
+            !widget.enableSuccessfulDelete
         ? guardedPage
         : MessageActionsScope(
+            enableSuccessfulDelete: widget.enableSuccessfulDelete,
+            actionGuard: widget.messageInputConfig.actionGuard,
             config: config,
             showActions: _showActions,
             onMessagesChanged: _onEditWindowChanged,

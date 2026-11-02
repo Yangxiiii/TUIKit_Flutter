@@ -19,6 +19,7 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/message_read_receipt
 import 'message_tooltip.dart';
 import '../utils/sticky_message_event.dart';
 import 'message_actions_scope.dart';
+import 'message_confirmation.dart';
 import 'message_recall_scope.dart';
 import 'message_recall_notice.dart';
 import '../message_recall_config.dart';
@@ -48,6 +49,9 @@ class DefaultMessageMenuCallbacks implements MessageMenuCallbacks {
   /// 交给聊天页设置输入引用，不由菜单管理输入控制器。
   final void Function(MessageInfo message)? onQuoteMessageCallback;
 
+  /// SDK 删除成功后移除首屏本地候选，失败时不得提前清理。
+  final VoidCallback? onDeleted;
+
   DefaultMessageMenuCallbacks({
     required this.context,
     required this.messageListStore,
@@ -56,6 +60,7 @@ class DefaultMessageMenuCallbacks implements MessageMenuCallbacks {
     required this.config,
     this.onMultiSelectTriggered,
     this.onQuoteMessageCallback,
+    this.onDeleted,
   });
 
   @override
@@ -64,14 +69,31 @@ class DefaultMessageMenuCallbacks implements MessageMenuCallbacks {
         text: (message.messagePayload as TextMessagePayload?)?.text ?? ""));
   }
 
-  /// 保护置顶操作提示；只有SDK明确删除成功才通知宿主清理原文对应的置顶。
+  /// 保护操作提示；宿主开启成功态删除时先确认，SDK 成功后才清理关联置顶。
   @override
   void onDeleteMessage(MessageInfo message) async {
     if (StickyMessageEvent.fromMessage(message) != null) return;
     final scope = MessageActionsScope.maybeOf(context);
+    if (scope?.enableSuccessfulDelete == true) {
+      await confirmMessageAction(
+        context,
+        messageId: message.msgID,
+        isDelete: true,
+        isEligible: () => message.status == MessageStatus.sendSuccess,
+        execute: () => _deleteMessage(message, scope),
+      );
+      return;
+    }
+    await _deleteMessage(message, scope);
+  }
+
+  /// 既有 SDK 删除成功后才通知列表与宿主；异常保留原消息并提示失败。
+  Future<void> _deleteMessage(
+      MessageInfo message, MessageActionsScope? scope) async {
     try {
       final result = await messageActionStore.delete();
       if (result.isSuccess) {
+        onDeleted?.call();
         scope?.onMessagesDeleted?.call([message.msgID]);
       } else if (context.mounted) {
         Toast.error(context, '删除失败，请稍后重试');
@@ -295,25 +317,18 @@ class _MessageBubbleState extends State<MessageBubble>
     super.dispose();
   }
 
-  void _showResendConfirmDialog() {
-    AtomicAlertDialog.showWithConfig(
+  /// 气泡内失败入口与外侧失败图标共用同一确认及防重流程。
+  void _showResendConfirmDialog() async {
+    await confirmMessageAction(
       context,
-      config: AlertDialogConfig(
-        title: atomicLocal.resendTips,
-        cancelConfig: ButtonConfig(text: atomicLocal.cancel),
-        confirmConfig: ButtonConfig(
-          text: atomicLocal.confirm,
-          type: TextColorPreset.blue,
-          onClick: _handleResendMessage,
-        ),
+      messageId: widget.message.msgID,
+      isDelete: false,
+      isEligible: () => widget.message.status == MessageStatus.sendFail,
+      execute: () => MessageResender.resend(
+        message: widget.message,
+        conversationID: widget.conversationID,
+        mediaSender: widget.config.mediaSender,
       ),
-    );
-  }
-
-  void _handleResendMessage() {
-    MessageResender.resend(
-      message: widget.message,
-      conversationID: widget.conversationID,
     );
   }
 
@@ -1413,7 +1428,10 @@ class _MessageBubbleState extends State<MessageBubble>
     // Delete button
     //
     // 删除按钮
-    if (widget.config.isSupportDelete) {
+    if (widget.config.isSupportDelete ||
+        ((MessageActionsScope.maybeOf(context)?.enableSuccessfulDelete ??
+                false) &&
+            widget.message.status == MessageStatus.sendSuccess)) {
       items.add(MessageMenuItem(
         title: atomicLocal.delete,
         id: 'delete',

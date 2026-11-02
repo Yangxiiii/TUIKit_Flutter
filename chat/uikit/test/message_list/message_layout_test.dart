@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:app_core/app_core.dart';
+import 'package:flutter/foundation.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_action_sheet.dart';
@@ -29,10 +31,370 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/text_m
 import 'package:tencent_chat_uikit/src/third_party/extended_text/extended_text.dart';
 
 void main() {
-  testWidgets('聊天复用基类导航且列表紧贴导航和输入，编辑期间返回只退出编辑', (tester) async {
+  testWidgets('基类导航展示全局实时未读与统一姓名，0隐藏且超过99封顶', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final original = TencentImSDKPlugin.v2TIMManager;
     TencentImSDKPlugin.v2TIMManager = _Sdk('/single');
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    final unread = ValueNotifier<int>(0);
+    addTearDown(unread.dispose);
+    await tester.pumpWidget(ProviderScope(
+        child: MaterialApp(
+      home: ChatPage(
+          conversation: ConversationInfo(
+              conversationID: 'c2c_visual',
+              type: ConversationType.c2c,
+              title: '旧标题'),
+          displayName: '姓名 (昵称)',
+          totalUnreadCount: unread),
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('姓名 (昵称)'), findsOneWidget);
+    expect(find.text('旧标题'), findsNothing);
+    expect(
+        find.byWidgetPredicate((w) =>
+            w is Semantics && w.properties.identifier == 'tim.chat.unread'),
+        findsNothing);
+    for (final count in [1, 9, 10, 99, 100]) {
+      unread.value = count;
+      await tester.pump();
+      final label = find.text(count > 99 ? '99+' : '$count');
+      expect(label, findsOneWidget);
+      final badge = find.descendant(
+        of: find.byWidgetPredicate((w) =>
+            w is Semantics && w.properties.identifier == 'tim.chat.unread'),
+        matching: find.byType(Container),
+      );
+      final badgeSize = tester.getSize(badge);
+      final textSize = tester.getSize(label);
+      expect(tester.widget<Text>(label).style!.color,
+          tester.element(label).appColors.textPrimary);
+      expect(badgeSize.height, textSize.height);
+      expect(
+          badgeSize.width,
+          closeTo(
+              textSize.width <= textSize.height
+                  ? textSize.height
+                  : textSize.width + 8,
+              .01));
+      expect(
+          (tester.widget<Container>(badge).decoration as BoxDecoration)
+              .borderRadius,
+          BorderRadius.circular(badgeSize.height / 2));
+    }
+    expect(tester.getCenter(find.text('姓名 (昵称)')).dx,
+        closeTo(tester.getCenter(find.byType(AppBaseNavigationBar)).dx, .01));
+    unread.value = 0;
+    await tester.pump();
+    expect(find.text('99+'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    unread.value = 3;
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('本机窗口在云端完成前显示，实时消息和云端合并后无重复且不清空本地', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/single');
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    final cloud = sdk.messages.historyGate =
+        Completer<V2TimValueCallback<List<V2TimMessage>>>();
+    var readCalls = 0;
+    await tester.pumpWidget(MaterialApp(
+        home: Column(children: [
+      MessageList(
+        conversationID: 'c2c_visual',
+        localMessagesLoader: () async =>
+            [ChatUtil.convertToUIMessage(_Message('second'))],
+        onInitialMessagesLoaded: () => readCalls++,
+      )
+    ])));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextMessageWidget), findsOneWidget);
+    expect(readCalls, 0);
+    expect(sdk.messages.historyCalls, 1);
+    for (final listener in [...sdk.messages.listeners]) {
+      listener.onRecvNewMessage(_Message('third'));
+    }
+    await tester.pumpAndSettle();
+    cloud.complete(
+        V2TimValueCallback(code: 0, desc: '', data: [_Message('second')]));
+    await tester.pumpAndSettle();
+    final ids = tester
+        .widgetList<MessageItem>(find.byType(MessageItem))
+        .map((w) => w.message.msgID)
+        .toList();
+    expect(ids.toSet(), {'second', 'third'});
+    expect(ids.length, 2);
+    expect(readCalls, 1);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('本地窗口已滚到历史时，云端补到己方历史也保持当前消息锚点', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/single');
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    final cloud = sdk.messages.historyGate =
+        Completer<V2TimValueCallback<List<V2TimMessage>>>();
+    final stamp = DateTime(2026, 10, 30, 12).millisecondsSinceEpoch ~/ 1000;
+    final raw = List.generate(
+        20, (i) => _Message('local-${i + 1}', timestampOverride: stamp + i));
+    await tester.pumpWidget(MaterialApp(
+        home: Column(children: [
+      MessageList(
+          conversationID: 'c2c_visual',
+          localMessagesLoader: () async =>
+              raw.reversed.map(ChatUtil.convertToUIMessage).toList())
+    ])));
+    await tester.pumpAndSettle();
+    final list = tester.widget<ScrollablePositionedList>(
+        find.byType(ScrollablePositionedList));
+    list.itemScrollController!.jumpTo(index: 10, alignment: .1);
+    await tester.pumpAndSettle();
+    final target = find.byWidgetPredicate(
+        (w) => w is MessageItem && w.message.msgID == 'local-10');
+    final top = tester.getTopLeft(target).dy;
+    cloud.complete(V2TimValueCallback(code: 0, desc: '', data: [
+      _Message('synced-self',
+          timestampOverride: stamp + 30, isSelfOverride: true),
+      ...raw.reversed.take(18)
+    ]));
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(target).dy, closeTo(top, .01));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('本地消息在云端失败后保留，显式定位不调用最新本地加载器', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    var localCalls = 0;
+    for (final locate in [false, true]) {
+      final sdk = _Sdk('/single');
+      TencentImSDKPlugin.v2TIMManager = sdk;
+      MessageList.clearViewportSnapshots();
+      final cloud = sdk.messages.historyGate =
+          Completer<V2TimValueCallback<List<V2TimMessage>>>();
+      await tester.pumpWidget(MaterialApp(
+          home: Column(children: [
+        MessageList(
+            conversationID: 'c2c_visual',
+            locateMessage:
+                locate ? ChatUtil.convertToUIMessage(_Message('first')) : null,
+            localMessagesLoader: () async {
+              localCalls++;
+              return [ChatUtil.convertToUIMessage(_Message('second'))];
+            })
+      ])));
+      await tester.pumpAndSettle();
+      expect(localCalls, 1);
+      cloud.complete(V2TimValueCallback(code: 1, desc: '离线'));
+      await tester.pumpAndSettle();
+      if (!locate) expect(find.byType(TextMessageWidget), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('双向头像聚合保留列宽和8像素间距，每条气泡保持独立', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/single');
+    final stamp = DateTime(2026, 10, 30, 12).millisecondsSinceEpoch ~/ 1000;
+    sdk.messages.chronologicalHistory = [
+      _Message('incomingA', timestampOverride: stamp),
+      _Message('incomingB', timestampOverride: stamp + 30),
+      _Message('outgoingA',
+          timestampOverride: stamp + 40, isSelfOverride: true),
+      _Message('outgoingB',
+          timestampOverride: stamp + 60, isSelfOverride: true),
+    ];
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    await tester.pumpWidget(MaterialApp(
+        home: Column(children: [
+      MessageList(
+          conversationID: 'c2c_visual',
+          aggregateMessages: true,
+          config: const ChatMessageListConfig(isShowRightAvatar: true))
+    ])));
+    await tester.pumpAndSettle();
+    Finder item(String id) => find
+        .byWidgetPredicate((w) => w is MessageItem && w.message.msgID == id);
+    Finder bubble(String id) =>
+        find.descendant(of: item(id), matching: find.byType(TextMessageWidget));
+    for (final prefix in ['incoming', 'outgoing']) {
+      expect(tester.widget<MessageItem>(item('${prefix}A')).isContinuation,
+          isFalse);
+      expect(tester.widget<MessageItem>(item('${prefix}B')).isContinuation,
+          isTrue);
+      final hidden = find.descendant(
+          of: item('${prefix}B'), matching: find.byType(Visibility));
+      expect(
+          tester
+              .widgetList<Visibility>(hidden)
+              .any((w) => !w.visible && w.maintainSize),
+          isTrue);
+      final first = tester.getRect(bubble('${prefix}A'));
+      final next = tester.getRect(bubble('${prefix}B'));
+      expect(prefix == 'incoming' ? next.left : next.right,
+          closeTo(prefix == 'incoming' ? first.left : first.right, .01));
+      expect(next.top - first.bottom, closeTo(8, .01));
+    }
+    expect(find.byType(TextMessageWidget), findsNWidgets(4));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('仅成功消息可删除，二次确认取消零调用且删除成功通知宿主', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    final deleted = <String>[];
+    Finder control(String id) => find.byWidgetPredicate(
+        (w) => w is Semantics && w.properties.identifier == id);
+    for (final status in [1, 3, 2]) {
+      Future<void> settle() async {
+        if (status == 1) {
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 500));
+          await tester.pump();
+        } else {
+          await tester.pumpAndSettle();
+        }
+      }
+
+      final sdk = _Sdk('/single');
+      sdk.messages.chronologicalHistory = [
+        _Message('target', statusOverride: status, isSelfOverride: true)
+      ];
+      TencentImSDKPlugin.v2TIMManager = sdk;
+      MessageList.clearViewportSnapshots();
+      await tester.pumpWidget(ProviderScope(
+          child: MaterialApp(
+        navigatorObservers: [AppDialog.observer],
+        builder: AppDialog.init(),
+        home: ChatPage(
+            conversation: ConversationInfo(
+                conversationID: 'c2c_visual', type: ConversationType.c2c),
+            enableSuccessfulDelete: true,
+            messageListConfig:
+                const ChatMessageListConfig(isSupportDelete: false),
+            messageInputConfig:
+                ChatMessageInputConfig(actionGuard: ActionGuard()),
+            messageStickyConfig: ChatMessageStickyConfig(
+                pin: (_) async => null,
+                bannerBuilder: (_, locate) => const SizedBox.shrink(),
+                onMessagesChanged: (_) {},
+                onMessagesDeleted: deleted.addAll,
+                onInitialLoadFinished: () {})),
+      )));
+      await settle();
+      await tester.longPress(find.byType(TextMessageWidget));
+      await settle();
+      final entry = control('tim.message.action.delete');
+      expect(tester.widget<Semantics>(entry).properties.enabled, status == 2);
+      if (status == 2) {
+        await tester.tap(entry);
+        await settle();
+        expect(sdk.messages.deleteCalls, 0);
+        expect(deleted, isEmpty);
+        await tester.tap(control('tim.message.delete.confirm.cancel'));
+        await settle();
+        expect(sdk.messages.deleteCalls, 0);
+        expect(find.byType(TextMessageWidget), findsOneWidget);
+        await tester.longPress(find.byType(TextMessageWidget));
+        await settle();
+        await tester.tap(control('tim.message.action.delete'));
+        await settle();
+        await tester.tap(control('tim.message.delete.confirm.confirm'));
+        await settle();
+        expect(sdk.messages.deleteCalls, 1);
+        expect(deleted, ['target']);
+        expect(find.byType(TextMessageWidget), findsNothing);
+      }
+      await tester.pumpWidget(const SizedBox.shrink());
+      await settle();
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('失败图标打开精确重发确认，取消不重试，确认恢复原上传任务', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/single');
+    sdk.messages.chronologicalHistory = [
+      _Message('failed', statusOverride: 3, isSelfOverride: true)
+    ];
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    var retries = 0;
+    Finder control(String id) => find.byWidgetPredicate(
+        (w) => w is Semantics && w.properties.identifier == id);
+    await tester.pumpWidget(ProviderScope(
+        child: MaterialApp(
+      navigatorObservers: [AppDialog.observer],
+      builder: AppDialog.init(),
+      home: ChatPage(
+          conversation: ConversationInfo(
+              conversationID: 'c2c_visual', type: ConversationType.c2c),
+          enableSuccessfulDelete: true,
+          messageInputConfig:
+              ChatMessageInputConfig(actionGuard: ActionGuard()),
+          messageListConfig:
+              ChatMessageListConfig(isSupportDelete: false, fileTransfers: {
+            'failed': ChatFileTransferView(
+                failed: true,
+                retry: () async {
+                  retries++;
+                  return CompletionHandler();
+                })
+          })),
+    )));
+    await tester.pumpAndSettle();
+    await tester.tap(control('tim.message.retry.failed'));
+    await tester.pumpAndSettle();
+    expect(find.text('发送失败，重发该消息？', findRichText: true), findsOneWidget);
+    await tester.tap(control('tim.message.retry.confirm.cancel'));
+    await tester.pumpAndSettle();
+    expect(retries, 0);
+    expect(sdk.messages.deleteCalls, 0);
+    await tester.tap(control('tim.message.retry.failed'));
+    await tester.pumpAndSettle();
+    await tester.tap(control('tim.message.retry.confirm.confirm'));
+    await tester.pumpAndSettle();
+    expect(retries, 1);
+    expect(sdk.messages.deleteCalls, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('聊天复用基类导航且列表紧贴导航和输入，编辑期间返回只退出编辑', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/single');
+    sdk.messages.chronologicalHistory = [
+      _Message('third',
+          timestampOverride: DateTime.now().millisecondsSinceEpoch ~/ 1000 - 1)
+    ];
+    TencentImSDKPlugin.v2TIMManager = sdk;
     addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
     MessageList.clearViewportSnapshots();
     final navigator = GlobalKey<NavigatorState>();
@@ -65,7 +427,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(AppBaseNavigationBar), findsOneWidget);
     expect(
-      tester.widget<AppBaseNavigationBar>(find.byType(AppBaseNavigationBar))
+      tester
+          .widget<AppBaseNavigationBar>(find.byType(AppBaseNavigationBar))
           .showBottomDivider,
       isTrue,
     );
@@ -239,7 +602,12 @@ void main() {
   testWidgets('长按和松手只打开操作面板，点击多选才进入多选', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final original = TencentImSDKPlugin.v2TIMManager;
-    TencentImSDKPlugin.v2TIMManager = _Sdk('/single');
+    final sdk = _Sdk('/single');
+    sdk.messages.chronologicalHistory = [
+      _Message('third',
+          timestampOverride: DateTime.now().millisecondsSinceEpoch ~/ 1000 - 1)
+    ];
+    TencentImSDKPlugin.v2TIMManager = sdk;
     addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
     MessageList.clearViewportSnapshots();
     await tester.pumpWidget(MaterialApp(
@@ -575,6 +943,7 @@ final class _Messages implements V2TIMMessageManager {
   final String scene;
   Completer<V2TimValueCallback<List<V2TimMessage>>>? historyGate;
   int historyCalls = 0;
+  int deleteCalls = 0;
 
   /// 按时间正序排列的可变历史，用于模拟页面关闭期间收到新消息。
   List<V2TimMessage>? chronologicalHistory;
@@ -605,7 +974,9 @@ final class _Messages implements V2TIMMessageManager {
         );
   }
 
-  V2TimAdvancedMsgListener? listener;
+  final listeners = <V2TimAdvancedMsgListener>[];
+  V2TimAdvancedMsgListener? get listener =>
+      listeners.isEmpty ? null : listeners.first;
   bool _historyLoaded = false;
   List<V2TimMessage> _history() {
     if (scene != '/history') {
@@ -618,12 +989,18 @@ final class _Messages implements V2TIMMessageManager {
 
   @override
   dynamic noSuchMethod(Invocation call) => switch (call.memberName) {
+        #deleteMessages => Future<V2TimCallback>.sync(() {
+            deleteCalls++;
+            return V2TimCallback(code: 0, desc: '');
+          }),
         #getHistoryMessageList => _loadHistory(call),
         #addAdvancedMsgListener => Future<void>.sync(() {
-            listener =
-                call.namedArguments[#listener] as V2TimAdvancedMsgListener;
+            listeners.add(
+                call.namedArguments[#listener] as V2TimAdvancedMsgListener);
           }),
-        #removeAdvancedMsgListener => Future<void>.value(),
+        #removeAdvancedMsgListener => Future<void>.sync(() {
+            listeners.remove(call.namedArguments[#listener]);
+          }),
         #getMessageReactions => Future.value(
             V2TimValueCallback<List<V2TimMessageReactionResult>>(
               code: 0,
@@ -648,25 +1025,32 @@ final class _Friends implements V2TIMFriendshipManager {
 
 /// SDK消息替身使用稳定时间与正文，避免原生构造器访问服务时间。
 final class _Message implements V2TimMessage {
-  _Message(this.msgID);
+  _Message(this.msgID,
+      {this.timestampOverride,
+      this.statusOverride = 2,
+      this.isSelfOverride = false});
+  final int? timestampOverride;
+  final int statusOverride;
+  final bool isSelfOverride;
   @override
   final String msgID;
   @override
   dynamic noSuchMethod(Invocation call) => switch (call.memberName) {
         #seq => msgID.contains('-') ? msgID.split('-').last : null,
-        #status => 2,
-        #timestamp => DateTime.now()
-                .copyWith(
-                  day: DateTime.now().day - (msgID == 'first' ? 1 : 0),
-                  hour: 18,
-                  minute: msgID == 'third' ? 1 : 0,
-                  second: 0,
-                )
-                .millisecondsSinceEpoch ~/
-            1000,
+        #status => statusOverride,
+        #timestamp => timestampOverride ??
+            DateTime.now()
+                    .copyWith(
+                      day: DateTime.now().day - (msgID == 'first' ? 1 : 0),
+                      hour: 18,
+                      minute: msgID == 'third' ? 1 : 0,
+                      second: 0,
+                    )
+                    .millisecondsSinceEpoch ~/
+                1000,
         #elemType => 1,
         #sender || #userID => msgID.contains('-') ? 'history_visual' : 'visual',
-        #isSelf ||
+        #isSelf => isSelfOverride,
         #isRead ||
         #isPeerRead ||
         #needReadReceipt ||

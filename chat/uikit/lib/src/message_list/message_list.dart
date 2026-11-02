@@ -1,6 +1,10 @@
 import 'package:app_ui/app_ui.dart';
 import 'dart:async';
 import 'utils/sticky_message_event.dart';
+import 'utils/local_message_window.dart';
+import 'package:tencent_cloud_chat_sdk/tencent_im_sdk_plugin.dart';
+import 'package:tencent_cloud_chat_sdk/enum/V2TimAdvancedMsgListener.dart';
+import 'package:tencent_cloud_chat_sdk/manager/v2_tim_message_manager.dart';
 
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/cupertino.dart';
@@ -112,6 +116,11 @@ class MessageCustomAction {
 
 /// 展示 SDK 会话消息，并协调分页和列表内跳转。
 class MessageList extends StatefulWidget {
+  /// 最新窗口先显示本机记录；显式定位和进程内浏览快照仍优先。
+  final Future<List<MessageInfo>> Function()? localMessagesLoader;
+
+  /// 是否按同人、同日、相邻60秒内聚合头像，默认关闭。
+  final bool aggregateMessages;
   final String conversationID;
   final MessageListConfigProtocol config;
   final MessageInfo? locateMessage;
@@ -169,6 +178,8 @@ class MessageList extends StatefulWidget {
   final MessageOverlayController? overlayController;
 
   const MessageList({
+    this.localMessagesLoader,
+    this.aggregateMessages = false,
     this.overlayController,
     super.key,
     required this.conversationID,
@@ -382,6 +393,15 @@ class _MessageListState extends State<MessageList>
   final ItemPositionsListener _itemPositionsListener =
       ItemPositionsListener.create();
   List<MessageInfo> _messages = [];
+
+  /// 仅补齐 SDK 尚未接管的本机记录，不取代原 SDK 消息源。
+  final LocalMessageWindow _localWindow = LocalMessageWindow();
+
+  /// 与首次读取使用同一 SDK 管理器，销毁时从原实例注销。
+  V2TIMMessageManager? _localMessageManager;
+
+  /// 本机候选尚未交接时监听撤回与正文修改，随当前列表销毁注销。
+  V2TimAdvancedMsgListener? _localMessageListener;
   StreamSubscription<MessageEvent>? _messageEventSubscription;
   bool isLoading = false;
   bool _isLoadingNewer = false;
@@ -534,6 +554,28 @@ class _MessageListState extends State<MessageList>
         .addListener(_messageListStateChangedListener);
     _messageEventSubscription =
         _messageListStore.messageEventStream.listen(_onMessageEvent);
+    if (widget.localMessagesLoader != null) {
+      _localMessageManager =
+          TencentImSDKPlugin.v2TIMManager.getMessageManager();
+      _localMessageListener = V2TimAdvancedMsgListener(
+        onRecvMessageRevoked: (id) {
+          _localWindow.revoke(id);
+          if (mounted) _onMessageListStateChanged();
+        },
+        onRecvMessageRevokedWithInfo: (id, user, reason) {
+          _localWindow.revoke(id);
+          if (mounted) _onMessageListStateChanged();
+        },
+        onRecvMessageModified: (raw) {
+          if (_messages.any((m) => m.msgID == raw.msgID)) {
+            _localWindow.update(ChatUtil.convertToUIMessage(raw));
+            if (mounted) _onMessageListStateChanged();
+          }
+        },
+      );
+      _localMessageManager!
+          .addAdvancedMsgListener(listener: _localMessageListener!);
+    }
     _itemPositionsListener.itemPositions.addListener(_scrollListenerCallback);
     _notifyEditWindow();
 
@@ -594,6 +636,10 @@ class _MessageListState extends State<MessageList>
     _messageListStore.state.messageList
         .removeListener(_messageListStateChangedListener);
     _messageEventSubscription?.cancel();
+    final localListener = _localMessageListener;
+    if (localListener != null) {
+      _localMessageManager?.removeAdvancedMsgListener(listener: localListener);
+    }
     _itemPositionsListener.itemPositions
         .removeListener(_scrollListenerCallback);
     if (widget.conversationID.startsWith(groupConversationIDPrefix)) {
@@ -805,6 +851,24 @@ class _MessageListState extends State<MessageList>
         }
       } else {
         // 首次访问或进程重启后没有内存快照，按原有规则进入最新消息位置。
+        final loader = widget.localMessagesLoader;
+        if (loader != null) {
+          try {
+            final local = await loader();
+            if (!mounted) return;
+            _localWindow.seed(local);
+            setState(() {
+              _messages = _localWindow
+                  .merge(_messageListStore.state.messageList.value.reversed);
+              _isInitialViewportReady = true;
+            });
+            // 本地先提交一帧，再启动云端；这一帧不触发新增的清未读或回执。
+            await WidgetsBinding.instance.endOfFrame;
+          } on Object catch (error) {
+            debugPrint('messageList, local bootstrap failed: $error');
+          }
+        }
+        if (!mounted) return;
         debugPrint('messageList, _loadInitialMessages->_loadLatestMessages');
         loadSucceeded = await _loadLatestMessages();
       }
@@ -814,8 +878,14 @@ class _MessageListState extends State<MessageList>
       debugPrint('messageList, initial load failed: $error');
     }
 
-    final initialRenderComplete =
-        _messages.length == _messageListStore.state.messageList.value.length;
+    final sdkMessages = _messageListStore.state.messageList.value;
+    // 本机候选不能凭空解锁回执；SDK 空窗口沿用原有“无消息可读”的边界。
+    final initialRenderComplete = widget.localMessagesLoader == null
+        ? _messages.length == sdkMessages.length
+        : sdkMessages.isEmpty
+            ? _messages.isEmpty
+            : sdkMessages.every((message) =>
+                _messages.any((item) => item.msgID == message.msgID));
     if (!mounted) return;
     setState(() {
       isLoading = false;
@@ -846,8 +916,10 @@ class _MessageListState extends State<MessageList>
     return true;
   }
 
+  /// SDK 窗口接管本地同 ID 消息，并复用已有导航和锚点补偿处理新增项。
   void _onMessageListStateChanged() {
     _notifyEditWindow();
+    if (_navigationState is! _NavIdle) _localWindow.clear();
     final state = _messageListStore.state;
 
     debugPrint('messageList, _onMessageListStateChanged, '
@@ -981,7 +1053,10 @@ class _MessageListState extends State<MessageList>
         break;
     }
 
-    final nextMessages = state.messageList.value.reversed.toList();
+    // 显式历史定位不混入最新的本机窗口；普通同步保留本地缺席项并去重。
+    final nextMessages = widget.localMessagesLoader == null
+        ? state.messageList.value.reversed.toList()
+        : _localWindow.merge(state.messageList.value.reversed);
     final oldLength = _messages.length;
     // Remember the first message's ID to detect head-insertion (new messages)
     // vs tail-append (older history messages).
@@ -1008,6 +1083,12 @@ class _MessageListState extends State<MessageList>
         oldFirstMsgID != null &&
         newFirstMsgID != oldFirstMsgID;
 
+    // 本地首屏之后补到的己方成功历史不是本次主动发送，不能抢走用户浏览锚点。
+    final isSyncedSelfHistory = widget.localMessagesLoader != null &&
+        _isInitialLoad &&
+        _messages.isNotEmpty &&
+        _messages.first.status == MessageStatus.sendSuccess;
+
     // If the new head message is sent by self, auto-scroll to bottom.
     //
     // Must also skip while _loadNewerMessages is in flight: when a page of
@@ -1024,6 +1105,7 @@ class _MessageListState extends State<MessageList>
     // _messages.first 会是自己发送的消息——但这并不是一个新的“用户刚发送消息”的事件。_loadNewerMessages 已经在 await 之后运行它自己的滚动保持
     // jumpTo(insertedCount)，如果我们在这里还安排 postFrame jumpTo(0)，postFrame 会最后触发，覆盖滚动保持，让用户在每次第二次加载时明显地跳到最底部。
     if (isHeadInsertion &&
+        !isSyncedSelfHistory &&
         !_isLoadingNewer &&
         _messages.isNotEmpty &&
         _messages.first.isSentBySelf) {
@@ -1277,7 +1359,7 @@ class _MessageListState extends State<MessageList>
     return '${message.msgID}-${message.timestamp}';
   }
 
-  /// 时间组之间留24像素，组内使用宿主间距；隐藏消息不占据视觉间隔。
+  /// 时间组仍留24像素；连续头像组留8像素，其他消息使用宿主间距，隐藏消息不占布局。
   Widget _renderItem(BuildContext context, int index) {
     if (index >= _messages.length) return Container();
     final message = _messages[index];
@@ -1300,18 +1382,25 @@ class _MessageListState extends State<MessageList>
                 _isSystemMessage(_messages[olderIndex])))) {
       olderIndex++;
     }
+    final isContinuation = widget.aggregateMessages &&
+        olderIndex < _messages.length &&
+        !_isSystemMessage(message) &&
+        !_isSystemMessage(_messages[olderIndex]) &&
+        MessageUtil.isAvatarContinuation(_messages[olderIndex], message);
     final topSpacing = olderIndex == _messages.length
         ? 0.0
         : shouldShowTime
             ? 24.0
-            : widget.config.cellSpacing;
+            : isContinuation
+                ? 8.0
+                : widget.config.cellSpacing;
 
     return Padding(
       padding: EdgeInsets.only(top: topSpacing),
       child: Column(
         children: [
           if (shouldShowTime) _buildTimeDivider(timeString, colors),
-          _buildMessageItem(message, colors),
+          _buildMessageItem(message, colors, isContinuation: isContinuation),
           if (_isLoadingNewer && index == _messages.length - 1)
             const Padding(
               padding: EdgeInsets.all(16),
@@ -1322,7 +1411,9 @@ class _MessageListState extends State<MessageList>
     );
   }
 
-  Widget _buildMessageItem(MessageInfo message, SemanticColorScheme colors) {
+  /// 每条气泡保留独立操作与可见性检测，聚合只隐藏头像，不合并消息身份。
+  Widget _buildMessageItem(MessageInfo message, SemanticColorScheme colors,
+      {bool isContinuation = false}) {
     bool isGroup = widget.conversationID.startsWith(groupConversationIDPrefix);
 
     final messageWidget = RepaintBoundary(
@@ -1333,6 +1424,13 @@ class _MessageListState extends State<MessageList>
           return MessageItem(
             key: ValueKey(_getMessageKey(message)),
             message: message,
+            isContinuation: isContinuation,
+            onDeleted: widget.localMessagesLoader == null
+                ? null
+                : () {
+                    _localWindow.delete([message.msgID]);
+                    if (mounted) _onMessageListStateChanged();
+                  },
             conversationID: widget.conversationID,
             isGroup: isGroup,
             maxWidth: MediaQuery.sizeOf(context).width - 32,
@@ -2391,9 +2489,7 @@ class _MessageListState extends State<MessageList>
     }
   }
 
-  /// Delete selected messages
-  ///
-  /// 删除选中消息
+  /// 多选删除沿用原确认；SDK 成功后同时移除尚未交接的本地候选。
   Future<void> deleteSelectedMessages() async {
     if (_selectedMessageIDs.isEmpty) return;
 
@@ -2414,7 +2510,15 @@ class _MessageListState extends State<MessageList>
               .where((message) => StickyMessageEvent.fromMessage(message) == null).toList();
             final result = await _messageListStore.deleteMessages(
                 messageList: messagesToDelete);
-            if (result.isSuccess) widget.onMessagesDeleted?.call(messagesToDelete.map((message) => message.msgID).toList());
+            if (result.isSuccess) {
+              final ids =
+                  messagesToDelete.map((message) => message.msgID).toList();
+              if (widget.localMessagesLoader != null) {
+                _localWindow.delete(ids);
+                if (mounted) _onMessageListStateChanged();
+              }
+              widget.onMessagesDeleted?.call(ids);
+            }
             exitMultiSelectMode();
           },
         ),

@@ -11,6 +11,34 @@ import 'big_file_message.dart';
 
 /// 汇总消息的展示文案，并为会话列表提供统一的消息摘要。
 class MessageUtil {
+  /// 仅聚合相邻、同发送人且同一自然日0～60秒内的普通消息；撤回和未知时间断组。
+  static bool isAvatarContinuation(MessageInfo older, MessageInfo current) {
+    final before = older.timestamp;
+    final after = current.timestamp;
+    if (before == null ||
+        after == null ||
+        before <= 0 ||
+        after <= 0 ||
+        after < before ||
+        after - before > 60 ||
+        older.from.userID.isEmpty ||
+        older.from.userID != current.from.userID ||
+        older.isSentBySelf != current.isSentBySelf) {
+      return false;
+    }
+    for (final message in [older, current]) {
+      if (message.status == MessageStatus.revoked ||
+          message.status == MessageStatus.deleted ||
+          message.messageType == MessageType.tips ||
+          StickyMessageEvent.fromMessage(message) != null) {
+        return false;
+      }
+    }
+    final a = DateTime.fromMillisecondsSinceEpoch(before * 1000);
+    final b = DateTime.fromMillisecondsSinceEpoch(after * 1000);
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
   static String getSystemInfoDisplayString(
       List<GroupTipsInfo> groupTipsInfo, BuildContext context) {
     if (groupTipsInfo.isEmpty) {

@@ -1,4 +1,5 @@
 import 'package:app_ui/app_ui.dart';
+import 'message_confirmation.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart' hide AlertDialog;
 import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
@@ -18,6 +19,12 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/message_tooltip.dart
 class MessageItem extends StatelessWidget with MessageStatusMixin {
   /// 当前消息、发送状态及阅读回执，状态标记和正文共用此数据。
   final MessageInfo message;
+
+  /// 同组后续消息隐藏头像但保留头像列，气泡仍是独立消息。
+  final bool isContinuation;
+
+  /// 删除成功后通知列表移除尚未被 SDK 接管的本地候选。
+  final VoidCallback? onDeleted;
 
   /// 当前消息所属会话，供菜单和消息定位使用。
   final String conversationID;
@@ -115,6 +122,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   const MessageItem({
     super.key,
     required this.message,
+    this.isContinuation = false,
+    this.onDeleted,
     required this.conversationID,
     this.isGroup = false,
     this.maxWidth = 200,
@@ -271,6 +280,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
       context: context,
       messageListStore: messageListStore,
       messageActionStore: MessageActionStore.create(message),
+      onDeleted: onDeleted,
       conversationID: conversationID,
       config: config,
       onMultiSelectTriggered: onEnterMultiSelectMode,
@@ -278,34 +288,26 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     );
   }
 
-  /// Show resend confirmation dialog
-  ///
-  /// 显示重新发送确认对话框
-  void _showResendConfirmDialog(BuildContext context) {
-    final locale = AppLocalization.of(context);
-    AtomicAlertDialog.showWithConfig(
+  /// 现有失败图标只打开确认，确认前后均复核状态，不启用失败长按菜单。
+  void _showResendConfirmDialog(BuildContext context) async {
+    await confirmMessageAction(
       context,
-      config: AlertDialogConfig(
-        title: locale.resendTips,
-        cancelConfig: ButtonConfig(text: locale.cancel),
-        confirmConfig: ButtonConfig(
-          text: locale.confirm,
-          type: TextColorPreset.blue,
-          onClick: () => _handleResendMessage(),
-        ),
-      ),
+      messageId: message.msgID,
+      isDelete: false,
+      isEligible: () => message.status == MessageStatus.sendFail,
+      execute: _handleResendMessage,
     );
   }
 
   /// 本地上传失败恢复同一任务，SDK失败消息校验后由重发器替换旧行。
-  void _handleResendMessage() {
+  Future<void> _handleResendMessage() async {
     // 上传前的失败行没有SDK消息ID，先恢复宿主任务，不能调用SDK删除或重发。
     final transfer = config.fileTransfers[message.msgID];
     if (transfer != null) {
-      transfer.retry?.call();
+      await transfer.retry?.call();
       return;
     }
-    MessageResender.resend(
+    await MessageResender.resend(
         message: message,
         conversationID: conversationID,
         mediaSender: config.mediaSender);
@@ -361,6 +363,16 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     }
   }
 
+  /// 隐藏组内头像时仍占据原列宽度，后续气泡不向头像位置偏移。
+  Widget _groupAvatar(Widget avatar) => Visibility(
+        visible: !isContinuation || isInMergedDetailView,
+        maintainSize: true,
+        maintainState: true,
+        maintainAnimation: true,
+        child: avatar,
+      );
+
+  /// 通话资料异步补齐后仍使用相同菜单回调，删除与聚合规则不随布局路径丢失。
   Widget _buildMessageLayout(
       bool isSelf, String? avatarUrl, String senderName, BuildContext context) {
     Widget messageBubble = MessageBubble(
@@ -369,6 +381,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
       isSelf: isSelf,
       maxWidth: maxWidth,
       config: config,
+      menuCallbacks: _buildMenuCallbacks(context),
       messageListStore: messageListStore,
       isHighlighted: isHighlighted,
       onHighlightComplete: onHighlightComplete,
@@ -525,10 +538,10 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                             message.from.userID, displaySenderName);
                       }
                     },
-              child: Avatar(
+              child: _groupAvatar(Avatar(
                 content: AvatarImageContent(
                     url: displayAvatarUrl, name: displaySenderName),
-              ),
+              )),
             ),
           if (shouldShowAvatar) SizedBox(width: config.avatarSpacing),
           Flexible(
@@ -681,10 +694,10 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                   onUserClick!(message.from.userID);
                 }
               },
-              child: Avatar(
+              child: _groupAvatar(Avatar(
                 content: AvatarImageContent(
                     url: displayAvatarUrl, name: displaySenderName),
-              ),
+              )),
             ),
         ],
       ),
@@ -777,10 +790,10 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
       ),
       if (config.isShowRightAvatar) SizedBox(width: config.avatarSpacing),
       if (config.isShowRightAvatar)
-        Avatar(
+        _groupAvatar(Avatar(
           content: AvatarImageContent(
               url: displayAvatarUrl, name: displaySenderName),
-        ),
+        )),
     ];
   }
 
@@ -818,10 +831,10 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
               onUserLongPress!(message.from.userID, displaySenderName);
             }
           },
-          child: Avatar(
+          child: _groupAvatar(Avatar(
             content: AvatarImageContent(
                 url: displayAvatarUrl, name: displaySenderName),
-          ),
+          )),
         ),
       if (config.isShowLeftAvatar) SizedBox(width: config.avatarSpacing),
       Flexible(
