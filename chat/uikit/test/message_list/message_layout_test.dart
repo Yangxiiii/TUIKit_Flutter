@@ -31,6 +31,110 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/text_m
 import 'package:tencent_chat_uikit/src/third_party/extended_text/extended_text.dart';
 
 void main() {
+  for (final sameId in [true, false]) {
+    testWidgets('HTTP搜索${sameId ? '相同ID' : '不同ID'}定位挂载后高亮一次并恢复',
+        (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      SharedPreferences.setMockInitialValues({});
+      final original = TencentImSDKPlugin.v2TIMManager;
+      final sdk = _Sdk('/single');
+      TencentImSDKPlugin.v2TIMManager = sdk;
+      addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+      MessageList.clearViewportSnapshots();
+      addTearDown(MessageList.clearViewportSnapshots);
+      final gate = sdk.messages.historyGate =
+          Completer<V2TimValueCallback<List<V2TimMessage>>>();
+      final stamp = DateTime(2026, 11, 3, 12).millisecondsSinceEpoch ~/ 1000;
+      // HTTP命中没有rawMessage，只保留后端提供的原消息ID、时间和序列号。
+      final target = MessageInfo(
+        msgID: sameId ? 'search-9' : 'server-key',
+        timestamp: stamp + 9,
+        sequence: 9,
+        from: MessageSenderInfo(userID: 'history_visual'),
+        conversationType: ConversationType.c2c,
+      );
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: Column(children: [
+          MessageList(conversationID: 'c2c_visual', locateMessage: target),
+        ])),
+      ));
+      await tester.pump(const Duration(milliseconds: 200));
+      gate.complete(V2TimValueCallback(code: 0, desc: '', data: [
+        for (var i = 18; i >= 0; i--)
+          _Message('search-$i', timestampOverride: stamp + i),
+      ]));
+      for (var frame = 0; frame < 4; frame++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      final row = find.byWidgetPredicate((widget) =>
+          widget is MessageItem && widget.message.msgID == 'search-9');
+      expect(row, findsOneWidget);
+      expect(tester.widget<MessageItem>(row).isHighlighted, isTrue);
+      final list = tester.widget<ScrollablePositionedList>(
+          find.byType(ScrollablePositionedList));
+      expect(
+          list.itemPositionsNotifier!.itemPositions.value.any((position) =>
+              position.index == 9 &&
+              position.itemLeadingEdge >= 0 &&
+              position.itemLeadingEdge < 1),
+          isTrue);
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(tester.widget<MessageItem>(row).isHighlighted, isTrue);
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pump();
+      expect(tester.widget<MessageItem>(row).isHighlighted, isFalse);
+      sdk.messages.listener!.onRecvMessageModified(
+        _Message('search-9', timestampOverride: stamp + 9),
+      );
+      await tester.pump();
+      expect(tester.widget<MessageItem>(row).isHighlighted, isFalse);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  for (final reason in ['重复候选', '缺少序列号', '发送者不匹配']) {
+    testWidgets('HTTP搜索$reason时不误高亮其他消息', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final original = TencentImSDKPlugin.v2TIMManager;
+      final sdk = _Sdk('/single');
+      TencentImSDKPlugin.v2TIMManager = sdk;
+      addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+      MessageList.clearViewportSnapshots();
+      addTearDown(MessageList.clearViewportSnapshots);
+      final stamp = DateTime(2026, 11, 3, 12).millisecondsSinceEpoch ~/ 1000;
+      sdk.messages.historyGate =
+          Completer<V2TimValueCallback<List<V2TimMessage>>>()
+            ..complete(V2TimValueCallback(code: 0, desc: '', data: [
+              for (var i = 17; i >= 0; i--)
+                _Message('search-$i', timestampOverride: stamp + i),
+              if (reason == '重复候选')
+                _Message('duplicate-9', timestampOverride: stamp + 9),
+            ]));
+      final target = MessageInfo(
+        msgID: 'server-key',
+        timestamp: stamp + 9,
+        sequence: reason == '缺少序列号' ? 0 : 9,
+        from: MessageSenderInfo(
+            userID: reason == '发送者不匹配' ? 'other' : 'history_visual'),
+        conversationType: ConversationType.c2c,
+      );
+      await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+              body: Column(children: [
+        MessageList(conversationID: 'c2c_visual', locateMessage: target),
+      ]))));
+      await tester.pumpAndSettle();
+      expect(
+          find.byWidgetPredicate(
+              (widget) => widget is MessageItem && widget.isHighlighted),
+          findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('基类导航展示全局实时未读与统一姓名，0隐藏且超过99封顶', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final original = TencentImSDKPlugin.v2TIMManager;

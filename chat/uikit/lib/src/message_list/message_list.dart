@@ -418,6 +418,7 @@ class _MessageListState extends State<MessageList>
   bool _isInitialRenderComplete = false;
   bool _initialLoadStarted = false;
 
+  /// 当前正在播放UIKit高亮的原生消息ID，动画完成后清空。
   String? _highlightedMessageId;
 
   /// The source message of an in-progress quote round-trip — i.e. the
@@ -894,6 +895,13 @@ class _MessageListState extends State<MessageList>
       _isInitialViewportReady = true;
     });
 
+    // 首屏窗口就绪后再交给UIKit定位高亮，避免提前通知时列表尚未挂载。
+    final target = widget.locateMessage;
+    if (loadSucceeded && target != null) {
+      final index = _findLocatedMessageIndex(target);
+      if (index != -1) _scrollToMessageAndHighlight(_messages[index].msgID);
+    }
+
     // 先提交首屏显示，再启动置顶等辅助查询；清未读仍只接受后面的非空成功信号。
     widget.onInitialLoadFinished?.call();
 
@@ -909,11 +917,37 @@ class _MessageListState extends State<MessageList>
 
   /// 将稳定消息标识转换为本次消息窗口内的初始列表索引。
   bool _setInitialViewport(MessageInfo message, {required double alignment}) {
-    final index = _messages.indexWhere((item) => item.msgID == message.msgID);
+    final index = _findLocatedMessageIndex(message);
     if (index == -1) return false;
     _initialScrollIndex = index;
     _initialScrollAlignment = alignment;
     return true;
+  }
+
+  /// 优先使用原消息ID；HTTP定位键不同时只接受时间、正数序列号和发送者的唯一匹配。
+  int _findLocatedMessageIndex(MessageInfo target) {
+    if (target.msgID.isEmpty) return -1;
+    final exact = _messages.indexWhere((item) => item.msgID == target.msgID);
+    if (exact != -1) return exact;
+    if ((target.sequence ?? 0) <= 0 ||
+        target.timestamp == null ||
+        target.from.userID.isEmpty) {
+      return -1;
+    }
+
+    // 不能仅凭秒级时间或正文猜测；重复候选同样拒绝，避免高亮到另一条消息。
+    var found = -1;
+    for (var index = 0; index < _messages.length; index++) {
+      final item = _messages[index];
+      if (item.sequence == target.sequence &&
+          item.timestamp == target.timestamp &&
+          item.from.userID == target.from.userID &&
+          item.conversationType == target.conversationType) {
+        if (found != -1) return -1;
+        found = index;
+      }
+    }
+    return found;
   }
 
   /// SDK 窗口接管本地同 ID 消息，并复用已有导航和锚点补偿处理新增项。
@@ -1083,11 +1117,12 @@ class _MessageListState extends State<MessageList>
         oldFirstMsgID != null &&
         newFirstMsgID != oldFirstMsgID;
 
-    // 本地首屏之后补到的己方成功历史不是本次主动发送，不能抢走用户浏览锚点。
-    final isSyncedSelfHistory = widget.localMessagesLoader != null &&
-        _isInitialLoad &&
-        _messages.isNotEmpty &&
-        _messages.first.status == MessageStatus.sendSuccess;
+    // 本地首屏补齐及显式定位收到的己方历史都不是主动发送，不能抢走目标锚点。
+    final isSyncedSelfHistory =
+        (widget.localMessagesLoader != null || widget.locateMessage != null) &&
+            _isInitialLoad &&
+            _messages.isNotEmpty &&
+            _messages.first.status == MessageStatus.sendSuccess;
 
     // If the new head message is sent by self, auto-scroll to bottom.
     //
@@ -1153,11 +1188,6 @@ class _MessageListState extends State<MessageList>
       }
     }
 
-    if (widget.locateMessage != null && _isInitialLoad) {
-      _isInitialLoad = false;
-      _scrollToMessageAndHighlight(widget.locateMessage!.msgID!);
-      return;
-    }
   }
 
   /// 先让列表接收新增数量，再按稳定消息ID恢复历史位置，最后恢复可见未读统计。
@@ -1328,9 +1358,10 @@ class _MessageListState extends State<MessageList>
     });
   }
 
+  /// 在列表挂载后定位并复用气泡高亮；页面已退出时丢弃待执行回调。
   void _scrollToMessageAndHighlight(String messageID) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_itemScrollController.isAttached) return;
+      if (!mounted || !_itemScrollController.isAttached) return;
 
       final targetIndex = _messages.indexWhere((m) => m.msgID == messageID);
       if (targetIndex != -1) {
@@ -1439,8 +1470,8 @@ class _MessageListState extends State<MessageList>
             onHighlightComplete: () {
               debugPrint(
                   'messageList, onHighlightComplete, msgID: ${message.msgID}, sequence:${message.sequence}');
-              if (_highlightedMessageId == message.msgID) {
-                _highlightedMessageId = null;
+              if (mounted && _highlightedMessageId == message.msgID) {
+                setState(() => _highlightedMessageId = null);
               }
             },
             onUserClick: widget.onUserClick,
