@@ -5,6 +5,7 @@ import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
 import 'package:tencent_chat_uikit/src/image_viewer/image_element.dart';
 
+/// 将消息媒体转换为预览数据，静态转发集合不拉取原会话历史。
 class ImageViewerManager {
   bool _isShowingImageViewer = false;
   List<ImageElement> _initialImageElements = [];
@@ -162,6 +163,7 @@ class ImageViewerManager {
   }
 }
 
+/// 读取媒体本地文件及远端展示地址，按来源集合提供分页和SDK下载回退。
 class ImageViewerDataManager {
   final String conversationID;
   final MessageInfo currentMessage;
@@ -313,12 +315,18 @@ class ImageViewerDataManager {
             (message.messagePayload as ImageMessagePayload?)?.originalImagePath;
         final largeImagePath =
             (message.messagePayload as ImageMessagePayload?)?.largeImagePath;
+        final payload = message.messagePayload as ImageMessagePayload?;
         return originalImagePath == byImagePath ||
-            largeImagePath == byImagePath;
+            largeImagePath == byImagePath ||
+            payload?.originalImageURL == byImagePath ||
+            payload?.largeImageURL == byImagePath ||
+            payload?.thumbImageURL == byImagePath;
       } else if (message.messageType == MessageType.video) {
         final payload = message.messagePayload as VideoMessagePayload?;
         final videoSnapshotPath = payload?.videoSnapshotPath;
-        return videoSnapshotPath == byImagePath;
+        return videoSnapshotPath == byImagePath ||
+            (message.messagePayload as VideoMessagePayload?)?.videoSnapshotURL ==
+                byImagePath;
       }
       return false;
     });
@@ -386,6 +394,7 @@ class ImageViewerDataManager {
     }
   }
 
+  /// 优先预览已有本地图片或有效远端地址，仍无资源时才通过原生消息下载。
   Future<ImageElement> _processImageMessagePayload(MessageInfo msg) async {
     final imagePayload = msg.messagePayload as ImageMessagePayload?;
     String imagePath = '';
@@ -407,7 +416,15 @@ class ImageViewerDataManager {
       }
     }
 
-    if (imagePath.isEmpty) {
+    // 静态转发载荷可能只有远端地址，不依赖原生消息对象也能打开图片预览。
+    if (imagePath.isEmpty && msg.rawMessage == null) {
+      imagePath = _remotePreviewUrl([
+        imagePayload?.originalImageURL,
+        imagePayload?.largeImageURL,
+        imagePayload?.thumbImageURL,
+      ]);
+    }
+    if (imagePath.isEmpty && msg.rawMessage != null) {
       await MessageActionStore.create(msg)
           .downloadMedia(quality: MediaQuality.standard);
 
@@ -430,6 +447,7 @@ class ImageViewerDataManager {
     );
   }
 
+  /// 预览本地或远端视频封面，保留原消息与本地视频路径供播放器按需下载。
   Future<ImageElement> _processVideoMessagePayload(MessageInfo msg) async {
     final videoPayload2 = msg.messagePayload as VideoMessagePayload?;
     String imagePath = '';
@@ -442,7 +460,11 @@ class ImageViewerDataManager {
       }
     }
 
-    if (imagePath.isEmpty) {
+    // 无原生对象时直接展示封面地址，原生视频继续使用既有SDK下载和播放流程。
+    if (imagePath.isEmpty && msg.rawMessage == null) {
+      imagePath = _remotePreviewUrl([videoPayload2?.videoSnapshotURL]);
+    }
+    if (imagePath.isEmpty && msg.rawMessage != null) {
       await MessageActionStore.create(msg)
           .downloadMedia(quality: MediaQuality.thumbnail);
 
@@ -464,6 +486,20 @@ class ImageViewerDataManager {
       imagePath: imagePath,
       videoPath: videoPayload2?.videoPath,
     );
+  }
+
+  /// 远端展示地址仅接受带Host的HTTP(S)，不把其他协议作为本地文件传入查看器。
+  String _remotePreviewUrl(Iterable<String?> urls) {
+    for (final value in urls) {
+      if (value == null || value.isEmpty) continue;
+      final uri = Uri.tryParse(value);
+      if (uri != null &&
+          uri.host.isNotEmpty &&
+          (uri.scheme == 'http' || uri.scheme == 'https')) {
+        return value;
+      }
+    }
+    return '';
   }
 
   void dispose() {}

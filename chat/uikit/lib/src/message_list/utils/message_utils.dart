@@ -11,6 +11,57 @@ import 'big_file_message.dart';
 
 /// 汇总消息的展示文案，并为会话列表提供统一的消息摘要。
 class MessageUtil {
+  /// 聊天和合并详情共用的本地时间文案，使用秒级时间戳与当前语言。
+  static String formatMessageTime(int timestamp, BuildContext context) {
+    final locale = AppLocalization.of(context);
+    // 先区分本地自然日内的时间和昨天文案，再处理周内及更早日期。
+    final DateTime date = DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
+    final DateTime now = DateTime.now();
+
+    final String timeStr =
+        "${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}";
+
+    final DateTime today = DateTime(now.year, now.month, now.day);
+    final DateTime messageDay = DateTime(date.year, date.month, date.day);
+    final int daysDiff = today.difference(messageDay).inDays;
+
+    if (daysDiff == 0) {
+      return timeStr;
+    }
+
+    if (daysDiff == 1) {
+      // 中文设计不在日期与时间之间留空格；其他语言保留词间分隔。
+      final separator = locale.locale.languageCode == 'zh' ? '' : ' ';
+      return '${locale.yesterday}$separator$timeStr';
+    }
+
+    // 按周一划分自然周，与聊天窗口原有时间分组文案保持一致。
+    final int nowWeekIndex = (now.weekday + 6) % 7;
+    final int dateWeekIndex = (date.weekday + 6) % 7;
+    final DateTime nowWeekStart = today.subtract(Duration(days: nowWeekIndex));
+    final DateTime dateWeekStart =
+        messageDay.subtract(Duration(days: dateWeekIndex));
+
+    if (now.year == date.year && nowWeekStart == dateWeekStart) {
+      final weekdays = [
+        locale.weekdaySunday,
+        locale.weekdayMonday,
+        locale.weekdayTuesday,
+        locale.weekdayWednesday,
+        locale.weekdayThursday,
+        locale.weekdayFriday,
+        locale.weekdaySaturday,
+      ];
+      return "${weekdays[date.weekday % 7]} $timeStr";
+    }
+
+    if (now.year == date.year) {
+      return "${date.month}/${date.day} $timeStr";
+    }
+
+    return "${date.year}/${date.month}/${date.day} $timeStr";
+  }
+
   /// 仅聚合相邻、同发送人且同一自然日0～60秒内的普通消息；撤回和未知时间断组。
   static bool isAvatarContinuation(MessageInfo older, MessageInfo current) {
     final before = older.timestamp;

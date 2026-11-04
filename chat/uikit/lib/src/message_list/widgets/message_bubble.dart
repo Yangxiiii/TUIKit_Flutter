@@ -36,16 +36,22 @@ import 'message_types/video_message_widget.dart';
 class DefaultMessageMenuCallbacks implements MessageMenuCallbacks {
   /// 菜单所属页面，用于读取宿主动作范围及展示现有操作反馈。
   final BuildContext context;
+
   /// 当前会话的唯一消息列表Store，不另行维护一份消息集合。
   final MessageListStore messageListStore;
+
   /// 动作所属会话标识，用于转发来源和权限边界。
   final String conversationID;
+
   /// 宿主允许的复制、回复、转发等消息能力。
   final MessageListConfigProtocol config;
+
   /// 当前目标的公开AtomicX动作，撤回成功通过其通知更新本机列表。
   MessageActionStore messageActionStore;
+
   /// 明确点击多选时由外层切换模式，普通长按不触发。
   final VoidCallback? onMultiSelectTriggered;
+
   /// 交给聊天页设置输入引用，不由菜单管理输入控制器。
   final void Function(MessageInfo message)? onQuoteMessageCallback;
 
@@ -91,6 +97,14 @@ class DefaultMessageMenuCallbacks implements MessageMenuCallbacks {
   Future<void> _deleteMessage(
       MessageInfo message, MessageActionsScope? scope) async {
     try {
+      final localDelete = config.localDeleteHandler;
+      if (localDelete != null) {
+        final deleted = await localDelete([message]);
+        // 本地删除与原SDK成功态共用候选清理回调，失败或空回执不得提前移除。
+        if (deleted.contains(message.msgID)) onDeleted?.call();
+        scope?.onMessagesDeleted?.call(deleted);
+        return;
+      }
       final result = await messageActionStore.delete();
       if (result.isSuccess) {
         onDeleted?.call();
@@ -116,14 +130,14 @@ class DefaultMessageMenuCallbacks implements MessageMenuCallbacks {
 
   @override
   void onForwardMessage(MessageInfo message) {
-    // Validate message status first
-    //
-    // 先验证消息状态。
-    final statusError =
-        ForwardService.validateMessagesStatus(context, [message]);
-    if (statusError != null) {
-      Toast.error(context, statusError);
-      return;
+    // 接入宿主后由统一入口重查撤回和附件状态，旧快照不能提前决定转发资格。
+    if (config.forwardHandler == null) {
+      final statusError =
+          ForwardService.validateMessagesStatus(context, [message]);
+      if (statusError != null) {
+        Toast.error(context, statusError);
+        return;
+      }
     }
 
     ForwardService.forwardSingleMessage(
@@ -666,16 +680,21 @@ class _MessageBubbleState extends State<MessageBubble>
       );
     }
 
-    return messageWidget;
+    // 原消息与记录预览使用不同命名空间，稳定标识保留正文与原有长按动作。
+    return Semantics(
+      identifier: widget.message.msgID.isEmpty
+          ? null
+          : 'tim.${widget.isInMergedDetailView ? 'record' : 'chat'}.message.${Uri.encodeComponent(widget.message.msgID)}',
+      onLongPress: _longPressCallback,
+      child: messageWidget,
+    );
   }
 
   void _handleLongPress() {
     _onOpenToolTip();
   }
 
-  /// Get long press callback - returns null if in merged detail view
-  ///
-  /// 获取长按回调——如果在合并详情视图中返回 null。
+  /// 合并详情始终只读，即使来源配置带有转发能力也不能响应长按。
   VoidCallback? get _longPressCallback =>
       widget.isInMergedDetailView ? null : _handleLongPress;
 

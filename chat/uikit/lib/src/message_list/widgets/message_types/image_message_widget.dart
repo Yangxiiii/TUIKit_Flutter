@@ -65,7 +65,10 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget>
   }
 
   void _initializeImageViewerManager() {
-    if (widget.message.rawMessage == null) return;
+    // 转发已有静态媒体集合时，可直接预览载荷中的本地文件或有效URL。
+    if (widget.message.rawMessage == null && widget.mergedMediaMessages == null) {
+      return;
+    }
 
     _imageViewerManager = ImageViewerManager(
       conversationID: widget.conversationID,

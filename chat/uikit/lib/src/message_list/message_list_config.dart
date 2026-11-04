@@ -1,9 +1,20 @@
 import 'package:tuikit_atomic_x/base_component/utils/app_builder.dart';
 import 'package:flutter/painting.dart';
 import '../message_input/chat_media_sender.dart';
+import 'message_forward_config.dart';
+export 'message_forward_config.dart';
 
 /// 约定消息列表的外观和可操作能力，具体默认值由聊天配置提供。
 abstract class MessageListConfigProtocol {
+  /// 宿主统一转发入口；为空时保留UIKit默认流程。
+  ChatForwardHandler? get forwardHandler;
+
+  /// 宿主只删除当前用户本地记录，不借用会删除云端漫游的SDK批量接口。
+  ChatLocalDeleteHandler? get localDeleteHandler;
+
+  /// 本账号已确认的本机删除标识，阻止SDK窗口与进程快照重新呈现旧记录。
+  Set<String> get hiddenMessageIDs;
+
   /// 宿主提供的视频播放图标；缺省时使用 UIKit 字体图标。
   ImageProvider? get videoPlayIcon;
 
@@ -53,6 +64,12 @@ abstract class MessageListConfigProtocol {
 
 /// 提供消息列表默认外观，并保留宿主显式传入的单项覆盖。
 class ChatMessageListConfig implements MessageListConfigProtocol {
+  @override
+  final ChatForwardHandler? forwardHandler;
+  @override
+  final ChatLocalDeleteHandler? localDeleteHandler;
+  @override
+  final Set<String> hiddenMessageIDs;
   @override
   final ImageProvider? videoPlayIcon;
   @override
@@ -200,6 +217,9 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
   bool get isSupportQuote => _isSupportQuote;
 
   const ChatMessageListConfig({
+    this.forwardHandler,
+    this.localDeleteHandler,
+    this.hiddenMessageIDs = const {},
     this.videoPlayIcon,
     this.imageLoadingPlaceholder,
     this.videoLoadingPlaceholder,

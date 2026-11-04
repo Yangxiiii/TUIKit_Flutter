@@ -3,6 +3,48 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_chat_uikit/src/third_party/scrollable_positioned_list/scrollable_positioned_list.dart';
 
 void main() {
+  testWidgets('普通页面仍保存并恢复定位列表的阅读锚点', (tester) async {
+    final bucket = PageStorageBucket();
+    final controller = ItemScrollController();
+    final positions = ItemPositionsListener.create();
+    Widget layout(bool show) => MaterialApp(
+            home: PageStorage(
+          bucket: bucket,
+          child: Align(
+              alignment: Alignment.topCenter,
+              child: SizedBox(
+                height: 300,
+                child: show
+                    ? ScrollablePositionedList.builder(
+                        key: const PageStorageKey('saved-records'),
+                        itemCount: 30,
+                        itemScrollController: controller,
+                        itemPositionsListener: positions,
+                        itemBuilder: (_, index) =>
+                            SizedBox(height: 60, child: Text('$index')),
+                      )
+                    : const SizedBox.shrink(),
+              )),
+        ));
+    await tester.pumpWidget(layout(true));
+    await tester.pumpAndSettle();
+    controller.jumpTo(index: 10);
+    await tester.pumpAndSettle();
+    final context = tester.element(find.byType(ScrollablePositionedList));
+    expect((bucket.readState(context) as ItemPosition).index, 10);
+    // 销毁列表再挂载，验证可选存储没有破坏原页面的恢复行为。
+    await tester.pumpWidget(layout(false));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(layout(true));
+    await tester.pumpAndSettle();
+    expect(
+        positions.itemPositions.value
+            .any((p) => p.index == 10 && p.itemLeadingEdge.abs() < .01),
+        isTrue);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('视口随键盘缩小再恢复、消息数量增加时仍保持连续', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;

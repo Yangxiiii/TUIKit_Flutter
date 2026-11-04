@@ -30,6 +30,8 @@ export 'src/message_list/utils/rich_content_message.dart'
     show RichContentMessage;
 export 'src/message_list/utils/message_utils.dart' show MessageUtil;
 export 'src/message_list/message_list.dart';
+export 'src/message_list/widgets/merged_message_detail_page.dart'
+    show MergedMessageDetailPage;
 export 'src/navigation/chat_uikit_navigation.dart';
 export 'src/pages/chat_page.dart';
 export 'src/search/search_page.dart';
@@ -44,3 +46,7 @@ export 'src/message_list/message_recall_config.dart';
 export 'src/message_list/message_sticky_config.dart';
 export 'src/message_list/utils/sticky_message_event.dart';
 export 'src/message_list/widgets/message_types/image_message_widget.dart';
+
+export 'src/message_input/src/chat_special_text_span_builder.dart'
+    show ChatSpecialTextSpanBuilder;
+export 'src/third_party/extended_text/extended_text.dart' show ExtendedText;

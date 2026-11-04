@@ -45,6 +45,9 @@ class ChatPage extends AppBaseStatefulPage {
   /// 消息首次加载成功后交给业务清未读；失败及页面销毁不会触发。
   final VoidCallback? onInitialMessagesLoaded;
 
+  /// 首次窗口请求结束后通知宿主；空会话也触发，只用于记录打开等辅助动作。
+  final VoidCallback? onInitialLoadFinished;
+
   /// 当前宿主允许的输入能力与操作守卫。
   final ChatMessageInputConfig messageInputConfig;
 
@@ -76,6 +79,7 @@ class ChatPage extends AppBaseStatefulPage {
     this.enableSuccessfulDelete = false,
     this.message,
     this.onInitialMessagesLoaded,
+    this.onInitialLoadFinished,
     this.messageInputConfig = const ChatMessageInputConfig(
       isShowAudioCall: true,
       isShowVideoCall: true,
@@ -94,6 +98,9 @@ class ChatPage extends AppBaseStatefulPage {
 
 /// 协调会话页的消息展示和输入交互。
 class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
+  /// 快选分隔线的实测锚点，点击时使用当前位置，不缓存滚动前的边界。
+  final GlobalKey _selectBelowLineKey = GlobalKey();
+
   /// 临时面板绘制偏移，不改动SDK消息窗口或普通输入草稿。
   final MessageOverlayController _overlay = MessageOverlayController();
 
@@ -132,9 +139,13 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
       _messageInputKey.currentState?.collapseAllPanels();
       FocusScope.of(context).unfocus();
       final items = [...original];
-      if (widget.messageStickyConfig != null && StickyMessageEvent.canPin(message)) {
-        items.add(MessageMenuItem(id: 'top', title: '置顶消息', icon: AppIcons.topMessage,
-          onTap: () => unawaited(_pinStickyMessage(message))));
+      if (widget.messageStickyConfig != null &&
+          StickyMessageEvent.canPin(message)) {
+        items.add(MessageMenuItem(
+            id: 'top',
+            title: '置顶消息',
+            icon: AppIcons.topMessage,
+            onTap: () => unawaited(_pinStickyMessage(message))));
       }
       if (widget.messageEditConfig?.canEdit(message) ?? false) {
         items.add(MessageMenuItem(
@@ -150,8 +161,11 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
         backgroundColor: Colors.transparent,
         barrierColor: Colors.transparent,
         builder: (sheetContext) => MessageActionSheet(
-          recallExpiresAt: widget.messageRecallConfig == null || message.timestamp == null
-              ? null : DateTime.fromMillisecondsSinceEpoch((message.timestamp! + 120) * 1000),
+          recallExpiresAt:
+              widget.messageRecallConfig == null || message.timestamp == null
+                  ? null
+                  : DateTime.fromMillisecondsSinceEpoch(
+                      (message.timestamp! + 120) * 1000),
           editExpiresAt: message.timestamp == null
               ? null
               : DateTime.fromMillisecondsSinceEpoch(
@@ -193,6 +207,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
       final error = await widget.messageStickyConfig?.pin(message);
       if (mounted && error != null) AppToast.show(error);
     }
+
     final guard = widget.messageInputConfig.actionGuard;
     if (guard == null) {
       await submit();
@@ -517,7 +532,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
   Widget leadingOf(BuildContext context, Locale locale) {
     final back = Semantics(
       identifier: 'tim.chat.back',
-      // maybePop遵守消息编辑的PopScope，首次返回只退出编辑，不离开会话。
+      // 首次返回遵守PopScope，只退出编辑或多选，再次返回才离开会话。
       child: BackButton(
           style: const ButtonStyle(
             padding: WidgetStatePropertyAll(EdgeInsets.zero),
@@ -612,6 +627,8 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
             MessageList(
               localMessagesLoader: widget.localMessagesLoader,
               aggregateMessages: widget.aggregateMessages,
+              // 多选切换保持同一列表State，避免重新加载时丢失选择与阅读位置。
+              key: ValueKey(widget.conversation.conversationID),
               overlayController: _overlay,
               conversationID: widget.conversation.conversationID,
               config: widget.messageListConfig,
@@ -619,8 +636,10 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
               onMessagesChanged: widget.messageStickyConfig?.onMessagesChanged,
               onMessagesDeleted: widget.messageStickyConfig?.onMessagesDeleted,
               onInitialMessagesLoaded: widget.onInitialMessagesLoaded,
-              onInitialLoadFinished:
-                  widget.messageStickyConfig?.onInitialLoadFinished,
+              onInitialLoadFinished: () {
+                widget.onInitialLoadFinished?.call();
+                widget.messageStickyConfig?.onInitialLoadFinished?.call();
+              },
               onUserClick: (String userID) => _onUserClick(userID),
               onUserLongPress: (String userID, String displayName) {
                 _messageInputKey.currentState?.insertMention(
@@ -633,6 +652,11 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
                 _messageInputKey.currentState?.setQuotedMessage(message);
               },
               onMultiSelectStateChanged: (state) {
+                if (state?.isActive == true &&
+                    _multiSelectState?.isActive != true) {
+                  _messageInputKey.currentState?.collapseAllPanels();
+                  FocusScope.of(context).unfocus();
+                }
                 setState(() {
                   _multiSelectState = state;
                 });
@@ -646,25 +670,73 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
                 onCancel: _multiSelectState!.onCancel,
                 onDelete: _multiSelectState!.onDelete,
                 onForward: () => _multiSelectState!.onForward(context),
-              )
-            else
-              Visibility(
-                visible: _editingMessage == null,
-                maintainState: true,
-                maintainAnimation: true,
-                maintainSize: true,
-                child: MessageInput(
-                  conversationDisplayName: widget.displayName,
-                  key: _messageInputKey,
-                  conversationID: widget.conversation.conversationID,
-                  config: widget.messageInputConfig,
-                  onLocalMessageSent:
-                      widget.messageRecallConfig?.onLocalMessageSent,
-                ),
+                onMergedForward: () =>
+                    _multiSelectState!.onMergedForward?.call(context),
+                onSeparateForward: () =>
+                    _multiSelectState!.onSeparateForward?.call(context),
               ),
+            Visibility(
+              key: const ValueKey('normal-chat-input'),
+              visible: _multiSelectState?.isActive != true &&
+                  _editingMessage == null,
+              maintainState: true,
+              maintainAnimation: true,
+              maintainSize: _multiSelectState?.isActive != true,
+              child: MessageInput(
+                conversationDisplayName: widget.displayName,
+                key: _messageInputKey,
+                conversationID: widget.conversation.conversationID,
+                config: widget.messageInputConfig,
+                onLocalMessageSent:
+                    widget.messageRecallConfig?.onLocalMessageSent,
+              ),
+            ),
           ],
         ),
       );
+
+  /// 将分隔线的屏幕纵坐标交给原消息列表，选择状态仍由列表唯一持有。
+  void _selectMessagesBelowLine() {
+    final line = _selectBelowLineKey.currentContext?.findRenderObject();
+    if (line is! RenderBox || !line.hasSize) return;
+    final boundary = line.localToGlobal(Offset(0, line.size.height / 2)).dy;
+    _multiSelectState?.onSelectBelow?.call(boundary);
+  }
+
+  /// 快选入口浮在导航下方，外层不绘制背景，消息可从按钮后方滚过。
+  Widget _buildSelectBelow() => SizedBox(
+      height: 60,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        child: Row(children: [
+          Expanded(
+              child: Divider(
+                  key: _selectBelowLineKey,
+                  height: 1,
+                  color: context.appColors.outline)),
+          Semantics(
+              identifier: 'tim.forward.select_below',
+              button: true,
+              child: InkWell(
+                onTap: _selectMessagesBelowLine,
+                child: Container(
+                    height: 28,
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    decoration: BoxDecoration(
+                        color: context.appColors.surface,
+                        border: Border.all(
+                            color: context.appColors.outline, width: .5),
+                        borderRadius: BorderRadius.circular(16)),
+                    child: Center(
+                        child: Text('选择以下消息',
+                            style: TextStyle(
+                                fontSize: 14,
+                                height: 1.5,
+                                color: context.appColors.textPrimary)))),
+              )),
+          Expanded(child: Divider(height: 1, color: context.appColors.outline)),
+        ]),
+      ));
 
   @override
   Widget buildBody(BuildContext context, WidgetRef ref, Locale locale) {
@@ -673,6 +745,9 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
         _buildConversation(),
         // 聆听浮层保持原有全屏收起手势；编辑区随后绘制，优先接收编辑交互。
         const Positioned.fill(child: ListenPlaybackBar()),
+        // 快选入口不占用消息窗口高度，仅按钮和分隔线覆盖消息。
+        if (_multiSelectState?.isActive == true)
+          Positioned(top: 0, left: 0, right: 0, child: _buildSelectBelow()),
         // 置顶横幅覆盖消息列表上部，不挤压原消息窗口和输入区。
         if (widget.messageStickyConfig case final sticky?)
           Positioned(
@@ -703,18 +778,22 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
       ],
     );
     final guardedPage = PopScope(
-      canPop: _editingMessage == null,
+      canPop: _editingMessage == null && _multiSelectState?.isActive != true,
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop && _editingMessage != null) {
           _cancelEditing();
+        } else if (!didPop && _multiSelectState?.isActive == true) {
+          _multiSelectState?.onCancel();
         }
       },
       child: page,
     );
     final config = widget.messageEditConfig;
+    // 转发、成功态删除、编辑或置顶任一能力接入时，均使用统一操作面板。
     final editPage = config == null &&
             widget.messageStickyConfig == null &&
-            !widget.enableSuccessfulDelete
+            !widget.enableSuccessfulDelete &&
+            widget.messageListConfig.forwardHandler == null
         ? guardedPage
         : MessageActionsScope(
             enableSuccessfulDelete: widget.enableSuccessfulDelete,

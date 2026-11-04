@@ -813,11 +813,15 @@ class ImageViewerWidget extends StatefulWidget {
   /// 由调用方处理历史分页和视频下载，完成后交还预览器更新当前媒体。
   final EventHandler onEventTriggered;
 
+  /// 浮层预览由调用方关闭当前浮层；不传时保留原页面路由返回行为。
+  final VoidCallback? onClose;
+
   const ImageViewerWidget({
     Key? key,
     required this.imageElements,
     this.initialIndex = 0,
     required this.onEventTriggered,
+    this.onClose,
   }) : super(key: key);
 
   @override
@@ -867,8 +871,14 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
     super.dispose();
   }
 
+  /// 关闭当前媒体承载容器，浮层模式不弹出下方仍持有转发草稿的页面。
   void _onImageTap() {
-    Navigator.of(context).pop();
+    final close = widget.onClose;
+    if (close != null) {
+      close();
+    } else {
+      Navigator.of(context).pop();
+    }
   }
 
   void _onLoadMore(

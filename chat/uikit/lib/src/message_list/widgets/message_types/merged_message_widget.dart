@@ -1,25 +1,36 @@
 import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
-import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_input/src/chat_special_text_span_builder.dart';
 import 'package:tencent_chat_uikit/src/message_list/message_list_config.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/merged_message_detail_page.dart';
-import 'package:tencent_chat_uikit/src/message_list/widgets/message_status_mixin.dart';
 import 'package:tencent_chat_uikit/src/third_party/extended_text/extended_text.dart';
 
-/// Merged message display widget
-///
-/// 合并消息展示控件
+/// 展示原合并消息摘要，并从统一详情Sheet查看或再次转发内层消息。
 class MergedMessageWidget extends StatefulWidget {
+  /// 原合并消息的标题、摘要及下载载荷。
   final MessageInfo message;
+
+  /// 使用原发送方向选择气泡背景，不改变下载包内发送者。
   final bool isSelf;
+
+  /// 父消息行分配的可用宽度，长标题按两行省略。
   final double maxWidth;
+
+  /// 沿用来源圆角、媒体和宿主转发能力。
   final MessageListConfigProtocol config;
+
+  /// 来源允许时打开消息操作，详情只读模式可为空。
   final VoidCallback? onLongPress;
+
+  /// 外部浮层定位的稳定气泡锚点。
   final GlobalKey? bubbleKey;
+
+  /// 来源消息Store，仅用于公开消息操作，不重新加载包外历史。
   final MessageListStore messageListStore;
+
+  /// 合并详情不显示包外发送回执，媒体使用包内静态集合。
   final bool isInMergedDetailView;
 
   /// Optional override for bubble background color — used by the
@@ -46,8 +57,8 @@ class MergedMessageWidget extends StatefulWidget {
   State<MergedMessageWidget> createState() => _MergedMessageWidgetState();
 }
 
-class _MergedMessageWidgetState extends State<MergedMessageWidget>
-    with MessageStatusMixin {
+/// 根据真实合并载荷呈现三条摘要，并协调原包详情面板的生命周期。
+class _MergedMessageWidgetState extends State<MergedMessageWidget> {
   @override
   Widget build(BuildContext context) {
     final colors = SemanticColorScheme.of(context);
@@ -59,7 +70,7 @@ class _MergedMessageWidgetState extends State<MergedMessageWidget>
       child: Container(
         key: widget.bubbleKey,
         constraints: BoxConstraints(
-          maxWidth: widget.maxWidth * 0.7,
+          maxWidth: widget.maxWidth,
           minWidth: 120,
         ),
         decoration: BoxDecoration(
@@ -73,27 +84,18 @@ class _MergedMessageWidgetState extends State<MergedMessageWidget>
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Title
+            // 标题最多两行，摘要与其分区留白，不增加设计中不存在的分隔线。
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
               child: Text(
                 mergedInfo?.title ?? _getDefaultTitle(context),
-                style: FontScheme.caption2Medium.copyWith(
-                  color: colors.textColorPrimary,
-                ),
-                maxLines: 1,
+                style: TextStyle(
+                    fontSize: 16, height: 1.5, color: colors.textColorPrimary),
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            // Divider
-            Container(
-              height: 1,
-              margin: const EdgeInsets.symmetric(horizontal: 12),
-              color: colors.strokeColorPrimary.withOpacity(0.5),
-            ),
-            // Abstract list with status and time
-            //
-            // 带状态和时间的摘要列表
+            // 回执与时间由外层MessageItem统一展示，卡片内部只保留真实摘要。
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
               child: Column(
@@ -101,21 +103,6 @@ class _MergedMessageWidgetState extends State<MergedMessageWidget>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   _buildAbstractList(context, mergedInfo?.abstractList, colors),
-                  const SizedBox(height: 6),
-                  // Status and time row
-                  //
-                  // 状态和时间行
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: buildStatusAndTimeWidgets(
-                      message: widget.message,
-                      isSelf: widget.isSelf,
-                      colors: colors,
-                      isShowTimeInBubble: widget.config.isShowTimeInBubble,
-                      enableReadReceipt: widget.config.enableReadReceipt,
-                      isInMergedDetailView: widget.isInMergedDetailView,
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -139,10 +126,8 @@ class _MergedMessageWidgetState extends State<MergedMessageWidget>
       );
     }
 
-    // Show max 4 abstracts
-    //
-    // 最多显示 4 条摘要
-    final displayList = abstractList.take(4).toList();
+    // 产品展示前三条摘要，收到更多SDK摘要时也不改变固定卡片密度。
+    final displayList = abstractList.take(3).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -159,9 +144,10 @@ class _MergedMessageWidgetState extends State<MergedMessageWidget>
               colorScheme: colors,
               onTapUrl: (_) {},
             ),
-            style: FontScheme.caption3Regular.copyWith(
-              color: colors.textColorSecondary,
-            ),
+            style: TextStyle(
+                fontSize: 14,
+                height: 22 / 14,
+                color: colors.textColorSecondary),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
@@ -171,6 +157,9 @@ class _MergedMessageWidgetState extends State<MergedMessageWidget>
   }
 
   BorderRadius _getBubbleBorderRadius() {
+    if (widget.config.textBubbleCornerRadius != 18) {
+      return BorderRadius.circular(widget.config.textBubbleCornerRadius);
+    }
     if (widget.isSelf) {
       return const BorderRadius.only(
         topLeft: Radius.circular(18),
@@ -188,11 +177,17 @@ class _MergedMessageWidgetState extends State<MergedMessageWidget>
     }
   }
 
+  /// 原包详情保留顶部安全区及12像素留白，遮罩沿用普通弹窗的统一配置。
   void _openMergedMessagePayloadDetail(BuildContext context) {
-    context.pushChatUIKitPage(
-      MergedMessageDetailPage(
+    AppDialog.showSheet<void>(
+      showCloseButton: false,
+      topRadius: 16,
+      maxHeightFactor: 1,
+      backgroundColor: context.appColors.surface,
+      child: MergedMessageDetailPage(
         message: widget.message,
         messageListStore: widget.messageListStore,
+        config: widget.config,
       ),
     );
   }

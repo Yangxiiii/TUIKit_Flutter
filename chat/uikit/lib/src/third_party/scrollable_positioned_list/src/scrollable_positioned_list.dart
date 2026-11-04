@@ -305,6 +305,7 @@ class ScrollOffsetController {
   }
 }
 
+/// 协调定位列表的滚动和锚点；仅在宿主提供PageStorage时保存与恢复阅读位置。
 class _ScrollablePositionedListState extends State<ScrollablePositionedList>
     with TickerProviderStateMixin {
   /// Details for the primary (active) [ListView].
@@ -327,7 +328,9 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
   @override
   void initState() {
     super.initState();
-    ItemPosition? initialPosition = PageStorage.of(context).readState(context);
+    // 全局Sheet不具备路由的PageStorage，缺省时直接使用调用方的初始锚点。
+    ItemPosition? initialPosition =
+        PageStorage.maybeOf(context)?.readState(context);
     primary.target = initialPosition?.index ?? widget.initialScrollIndex;
     primary.alignment =
         initialPosition?.itemLeadingEdge ?? widget.initialAlignment;
@@ -639,12 +642,13 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
     ]);
   }
 
+  /// 发布可见项位置，有存储容器时同步保存锚点，浮层内仍正常通知定位监听器。
   void _updatePositions() {
     final itemPositions = primary.itemPositionsNotifier.itemPositions.value
         .where((ItemPosition position) =>
             position.itemLeadingEdge < 1 && position.itemTrailingEdge > 0);
     if (itemPositions.isNotEmpty) {
-      PageStorage.of(context).writeState(
+      PageStorage.maybeOf(context)?.writeState(
           context,
           itemPositions.reduce((value, element) =>
               value.itemLeadingEdge < element.itemLeadingEdge

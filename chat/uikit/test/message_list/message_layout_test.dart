@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:tencent_chat_uikit/src/message_list/widgets/message_bubble.dart';
 import 'package:app_core/app_core.dart';
 import 'package:flutter/foundation.dart';
 
@@ -21,6 +22,9 @@ import 'package:tencent_cloud_chat_sdk/models/v2_tim_conversation.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_conversation_result.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_message.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_text_elem.dart';
+import 'package:tencent_cloud_chat_sdk/models/v2_tim_merger_elem.dart';
+import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/merged_message_widget.dart';
+import 'package:tencent_chat_uikit/src/message_list/widgets/merged_message_detail_page.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_message_reaction_result.dart';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -135,10 +139,199 @@ void main() {
     });
   }
 
+  testWidgets('聊天点击合并记录后通过全局Sheet显示正文、滚动并关闭', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    tester.view.padding = const FakeViewPadding(top: 44, bottom: 24);
+    addTearDown(tester.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/single');
+    sdk.messages.chronologicalHistory = [_Message('merged', isMerged: true)];
+    sdk.messages.mergedContents = [
+      _Message('record-0'),
+      _Message('record-1'),
+      _Message('record-2', isSelfOverride: true),
+      _Message('nested', isMerged: true),
+      for (var i = 4; i < 20; i++) _Message('record-$i'),
+    ];
+    var forwarded = 0;
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    addTearDown(MessageList.clearViewportSnapshots);
+    await tester.pumpWidget(ProviderScope(
+        child: MaterialApp(
+      navigatorObservers: [AppDialog.observer],
+      builder: AppDialog.init(),
+      home: ChatPage(
+          messageListConfig: ChatMessageListConfig(
+              isShowRightAvatar: true,
+              textBubbleCornerRadius: 8,
+              forwardHandler: (_, request) async {
+                forwarded++;
+                return false;
+              }),
+          conversation: ConversationInfo(
+              conversationID: 'c2c_visual', type: ConversationType.c2c)),
+    )));
+    await tester.pumpAndSettle();
+    Color currentMask() => tester
+        .widgetList<Container>(find.byType(Container))
+        .map((widget) => widget.color)
+        .whereType<Color>()
+        .singleWhere((color) =>
+            color.a > 0 &&
+            color.a < 1 &&
+            color.r == 0 &&
+            color.g == 0 &&
+            color.b == 0);
+    // 先读取普通弹窗实际渲染的遮罩，再对照生产合并详情入口，避免两者独立取色。
+    final alert = AppDialog.showAlert(content: '遮罩对照');
+    await tester.pumpAndSettle();
+    final normalMask = currentMask();
+    final dismissAlert = AppDialog.dismiss();
+    await tester.pumpAndSettle();
+    await dismissAlert;
+    await alert;
+    await tester.tap(find.byType(MergedMessageWidget));
+    await tester.pumpAndSettle();
+    expect(currentMask(), normalMask);
+    expect(tester.takeException(), isNull);
+    final detail = find.byType(MergedMessageDetailPage);
+    expect(detail, findsOneWidget);
+    // 设计保留顶部安全区及12像素留白，整张Sheet与正文都使用白色承载面。
+    final sheet =
+        find.ancestor(of: detail, matching: find.byType(Material)).first;
+    final sheetBounds = tester.getRect(sheet);
+    expect(sheetBounds.height, closeTo(844 - 44 - 12, .01));
+    expect(sheetBounds.top, closeTo(44 + 12, .01));
+    expect(tester.getSize(detail).height, closeTo(844 - 44 - 24 - 12, .01));
+    const colors = AppNormalColorScheme();
+    final detailScaffold =
+        find.descendant(of: detail, matching: find.byType(Scaffold));
+    final header = find.descendant(of: detail, matching: find.byType(AppBar));
+    expect(tester.widget<Material>(sheet).color, colors.surface);
+    expect(tester.widget<Scaffold>(detailScaffold).backgroundColor,
+        colors.surface);
+    expect(tester.widget<AppBar>(header).backgroundColor, colors.surface);
+    expect(tester.widget<AppBar>(header).scrolledUnderElevation, 0);
+    expect(tester.getSize(header).height, 48);
+    expect(tester.widget<Scaffold>(detailScaffold).primary, isFalse);
+    final closeButton = find.bySemanticsIdentifier('tim.forward.merged.close');
+    final closeTop = tester.getTopLeft(closeButton).dy;
+    final items = tester
+        .widgetList<MessageItem>(
+            find.descendant(of: detail, matching: find.byType(MessageItem)))
+        .toList();
+    final first = items.singleWhere((item) => item.message.msgID == 'record-0');
+    final second =
+        items.singleWhere((item) => item.message.msgID == 'record-1');
+    final outgoing =
+        items.singleWhere((item) => item.message.msgID == 'record-2');
+    expect(first.maxWidth, 390 - 32);
+    expect(second.isContinuation, isTrue);
+    expect(outgoing.message.isSentBySelf, isTrue);
+    expect(outgoing.isContinuation, isFalse);
+    expect(
+        tester.getTopLeft(find.byWidget(second)).dy -
+            tester.getBottomLeft(find.byWidget(first)).dy,
+        closeTo(8, .01));
+    for (final item in items) {
+      expect(item.isInMergedDetailView, isTrue);
+      expect(item.config.forwardHandler, isNull);
+      expect(item.config.isSupportForward, isFalse);
+      expect(item.config.isSupportMultiSelect, isFalse);
+      expect(item.config.isSupportDelete, isFalse);
+      expect(item.config.enableReadReceipt, isFalse);
+      expect(item.config.textBubbleCornerRadius, 8);
+    }
+    // 来源已配置转发，详情仍不能长按打开菜单或执行转发。
+    final body = find.descendant(
+        of: find.byWidget(first), matching: find.byType(TextMessageWidget));
+    await tester.longPress(body);
+    await tester.pumpAndSettle();
+    expect(find.byType(MessageActionSheet), findsNothing);
+    expect(forwarded, 0);
+    final semantics = find.descendant(
+        of: detail,
+        matching: find.byWidgetPredicate((widget) =>
+            widget is Semantics &&
+            widget.properties.identifier?.startsWith('tim.record.message.') ==
+                true));
+    expect(semantics, findsWidgets);
+    expect(
+        tester
+            .widgetList<Semantics>(semantics)
+            .every((widget) => widget.properties.onLongPress == null),
+        isTrue);
+    // 点击包内合并卡片仍打开只读预览，关闭后回到原详情。
+    await tester.tap(find.descendant(
+        of: detail, matching: find.byType(MergedMessageWidget)));
+    await tester.pumpAndSettle();
+    expect(find.byType(MergedMessageDetailPage), findsNWidgets(2));
+    await tester
+        .tap(find.bySemanticsIdentifier('tim.forward.merged.close').last);
+    await tester.pumpAndSettle();
+    expect(detail, findsOneWidget);
+    expect(
+        find.descendant(of: detail, matching: find.byType(TextMessageWidget)),
+        findsWidgets);
+    final list = find.descendant(
+        of: detail, matching: find.byType(ScrollablePositionedList));
+    // 详情位于全局浮层而非页面路由下，滚动更新也不能强制依赖PageStorage。
+    expect(PageStorage.maybeOf(tester.element(list)), isNull);
+    await tester.drag(list, const Offset(0, -200));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(sheet), sheetBounds);
+    expect(tester.getTopLeft(closeButton).dy, closeTop);
+    expect(tester.takeException(), isNull);
+    await tester.tap(closeButton);
+    await tester.pumpAndSettle();
+    expect(detail, findsNothing);
+    expect(find.byType(ChatPage), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('宿主本地删除收到成功标识后才清理首屏候选，空回执保留原消息', (tester) async {
+    late BuildContext context;
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (value) {
+      context = value;
+      return const SizedBox.shrink();
+    })));
+    final message = MessageInfo(
+        msgID: 'local',
+        status: MessageStatus.sendSuccess,
+        messageType: MessageType.text,
+        messagePayload: TextMessagePayload(text: '本地正文'),
+        from: MessageSenderInfo(userID: 'peer'));
+    for (final succeeds in [false, true]) {
+      var removed = 0;
+      final callbacks = DefaultMessageMenuCallbacks(
+        context: context,
+        messageListStore: _UnusedMenuListStore(),
+        messageActionStore: _UnusedMenuActionStore(),
+        conversationID: 'c2c_peer',
+        config: ChatMessageListConfig(
+            localDeleteHandler: (_) async => succeeds ? [message.msgID] : []),
+        onDeleted: () => removed++,
+      );
+      callbacks.onDeleteMessage(message);
+      await tester.pumpAndSettle();
+      expect(removed, succeeds ? 1 : 0);
+    }
+  });
+
   testWidgets('基类导航展示全局实时未读与统一姓名，0隐藏且超过99封顶', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final original = TencentImSDKPlugin.v2TIMManager;
-    TencentImSDKPlugin.v2TIMManager = _Sdk('/single');
+    final sdk = _Sdk('/single');
+    // 编辑交互必须使用仍在五分钟有效期内的消息，不能依赖测试执行时的时钟。
+    sdk.messages.chronologicalHistory = [
+      _Message('editable',
+          timestampOverride: DateTime.now().millisecondsSinceEpoch ~/ 1000)
+    ];
+    TencentImSDKPlugin.v2TIMManager = sdk;
     addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
     MessageList.clearViewportSnapshots();
     final unread = ValueNotifier<int>(0);
@@ -490,6 +683,67 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('本机首屏先过滤已删除消息，SDK迟到时保留仍有效的本地多选', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/single');
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    final cloud = sdk.messages.historyGate =
+        Completer<V2TimValueCallback<List<V2TimMessage>>>();
+    await tester.pumpWidget(ProviderScope(
+        child: MaterialApp(
+            home: ChatPage(
+      conversation:
+          ConversationInfo(conversationID: 'c2c_visual', title: '本机窗口'),
+      isShowAppBarActions: false,
+      localMessagesLoader: () async => [
+        ChatUtil.convertToUIMessage(_Message('first')),
+        ChatUtil.convertToUIMessage(_Message('second')),
+      ],
+      messageListConfig: ChatMessageListConfig(
+        hiddenMessageIDs: const {'first'},
+        forwardHandler: (context, request) async => false,
+      ),
+    ))));
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widgetList<MessageItem>(find.byType(MessageItem))
+            .map((item) => item.message.msgID),
+        ['second']);
+    await tester.longPress(find.byType(TextMessageWidget).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byWidgetPredicate((widget) =>
+        widget is Semantics &&
+        widget.properties.identifier == 'tim.message.action.multiSelect'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(MessageCheckbox).first);
+    await tester.pumpAndSettle();
+    // SDK尚未返回second时，实时third不能让本地已选项被错误剔除。
+    for (final listener in [...sdk.messages.listeners]) {
+      listener.onRecvNewMessage(_Message('third'));
+    }
+    await tester.pumpAndSettle();
+    MessageItem selected() => tester
+        .widgetList<MessageItem>(find.byType(MessageItem))
+        .singleWhere((item) => item.message.msgID == 'second');
+    expect(selected().isSelected, isTrue);
+    cloud.complete(V2TimValueCallback(
+        code: 0, desc: '', data: [_Message('first'), _Message('third')]));
+    await tester.pumpAndSettle();
+    expect(selected().isSelected, isTrue);
+    expect(
+        tester
+            .widgetList<MessageItem>(find.byType(MessageItem))
+            .any((item) => item.message.msgID == 'first'),
+        isFalse);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('聊天复用基类导航且列表紧贴导航和输入，编辑期间返回只退出编辑', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final original = TencentImSDKPlugin.v2TIMManager;
@@ -571,6 +825,129 @@ void main() {
     await tester.tap(control('tim.chat.back'));
     await tester.pumpAndSettle();
     expect(find.text('会话列表'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('仅接入宿主转发时也使用操作面板，多选可从真实聊天入口进入', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    TencentImSDKPlugin.v2TIMManager = _Sdk('/single');
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    await tester.pumpWidget(ProviderScope(
+        child: MaterialApp(
+            home: ChatPage(
+      conversation: ConversationInfo(
+          conversationID: 'c2c_visual', type: ConversationType.c2c),
+      messageListConfig: ChatMessageListConfig(
+          isShowTimeMessage: false,
+          forwardHandler: (context, request) async => false),
+    ))));
+    await tester.pumpAndSettle();
+    final messageWindowTop = tester.getTopLeft(find.byType(MessageList)).dy;
+    await tester.longPress(find.byType(TextMessageWidget).first);
+    await tester.pumpAndSettle();
+    expect(find.byType(MessageActionSheet), findsOneWidget);
+    final id = tester
+        .widget<MessageItem>(find.byType(MessageItem).first)
+        .message
+        .msgID;
+    expect(find.bySemanticsIdentifier('tim.chat.message.$id'), findsOneWidget);
+    await tester.tap(find.byWidgetPredicate((widget) =>
+        widget is Semantics &&
+        widget.properties.identifier == 'tim.message.action.multiSelect'));
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widgetList<MessageItem>(find.byType(MessageItem))
+            .every((item) => item.isMultiSelectMode),
+        isTrue);
+    expect(find.byType(MultiSelectBottomBar), findsOneWidget);
+    // 快选入口必须覆盖原消息窗口，不能再挤出顶部60像素的独立空白区。
+    final messageWindow = tester.getRect(find.byType(MessageList));
+    final selectBelow = tester.getRect(find.text('选择以下消息'));
+    expect(messageWindow.top, messageWindowTop);
+    expect(selectBelow.top, greaterThanOrEqualTo(messageWindow.top));
+    expect(selectBelow.bottom, lessThan(messageWindow.top + 60));
+    final boundary = tester.getCenter(find.text('选择以下消息')).dy;
+    final before =
+        tester.widgetList<MessageItem>(find.byType(MessageItem)).toList();
+    final expected = {
+      for (final item in before)
+        if (tester.getTopLeft(find.byWidget(item)).dy >= boundary)
+          item.message.msgID,
+    };
+    expect(expected, isNotEmpty);
+    expect(expected.length, lessThan(before.length));
+    await tester.tap(find.text('选择以下消息'));
+    await tester.pumpAndSettle();
+    expect({
+      for (final item
+          in tester.widgetList<MessageItem>(find.byType(MessageItem)))
+        if (item.isSelected) item.message.msgID,
+    }, expected);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('滚动后按横线实测位置补选，跨线消息排除且保留原选择', (tester) async {
+    final original = TencentImSDKPlugin.v2TIMManager;
+    TencentImSDKPlugin.v2TIMManager = _Sdk('/history');
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    addTearDown(MessageList.clearViewportSnapshots);
+    MultiSelectState? selection;
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: Column(children: [
+      MessageList(
+        conversationID: 'c2c_history_visual',
+        config: const ChatMessageListConfig(isShowTimeMessage: false),
+        onMultiSelectStateChanged: (value) => selection = value,
+      ),
+    ]))));
+    await tester.pumpAndSettle();
+    tester
+        .widgetList<MessageItem>(find.byType(MessageItem))
+        .first
+        .onEnterMultiSelectMode!();
+    await tester.pumpAndSettle();
+    await tester.drag(
+        find.byType(ScrollablePositionedList), const Offset(0, 400));
+    await tester.pumpAndSettle();
+    final visible = tester
+        .widgetList<MessageItem>(find.byType(MessageItem))
+        .where((item) {
+      final rect = tester.getRect(find.byWidget(item));
+      return rect.top >= 0 && rect.bottom < 600;
+    }).toList()
+      ..sort((a, b) => tester
+          .getTopLeft(find.byWidget(a))
+          .dy
+          .compareTo(tester.getTopLeft(find.byWidget(b)).dy));
+    expect(visible.length, greaterThanOrEqualTo(3));
+    // 将横线置于一条消息内部，验证跨线排除；线上的原选择仍保留。
+    final crossing = visible[1];
+    final boundary = tester.getCenter(find.byWidget(crossing)).dy;
+    visible.first.onToggleSelection!();
+    await tester.pumpAndSettle();
+    selection!.onSelectBelow!(boundary);
+    await tester.pumpAndSettle();
+    final crossingNumber = int.parse(crossing.message.msgID.split('-').last);
+    final expected = {
+      visible.first.message.msgID,
+      for (var i = crossingNumber + 1; i <= 20; i++) 'history-$i',
+    };
+    expect(selection!.selectedCount, expected.length);
+    for (final item
+        in tester.widgetList<MessageItem>(find.byType(MessageItem))) {
+      expect(item.isSelected, expected.contains(item.message.msgID),
+          reason: item.message.msgID);
+    }
+    // 没有线下候选或边界无效时保留当前集合，不能降级成全选。
+    selection!.onSelectBelow!(1000000);
+    selection!.onSelectBelow!(double.nan);
+    await tester.pumpAndSettle();
+    expect(selection!.selectedCount, expected.length);
     expect(tester.takeException(), isNull);
   });
 
@@ -1047,6 +1424,7 @@ final class _Messages implements V2TIMMessageManager {
   final String scene;
   Completer<V2TimValueCallback<List<V2TimMessage>>>? historyGate;
   int historyCalls = 0;
+  List<V2TimMessage>? mergedContents;
   int deleteCalls = 0;
 
   /// 按时间正序排列的可变历史，用于模拟页面关闭期间收到新消息。
@@ -1098,6 +1476,12 @@ final class _Messages implements V2TIMMessageManager {
             return V2TimCallback(code: 0, desc: '');
           }),
         #getHistoryMessageList => _loadHistory(call),
+        #downloadMergerMessage => Future.value(
+            V2TimValueCallback<List<V2TimMessage>>(
+                code: 0,
+                desc: '',
+                data: mergedContents ??
+                    List.generate(20, (index) => _Message('record-$index')))),
         #addAdvancedMsgListener => Future<void>.sync(() {
             listeners.add(
                 call.namedArguments[#listener] as V2TimAdvancedMsgListener);
@@ -1132,10 +1516,12 @@ final class _Message implements V2TimMessage {
   _Message(this.msgID,
       {this.timestampOverride,
       this.statusOverride = 2,
-      this.isSelfOverride = false});
+      this.isSelfOverride = false,
+      this.isMerged = false});
   final int? timestampOverride;
   final int statusOverride;
   final bool isSelfOverride;
+  final bool isMerged;
   @override
   final String msgID;
   @override
@@ -1152,7 +1538,10 @@ final class _Message implements V2TimMessage {
                     )
                     .millisecondsSinceEpoch ~/
                 1000,
-        #elemType => 1,
+        #elemType => isMerged ? 10 : 1,
+        #mergerElem => isMerged
+            ? V2TimMergerElem(title: '测试合并记录', abstractList: ['测试摘要'])
+            : null,
         #sender || #userID => msgID.contains('-') ? 'history_visual' : 'visual',
         #isSelf => isSelfOverride,
         #isRead ||
@@ -1164,4 +1553,16 @@ final class _Message implements V2TimMessage {
         #toJson => <String, dynamic>{'msgID': msgID},
         _ => null,
       };
+}
+
+/// 本地删除回归只允许走宿主回调，误入原SDK方法即失败。
+final class _UnusedMenuListStore implements MessageListStore {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw StateError('不应访问SDK列表');
+}
+
+/// 空实现阻止本地删除测试意外退回云端删除。
+final class _UnusedMenuActionStore implements MessageActionStore {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw StateError('不应调用云端删除');
 }

@@ -164,8 +164,9 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
       message.from.nickname,
       ChatUtil.getMessageSenderName(message),
       message.from.userID,
-    ].whereType<String>().firstWhere((name) => name.isNotEmpty,
-        orElse: () => '');
+    ]
+        .whereType<String>()
+        .firstWhere((name) => name.isNotEmpty, orElse: () => '');
     CallingMessageDataProvider provider =
         CallingMessageDataProvider(message, context);
 
@@ -212,14 +213,6 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         return const SizedBox.shrink();
       }
       return messageBubble;
-    }
-
-    // In merged detail view, always use left-aligned layout
-    //
-    // 在合并详情视图中，总是使用左对齐布局
-    if (isInMergedDetailView) {
-      return _buildLeftAlignedLayout(
-          context, messageBubble, isSelf, avatarURL, senderName);
     }
 
     Widget messageRow;
@@ -365,7 +358,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
 
   /// 隐藏组内头像时仍占据原列宽度，后续气泡不向头像位置偏移。
   Widget _groupAvatar(Widget avatar) => Visibility(
-        visible: !isContinuation || isInMergedDetailView,
+        visible: !isContinuation,
         maintainSize: true,
         maintainState: true,
         maintainAnimation: true,
@@ -467,17 +460,12 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     final colors = SemanticColorScheme.of(context);
     final locale = AppLocalization.of(context);
 
-    // In merged detail view: always show avatar, disable click, hide nickname
-    //
-    // 在合并详情视图中：始终显示头像，禁用点击，隐藏昵称
-    final shouldShowAvatar = isInMergedDetailView || config.isShowLeftAvatar;
-    final shouldShowNickname =
-        !isInMergedDetailView && config.isShowLeftNickname;
+    // 详情沿用来源头像和昵称布局，只在交互入口限制操作。
+    final shouldShowAvatar = config.isShowLeftAvatar;
+    final shouldShowNickname = config.isShowLeftNickname;
 
-    // Build status indicator if needed (only for self messages)
-    //
-    // 如果需要，为自己发送的消息构建状态指示器
-    final statusIndicator = isSelf
+    // 只读记录不显示发送进度或失败重发入口。
+    final statusIndicator = isSelf && !isInMergedDetailView
         ? buildOutsideBubbleStatusIndicator(
             message: message,
             colorsTheme: colors,
@@ -604,10 +592,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     final colors = SemanticColorScheme.of(context);
     final locale = AppLocalization.of(context);
 
-    // Build status indicator if needed (only for self messages)
-    //
-    // 根据需要构建状态指示器（仅限自己消息）
-    final statusIndicator = isSelf
+    // 只读记录不显示发送进度或失败重发入口。
+    final statusIndicator = isSelf && !isInMergedDetailView
         ? buildOutsideBubbleStatusIndicator(
             message: message,
             colorsTheme: colors,
@@ -712,16 +698,16 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     final colors = SemanticColorScheme.of(context);
     final locale = AppLocalization.of(context);
 
-    // Build status indicator if needed
-    //
-    // 根据需要构建状态指示器
-    final statusIndicator = buildOutsideBubbleStatusIndicator(
-      message: message,
-      colorsTheme: colors,
-      onResendTap: message.status == MessageStatus.sendFail
-          ? () => _showResendConfirmDialog(context)
-          : null,
-    );
+    // 只读记录不显示发送进度或失败重发入口。
+    final statusIndicator = isInMergedDetailView
+        ? null
+        : buildOutsideBubbleStatusIndicator(
+            message: message,
+            colorsTheme: colors,
+            onResendTap: message.status == MessageStatus.sendFail
+                ? () => _showResendConfirmDialog(context)
+                : null,
+          );
 
     // 阅读回执显示在己方气泡左侧，与发送进度和失败提示分别处理。
     final readReceiptIndicator = buildOutsideReadReceiptIndicator(
@@ -807,30 +793,27 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     return [
       if (config.isShowLeftAvatar)
         GestureDetector(
-          onTap: () {
-            // Disable avatar click in multi-select mode
-            //
-            // 多选模式下禁用头像点击
-            if (isMultiSelectMode) {
-              onToggleSelection?.call();
-              return;
-            }
-            if (onUserClick != null) {
-              onUserClick!(message.from.userID);
-            }
-          },
-          onLongPress: () {
-            // Disable avatar long press in multi-select mode
-            //
-            // 多选模式下禁用头像长按
-            if (isMultiSelectMode) return;
-            // Trigger @ mention callback
-            //
-            // 触发 @ 提及回调
-            if (onUserLongPress != null) {
-              onUserLongPress!(message.from.userID, displaySenderName);
-            }
-          },
+          onTap: isInMergedDetailView
+              ? null
+              : () {
+                  // 多选期间点击头像仅切换消息选择，不能打开用户资料。
+                  if (isMultiSelectMode) {
+                    onToggleSelection?.call();
+                    return;
+                  }
+                  if (onUserClick != null) {
+                    onUserClick!(message.from.userID);
+                  }
+                },
+          onLongPress: isInMergedDetailView
+              ? null
+              : () {
+                  // 多选期间头像长按不能向输入栏插入提及。
+                  if (isMultiSelectMode) return;
+                  if (onUserLongPress != null) {
+                    onUserLongPress!(message.from.userID, displaySenderName);
+                  }
+                },
           child: _groupAvatar(Avatar(
             content: AvatarImageContent(
                 url: displayAvatarUrl, name: displaySenderName),

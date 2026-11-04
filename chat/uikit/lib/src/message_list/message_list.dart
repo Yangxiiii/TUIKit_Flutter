@@ -5,12 +5,14 @@ import 'utils/local_message_window.dart';
 import 'package:tencent_cloud_chat_sdk/tencent_im_sdk_plugin.dart';
 import 'package:tencent_cloud_chat_sdk/enum/V2TimAdvancedMsgListener.dart';
 import 'package:tencent_cloud_chat_sdk/manager/v2_tim_message_manager.dart';
+import 'utils/message_selection_policy.dart';
 
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/cupertino.dart';
 
 import 'package:flutter/material.dart' hide AlertDialog;
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show setEquals;
 import 'widgets/message_actions_scope.dart';
 import 'widgets/message_overlay_avoider.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
@@ -64,15 +66,31 @@ typedef OnCallMessageClick = void Function(String userID, bool isVideoCall);
 typedef OnMultiSelectModeChanged = void Function(
     bool isMultiSelectMode, int selectedCount);
 
-/// Multi-select mode state
-///
-/// 多选模式状态
+/// 向聊天页发布当前多选集合的操作入口，所有动作仍使用列表内唯一选择状态。
 class MultiSelectState {
+  /// 是否显示多选工具栏，退出时宿主收到null状态。
   final bool isActive;
+
+  /// 当前有效选择数量，最多100项。
   final int selectedCount;
+
+  /// 退出多选并清空选择。
   final VoidCallback onCancel;
+
+  /// 使用当前选中内容发起删除确认。
   final VoidCallback onDelete;
+
+  /// 兼容未拆分类型的旧转发入口。
   final Future<void> Function(BuildContext context) onForward;
+
+  /// 合并转发入口，选择方式已明确，不再弹出类型选择器。
+  final Future<void> Function(BuildContext context)? onMergedForward;
+
+  /// 逐条转发入口，与合并共用100条消息上限。
+  final Future<void> Function(BuildContext context)? onSeparateForward;
+
+  /// 以传入的屏幕纵坐标为分隔线，补选起点位于线下的消息及其后续记录。
+  final ValueChanged<double>? onSelectBelow;
 
   const MultiSelectState({
     required this.isActive,
@@ -80,6 +98,9 @@ class MultiSelectState {
     required this.onCancel,
     required this.onDelete,
     required this.onForward,
+    this.onMergedForward,
+    this.onSeparateForward,
+    this.onSelectBelow,
   });
 }
 
@@ -327,10 +348,27 @@ class _MessageListState extends State<MessageList>
   @override
   void didUpdateWidget(covariant MessageList oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!setEquals(
+        widget.config.hiddenMessageIDs, oldWidget.config.hiddenMessageIDs)) {
+      // 本地删除事实优先于SDK内存窗口，清理快照后返回页面也不会恢复旧行。
+      _localWindow.delete(widget.config.hiddenMessageIDs);
+      _messages = _visibleMessages(_messages);
+      _selectedMessageIDs.removeAll(widget.config.hiddenMessageIDs);
+      _viewportSnapshots.remove(_viewportAnchorKey);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _notifyMultiSelectModeChanged();
+      });
+    }
     if (!identical(widget.locateMessage, oldWidget.locateMessage)) {
       unawaited(_updateStickyWindow(widget.locateMessage));
     }
   }
+
+  /// 本机删除记录只影响展示，不改变SDK窗口的分页游标或云端内容。
+  List<MessageInfo> _visibleMessages(Iterable<MessageInfo> messages) => messages
+      .where(
+          (message) => !widget.config.hiddenMessageIDs.contains(message.msgID))
+      .toList();
 
   /// SDK异常不能成为未处理Future；定位或刷新失败保留列表并给出可重试反馈。
   Future<void> _updateStickyWindow(MessageInfo? target) async {
@@ -531,7 +569,7 @@ class _MessageListState extends State<MessageList>
       if (snapshot != null) {
         // initState 内同步注入消息窗口，让缓存会话在页面转场的第一帧就有内容。
         _restoreViewportSnapshot = snapshot;
-        _messages = snapshot.messages;
+        _messages = _visibleMessages(snapshot.messages);
         _isInitialViewportReady = _setInitialViewport(
           snapshot.anchor.message,
           alignment: snapshot.anchor.alignment,
@@ -859,8 +897,8 @@ class _MessageListState extends State<MessageList>
             if (!mounted) return;
             _localWindow.seed(local);
             setState(() {
-              _messages = _localWindow
-                  .merge(_messageListStore.state.messageList.value.reversed);
+              _messages = _visibleMessages(_localWindow
+                  .merge(_messageListStore.state.messageList.value.reversed));
               _isInitialViewportReady = true;
             });
             // 本地先提交一帧，再启动云端；这一帧不触发新增的清未读或回执。
@@ -879,7 +917,8 @@ class _MessageListState extends State<MessageList>
       debugPrint('messageList, initial load failed: $error');
     }
 
-    final sdkMessages = _messageListStore.state.messageList.value;
+    final sdkMessages =
+        _visibleMessages(_messageListStore.state.messageList.value);
     // 本机候选不能凭空解锁回执；SDK 空窗口沿用原有“无消息可读”的边界。
     final initialRenderComplete = widget.localMessagesLoader == null
         ? _messages.length == sdkMessages.length
@@ -955,6 +994,20 @@ class _MessageListState extends State<MessageList>
     _notifyEditWindow();
     if (_navigationState is! _NavIdle) _localWindow.clear();
     final state = _messageListStore.state;
+    final visibleWindow = _visibleMessages(widget.localMessagesLoader == null
+        ? state.messageList.value.reversed
+        : _localWindow.merge(state.messageList.value.reversed));
+    // 先清理失效选择，再发布新窗口；撤回和删除不能留下仍可提交的旧计数。
+    if (_isMultiSelectMode) {
+      final retained =
+          retainSelectableChatMessages(_selectedMessageIDs, visibleWindow);
+      if (retained.length != _selectedMessageIDs.length) {
+        _selectedMessageIDs
+          ..clear()
+          ..addAll(retained);
+        _notifyMultiSelectModeChanged();
+      }
+    }
 
     debugPrint('messageList, _onMessageListStateChanged, '
         'msgCount: ${state.messageList.value.length}, '
@@ -963,7 +1016,8 @@ class _MessageListState extends State<MessageList>
     // 快照已在首帧展示；SDK 回包后仍围绕原锚点替换窗口，避免刷新把用户拉回最新消息。
     final refreshAnchor = _refreshViewportAnchor;
     if (refreshAnchor != null) {
-      final refreshedMessages = state.messageList.value.reversed.toList();
+      final refreshedMessages =
+          _visibleMessages(state.messageList.value.reversed);
       final previousTargetIndex = _messages.indexWhere(
         (message) => message.msgID == refreshAnchor.message.msgID,
       );
@@ -1013,7 +1067,7 @@ class _MessageListState extends State<MessageList>
       case _NavToUnread()
           when _oldestUnreadMessageSeq != null && _oldestUnreadMessageSeq! > 0:
         setState(() {
-          _messages = state.messageList.value.reversed.toList();
+          _messages = _visibleMessages(state.messageList.value.reversed);
           isLoading = false;
         });
         _scrollToSeq(_oldestUnreadMessageSeq!);
@@ -1024,7 +1078,7 @@ class _MessageListState extends State<MessageList>
             'targetSeq: $targetSeq, '
             'messageCount: ${state.messageList.value.length}');
         setState(() {
-          _messages = state.messageList.value.reversed.toList();
+          _messages = _visibleMessages(state.messageList.value.reversed);
           isLoading = false;
         });
         _scrollToSeq(targetSeq, alignment: 0);
@@ -1060,7 +1114,7 @@ class _MessageListState extends State<MessageList>
             'highlight: $highlightTarget, '
             'messageCount: ${state.messageList.value.length}');
         setState(() {
-          _messages = state.messageList.value.reversed.toList();
+          _messages = _visibleMessages(state.messageList.value.reversed);
           isLoading = false;
           if (highlightTarget) {
             _highlightedMessageId = targetMsgID;
@@ -1087,10 +1141,8 @@ class _MessageListState extends State<MessageList>
         break;
     }
 
-    // 显式历史定位不混入最新的本机窗口；普通同步保留本地缺席项并去重。
-    final nextMessages = widget.localMessagesLoader == null
-        ? state.messageList.value.reversed.toList()
-        : _localWindow.merge(state.messageList.value.reversed);
+    // 本地补齐与SDK合并后再过滤，迟到窗口不能复活已删除消息。
+    final nextMessages = visibleWindow;
     final oldLength = _messages.length;
     // Remember the first message's ID to detect head-insertion (new messages)
     // vs tail-append (older history messages).
@@ -1187,7 +1239,6 @@ class _MessageListState extends State<MessageList>
         }
       }
     }
-
   }
 
   /// 先让列表接收新增数量，再按稳定消息ID恢复历史位置，最后恢复可见未读统计。
@@ -1224,7 +1275,9 @@ class _MessageListState extends State<MessageList>
         // 静默失效包只驱动宿主查询，不增加历史提示、未读舌标或反应请求。
         if (StickyMessageEvent.fromMessage(message)?.isControl == true) return;
         debugPrint('messageList, onReceiveNewMessage: ${message.msgID}');
-        if (StickyMessageEvent.fromMessage(message) == null) _clearUnreadCount();
+        if (StickyMessageEvent.fromMessage(message) == null) {
+          _clearUnreadCount();
+        }
         final isAtBottom = _isUserAtBottom();
         if (!isLoading && isAtBottom) {
           _scrollToBottom();
@@ -1402,13 +1455,15 @@ class _MessageListState extends State<MessageList>
     final colors = SemanticColorScheme.of(context);
 
     final timeString = StickyMessageEvent.fromMessage(message) == null
-      ? _getMessageTimeString(index) : null;
+        ? _getMessageTimeString(index)
+        : null;
     final shouldShowTime =
         widget.config.isShowTimeMessage && timeString != null;
     // 反向列表中较大的索引更旧；跳过隐藏系统消息后再判断是否为首个可见项。
     var olderIndex = index + 1;
     while (olderIndex < _messages.length &&
-        (StickyMessageEvent.fromMessage(_messages[olderIndex])?.isControl == true ||
+        (StickyMessageEvent.fromMessage(_messages[olderIndex])?.isControl ==
+                true ||
             (!widget.config.isShowSystemMessage &&
                 _isSystemMessage(_messages[olderIndex])))) {
       olderIndex++;
@@ -2471,23 +2526,53 @@ class _MessageListState extends State<MessageList>
     _notifyMultiSelectModeChanged();
   }
 
-  /// Toggle message selection state
-  ///
-  /// 切换消息选择状态
+  /// 单条勾选共享产品上限和提醒消息边界，反选仍允许立即执行。
   void toggleMessageSelection(MessageInfo message) {
-    // 置顶操作记录不是可编辑内容，多选入口和最终删除边界均须保护。
-    if (StickyMessageEvent.fromMessage(message) != null) return;
-    final msgID = message.msgID;
-    if (msgID == null) return;
-
+    final next = toggleChatMessageSelection(_selectedMessageIDs, message);
+    if (next.limited) {
+      AppToast.show('最多选择100条消息');
+      return;
+    }
     setState(() {
-      if (_selectedMessageIDs.contains(msgID)) {
-        _selectedMessageIDs.remove(msgID);
-      } else {
-        _selectedMessageIDs.add(msgID);
-      }
+      _selectedMessageIDs
+        ..clear()
+        ..addAll(next.ids);
     });
     _notifyMultiSelectModeChanged();
+  }
+
+  /// 按分隔线实测位置补选；跨线消息不新增选中，已有选择保持不变。
+  void selectMessagesBelow(double boundaryGlobalY) {
+    if (!boundaryGlobalY.isFinite || !_isMultiSelectMode) return;
+    final below = <String>{};
+    // 直接读取已布局的消息正文边界，避免反向列表、时间标签和行间距干扰判断。
+    void collect(Element element) {
+      if (element.widget case MessageItem item) {
+        final box = element.findRenderObject();
+        if (box is RenderBox &&
+            box.hasSize &&
+            box.localToGlobal(Offset.zero).dy >= boundaryGlobalY) {
+          below.add(item.message.msgID);
+        }
+        return;
+      }
+      element.visitChildren(collect);
+    }
+
+    (context as Element).visitChildren(collect);
+    // 反向窗口索引越大越旧，从线下最旧的一条起补选到最新端；无实测候选时不全选。
+    final topIndex =
+        _messages.lastIndexWhere((message) => below.contains(message.msgID));
+    if (topIndex < 0) return;
+    final next = selectChatMessagesBelow(
+        _selectedMessageIDs, _messages.take(topIndex + 1).toList().reversed);
+    setState(() {
+      _selectedMessageIDs
+        ..clear()
+        ..addAll(next.ids);
+    });
+    _notifyMultiSelectModeChanged();
+    if (next.limited) AppToast.show('最多选择100条消息');
   }
 
   /// Check if message is selected
@@ -2514,19 +2599,22 @@ class _MessageListState extends State<MessageList>
         onCancel: exitMultiSelectMode,
         onDelete: deleteSelectedMessages,
         onForward: forwardSelectedMessages,
+        onMergedForward: (context) =>
+            forwardSelectedMessages(context, forwardType: ForwardType.merged),
+        onSeparateForward: (context) =>
+            forwardSelectedMessages(context, forwardType: ForwardType.separate),
+        onSelectBelow: selectMessagesBelow,
       ));
     } else {
       widget.onMultiSelectStateChanged?.call(null);
     }
   }
 
-  /// 多选删除沿用原确认；SDK 成功后同时移除尚未交接的本地候选。
+  /// 确认后只清理实际删除的消息，并同步移除首屏本地候选。
   Future<void> deleteSelectedMessages() async {
     if (_selectedMessageIDs.isEmpty) return;
 
-    // Show confirmation dialog
-    //
-    // 显示确认对话框
+    // 确认前不触发删除，取消保留原选择集合。
     AtomicAlertDialog.showWithConfig(
       context,
       config: AlertDialogConfig(
@@ -2538,7 +2626,23 @@ class _MessageListState extends State<MessageList>
           onClick: () async {
             // 即使旧选择集合保留了操作提示，也不能把它提交给SDK删除。
             final messagesToDelete = selectedMessages
-              .where((message) => StickyMessageEvent.fromMessage(message) == null).toList();
+                .where((message) =>
+                    StickyMessageEvent.fromMessage(message) == null)
+                .toList();
+            final localDelete = widget.config.localDeleteHandler;
+            if (localDelete != null) {
+              final deleted = await localDelete(messagesToDelete);
+              if (!mounted) return;
+              if (widget.localMessagesLoader != null) {
+                _localWindow.delete(deleted);
+                _onMessageListStateChanged();
+              }
+              widget.onMessagesDeleted?.call(deleted);
+              if (deleted.length == messagesToDelete.length) {
+                exitMultiSelectMode();
+              }
+              return;
+            }
             final result = await _messageListStore.deleteMessages(
                 messageList: messagesToDelete);
             if (result.isSuccess) {
@@ -2557,21 +2661,30 @@ class _MessageListState extends State<MessageList>
     );
   }
 
-  /// Forward selected messages
-  ///
-  /// 转发选中消息
-  Future<void> forwardSelectedMessages(BuildContext context) async {
+  /// 宿主转发成功后才退出多选；取消和失败保留仍有效的消息，允许继续操作。
+  Future<void> forwardSelectedMessages(BuildContext context,
+      {ForwardType? forwardType}) async {
     if (_selectedMessageIDs.isEmpty) return;
 
-    // Get selected messages in the order they appear in _messages.
-    // _messages is reversed from messageListStore (newest first), so we need to reverse it back to get oldest first
-    //
-    // 按 _messages 中出现的顺序获取已选择的消息。_messages 是从 messageListStore 反转过来的（最新的在前），所以我们需要再反转一次才能按最旧的顺序获取
+    // 列表内部最新在前，提交前反转为原始时间顺序，不采用用户点击勾选的顺序。
     final messages = _messages.reversed
-        .where((message) =>
-            message.msgID != null &&
-            _selectedMessageIDs.contains(message.msgID))
+        .where((message) => _selectedMessageIDs.contains(message.msgID))
         .toList();
+
+    if (widget.config.forwardHandler != null) {
+      final type =
+          forwardType ?? await ForwardService.showForwardTypeSelector(context);
+      if (type == null || !context.mounted) return;
+      final success = await ForwardService.forwardMessagesWithType(
+          context: context,
+          messages: messages,
+          messageListStore: _messageListStore,
+          config: widget.config,
+          forwardType: type,
+          sourceConversationID: widget.conversationID);
+      if (success && mounted) exitMultiSelectMode();
+      return;
+    }
 
     // 1. Validate message status first (don't exit multi-select if failed)
     //
@@ -2586,8 +2699,8 @@ class _MessageListState extends State<MessageList>
     // 2. Select forward type
     //
     // 2. 选择转发类型
-    final forwardType = await ForwardService.showForwardTypeSelector(context);
-    if (forwardType == null) {
+    forwardType ??= await ForwardService.showForwardTypeSelector(context);
+    if (forwardType == null || !context.mounted) {
       return;
     }
 
@@ -2645,7 +2758,8 @@ class _MessageListState extends State<MessageList>
     final message = _messages[index];
 
     // 撤回提示直接嵌入原消息位置，不再为该行单独生成时间分隔符。
-    if (widget.conversationID.startsWith('c2c_') && message.status == MessageStatus.revoked) {
+    if (widget.conversationID.startsWith('c2c_') &&
+        message.status == MessageStatus.revoked) {
       return null;
     }
 
@@ -2698,55 +2812,8 @@ class _MessageListState extends State<MessageList>
     return (timestamp2 - timestamp1).abs();
   }
 
-  String? _getTimeString(int timestamp) {
-    final DateTime date = DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
-    final DateTime now = DateTime.now();
-
-    final String timeStr =
-        "${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}";
-
-    final DateTime today = DateTime(now.year, now.month, now.day);
-    final DateTime messageDay = DateTime(date.year, date.month, date.day);
-    final int daysDiff = today.difference(messageDay).inDays;
-
-    if (daysDiff == 0) {
-      return timeStr;
-    }
-
-    if (daysDiff == 1) {
-      // 中文设计不在日期与时间之间留空格；其他语言保留词间分隔。
-      final separator = _atomicLocale.locale.languageCode == 'zh' ? '' : ' ';
-      return '${_atomicLocale.yesterday}$separator$timeStr';
-    }
-
-    // Compute Monday-based week start to determine "same week".
-    //
-    // 计算基于周一的周开始时间来确定“同一周”
-    final int nowWeekIndex = (now.weekday + 6) % 7;
-    final int dateWeekIndex = (date.weekday + 6) % 7;
-    final DateTime nowWeekStart = today.subtract(Duration(days: nowWeekIndex));
-    final DateTime dateWeekStart =
-        messageDay.subtract(Duration(days: dateWeekIndex));
-
-    if (now.year == date.year && nowWeekStart == dateWeekStart) {
-      final weekdays = [
-        _atomicLocale.weekdaySunday,
-        _atomicLocale.weekdayMonday,
-        _atomicLocale.weekdayTuesday,
-        _atomicLocale.weekdayWednesday,
-        _atomicLocale.weekdayThursday,
-        _atomicLocale.weekdayFriday,
-        _atomicLocale.weekdaySaturday,
-      ];
-      return "${weekdays[date.weekday % 7]} $timeStr";
-    }
-
-    if (now.year == date.year) {
-      return "${date.month}/${date.day} $timeStr";
-    }
-
-    return "${date.year}/${date.month}/${date.day} $timeStr";
-  }
+  String _getTimeString(int timestamp) =>
+      MessageUtil.formatMessageTime(timestamp, context);
 
   Future<void> _loadGroupAttributes() async {
     final groupId =

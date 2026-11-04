@@ -23,9 +23,7 @@ enum ForwardType {
   merged,
 }
 
-/// Forward service
-///
-/// 转发服务
+/// 复用腾讯转发，并在宿主接入时把选择、确认和发送交给同一业务入口。
 class ForwardService {
   /// Group conversation ID prefix
   ///
@@ -83,13 +81,26 @@ class ForwardService {
     required MessageListConfigProtocol config,
     String? excludeConversationID,
   }) async {
+    if (config.forwardHandler != null) {
+      return config.forwardHandler!(
+          context,
+          ChatForwardRequest(
+              messages: [message],
+              type: MessageForwardType.separate,
+              source: messageListStore,
+              conversationID: excludeConversationID ?? '',
+              single: true,
+              needReadReceipt: config.enableReadReceipt));
+    }
     // Single message: skip type selection, directly show forward target selector
     //
     // 单条消息：跳过类型选择，直接显示转发目标选择器
     final selectResult = await ForwardTargetSelectorPage.show(
       context,
     );
-    if (selectResult == null || selectResult.conversationIDs.isEmpty) {
+    if (!context.mounted ||
+        selectResult == null ||
+        selectResult.conversationIDs.isEmpty) {
       return false;
     }
 
@@ -132,13 +143,30 @@ class ForwardService {
       return false;
     }
 
+    // 宿主自行复核消息资格及产品上限，SDK默认选择器不能提前发送或弹出成功提示。
+    if (config.forwardHandler != null) {
+      return config.forwardHandler!(
+          context,
+          ChatForwardRequest(
+              messages: messages,
+              type: forwardType == ForwardType.merged
+                  ? MessageForwardType.merged
+                  : MessageForwardType.separate,
+              source: messageListStore,
+              conversationID: sourceConversationID ?? '',
+              single: false,
+              needReadReceipt: config.enableReadReceipt));
+    }
+
     // Select target conversations
     //
     // 选择目标会话
     final selectResult = await ForwardTargetSelectorPage.show(
       context,
     );
-    if (selectResult == null || selectResult.conversationIDs.isEmpty) {
+    if (!context.mounted ||
+        selectResult == null ||
+        selectResult.conversationIDs.isEmpty) {
       return false;
     }
 
@@ -412,7 +440,9 @@ class ForwardService {
     final selectResult = await ForwardTargetSelectorPage.show(
       context,
     );
-    if (selectResult == null || selectResult.conversationIDs.isEmpty) {
+    if (!context.mounted ||
+        selectResult == null ||
+        selectResult.conversationIDs.isEmpty) {
       return false;
     }
 
