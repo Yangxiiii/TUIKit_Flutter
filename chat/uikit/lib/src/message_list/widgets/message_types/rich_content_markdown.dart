@@ -30,17 +30,24 @@ class RichContentMarkdown extends StatelessWidget {
       blockSpacing: 4,
     );
     final inlineBuilder = _InlineFormatBuilder(textStyle);
-    return MarkdownBody(
-      data: data,
-      styleSheet: style,
-      softLineBreak: true,
-      extensionSet: richContentMarkdownExtensionSet,
-      // 与会话列表共用行内样式转换，块级排版继续使用 MarkdownBody。
-      builders: {
-        for (final tag in ['strong', 'em', 'u', 'del', 'a']) tag: inlineBuilder,
-      },
-      // 消息文字中的 Markdown 图片不是附件块，不允许借此读取本地资源。
-      imageBuilder: (uri, title, alt) => Text(alt ?? '', style: textStyle),
+    // 富文本保留消息原始字号，仅跟随平台无障碍缩放，不叠加宿主的普通文字档位。
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(
+        textScaler: MediaQueryData.fromView(View.of(context)).textScaler,
+      ),
+      child: MarkdownBody(
+        data: data,
+        styleSheet: style,
+        softLineBreak: true,
+        extensionSet: richContentMarkdownExtensionSet,
+        // 与会话列表共用行内样式转换，块级排版继续使用 MarkdownBody。
+        builders: {
+          for (final tag in ['strong', 'em', 'u', 'del', 'a'])
+            tag: inlineBuilder,
+        },
+        // 消息文字中的 Markdown 图片不是附件块，不允许借此读取本地资源。
+        imageBuilder: (uri, title, alt) => Text(alt ?? '', style: textStyle),
+      ),
     );
   }
 }

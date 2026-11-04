@@ -11,6 +11,26 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/rich_c
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
 
 void main() {
+  testWidgets('富文本只跟随系统无障碍缩放，普通文字仍接受应用字号', (tester) async {
+    tester.platformDispatcher.textScaleFactorTestValue = 1.2;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await tester.pumpWidget(MaterialApp(
+        home: MediaQuery(
+      data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+      child: const Column(children: [
+        Text('普通文字', style: TextStyle(fontSize: 16)),
+        RichContentMarkdown(data: '富文本正文', textStyle: TextStyle(fontSize: 16)),
+      ]),
+    )));
+    final ordinary = tester.widget<RichText>(find.descendant(
+        of: find.text('普通文字'), matching: find.byType(RichText)));
+    final rich = tester
+        .widgetList<RichText>(find.byType(RichText))
+        .singleWhere((value) => value.text.toPlainText() == '富文本正文');
+    expect(ordinary.textScaler.scale(16), 32);
+    expect(rich.textScaler.scale(16), closeTo(19.2, .001));
+  });
+
   testWidgets('格式文字回车后编辑器、聊天和列表保留每行的嵌套样式', (tester) async {
     const source = '**前*甲乙*后**';
     final offset = source.indexOf('乙');
