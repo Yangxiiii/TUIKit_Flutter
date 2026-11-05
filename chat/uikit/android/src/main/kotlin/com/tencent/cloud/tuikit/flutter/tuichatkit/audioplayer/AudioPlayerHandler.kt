@@ -3,6 +3,7 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
+/** 将Flutter播放命令交给唯一播放器，播放起点单位为毫秒。 */
 class AudioPlayerHandler(
     private val methodChannel: MethodChannel,
     private val eventChannel: EventChannel
@@ -75,6 +76,19 @@ class AudioPlayerHandler(
             "pause" -> pause(result)
             "resume" -> resume(result)
             "stop" -> stop(result)
+            "setEarpiece" -> {
+                val enabled = call.argument<Boolean>("enabled")
+                if (enabled == null) {
+                    result.error("INVALID_ARGUMENTS", "enabled is required", null)
+                    return
+                }
+                try {
+                    AudioPlayer.shared.setAudioOutputDevice(if (enabled) AudioOutputDevice.EARPIECE else AudioOutputDevice.SPEAKER)
+                    result.success(null)
+                } catch (error: Exception) {
+                    result.error("AUDIO_ROUTE_FAILED", error.message, null)
+                }
+            }
             "getCurrentPosition" -> getCurrentPosition(result)
             "getDuration" -> getDuration(result)
             "isPlaying" -> isPlaying(result)
@@ -90,7 +104,12 @@ class AudioPlayerHandler(
             return
         }
 
-        AudioPlayer.shared.play(filePath)
+        val startPositionMs = call.argument<Int>("startPositionMs") ?: 0
+        if (startPositionMs < 0) {
+            result.error("INVALID_ARGUMENTS", "Invalid start position", null)
+            return
+        }
+        AudioPlayer.shared.play(filePath, startPositionMs)
         result.success(null)
     }
 

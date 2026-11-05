@@ -18,12 +18,14 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/// 原生录音器统一上报毫秒进度、dBFS音量和终态，由适配器转到主线程。
 interface RecorderListener {
     fun onRecordTime(time: Int)
     fun onAmplitudeChanged(db: Int)
     fun onCompleted(resultCode: ResultCode, path: String?)
 }
 
+/// 协调权限、录音器选择与主线程回调；普通录音回传实时音量，AI降噪按需使用腾讯录音器。
 class AudioRecorderImpl() {
     companion object {
         private var TAG: String? = "AudioRecorderImpl"
@@ -35,23 +37,10 @@ class AudioRecorderImpl() {
     private var isCancelRecord = false
     private var audioFilePath: String? = null
 
-    private var enableAIDeNoise: Boolean = false
     private var listener: AudioRecorderListener? = null
 
     var onRecordTime: ((timeMs: Int) -> Unit)? = null
     var onPowerLevel: ((powerLevel: Int) -> Unit)? = null
-
-    init {
-        val context = ContextProvider.appContext
-        try {
-            recorder = AudioRecorderTXUGC(context)
-            (recorder as AudioRecorderTXUGC).init()
-        } catch (e: Exception) {
-            Log.i("AudioRecorderFactory", "can not create ugc audio recorder." + e.message)
-            recorder = AudioRecorderSystem(context)
-        }
-        recorder?.setListener(RecorderListenerImpl())
-    }
 
     fun startRecord(
         filepath: String?,
@@ -74,6 +63,7 @@ class AudioRecorderImpl() {
         }).request()
     }
 
+    /// 权限通过后启动单次录音，完成参数检查后才占用麦克风。
     private fun startRecordInternal(
         filepath: String?,
         enableAIDeNoise: Boolean,
@@ -98,6 +88,20 @@ class AudioRecorderImpl() {
             return
         }
 
+        // 腾讯UGC当前只有时长和完成回调；未开启AI降噪时用已有系统实现回传真实音量。
+        val context = ContextProvider.appContext
+        recorder = if (enableAIDeNoise) {
+            // shortcut: 腾讯AI降噪模式没有音量回调，启用该模式的波形前需升级支持音量回调的SDK。
+            try {
+                AudioRecorderTXUGC(context).also { it.init() }
+            } catch (e: Exception) {
+                Log.i("AudioRecorderFactory", "can not create ugc audio recorder." + e.message)
+                AudioRecorderSystem(context)
+            }
+        } else {
+            AudioRecorderSystem(context)
+        }
+        recorder?.setListener(RecorderListenerImpl())
         recorder?.enableAIDeNoise(enableAIDeNoise)
         recorder?.startRecord(filePath = audioFilePath, minRecordDurationMs, maxRecordDurationMs)
     }
@@ -155,6 +159,7 @@ class AudioRecorderImpl() {
         }
     }
 
+    /// 只转发当前录音进度与终态，取消的原生完成事件不重复交付文件。
     inner class RecorderListenerImpl : RecorderListener {
         private var recordTimeMs: Int = 0
 

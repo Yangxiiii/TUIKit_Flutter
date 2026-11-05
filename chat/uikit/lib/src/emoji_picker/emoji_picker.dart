@@ -18,11 +18,15 @@ class EmojiPicker extends StatefulWidget {
   /// 交由输入框按完整表情和字素执行退格。
   final VoidCallback? onDeleteClick;
 
+  /// 语音编辑采用带分区标题的目录，确认发送仍由浮层提供，不在面板另放发送按钮。
+  final bool voicePreview;
+
   const EmojiPicker({
     super.key,
     this.onEmojiClick,
     this.onSendClick,
     this.onDeleteClick,
+    this.voicePreview = false,
   });
 
   @override
@@ -52,10 +56,17 @@ class EmojiPickerState extends State<EmojiPicker> {
     try {
       if (selected != null) await RecentEmojiManager.addRecentEmoji(selected);
       if (!mounted) return const [];
+      if (widget.voicePreview) {
+        final recent = await RecentEmojiManager.getRecentEmojiIds();
+        return {...recent, ...EmojiManager.emojis.map((item) => item.name)}
+            .take(7)
+            .map((id) => EmojiManager.getEmoji(id)!)
+            .toList();
+      }
       return await RecentEmojiManager.getQuickEmojis(context);
     } on Object {
       // 近期缓存只决定排序，不能阻断面板展示或已经触发的文字插入。
-      return EmojiManager.emojis.take(6).toList();
+      return EmojiManager.emojis.take(widget.voicePreview ? 7 : 6).toList();
     }
   }
 
@@ -84,24 +95,115 @@ class EmojiPickerState extends State<EmojiPicker> {
       onTap: () {},
       child: EmojiPickerConfig.customStickerLists.isEmpty
           ? const EmojiPickerError()
-          : Column(children: [
-              FutureBuilder<List<EmojiPickerModelItem>>(
-                future: _quickEmojis,
-                initialData: EmojiManager.emojis.take(6).toList(),
-                builder: (context, snapshot) => _QuickEmojiRow(
-                  emojis: snapshot.data!,
-                  onEmojiClick: _onEmojiClick,
-                ),
-              ),
-              EmojiPickerContent(
-                activeTabIndex: 0,
-                onEmojiClick: _onEmojiClick,
-                onSendClick: widget.onSendClick,
-                onDeleteClick: widget.onDeleteClick,
-              ),
-            ]),
+          : widget.voicePreview
+              ? _voicePanel(context)
+              : Column(children: [
+                  FutureBuilder<List<EmojiPickerModelItem>>(
+                    future: _quickEmojis,
+                    initialData: EmojiManager.emojis.take(6).toList(),
+                    builder: (context, snapshot) => _QuickEmojiRow(
+                      emojis: snapshot.data!,
+                      onEmojiClick: _onEmojiClick,
+                    ),
+                  ),
+                  EmojiPickerContent(
+                    activeTabIndex: 0,
+                    onEmojiClick: _onEmojiClick,
+                    onSendClick: widget.onSendClick,
+                    onDeleteClick: widget.onDeleteClick,
+                  ),
+                ]),
     );
   }
+
+  /// 常用行、完整目录与底部退格分别定位，目录只滚动自身，不挤压语音确认操作。
+  Widget _voicePanel(BuildContext context) {
+    final colors = context.appColors;
+    // 面板独立遮住聊天底图，网格空白和底部安全区也不能透出原会话。
+    return ColoredBox(
+        color: colors.groupedPageBackground,
+        child: Stack(children: [
+          Positioned.fill(
+            child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 20, 16, 64),
+                children: [
+                  Text('最常使用',
+                      style: TextStyle(
+                          fontSize: 12,
+                          height: 17 / 12,
+                          color: colors.textTertiary)),
+                  const SizedBox(height: 12),
+                  FutureBuilder<List<EmojiPickerModelItem>>(
+                    future: _quickEmojis,
+                    initialData: EmojiManager.emojis.take(7).toList(),
+                    builder: (_, snapshot) =>
+                        _voiceGrid(snapshot.data!, 'recent'),
+                  ),
+                  const SizedBox(height: 20),
+                  Text('默认表情',
+                      style: TextStyle(
+                          fontSize: 12,
+                          height: 17 / 12,
+                          color: colors.textTertiary)),
+                  const SizedBox(height: 12),
+                  _voiceGrid(EmojiManager.emojis.toList(), 'default'),
+                ]),
+          ),
+          Positioned(
+            right: 16,
+            bottom: MediaQuery.paddingOf(context).bottom + 8,
+            child: Semantics(
+              identifier: 'chat.voice.emoji_delete',
+              button: true,
+              enabled: widget.onDeleteClick != null,
+              label: '删除表情或文字',
+              child: GestureDetector(
+                onTap: widget.onDeleteClick,
+                child: Container(
+                    width: 48,
+                    height: 40,
+                    decoration: BoxDecoration(
+                        color: colors.surface,
+                        borderRadius: BorderRadius.circular(8)),
+                    // 项目字体暂无退格字形，保留既有表情键盘图标，待字体补齐后统一替换。
+                    child: Icon(Icons.backspace_outlined,
+                        size: 24,
+                        color: widget.onDeleteClick == null
+                            ? colors.textTertiary
+                            : colors.textPrimary)),
+              ),
+            ),
+          ),
+        ]));
+  }
+
+  /// 两个分区使用独立语义命名空间，近期表情同时出现在完整目录时仍可唯一定位。
+  Widget _voiceGrid(List<EmojiPickerModelItem> emojis, String section) =>
+      GridView.builder(
+        // 安全区已由面板统一承载，内嵌网格不能再次自动添加状态栏及底部留白。
+        padding: EdgeInsets.zero,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 7,
+            mainAxisExtent: 32,
+            mainAxisSpacing: 20,
+            crossAxisSpacing: 20),
+        itemCount: emojis.length,
+        itemBuilder: (_, index) {
+          final emoji = emojis[index];
+          return Semantics(
+              identifier: 'chat.voice.emoji.$section.${emoji.name}',
+              label: emoji.label,
+              button: true,
+              child: GestureDetector(
+                  onTap: () => _onEmojiClick(emoji),
+                  child: Image.asset(emoji.path,
+                      package: EmojiManager.assetPackage,
+                      width: 32,
+                      height: 32)));
+        },
+      );
 }
 
 /// 目录为空时展示配置错误，不回退到已经弃用的腾讯表情。

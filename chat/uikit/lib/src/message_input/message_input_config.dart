@@ -89,6 +89,9 @@ abstract class MessageInputConfigProtocol {
   bool get enableMention;
   bool get enableVoiceToTextOnRecord;
 
+  /// 单聊先识别预览再确认发送，并支持在同一音频末尾继续录音；默认保留旧流程。
+  bool get previewVoiceBeforeSend;
+
   /// More panel items (order matches the more panel UI)
   ///
   /// 更多面板项（顺序与更多面板 UI 一致）
@@ -119,6 +122,10 @@ class ChatMessageInputConfig implements MessageInputConfigProtocol {
   /// 保持与宿主其他文字发送入口共用同一并发边界。
   @override
   final ActionGuard? actionGuard;
+
+  /// 仅由宿主对本次语音预览范围开启，避免改变其他会话的发送行为。
+  @override
+  final bool previewVoiceBeforeSend;
 
   final bool? _userIsShowAudioRecorder;
   final bool? _userIsShowMore;
@@ -183,6 +190,7 @@ class ChatMessageInputConfig implements MessageInputConfigProtocol {
     this.mediaSender,
     this.fileSelector,
     this.actionGuard,
+    this.previewVoiceBeforeSend = false,
     bool? isShowAudioRecorder,
     bool? isShowMore,
     bool? enableReadReceipt,

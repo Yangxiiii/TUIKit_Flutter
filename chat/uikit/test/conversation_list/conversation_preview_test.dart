@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_chat_uikit/src/conversation_list/rich_content_preview.dart';
-import 'package:tencent_chat_uikit/src/message_list/utils/message_utils.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_message.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/rich_content_markdown.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
 
 void main() {
+  test('语音会话摘要保留空格和设计秒号，历史未知秒数不伪造', () {
+    expect(voiceConversationPreview('[语音]', 10), "[语音] 10''");
+    expect(voiceConversationPreview('[语音]', 60), "[语音] 60''");
+    expect(voiceConversationPreview('[语音]', null), '[语音]');
+  });
   testWidgets('单行富文本保留列表、引用、代码和转义，撤回及未知协议不使用旧正文', (tester) async {
     late BuildContext context;
     await tester.pumpWidget(MaterialApp(home: Builder(builder: (value) {

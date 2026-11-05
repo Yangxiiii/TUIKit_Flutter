@@ -301,13 +301,15 @@ class _MessageActionSheetState extends State<MessageActionSheet> {
   Widget build(BuildContext context) {
     _scheduleBounds();
     final colors = context.appColors;
+    final voice = _item('audio-route');
+    final asr = _item('voice-text');
     return Material(
       key: _bounds,
       color: colors.referenceBackground,
       borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
       clipBehavior: Clip.antiAlias,
       child: SizedBox(
-          height: 541,
+          height: voice == null ? 541 : 652,
           child: Stack(children: [
             // 拖拽条不占据内容高度，面板全部区域都参与遮挡测量。
             Positioned(
@@ -330,6 +332,16 @@ class _MessageActionSheetState extends State<MessageActionSheet> {
                   const SizedBox(height: 15),
                   _buildQuickActions(),
                   const SizedBox(height: 15),
+                  // 语音增加设计中的两行独立分组，其他消息保持原有面板高度。
+                  if (voice != null) ...[
+                    _group([
+                      _action('audio-route', voice.title,
+                          voice.icon ?? AppIcons.ear),
+                      if (asr != null)
+                        _action('voice-text', asr.title, AppIcons.text),
+                    ]),
+                    const SizedBox(height: 15),
+                  ],
                   _group([
                     // 不合资格的消息和已跨过120秒的菜单都不保留撤回入口。
                     if (_item('recall') != null && !_recallExpired)

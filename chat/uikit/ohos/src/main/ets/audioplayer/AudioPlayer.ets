@@ -109,13 +109,30 @@ export default class AudioPlayer implements MethodCallHandler, StreamHandler, Au
   onMethodCall(call: MethodCall, result: MethodResult): void {
     const helper = AudioPlayerHelper.shared();
     switch (call.method) {
+      case 'setEarpiece': {
+        const enabled = call.argument('enabled') as boolean | null;
+        if (enabled === null || enabled === undefined) {
+          result.error('INVALID_ARGUMENTS', 'enabled is required', null);
+          return;
+        }
+        helper.setEarpiece(enabled).then(() => result.success(null)).catch((error: Error) => {
+          result.error('AUDIO_ROUTE_FAILED', error.message, null);
+        });
+        return;
+      }
       case 'play': {
         const filePath = call.argument('filePath') as string | null;
         if (filePath === null || filePath === undefined || filePath.length === 0) {
           result.error('INVALID_ARGUMENTS', 'filePath is required', null);
           return;
         }
-        helper.play(filePath).then(() => {
+        const startPositionMs = call.argument('startPositionMs') as number | null;
+        const start = startPositionMs ?? 0;
+        if (!Number.isFinite(start) || start < 0) {
+          result.error('INVALID_ARGUMENTS', 'Invalid start position', null);
+          return;
+        }
+        helper.play(filePath, start).then(() => {
           result.success(null);
         }).catch((e: Error) => {
           console.error(`${AudioPlayer.TAG} play failed`, e.message);
@@ -125,20 +142,17 @@ export default class AudioPlayer implements MethodCallHandler, StreamHandler, Au
       }
       case 'pause':
         helper.pause().then(() => result.success(null)).catch((e: Error) => {
-          console.warn(`${AudioPlayer.TAG} pause failed`, e.message);
-          result.success(null);
+          result.error('AUDIO_PAUSE_FAILED', e.message, null);
         });
         return;
       case 'resume':
         helper.resume().then(() => result.success(null)).catch((e: Error) => {
-          console.warn(`${AudioPlayer.TAG} resume failed`, e.message);
-          result.success(null);
+          result.error('AUDIO_RESUME_FAILED', e.message, null);
         });
         return;
       case 'stop':
         helper.stop().then(() => result.success(null)).catch((e: Error) => {
-          console.warn(`${AudioPlayer.TAG} stop failed`, e.message);
-          result.success(null);
+          result.error('AUDIO_STOP_FAILED', e.message, null);
         });
         return;
       case 'getCurrentPosition':

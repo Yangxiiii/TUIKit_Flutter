@@ -39,6 +39,7 @@ class AudioRecorderConfig {
   });
 }
 
+/// 桥接录音与音轨合并；合并输出必须是新文件，不能覆盖正在预览的原音。
 class AudioRecorderPlatform {
   static const MethodChannel _methodChannel =
       MethodChannel('tencent_chat_uikit/audio_recorder');
@@ -54,6 +55,29 @@ class AudioRecorderPlatform {
   static StreamSubscription? _eventSubscription;
   static Function(int timeMs)? _onRecordTime;
   static Function(int powerLevel)? _onPowerLevel;
+
+  /// 合并压缩音轨并校验返回边界，失败交给草稿保留原有效音频。
+  static Future<RecordInfo> mergeRecordings(
+      List<String> paths, String destination) async {
+    final result = await _methodChannel.invokeMethod<Object?>(
+      'mergeRecordings',
+      {'paths': paths, 'destination': destination},
+    );
+    if (result is! Map ||
+        result['filePath'] != destination ||
+        result['durationMs'] is! int) {
+      throw PlatformException(code: 'INVALID_MERGED_AUDIO');
+    }
+    final durationMs = result['durationMs'] as int;
+    if (durationMs < 1000 || durationMs > 60000) {
+      throw PlatformException(code: 'INVALID_MERGED_DURATION');
+    }
+    return RecordInfo(
+      path: destination,
+      duration: (durationMs + 999) ~/ 1000,
+      durationMs: durationMs,
+    );
+  }
 
   /// Start recording with native implementation
   ///
@@ -132,6 +156,7 @@ class AudioRecorderPlatform {
   static Future<AudioRecordResult?> stopRecordNative() async {
     try {
       await _methodChannel.invokeMethod('stopRecord');
+      return null;
     } catch (e) {
       debugPrint('AudioRecorderPlatform.stopRecordNative error: $e');
       return null;

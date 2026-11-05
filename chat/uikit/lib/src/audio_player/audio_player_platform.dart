@@ -1,12 +1,24 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 
+/// 桥接共享原生播放器，文件切换通知暂停，事件监听随当前源交接。
 class AudioPlayerPlatform {
   static const MethodChannel _methodChannel =
       MethodChannel('tencent_chat_uikit/audio_player');
   static const EventChannel _eventChannel =
       EventChannel('tencent_chat_uikit/audio_player_events');
+
+  /// 原生确认后的播放路由偏好，不将菜单点击本身当作硬件切换成功。
+  static final ValueNotifier<bool> earpieceMode = ValueNotifier(false);
+
+  /// 原生切换成功后才更新菜单事实；失败保留原模式并交给调用方反馈。
+  static Future<void> setEarpiece(bool enabled) async {
+    await _methodChannel
+        .invokeMethod<void>('setEarpiece', {'enabled': enabled});
+    earpieceMode.value = enabled;
+  }
 
   /// HarmonyOS detection. `Platform.isOhos` only exists in the Flutter-OH SDK,
   /// so we compare the OS string to stay compilable under standard Flutter.
@@ -37,6 +49,7 @@ class AudioPlayerPlatform {
   /// 播放音频文件
   static Future<void> play({
     required String filePath,
+    int startPositionMs = 0,
     Function()? onComplete,
     Function(int currentPosition, int duration)? onProgressUpdate,
     Function()? onPlay,
@@ -44,18 +57,22 @@ class AudioPlayerPlatform {
     Function()? onResume,
     Function(String errorMessage)? onError,
   }) async {
-    if (!Platform.isAndroid && !Platform.isIOS && !_isOhos) {
+    if (kIsWeb ||
+        (defaultTargetPlatform != TargetPlatform.android &&
+            defaultTargetPlatform != TargetPlatform.iOS &&
+            !_isOhos)) {
       throw UnsupportedError(
           'Native AudioPlayer is only supported on Android, iOS and HarmonyOS');
     }
 
     try {
-      // If switching to a different audio file, notify the previous widget via its onComplete callback
-      // so it can reset its playing state and progress.
-      //
-      // 这样它就能重置播放状态和进度。
+      // 新语音播放器以暂停接管切换，旧客户端没有暂停回调时才保留既有结束通知。
       if (_currentPlayingPath != null && _currentPlayingPath != filePath) {
-        _previousOnComplete?.call();
+        if (_onPause != null) {
+          _onPause!();
+        } else {
+          _previousOnComplete?.call();
+        }
       }
 
       // Remember current path and callback for next switch detection
@@ -123,7 +140,7 @@ class AudioPlayerPlatform {
           }
         },
         onError: (error) {
-          print('AudioPlayerPlatform event error: $error');
+          debugPrint('AudioPlayerPlatform event error: $error');
           _onError?.call('Event stream error: $error');
         },
       );
@@ -133,9 +150,10 @@ class AudioPlayerPlatform {
       // 调用本地方法播放
       await _methodChannel.invokeMethod('play', {
         'filePath': filePath,
+        'startPositionMs': startPositionMs,
       });
     } catch (e) {
-      print('AudioPlayerPlatform.play error: $e');
+      debugPrint('AudioPlayerPlatform.play error: $e');
       rethrow;
     }
   }
@@ -147,7 +165,8 @@ class AudioPlayerPlatform {
     try {
       await _methodChannel.invokeMethod('pause');
     } catch (e) {
-      print('AudioPlayerPlatform.pause error: $e');
+      debugPrint('AudioPlayerPlatform.pause error: $e');
+      rethrow;
     }
   }
 
@@ -158,7 +177,8 @@ class AudioPlayerPlatform {
     try {
       await _methodChannel.invokeMethod('resume');
     } catch (e) {
-      print('AudioPlayerPlatform.resume error: $e');
+      debugPrint('AudioPlayerPlatform.resume error: $e');
+      rethrow;
     }
   }
 
@@ -178,7 +198,8 @@ class AudioPlayerPlatform {
       await _methodChannel.invokeMethod('stop');
       await dispose();
     } catch (e) {
-      print('AudioPlayerPlatform.stop error: $e');
+      debugPrint('AudioPlayerPlatform.stop error: $e');
+      rethrow;
     }
   }
 
@@ -190,8 +211,8 @@ class AudioPlayerPlatform {
       final position = await _methodChannel.invokeMethod('getCurrentPosition');
       return position as int? ?? 0;
     } catch (e) {
-      print('AudioPlayerPlatform.getCurrentPosition error: $e');
-      return 0;
+      debugPrint('AudioPlayerPlatform.getCurrentPosition error: $e');
+      rethrow;
     }
   }
 
@@ -203,7 +224,7 @@ class AudioPlayerPlatform {
       final duration = await _methodChannel.invokeMethod('getDuration');
       return duration as int? ?? 0;
     } catch (e) {
-      print('AudioPlayerPlatform.getDuration error: $e');
+      debugPrint('AudioPlayerPlatform.getDuration error: $e');
       return 0;
     }
   }
@@ -216,7 +237,7 @@ class AudioPlayerPlatform {
       final playing = await _methodChannel.invokeMethod('isPlaying');
       return playing as bool? ?? false;
     } catch (e) {
-      print('AudioPlayerPlatform.isPlaying error: $e');
+      debugPrint('AudioPlayerPlatform.isPlaying error: $e');
       return false;
     }
   }
@@ -229,7 +250,7 @@ class AudioPlayerPlatform {
       final paused = await _methodChannel.invokeMethod('isPaused');
       return paused as bool? ?? false;
     } catch (e) {
-      print('AudioPlayerPlatform.isPaused error: $e');
+      debugPrint('AudioPlayerPlatform.isPaused error: $e');
       return false;
     }
   }

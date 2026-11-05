@@ -6,7 +6,9 @@ import android.util.Log
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import kotlin.concurrent.thread
 
+/** 桥接录音与草稿音轨合并；耗时合并离开主线程，结果回到 Flutter 主线程。 */
 class AudioRecorderHandler(
     private val activity: Activity,
     private val methodChannel: MethodChannel,
@@ -48,6 +50,24 @@ class AudioRecorderHandler(
             "startRecord" -> startRecord(call, result)
             "stopRecord" -> stopRecord(result)
             "cancelRecord" -> cancelRecord(result)
+            "mergeRecordings" -> {
+                val paths = call.argument<List<String>>("paths")
+                val destination = call.argument<String>("destination")
+                if (paths == null || destination == null) {
+                    result.error("INVALID_ARGUMENTS", "Missing audio paths", null)
+                    return
+                }
+                thread(name = "chat-audio-merge") {
+                    try {
+                        val merged = AudioClipMerger.merge(paths, destination)
+                        Handler(Looper.getMainLooper()).post { result.success(merged) }
+                    } catch (error: Exception) {
+                        Handler(Looper.getMainLooper()).post {
+                            result.error("MERGE_ERROR", error.message, null)
+                        }
+                    }
+                }
+            }
             else -> result.notImplemented()
         }
     }

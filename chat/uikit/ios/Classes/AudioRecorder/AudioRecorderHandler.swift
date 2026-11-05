@@ -2,6 +2,7 @@ import Flutter
 import UIKit
 import AVFoundation
 
+/// 桥接录音与异步音轨合并，保持 Flutter 结果在主线程返回。
 class AudioRecorderHandler: NSObject, FlutterStreamHandler {
     private var methodChannel: FlutterMethodChannel
     private var eventChannel: FlutterEventChannel
@@ -54,6 +55,23 @@ class AudioRecorderHandler: NSObject, FlutterStreamHandler {
             stopRecord(result)
         case "cancelRecord":
             cancelRecord(result)
+        case "mergeRecordings":
+            guard let args = call.arguments as? [String: Any],
+                  let paths = args["paths"] as? [String],
+                  let destination = args["destination"] as? String else {
+                result(FlutterError(code: "INVALID_ARGUMENTS", message: "Missing audio paths", details: nil))
+                return
+            }
+            AudioClipMerger.merge(paths: paths, destination: destination) { outcome in
+                DispatchQueue.main.async {
+                    switch outcome {
+                    case .success(let merged):
+                        result(["filePath": merged.path, "durationMs": merged.durationMs])
+                    case .failure(let error):
+                        result(FlutterError(code: "MERGE_ERROR", message: error.localizedDescription, details: nil))
+                    }
+                }
+            }
         default:
             result(FlutterMethodNotImplemented)
         }

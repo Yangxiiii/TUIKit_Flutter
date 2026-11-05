@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'package:app_core/app_core.dart';
+import '../../audio_player/audio_player_platform.dart';
+import '../utils/voice_message_media.dart';
 import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart' hide AlertDialog;
@@ -9,12 +13,10 @@ import 'package:tencent_chat_uikit/src/emoji_picker/emoji_picker_model.dart';
 import 'package:tencent_chat_uikit/src/message_list/message_list.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/asr_display_manager.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/calling_message_data_provider.dart';
-import 'package:tencent_chat_uikit/src/message_list/utils/recent_emoji_manager.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/translation_display_manager.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/translation_text_parser.dart';
 import 'package:tencent_chat_uikit/src/message_list/listen/listen_from_here_controller.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/forward/forward_service.dart';
-import 'package:tencent_chat_uikit/src/message_list/widgets/message_read_receipt_view.dart';
 
 import 'message_tooltip.dart';
 import '../utils/sticky_message_event.dart';
@@ -263,6 +265,13 @@ class _MessageBubbleState extends State<MessageBubble>
     with SingleTickerProviderStateMixin {
   /// 当前消息及列表模式的菜单回调，保留气泡状态时仍随Widget更新替换。
   late MessageMenuCallbacks _menuCallbacks;
+  final _voiceFallbackGuard = ActionGuard();
+  ActionGuard get _voiceGuard =>
+      MessageActionsScope.maybeOf(context)?.actionGuard ?? _voiceFallbackGuard;
+  Object get _voiceRequestScope =>
+      widget.asrDisplayManager ?? widget.messageListStore;
+  bool get _isVoiceDesign => widget.conversationID.startsWith('c2c_');
+
   final GlobalKey _messageKey = GlobalKey();
   SuperTooltip? tooltip;
 
@@ -472,6 +481,9 @@ class _MessageBubbleState extends State<MessageBubble>
             builder: (context, _) {
               return SoundMessageWidget(
                 message: widget.message,
+                conversationID: widget.conversationID,
+                asrDisplayManager: widget.asrDisplayManager,
+                onConvertToText: _handleConvertVoiceToText,
                 isSelf: widget.isSelf,
                 maxWidth: widget.maxWidth,
                 config: widget.config,
@@ -486,6 +498,9 @@ class _MessageBubbleState extends State<MessageBubble>
         } else {
           messageWidget = SoundMessageWidget(
             message: widget.message,
+            conversationID: widget.conversationID,
+            asrDisplayManager: widget.asrDisplayManager,
+            onConvertToText: _handleConvertVoiceToText,
             isSelf: widget.isSelf,
             maxWidth: widget.maxWidth,
             config: widget.config,
@@ -1073,7 +1088,7 @@ class _MessageBubbleState extends State<MessageBubble>
                 ?.translatedText
                 ?.isNotEmpty ==
             true;
-    final messageID = widget.message.msgID ?? '';
+    final messageID = widget.message.msgID;
     final isHidden =
         widget.translationDisplayManager?.isHidden(messageID) ?? false;
 
@@ -1087,7 +1102,7 @@ class _MessageBubbleState extends State<MessageBubble>
   ///
   /// 处理翻译文本操作
   void _handleTranslateText() async {
-    final messageID = widget.message.msgID ?? '';
+    final messageID = widget.message.msgID;
     final hasTranslation =
         (widget.message.messagePayload as TextMessagePayload?)
                 ?.translatedText
@@ -1143,7 +1158,7 @@ class _MessageBubbleState extends State<MessageBubble>
   ///
   /// 执行实际翻译
   void _performTranslation({required String text, List<String>? atUserNames}) {
-    final messageID = widget.message.msgID ?? '';
+    final messageID = widget.message.msgID;
 
     // Parse text to separate emoji and @ from translatable text
     //
@@ -1209,24 +1224,57 @@ class _MessageBubbleState extends State<MessageBubble>
     return items;
   }
 
+  /// 单聊语音保留独立路由和识别组，已有复制、撤回等资格不因此放宽。
   List<MessageMenuItem> _buildSoundMessageMenuItems() {
     final items = <MessageMenuItem>[];
-
-    // Convert to text menu item
-    //
-    // 转换为文本菜单项
-    if (_shouldShowConvertToTextMenuItem()) {
+    if (_isVoiceDesign) {
+      final earpiece = AudioPlayerPlatform.earpieceMode.value;
+      final text =
+          (widget.message.messagePayload as AudioMessagePayload?)?.asrText ??
+              '';
+      final hidden =
+          widget.asrDisplayManager?.isHidden(widget.message.msgID) ?? false;
       items.add(MessageMenuItem(
-        title: atomicLocal.convertToText,
-        icon: Icons.text_fields,
-        onTap: () => _handleConvertVoiceToText(),
-      ));
+          id: 'audio-route',
+          title: earpiece ? '扬声器播放' : '听筒播放',
+          icon: earpiece ? AppIcons.voice4 : AppIcons.ear,
+          onTap: () => unawaited(_switchVoiceRoute())));
+      if (widget.message.status == MessageStatus.sendSuccess) {
+        items.add(MessageMenuItem(
+            id: 'voice-text',
+            title: text.isNotEmpty && !hidden ? '取消转文字' : '语音转文字',
+            icon: AppIcons.text,
+            onTap: () {
+              if (text.isNotEmpty && !hidden) {
+                widget.asrDisplayManager?.hide(widget.message.msgID);
+              } else {
+                unawaited(_handleConvertVoiceToText());
+              }
+            }));
+      }
+    } else if (_shouldShowConvertToTextMenuItem()) {
+      items.add(MessageMenuItem(
+          title: atomicLocal.convertToText,
+          icon: AppIcons.text,
+          onTap: () => unawaited(_handleConvertVoiceToText())));
     }
-
     items.addAll(_buildCommonMenuItems());
-
     return items;
   }
+
+  /// 原生接受路由配置后才显示成功提示，失败时保留菜单原模式。
+  Future<void> _switchVoiceRoute() =>
+      _voiceGuard.singleFlight<void>('chat.voice.route', () async {
+        final next = !AudioPlayerPlatform.earpieceMode.value;
+        try {
+          await AudioPlayerPlatform.setEarpiece(next);
+          if (mounted) {
+            Toast.simple(context, next ? '已切换为听筒播放模式' : '已切换为扬声器播放模式');
+          }
+        } catch (_) {
+          if (mounted) Toast.error(context, '播放方式切换失败，请重试');
+        }
+      });
 
   /// Check if "Convert to Text" menu item should be shown
   ///
@@ -1247,7 +1295,7 @@ class _MessageBubbleState extends State<MessageBubble>
             ?.asrText
             ?.isNotEmpty ==
         true;
-    final messageID = widget.message.msgID ?? '';
+    final messageID = widget.message.msgID;
     final isHidden = widget.asrDisplayManager?.isHidden(messageID) ?? false;
 
     // Show menu when: no asrText OR asrText exists but hidden in this session
@@ -1256,75 +1304,95 @@ class _MessageBubbleState extends State<MessageBubble>
     return !hasAsrText || isHidden;
   }
 
-  /// Handle convert voice to text action
-  ///
-  /// 处理语音转文字操作
-  void _handleConvertVoiceToText() {
-    final messageID = widget.message.msgID ?? '';
-    final hasAsrText = (widget.message.messagePayload as AudioMessagePayload?)
-            ?.asrText
-            ?.isNotEmpty ==
-        true;
-
-    // If already has asrText but was hidden, just show it again
-    if (hasAsrText) {
-      widget.asrDisplayManager?.show(messageID);
-      return;
+  /// 单聊识别失败按设计显示3秒纯文字提示，其他会话保留原有错误样式。
+  void _showAsrFailure(String message) {
+    if (_isVoiceDesign) {
+      Toast.simple(context, message, duration: const Duration(seconds: 3));
+    } else {
+      Toast.error(context, message, duration: const Duration(seconds: 3));
     }
-
-    // Set converting state (this also removes from hidden set)`
-    //
-    // 设置转换状态（这也会从隐藏集合中移除）
-    widget.asrDisplayManager?.setConverting(messageID, true);
-
-    // Call the API
-    //
-    // 调用 API
-    final messageActionStore = MessageActionStore.create(widget.message);
-    messageActionStore.convertVoiceToText(language: '').then((result) async {
-      // Clear converting state
-      //
-      // 清除转换状态
-      widget.asrDisplayManager?.setConverting(messageID, false);
-
-      if (!result.isSuccess) {
-        // Show error toast
-        //
-        // 显示错误提示
-        if (mounted) {
-          Toast.error(context, atomicLocal.convertToTextFailed);
-        }
-      } else {
-        // Wait for next frame to ensure messageListStore has been updated via notificationCenter
-        //
-        // 等待下一帧以确保 messageListStore 已通过 notificationCenter 更新
-        await Future.delayed(Duration.zero);
-        if (!mounted) return;
-
-        // On success, check if asrText is empty from the latest state in messageListStore
-        //
-        // 成功时，检查 messageListStore 中最新状态的 asrText 是否为空
-        final messageList = widget.messageListStore.state.messageList.value;
-        final updatedMessage = messageList.firstWhere(
-          (msg) => msg.msgID == messageID,
-          orElse: () => widget.message,
-        );
-        final asrText =
-            (updatedMessage.messagePayload as AudioMessagePayload?)?.asrText ??
-                '';
-
-        if (asrText.isEmpty) {
-          // Voice message has no content, show error toast and collapse ASR bubble
-          //
-          // 语音消息没有内容，显示错误提示并折叠 ASR 气泡
-          if (mounted) {
-            Toast.error(context, atomicLocal.convertToTextFailed);
-          }
-          widget.asrDisplayManager?.hide(messageID);
-        }
-      }
-    });
   }
+
+  /// 识别入口共用同消息守卫；缓存直接恢复，失败保留重试，资源过期与网络错误分开处理。
+  Future<void> _handleConvertVoiceToText() => _voiceGuard.singleFlight<void>(
+          ('chat.voice.asr', _voiceRequestScope, widget.message.msgID),
+          () async {
+        final id = widget.message.msgID;
+        final userId = LoginStore.shared.loginState.loginUserInfo?.userID;
+        final manager = widget.asrDisplayManager;
+        if (manager?.isExpired(id) == true) {
+          if (mounted) {
+            _showAsrFailure('语音消息已过期，无法识别');
+          }
+          return;
+        }
+        final previousText =
+            (widget.message.messagePayload as AudioMessagePayload?)?.asrText ??
+                '';
+        if (previousText.isNotEmpty) {
+          manager?.setFailed(id, false);
+          manager?.show(id);
+          return;
+        }
+        manager?.setConverting(id, true);
+        try {
+          // 与播放按钮共享下载Future，防止两条入口重复写同一个SDK缓存文件。
+          await _voiceGuard.singleFlight<String>(
+              ('chat.voice.download', _voiceRequestScope, id),
+              () => VoiceMessageMedia(widget.message).load());
+          if (!mounted ||
+              LoginStore.shared.loginState.loginUserInfo?.userID != userId) {
+            return;
+          }
+          final result = await MessageActionStore.create(widget.message)
+              .convertVoiceToText(language: '');
+          // SDK通过通知更新消息正文，沿用其本地缓存，不再维护第二份识别文本。
+          await Future<void>.delayed(Duration.zero);
+          if (!mounted ||
+              LoginStore.shared.loginState.loginUserInfo?.userID != userId) {
+            return;
+          }
+          final updated = widget.messageListStore.state.messageList.value
+                  .where((message) => message.msgID == id)
+                  .firstOrNull ??
+              widget.message;
+          final text =
+              (updated.messagePayload as AudioMessagePayload?)?.asrText ?? '';
+          if (!result.isSuccess || text.isEmpty) {
+            manager?.setFailed(id, _isVoiceDesign);
+            _showAsrFailure(
+                _isVoiceDesign ? '无法识别' : atomicLocal.convertToTextFailed);
+          } else {
+            manager?.setFailed(id, false);
+            manager?.show(id);
+          }
+        } on VoiceMediaFailure catch (error) {
+          if (!mounted ||
+              LoginStore.shared.loginState.loginUserInfo?.userID != userId) {
+            return;
+          }
+          if (error.expired) {
+            manager?.setExpired(id);
+            unawaited(VoiceMessageMedia(widget.message)
+                .markPlayed()
+                .catchError((Object _) {}));
+          } else {
+            manager?.setFailed(id, _isVoiceDesign);
+          }
+          _showAsrFailure(error.expired
+              ? '语音消息已过期，无法识别'
+              : (_isVoiceDesign ? '无法识别' : atomicLocal.convertToTextFailed));
+        } catch (_) {
+          if (mounted) {
+            manager?.setFailed(id, _isVoiceDesign);
+            _showAsrFailure(
+                _isVoiceDesign ? '无法识别' : atomicLocal.convertToTextFailed);
+          }
+        } finally {
+          // 页面已销毁时管理器也可能已释放，迟到回调不得再次通知新列表。
+          if (mounted) manager?.setConverting(id, false);
+        }
+      });
 
   List<MessageMenuItem> _buildFileMessagePayloadMenuItems() {
     final items = <MessageMenuItem>[];

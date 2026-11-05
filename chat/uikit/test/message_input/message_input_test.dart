@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:app_core/app_core.dart';
 import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart' hide IconButton;
@@ -39,7 +40,8 @@ void main() {
   tearDown(() => TencentImSDKPlugin.v2TIMManager = original);
 
   Future<void> mount(WidgetTester tester,
-          {RichContentAttachmentUploader? uploader}) =>
+          {RichContentAttachmentUploader? uploader,
+          bool voicePreview = false}) =>
       tester.pumpWidget(
         MaterialApp(
           theme: AppThemeFactory.create(
@@ -53,6 +55,7 @@ void main() {
                 conversationID: 'c2c_test',
                 config: ChatMessageInputConfig(
                     actionGuard: ActionGuard(),
+                    previewVoiceBeforeSend: voicePreview,
                     enableReadReceipt: false,
                     richContentAttachmentUploader: uploader),
               )
@@ -93,6 +96,58 @@ void main() {
             matching: find.byIcon(AppIcons.send1)),
         matching: find.byType(IconButton),
       ));
+
+  testWidgets('权限等待期间松手或离开后，不补启动原生采音', (tester) async {
+    // 共享硬件队列属于同一应用会话，两个场景在同一测试Zone中逐次释放。
+    for (final leavePage in [false, true]) {
+      sdk = _Sdk();
+      TencentImSDKPlugin.v2TIMManager = sdk;
+      const permissionChannel = MethodChannel('atomic_x/permission');
+      const playerChannel = MethodChannel('tencent_chat_uikit/audio_player');
+      const recorderChannel =
+          MethodChannel('tencent_chat_uikit/audio_recorder');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      final permission = Completer<String>();
+      var checks = 0;
+      var playerCalls = 0;
+      var starts = 0;
+      messenger.setMockMethodCallHandler(permissionChannel, (_) async {
+        checks++;
+        return permission.future;
+      });
+      messenger.setMockMethodCallHandler(playerChannel, (_) async {
+        playerCalls++;
+        return null;
+      });
+      messenger.setMockMethodCallHandler(recorderChannel, (call) async {
+        if (call.method == 'startRecord') starts++;
+        return null;
+      });
+      addTearDown(() {
+        messenger.setMockMethodCallHandler(permissionChannel, null);
+        messenger.setMockMethodCallHandler(playerChannel, null);
+        messenger.setMockMethodCallHandler(recorderChannel, null);
+      });
+      await mount(tester, voicePreview: true);
+      sdk.conversations.completeDraft('');
+      await tester.pump();
+      await tester.tap(find.byTooltip('切换语音输入'));
+      await tester.pump();
+      final gesture = await tester.startGesture(
+          tester.getCenter(find.bySemanticsIdentifier('chat.voice.hold')));
+      await tester.pumpAndSettle();
+      expect(checks, 1, reason: '共享播放器停止调用数：$playerCalls');
+      if (leavePage) await tester.pumpWidget(const SizedBox());
+      await gesture.up();
+      permission.complete('granted');
+      await tester.pump(const Duration(seconds: 3));
+      expect(starts, 0);
+      expect(
+          find.bySemanticsIdentifier('chat.voice.preview_text'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    }
+  });
 
   testWidgets('表情与系统键盘在同一区域切换，焦点选区和输入连接持续保留', (tester) async {
     EmojiManager.configure(assetPackage: 'tuikit_atomic_x', emojis: const [

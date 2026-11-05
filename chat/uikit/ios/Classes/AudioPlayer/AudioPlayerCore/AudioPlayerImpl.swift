@@ -2,6 +2,7 @@ import AVKit
 import SwiftUI
 import os.log
 
+/// 复用原生本地及流媒体播放器，在开始播放前恢复本消息暂停位置。
 internal class AudioPlayerImpl: AudioPlayer, AVAudioPlayerDelegate {
     private let logger = Logger(subsystem: "AudioPlayer", category: "AudioPlayerControl")
     
@@ -10,6 +11,62 @@ internal class AudioPlayerImpl: AudioPlayer, AVAudioPlayerDelegate {
     @Published public var currentPlayingURL: URL? = nil
     private var audioPlayer: AVAudioPlayer?
     private var progressTimer: Timer?
+
+    /// 播放方式是共享偏好，原生会话在停止时恢复，下一条音源仍沿用该偏好。
+    private var earpieceMode = false
+    private var routeConfigured = false
+    #if os(iOS)
+    private var previousSession: (AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)?
+    #endif
+
+    override public func setEarpiece(_ enabled: Bool) throws {
+        let previous = earpieceMode
+        let configured = routeConfigured
+        earpieceMode = enabled
+        routeConfigured = true
+        // 未开始播放时只核实能力并保存偏好，立即归还系统音频会话。
+        defer { if !isPlayingState { restoreAudioSession() } }
+        do { try configureAudioSession() } catch {
+            earpieceMode = previous
+            routeConfigured = configured
+            restoreAudioSession()
+            if isPlayingState || isPausedState { try? configureAudioSession() }
+            throw error
+        }
+    }
+
+    /// 只在用户选择通信播放路由后采用双向会话，普通播放继续使用原有播放类别。
+    private func configureAudioSession() throws {
+        #if os(iOS)
+        let session = AVAudioSession.sharedInstance()
+        if routeConfigured {
+            if previousSession == nil { previousSession = (session.category, session.mode, session.categoryOptions) }
+            try session.setCategory(.playAndRecord, mode: .default)
+            try session.setActive(true)
+            try session.overrideOutputAudioPort(earpieceMode ? .none : .speaker)
+            let expected: AVAudioSession.Port = earpieceMode ? .builtInReceiver : .builtInSpeaker
+            guard session.currentRoute.outputs.contains(where: { $0.portType == expected }) else {
+                throw NSError(domain: "ChatAudioRoute", code: 1)
+            }
+        } else {
+            try session.setCategory(.playback, mode: .default)
+            try session.setActive(true)
+        }
+        #endif
+    }
+
+    /// 外部通话已改成其他会话模式时不回写旧配置，避免停止语音覆盖通话资源。
+    private func restoreAudioSession() {
+        #if os(iOS)
+        guard let previous = previousSession else { return }
+        previousSession = nil
+        let session = AVAudioSession.sharedInstance()
+        if session.category == .playAndRecord && session.mode == .default {
+            try? session.overrideOutputAudioPort(.none)
+            try? session.setCategory(previous.0, mode: previous.1, options: previous.2)
+        }
+        #endif
+    }
 
     // Remote (http/https) playback uses AVPlayer because AVAudioPlayer cannot
     // stream remote URLs. Local files keep using AVAudioPlayer.
@@ -27,13 +84,13 @@ internal class AudioPlayerImpl: AudioPlayer, AVAudioPlayerDelegate {
         return lower.hasPrefix("http://") || lower.hasPrefix("https://")
     }
 
-    override public func play(filePath: String) {
+    override public func play(filePath: String, startPositionMs: Int = 0) {
         logger.info("play: \(filePath)")
 
         let remote = isRemotePath(filePath)
         guard let url = remote
             ? URL(string: filePath)
-            : (URL(string: filePath) ?? (URL(fileURLWithPath: filePath) as URL?)) else {
+            : URL(fileURLWithPath: filePath) else {
             logger.error("Invalid file path: \(filePath)")
             onError?("Invalid file path")
             return
@@ -51,18 +108,15 @@ internal class AudioPlayerImpl: AudioPlayer, AVAudioPlayerDelegate {
         }
 
         if remote {
-            playRemote(url)
+            playRemote(url, startPositionMs: startPositionMs)
         } else {
-            playInternal(url)
+            playInternal(url, startPositionMs: startPositionMs)
         }
     }
 
-    private func playRemote(_ url: URL) {
+    private func playRemote(_ url: URL, startPositionMs: Int) {
         do {
-            #if os(iOS)
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-            try AVAudioSession.sharedInstance().setActive(true)
-            #endif
+            try configureAudioSession()
         } catch {
             logger.error("AudioSession error: \(error.localizedDescription)")
         }
@@ -90,6 +144,9 @@ internal class AudioPlayerImpl: AudioPlayer, AVAudioPlayerDelegate {
             self.onProgressUpdate?(self.getCurrentPosition(), self.getDuration())
         }
 
+        if startPositionMs > 0 {
+            player.seek(to: CMTime(seconds: Double(startPositionMs) / 1000, preferredTimescale: 1000))
+        }
         player.play()
         isPlayingState = true
         isPausedState = false
@@ -112,6 +169,7 @@ internal class AudioPlayerImpl: AudioPlayer, AVAudioPlayerDelegate {
     }
 
     private func teardownRemote() {
+        restoreAudioSession()
         if let observer = remoteTimeObserver {
             remotePlayer?.removeTimeObserver(observer)
             remoteTimeObserver = nil
@@ -127,6 +185,8 @@ internal class AudioPlayerImpl: AudioPlayer, AVAudioPlayerDelegate {
     }
 
     override public func pause() {
+        // 暂停保留文件位置，但立即归还本播放器接管的系统路由。
+        defer { if isPausedState { restoreAudioSession() } }
         logger.info("pause")
         if isRemote {
             guard let player = remotePlayer, isPlayingState else { return }
@@ -146,6 +206,11 @@ internal class AudioPlayerImpl: AudioPlayer, AVAudioPlayerDelegate {
 
     override public func resume() {
         logger.info("resume")
+        guard isPausedState else { return }
+        do { try configureAudioSession() } catch {
+            onError?("Audio route restore failed")
+            return
+        }
         if isRemote {
             guard let player = remotePlayer, isPausedState else { return }
             player.play()
@@ -164,6 +229,7 @@ internal class AudioPlayerImpl: AudioPlayer, AVAudioPlayerDelegate {
     }
 
     override public func stop() {
+        defer { restoreAudioSession() }
         logger.info("stop")
         if isRemote {
             teardownRemote()
@@ -206,16 +272,17 @@ internal class AudioPlayerImpl: AudioPlayer, AVAudioPlayerDelegate {
         return isPausedState
     }
 
-    private func playInternal(_ url: URL) {
+    private func playInternal(_ url: URL, startPositionMs: Int) {
         do {
-            #if os(iOS)
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-            try AVAudioSession.sharedInstance().setActive(true)
-            #endif
+            try configureAudioSession()
 
             audioPlayer = try AVAudioPlayer(contentsOf: url)
             audioPlayer?.delegate = self
             audioPlayer?.prepareToPlay()
+            // 新文件已经准备完成，先恢复毫秒起点，再通知界面开始播放。
+            if let player = audioPlayer {
+                player.currentTime = min(Double(startPositionMs) / 1000, player.duration)
+            }
             if audioPlayer?.play() == true {
                 isPlayingState = true
                 isPausedState = false
@@ -257,6 +324,8 @@ internal class AudioPlayerImpl: AudioPlayer, AVAudioPlayerDelegate {
     }
 
     public func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        guard player === audioPlayer else { return }
+        restoreAudioSession()
         logger.info("Playback finished successfully: \(flag)")
         audioPlayer?.stop()
         audioPlayer = nil
@@ -268,6 +337,8 @@ internal class AudioPlayerImpl: AudioPlayer, AVAudioPlayerDelegate {
     }
 
     public func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        guard player === audioPlayer else { return }
+        restoreAudioSession()
         let errorMessage = error?.localizedDescription ?? "Unknown error"
         logger.error("Audio player decoding error: \(errorMessage)")
         audioPlayer = nil

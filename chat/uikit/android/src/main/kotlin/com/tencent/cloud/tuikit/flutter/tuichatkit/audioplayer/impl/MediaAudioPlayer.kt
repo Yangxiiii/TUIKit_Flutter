@@ -1,5 +1,7 @@
 package com.tencent.cloud.tuikit.flutter.tuichatkit.audioplayer.impl
 import android.content.Context
+import android.media.AudioDeviceInfo
+import android.os.Build
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
@@ -13,12 +15,18 @@ import io.trtc.tuikit.atomicx.basecomponent.utils.ContextProvider
 import java.io.File
 
 
+/** 装载当前音源，忽略已释放播放器的迟到事件，文件切换后可恢复暂停位置。 */
 class MediaAudioPlayer : AudioPlayer() {
     private var mediaPlayer: MediaPlayer? = null
     private var currentFilePath: String? = null
     private var listener: AudioPlayerListener? = null
     private var isPaused = false
+    /** 播放路由偏好跨文件保留，停止时恢复本应用接管前的音频模式。 */
     private var currentOutputDevice = AudioOutputDevice.SPEAKER
+    private var routeConfigured = false
+    /** 接管前的模式和扬声器状态只在本播放器释放资源时恢复。 */
+    private var previousAudioMode: Int? = null
+    private var previousSpeaker: Boolean = false
     private val mainHandler = Handler(Looper.getMainLooper())
     private var audioManager: AudioManager
 
@@ -43,10 +51,10 @@ class MediaAudioPlayer : AudioPlayer() {
         }
     }
 
-    override fun play(filePath: String) {
+    override fun play(filePath: String, startPositionMs: Int) {
         Log.d(TAG, "play: $filePath")
 
-        if (isPlaying() || isPaused) {
+        if (mediaPlayer != null) {
             stop()
         }
 
@@ -67,24 +75,16 @@ class MediaAudioPlayer : AudioPlayer() {
             mediaPlayer = MediaPlayer().apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
                         .build()
                 )
 
                 setDataSource(filePath)
-                // Remote sources must be prepared asynchronously; local files
-                // can prepare synchronously. onPrepared fires for both.
-                //
-                // 远程资源必须异步准备；本地文件可以同步准备。onPrepared 会对两者触发。
-                if (isRemote) {
-                    prepareAsync()
-                } else {
-                    prepare()
-                }
-
-                setOnCompletionListener {
+                setOnCompletionListener { completed ->
+                    if (mediaPlayer !== completed) return@setOnCompletionListener
                     stopProgressUpdates()
+                    restoreAudioMode()
                     listener?.onCompletion()
 
                     release()
@@ -92,10 +92,12 @@ class MediaAudioPlayer : AudioPlayer() {
                     isPaused = false
                 }
 
-                setOnErrorListener { _, what, extra ->
+                setOnErrorListener { failed, what, extra ->
+                    if (mediaPlayer !== failed) return@setOnErrorListener true
                     stopProgressUpdates()
                     val errorMessage = "Play error, code: $what, extra: $extra"
                     Log.e(TAG, errorMessage)
+                    restoreAudioMode()
                     listener?.onError(errorMessage)
 
                     release()
@@ -104,9 +106,18 @@ class MediaAudioPlayer : AudioPlayer() {
                     true
                 }
 
-                setOnPreparedListener {
-                    applyAudioOutputDevice()
+                setOnPreparedListener { prepared ->
+                    if (mediaPlayer !== prepared) return@setOnPreparedListener
+                    try {
+                        applyAudioOutputDevice()
+                    } catch (error: Exception) {
+                        listener?.onError("Audio route error: ${error.message}")
+                        stop()
+                        return@setOnPreparedListener
+                    }
 
+                    // 先定位后发声，不能先播出其他消息的开头再跳回暂停点。
+                    if (startPositionMs > 0) seekTo(startPositionMs.coerceAtMost(duration))
                     start()
                     isPaused = false
 
@@ -114,6 +125,8 @@ class MediaAudioPlayer : AudioPlayer() {
 
                     startProgressUpdates()
                 }
+                // 回调先注册，随后才准备音源，本地同步准备也不会漏掉开始事件。
+                if (isRemote) prepareAsync() else prepare()
             }
 
             currentFilePath = filePath
@@ -132,6 +145,8 @@ class MediaAudioPlayer : AudioPlayer() {
             mediaPlayer?.pause()
             isPaused = true
             stopProgressUpdates()
+            // 暂停和后台中断先归还路由，不能继续占用通话模式。
+            restoreAudioMode()
             listener?.onPause()
         }
     }
@@ -139,6 +154,7 @@ class MediaAudioPlayer : AudioPlayer() {
     override fun resume() {
         Log.d(TAG, "resume")
         if (isPaused && mediaPlayer != null) {
+            applyAudioOutputDevice()
             mediaPlayer?.start()
             isPaused = false
             startProgressUpdates()
@@ -146,64 +162,79 @@ class MediaAudioPlayer : AudioPlayer() {
         }
     }
 
+    /** 先解除当前源所有权，再释放资源，准备过程中的旧回调也会被忽略。 */
     override fun stop() {
-        Log.d(TAG, "stop")
+        val previous = mediaPlayer
+        mediaPlayer = null
         try {
-            mediaPlayer?.apply {
-                if (isPlaying() || isPaused) {
-                    stop()
-                }
-                reset()
-                release()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Stop error", e)
+            previous?.reset()
+        } catch (error: Exception) {
+            Log.e(TAG, "Stop error", error)
         } finally {
-            mediaPlayer = null
+            previous?.release()
             isPaused = false
             stopProgressUpdates()
+            restoreAudioMode()
         }
     }
 
-    fun setAudioOutputDevice(device: AudioOutputDevice): AudioPlayer {
-        if (currentOutputDevice == device) {
-            return this
+    /** 无听筒设备明确失败，活动播放切换失败时保留原偏好。 */
+    override fun setAudioOutputDevice(device: AudioOutputDevice): AudioPlayer {
+        if (device == AudioOutputDevice.EARPIECE) {
+            require(audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                .any { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }) { "Earpiece is unavailable" }
         }
-
+        val configured = routeConfigured
+        routeConfigured = true
+        try {
+            if (isPlaying()) applyAudioOutputDevice(device)
+        } catch (error: Exception) {
+            routeConfigured = configured
+            try { applyAudioOutputDevice(currentOutputDevice) } catch (_: Exception) { }
+            throw error
+        }
         currentOutputDevice = device
-        applyAudioOutputDevice()
-
+        routeConfigured = true
         listener?.onAudioOutputChanged(device)
-
         return this
     }
 
-    private fun applyAudioOutputDevice() {
-        val player = mediaPlayer ?: return
-
-        when (currentOutputDevice) {
-            AudioOutputDevice.SPEAKER -> {
-                audioManager.mode = AudioManager.MODE_NORMAL
-                audioManager.isSpeakerphoneOn = true
-                player.setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
-                        .build()
-                )
-            }
-
-            AudioOutputDevice.EARPIECE -> {
-                audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-                audioManager.isSpeakerphoneOn = false
-                player.setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                        .build()
-                )
-            }
+    /** 语音使用通信音轨，Android12及以上通过明确设备选择确认原生结果。 */
+    private fun applyAudioOutputDevice(device: AudioOutputDevice = currentOutputDevice) {
+        // 用户未主动选择时尊重耳机，不能因默认扬声器偏好把私密音频强制外放。
+        val external = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+            it.type != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER && it.type != AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
         }
+        if (!routeConfigured && external) return
+        if (previousAudioMode == null) {
+            previousAudioMode = audioManager.mode
+            previousSpeaker = audioManager.isSpeakerphoneOn
+        }
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val targetType = if (device == AudioOutputDevice.SPEAKER)
+                    AudioDeviceInfo.TYPE_BUILTIN_SPEAKER else AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+                val target = audioManager.availableCommunicationDevices.firstOrNull { it.type == targetType }
+                    ?: error("Audio output unavailable")
+                check(audioManager.setCommunicationDevice(target)) { "Audio route rejected" }
+            } else {
+                audioManager.isSpeakerphoneOn = device == AudioOutputDevice.SPEAKER
+            }
+        } catch (error: Exception) {
+            restoreAudioMode()
+            throw error
+        }
+    }
+
+    /** 只有接管过模式才恢复，避免每个气泡销毁时改动共享通话资源。 */
+    private fun restoreAudioMode() {
+        val mode = previousAudioMode ?: return
+        previousAudioMode = null
+        if (audioManager.mode != AudioManager.MODE_IN_COMMUNICATION) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) audioManager.clearCommunicationDevice()
+        audioManager.mode = mode
+        audioManager.isSpeakerphoneOn = previousSpeaker
     }
 
     override fun setListener(listener: AudioPlayerListener?): AudioPlayer {

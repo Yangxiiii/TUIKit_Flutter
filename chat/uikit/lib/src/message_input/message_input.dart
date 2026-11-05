@@ -4,7 +4,8 @@ import '../message_list/utils/rich_content_markdown_format.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:app_core/app_core.dart';
-import 'package:app_ui/app_ui.dart' show AppIcons;
+import 'package:app_ui/app_ui.dart'
+    show AppIcons, AppDialog, AppColorBuildContext;
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:atomic_x_core/impl/message/message_input_store_impl.dart';
 import 'package:atomic_x_core/impl/message/message_list_store_impl.dart';
@@ -31,7 +32,8 @@ import 'package:tencent_chat_uikit/src/message_input/widget/rich_content_editor_
 import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_message.dart';
 import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
 import 'package:tencent_chat_uikit/src/third_party/extended_text_field/extended_text_field.dart';
-import 'package:tencent_chat_uikit/src/audio_player/audio_player_platform.dart';
+import 'package:tencent_chat_uikit/src/audio_player/audio_player.dart'
+    as voice_audio;
 import 'package:tuikit_atomic_x/permission/permission.dart';
 import 'package:tencent_chat_uikit/src/user_picker/user_picker.dart';
 import 'package:tencent_chat_uikit/src/video_recorder/video_recorder.dart';
@@ -43,6 +45,8 @@ import 'message_text.dart';
 import 'input_keyboard_panel.dart';
 import 'pending_rich_content_message.dart';
 import 'widget/audio_record_overlay.dart';
+import 'widget/voice_record_preview.dart';
+import 'widget/voice_microphone_notice.dart';
 import 'widget/quote_preview_bar.dart';
 import '../message_list/message_recall_config.dart';
 
@@ -101,7 +105,10 @@ class MessageInputState extends State<MessageInput>
 
   late AppLocalizedText atomicLocale;
 
+  /// 按下后等待100毫秒再插入覆盖层，期间仍由原输入按钮接收抬手。
   Timer? _recordingStarter;
+
+  /// 权限和启动等待尚未结束；取消、离开或后台都会使等待失效。
   bool _isWaitingToStartRecord = false;
 
   /// 当前输入内容的校验结果；发送任务的忙碌状态另行限制按钮。
@@ -141,6 +148,10 @@ class MessageInputState extends State<MessageInput>
       activeMarkdownFormatInputFormatter(() => _activeInlineFormats);
   int _morePanelPageIndex = 0;
   final GlobalKey<AudioRecordOverlayState> _recordOverlayKey = GlobalKey();
+  final GlobalKey<VoiceRecordPreviewState> _voicePreviewKey = GlobalKey();
+
+  /// 与启动等待状态分离，避免首帧尚未创建浮层时松手后仍启动采音。
+  bool _recordPointerHeld = false;
   OverlayEntry? _recordOverlayEntry;
 
   /// When `true`, the next [AudioRecordOverlay.onRecordFinish] callback should
@@ -329,9 +340,29 @@ class MessageInputState extends State<MessageInput>
   @override
   void didUpdateWidget(MessageInput oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.conversationID != widget.conversationID) {
+      _recordingStarter?.cancel();
+      _recordPointerHeld = false;
+      _isWaitingToStartRecord = false;
+      _voicePreviewKey.currentState?.cancel();
+    }
     if (oldWidget.conversationDisplayName != widget.conversationDisplayName) {
       // 资料异步返回时，已展开的富文本浮层也要使用与导航相同的名称。
       _richContentEditorOverlay?.markNeedsBuild();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 尚未创建录音浮层时也必须取消等待，不能在返回前台后补启动旧按压。
+    if (widget.config.previewVoiceBeforeSend &&
+        state != AppLifecycleState.resumed) {
+      _recordPointerHeld = false;
+      _recordingStarter?.cancel();
+      if (_isWaitingToStartRecord) {
+        _isWaitingToStartRecord = false;
+        _removeRecordOverlay();
+      }
     }
   }
 
@@ -534,6 +565,9 @@ class MessageInputState extends State<MessageInput>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _recordingStarter?.cancel();
+    _recordPointerHeld = false;
+    _isWaitingToStartRecord = false;
     _keyboardPanel?.dispose();
     unawaited(_localSendSubscription?.cancel());
     _richContentEditorOverlay?.remove();
@@ -1785,8 +1819,25 @@ class MessageInputState extends State<MessageInput>
     }
   }
 
+  /// 在宿主上下文内捕获主题，单聊预览与旧录音浮层各自持有独立生命周期。
   void _showRecordOverlay() {
     _removeRecordOverlay();
+
+    if (widget.config.previewVoiceBeforeSend) {
+      _recordOverlayEntry = OverlayEntry(
+          builder: (_) => InheritedTheme.captureAll(
+                context,
+                VoiceRecordPreview(
+                  key: _voicePreviewKey,
+                  guard: _textSendGuard,
+                  onSendAudio: _onAudioRecorderFinished,
+                  onSendText: _sendTextMessageFromVoice,
+                  onClose: _removeRecordOverlay,
+                ),
+              ));
+      Overlay.of(context).insert(_recordOverlayEntry!);
+      return;
+    }
 
     // Capture inherited dependencies from current context before creating
     // the OverlayEntry, since the overlay lives in a different widget subtree
@@ -1852,12 +1903,13 @@ class MessageInputState extends State<MessageInput>
     _recordOverlayEntry = null;
   }
 
-  void _onAudioRecorderFinished(RecordInfo recordInfo) async {
+  /// 发送已确认的完整录音，返回SDK真实结果，失败时预览仍可重试。
+  Future<bool> _onAudioRecorderFinished(RecordInfo recordInfo) async {
     if (recordInfo.errorCode != AudioRecordResultCode.success &&
         recordInfo.errorCode !=
             AudioRecordResultCode.successExceedMaxDuration) {
       debugPrint("_onAudioRecorderFinished, errorCode:${recordInfo.errorCode}");
-      return;
+      return false;
     }
 
     final messageInfo = MessageInfo();
@@ -1867,75 +1919,98 @@ class MessageInputState extends State<MessageInput>
       audioDuration: recordInfo.duration,
     );
 
-    final result = await _sendMessage(messageInfo);
-    if (!result.isSuccess) {
-      debugPrint(
-        "_onRecordFinish, errorCode:${result.errorCode}, errorMessage:${result.errorMessage}",
-      );
+    try {
+      final result = await _sendMessage(messageInfo);
+      if (!result.isSuccess && mounted) Toast.error(context, '语音消息发送失败');
+      return result.isSuccess;
+    } catch (_) {
+      if (mounted) Toast.error(context, '语音消息发送失败');
+      return false;
     }
   }
 
   /// 语音转文字确认发送也遵守相同文字上限和同会话并发边界。
-  void _sendTextMessageFromVoice(String text) async {
+  Future<bool> _sendTextMessageFromVoice(String text) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty) return;
+    if (trimmed.isEmpty) return false;
     if (messageTextCharacterCount(text) > messageTextCharacterLimit) {
       Toast.error(context, atomicLocale.messageTextLimitExceeded);
-      return;
+      return false;
     }
-    await _runTextSend(() async {
+    return _runTextSend(() async {
       final messageInfo = MessageInfo()
         ..messageType = MessageType.text
         ..messagePayload = TextMessagePayload(text: trimmed);
-      return (await _sendMessage(messageInfo)).isSuccess;
+      final result = await _sendMessage(messageInfo);
+      if (!result.isSuccess && mounted) Toast.error(context, '发送失败，请重试');
+      return result.isSuccess;
     });
   }
 
+  /// 先停止共享播放并确认权限，再保留当前指针的延迟启动；授权结果不补启动旧按压。
   void _onStartRecording(PointerDownEvent event) async {
-    AudioPlayerPlatform.stop();
-
-    // Set flag BEFORE async permission check so that _onStopRecording
-    // can correctly cancel if the user lifts their finger during the await.
-    //
-    // 在异步权限检查前设置标志，以便如果用户在等待过程中抬起手指，_onStopRecording可以正确取消。
+    final conversationId = widget.conversationID;
+    // 权限等待前记录按压状态；系统弹窗吞掉抬手时，本次授权也不直接录音。
     _recordingStarter?.cancel();
+    _recordPointerHeld = true;
     _isWaitingToStartRecord = true;
 
-    final micStatus = await Permission.check(PermissionType.microphone);
-    if (micStatus != PermissionStatus.granted) {
-      // If PointerUp already fired during await, _isWaitingToStartRecord
-      // was reset — no further cleanup needed.
-      //
-      // 已重置——不需要进一步清理。
-      if (_isWaitingToStartRecord) {
-        _isWaitingToStartRecord = false;
-      }
-      // [bug#161275344] Known caveat on HarmonyOS: the finger is still down
-      // here, and the permission dialog is a system UIExtension window layered
-      // over ours, so it receives the PointerUp instead of us. OhosTouchProcessor
-      // (inside libflutter.so) never sees the sequence close and discards the
-      // *next* PointerDown as a duplicate — the long-press right after granting
-      // does nothing, and only the one after that works. Nothing in the Dart or
-      // ArkTS layer can reset that state; it needs a flutter_ohos fix.
-      //
-      // [bug#161275344] 在 HarmonyOS 上已知的问题：这里手指还按着，权限对话框是系统的 UIExtension 窗口，叠加在我们之上，所以它收到的是 PointerUp
-      // 而不是我们。OhosTouchProcessor（在 libflutter.so 里）从未看到序列关闭，并且把下一个 PointerDown
-      // 当作重复事件丢弃——在授权后紧接的长按不起作用，只有下一个才有效。Dart 或 ArkTS 层都无法重置这个状态；需要 flutter_ohos 修复。
-      await Permission.checkAndRequest(context, [PermissionType.microphone]);
+    // 录音等待共享播放队列停止，先到达的抬手仍会撤销本次启动。
+    try {
+      await voice_audio.AudioPlayer.stopAll();
+    } catch (_) {
+      _recordPointerHeld = false;
+      _isWaitingToStartRecord = false;
+      if (mounted) Toast.error(context, '语音录制失败');
+      return;
+    }
+    if (!mounted ||
+        !_recordPointerHeld ||
+        widget.conversationID != conversationId) {
       return;
     }
 
-    // If PointerUp fired during the await above, abort — recording was
-    // already cancelled by _onStopRecording.
-    //
-    // 已被 _onStopRecording 取消。
+    final micStatus = await Permission.check(PermissionType.microphone);
+    if (!mounted ||
+        !_recordPointerHeld ||
+        widget.conversationID != conversationId) {
+      return;
+    }
+    if (micStatus != PermissionStatus.granted) {
+      _isWaitingToStartRecord = false;
+      _recordPointerHeld = false;
+      if (widget.config.previewVoiceBeforeSend) {
+        await _textSendGuard.singleFlight<void>(
+            ('chat.voice.permission', conversationId), () async {
+          final requested =
+              await Permission.request([PermissionType.microphone]);
+          // 仅双重永久拒绝才提示；旧会话返回的结果不能在新会话弹窗。
+          if (mounted &&
+              widget.conversationID == conversationId &&
+              micStatus == PermissionStatus.permanentlyDenied &&
+              requested[PermissionType.microphone] ==
+                  PermissionStatus.permanentlyDenied) {
+            await AppDialog.showContent<void>(
+              theme: Theme.of(context),
+              maskColor: context.appColors.scrim.withValues(alpha: .4),
+              builder: (_) => const VoiceMicrophoneNotice(),
+            );
+          }
+        });
+      } else {
+        await Permission.checkAndRequest(context, [PermissionType.microphone]);
+      }
+      return;
+    }
+
+    // 等待期间已抬手或切换会话时，不再插入录音浮层。
     if (!_isWaitingToStartRecord) {
       return;
     }
 
     // 延迟插入全屏录音覆盖层，使按住说话按钮在启动等待期仍能收到 PointerUp 并正常取消。
     _recordingStarter = Timer(const Duration(milliseconds: 100), () {
-      if (!_isWaitingToStartRecord) return;
+      if (!mounted || !_isWaitingToStartRecord || !_recordPointerHeld) return;
       _isWaitingToStartRecord = false;
 
       _showRecordOverlay();
@@ -1944,6 +2019,16 @@ class MessageInputState extends State<MessageInput>
       //
       // 覆盖层的状态需要一帧时间来构建，然后我们才能操作它。
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_recordPointerHeld) {
+          _voicePreviewKey.currentState?.cancel();
+          _removeRecordOverlay();
+          return;
+        }
+        if (widget.config.previewVoiceBeforeSend) {
+          unawaited(_voicePreviewKey.currentState
+              ?.startRecord(origin: event.position));
+          return;
+        }
         final overlayState = _recordOverlayKey.currentState;
         if (overlayState == null) return;
         overlayState.resetRecordingState();
@@ -1959,17 +2044,27 @@ class MessageInputState extends State<MessageInput>
   }
 
   void _onStopRecording(PointerUpEvent event) {
+    _recordPointerHeld = false;
     if (_isWaitingToStartRecord) {
       _recordingStarter?.cancel();
       _recordingStarter = null;
       _isWaitingToStartRecord = false;
       _removeRecordOverlay();
 
+      if (widget.config.previewVoiceBeforeSend) {
+        Toast.simple(context, '说话时长太短');
+        return;
+      }
       _micTooltipKey.currentState?.ensureTooltipVisible();
       Future.delayed(const Duration(seconds: 1), () {
         Tooltip.dismissAllToolTips();
       });
     } else {
+      if (widget.config.previewVoiceBeforeSend) {
+        _voicePreviewKey.currentState?.updatePointerPosition(event.position);
+        _voicePreviewKey.currentState?.stopRecord();
+        return;
+      }
       final overlayState = _recordOverlayKey.currentState;
       final overCancel =
           overlayState?.isPointerOverCancelButton(event.position) ?? false;
@@ -2011,6 +2106,14 @@ class MessageInputState extends State<MessageInput>
   ///
   /// 处理指针取消事件（例如 Android 上的系统手势拦截，比如边缘滑动启动支付快捷方式或返回导航）。当系统抢占指针时，我们需要优雅地停止/取消正在进行的录制，以避免录制卡住。
   void _onRecordingPointerCancel(PointerCancelEvent event) {
+    _recordPointerHeld = false;
+    if (widget.config.previewVoiceBeforeSend) {
+      _recordingStarter?.cancel();
+      _isWaitingToStartRecord = false;
+      _voicePreviewKey.currentState?.cancel();
+      _removeRecordOverlay();
+      return;
+    }
     if (_isWaitingToStartRecord) {
       _recordingStarter?.cancel();
       _recordingStarter = null;
@@ -2571,24 +2674,29 @@ class MessageInputState extends State<MessageInput>
 
   /// 构建与文本输入区同色的按住说话按钮。
   Widget _buildHoldToTalkButton(SemanticColorScheme colorsTheme) {
-    return Listener(
-      onPointerDown: _onStartRecording,
-      onPointerUp: _onStopRecording,
-      onPointerCancel: _onRecordingPointerCancel,
-      onPointerMove: (PointerMoveEvent event) {
-        _recordOverlayKey.currentState?.updatePointerPosition(event.position);
-      },
-      child: Container(
-        height: 44,
-        decoration: BoxDecoration(
-          color: colorsTheme.bgColorOperate,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Center(
-          child: Text(
-            atomicLocale.holdToTalk,
-            style: FontScheme.caption1Medium.copyWith(
-              color: colorsTheme.textColorPrimary,
+    return Semantics(
+      identifier: 'chat.voice.hold',
+      label: '按住说话',
+      child: Listener(
+        onPointerDown: _onStartRecording,
+        onPointerUp: _onStopRecording,
+        onPointerCancel: _onRecordingPointerCancel,
+        onPointerMove: (PointerMoveEvent event) {
+          _voicePreviewKey.currentState?.updatePointerPosition(event.position);
+          _recordOverlayKey.currentState?.updatePointerPosition(event.position);
+        },
+        child: Container(
+          height: 44,
+          decoration: BoxDecoration(
+            color: colorsTheme.bgColorOperate,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Center(
+            child: Text(
+              atomicLocale.holdToTalk,
+              style: FontScheme.caption1Medium.copyWith(
+                color: colorsTheme.textColorPrimary,
+              ),
             ),
           ),
         ),

@@ -46,17 +46,74 @@ export default class AudioPlayerHelper {
   private listener: AudioPlayerListener | null = null;
   private progressTimerId: number = -1;
 
+  /** 本条消息恢复起点，单位为毫秒；只在当前播放器准备完成后应用。 */
+  private startPositionMs: number = 0;
+  /** 等待定位完成后再开始发声，不能先播放文件开头。 */
+  private waitingForSeek: boolean = false;
+
+  /** 仅在原生接受配置后更新；停止音源不丢失用户选择的下一次播放方式。 */
+  private earpieceMode: boolean = false;
+  /** 用户是否主动选择播放方式；未选择时尊重连接的耳机。 */
+  private routeConfigured: boolean = false;
+  /** 只恢复本播放器修改过且仍由它持有的外放状态，避免覆盖后来接入的通话。 */
+  private previousSpeaker: boolean | null = null;
+  private appliedSpeaker: boolean | null = null;
+
+  /** 无听筒设备明确失败；活动语音切换时等待原生路由确认，不能只改菜单状态。 */
+  async setEarpiece(enabled: boolean): Promise<void> {
+    const routing = audio.getAudioManager().getRoutingManager();
+    const devices = await routing.getDevices(audio.DeviceFlag.OUTPUT_DEVICES_FLAG);
+    if (enabled && !devices.some((device: audio.AudioDeviceDescriptor) => device.deviceType === audio.DeviceType.EARPIECE)) {
+      throw new Error('Earpiece is unavailable');
+    }
+    if (this._isPlaying) await this.applyRoute(!enabled);
+    this.earpieceMode = enabled;
+    this.routeConfigured = true;
+  }
+
+  /** 保存原路由并核实切换；失败回滚硬件，不能只保留旧菜单状态。 */
+  private async applyRoute(speaker: boolean): Promise<void> {
+    const routing = audio.getAudioManager().getRoutingManager();
+    const previous = await routing.isCommunicationDeviceActive(audio.CommunicationDeviceType.SPEAKER);
+    try {
+      await routing.setCommunicationDevice(audio.CommunicationDeviceType.SPEAKER, speaker);
+      if ((await routing.isCommunicationDeviceActive(audio.CommunicationDeviceType.SPEAKER)) !== speaker) {
+        throw new Error('Audio route rejected');
+      }
+      if (this.previousSpeaker === null) this.previousSpeaker = previous;
+      this.appliedSpeaker = speaker;
+    } catch (error) {
+      await routing.setCommunicationDevice(audio.CommunicationDeviceType.SPEAKER, previous);
+      throw error;
+    }
+  }
+
+  /** 停止后归还共享音频资源，外部已接管路由时不覆盖外部选择。 */
+  private async restoreRoute(): Promise<void> {
+    const previous = this.previousSpeaker;
+    const applied = this.appliedSpeaker;
+    this.previousSpeaker = null;
+    this.appliedSpeaker = null;
+    if (previous === null || applied === null) return;
+    const routing = audio.getAudioManager().getRoutingManager();
+    if ((await routing.isCommunicationDeviceActive(audio.CommunicationDeviceType.SPEAKER)) === applied) {
+      await routing.setCommunicationDevice(audio.CommunicationDeviceType.SPEAKER, previous);
+    }
+  }
+
   setListener(listener: AudioPlayerListener | null): void {
     this.listener = listener;
   }
 
-  async play(filePath: string): Promise<void> {
+  async play(filePath: string, startPositionMs: number = 0): Promise<void> {
     try {
       // 若当前有播放器,先彻底 release 掉,避免 stateChange 事件混淆
       if (this.avPlayer !== null) {
         await this.stop();
       }
 
+      this.startPositionMs = startPositionMs;
+      this.waitingForSeek = false;
       this.avPlayer = await media.createAVPlayer();
       this.setupAVPlayerCallbacks();
 
@@ -94,24 +151,30 @@ export default class AudioPlayerHelper {
     return lower.startsWith('http://') || lower.startsWith('https://');
   }
 
+  /** 暂停保留消息位置，先归还本播放器修改过的路由，避免与来电抢占。 */
   async pause(): Promise<void> {
     if (this.avPlayer !== null && this._isPlaying) {
-      try {
-        await this.avPlayer.pause();
-      } catch (e) {
-        this.emitError(`pause error: ${(e as BusinessError).message}`);
-      }
+      await this.avPlayer.pause();
+      await this.restoreRoute();
     }
   }
 
+  /** 恢复前重新应用用户选择，切换失败不伪报继续播放。 */
   async resume(): Promise<void> {
-    if (this.avPlayer !== null && this._isPaused) {
-      try {
-        await this.avPlayer.play();
-      } catch (e) {
-        this.emitError(`resume error: ${(e as BusinessError).message}`);
-      }
+    const player = this.avPlayer;
+    if (player !== null && this._isPaused) {
+      await this.prepareRoute();
+      if (this.avPlayer === player) await player.play();
     }
+  }
+
+  /** 未主动选择时尊重耳机；显式选择才允许覆盖系统外部输出。 */
+  private async prepareRoute(): Promise<void> {
+    const routing = audio.getAudioManager().getRoutingManager();
+    const devices = await routing.getDevices(audio.DeviceFlag.OUTPUT_DEVICES_FLAG);
+    const external = devices.some((device: audio.AudioDeviceDescriptor) =>
+      device.deviceType !== audio.DeviceType.SPEAKER && device.deviceType !== audio.DeviceType.EARPIECE);
+    if (this.routeConfigured || !external) await this.applyRoute(!this.earpieceMode);
   }
 
   async stop(): Promise<void> {
@@ -129,6 +192,7 @@ export default class AudioPlayerHelper {
       try {
         player.off('stateChange');
         player.off('error');
+        player.off('seekDone');
       } catch (_) {
         // off 失败无关紧要,继续走 stop/release
       }
@@ -154,6 +218,7 @@ export default class AudioPlayerHelper {
         console.warn(`${AudioPlayerHelper.TAG} close(fd) failed`, (e as BusinessError).message);
       }
     }
+    await this.restoreRoute();
   }
 
   isPlaying(): boolean {
@@ -178,6 +243,7 @@ export default class AudioPlayerHelper {
       return;
     }
     p.on('error', (err: BusinessError) => {
+      if (this.avPlayer !== p) return;
       this.emitError(`playError: ${err.message}`);
       try {
         this.avPlayer?.reset();
@@ -186,16 +252,26 @@ export default class AudioPlayerHelper {
       }
     });
 
+    // 定位结果只属于当前源，旧播放器的回调不能启动新消息。
+    p.on('seekDone', () => {
+      if (this.avPlayer === p && this.waitingForSeek) {
+        this.waitingForSeek = false;
+        p.play().catch((error: Error) => this.emitError(error.message));
+      }
+    });
+
     p.on('stateChange', async (state: string, reason: media.StateChangeReason) => {
+      // 已释放源的迟到事件不能操作下一条消息的新播放器。
+      if (this.avPlayer !== p) return;
       switch (state) {
         case 'initialized':
           if (this.avPlayer !== null) {
             this.avPlayer.audioRendererInfo = {
-              usage: audio.StreamUsage.STREAM_USAGE_MUSIC,
+              usage: audio.StreamUsage.STREAM_USAGE_VOICE_COMMUNICATION,
               rendererFlags: 0,
             };
             try {
-              await this.avPlayer.prepare();
+              await p.prepare();
             } catch (e) {
               this.emitError(`prepare error: ${(e as BusinessError).message}`);
             }
@@ -205,7 +281,14 @@ export default class AudioPlayerHelper {
           if (this.avPlayer !== null) {
             this.currentDuration = this.avPlayer.duration;
             try {
-              await this.avPlayer.play();
+              await this.prepareRoute();
+              if (this.avPlayer !== p) return;
+              if (this.startPositionMs > 0) {
+                this.waitingForSeek = true;
+                p.seek(Math.min(this.startPositionMs, this.currentDuration), media.SeekMode.SEEK_CLOSEST);
+              } else {
+                await p.play();
+              }
             } catch (e) {
               this.emitError(`play error: ${(e as BusinessError).message}`);
             }

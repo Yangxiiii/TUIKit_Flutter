@@ -2,6 +2,7 @@ import Flutter
 import UIKit
 import AVFoundation
 
+/// 桥接共享播放器，播放起点为毫秒，参数错误必须返回Flutter错误。
 class AudioPlayerHandler: NSObject, FlutterStreamHandler {
     private var methodChannel: FlutterMethodChannel
     private var eventChannel: FlutterEventChannel
@@ -66,6 +67,17 @@ class AudioPlayerHandler: NSObject, FlutterStreamHandler {
             resume(result)
         case "stop":
             stop(result)
+        case "setEarpiece":
+            guard let args = call.arguments as? [String: Any], let enabled = args["enabled"] as? Bool else {
+                result(FlutterError(code: "INVALID_ARGUMENTS", message: "enabled is required", details: nil))
+                return
+            }
+            do {
+                try AudioPlayer.shared.setEarpiece(enabled)
+                result(nil)
+            } catch {
+                result(FlutterError(code: "AUDIO_ROUTE_FAILED", message: error.localizedDescription, details: nil))
+            }
         case "getCurrentPosition":
             getCurrentPosition(result)
         case "getDuration":
@@ -86,7 +98,12 @@ class AudioPlayerHandler: NSObject, FlutterStreamHandler {
             return
         }
         
-        AudioPlayer.shared.play(filePath: filePath)
+        let startPositionMs = args["startPositionMs"] as? Int ?? 0
+        guard startPositionMs >= 0 else {
+            result(FlutterError(code: "INVALID_ARGUMENTS", message: "Invalid start position", details: nil))
+            return
+        }
+        AudioPlayer.shared.play(filePath: filePath, startPositionMs: startPositionMs)
         result(nil)
     }
     

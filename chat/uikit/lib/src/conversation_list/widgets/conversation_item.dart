@@ -259,6 +259,15 @@ class _ConversationItemState extends State<ConversationItem> {
           });
 
     replaceText = singleLineConversationPreview(replaceText);
+    // 在线SDK与离线还原都从同一个音频载荷取秒数；草稿和撤回摘要继续优先。
+    final lastMessage = widget.conversation.lastMessage;
+    final audio = lastMessage?.messagePayload;
+    if (widget.conversation.type == ConversationType.c2c &&
+        lastMessage?.status != MessageStatus.revoked &&
+        lastMessage?.messageType == MessageType.audio &&
+        audio is AudioMessagePayload) {
+      replaceText = voiceConversationPreview(replaceText, audio.audioDuration);
+    }
     final unreadPrefix = _unreadPrefix();
 
     // 富文本与提醒前缀合并到同一个文字段落，统一按剩余宽度省略。

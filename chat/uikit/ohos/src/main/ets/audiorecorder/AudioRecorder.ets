@@ -11,6 +11,7 @@ import {
   StreamHandler,
 } from '@ohos/flutter_ohos';
 import { common } from '@kit.AbilityKit';
+import { mergeRecordings } from 'libchat_voice.so';
 import AudioRecorderHelper, {
   RecordCompletionListener,
   RecordProgressListener,
@@ -120,6 +121,30 @@ export default class AudioRecorder implements
       case 'cancelRecord':
         this.handleCancelRecord(result);
         return;
+      case 'mergeRecordings': {
+        const paths = call.argument('paths') as string[] | null;
+        const destination = call.argument('destination') as string | null;
+        if (!paths || !destination || paths.length < 2) {
+          result.error('INVALID_ARGUMENTS', 'Missing audio paths', null);
+          return;
+        }
+        // 原生异步任务验证新文件后才返回，不修改已有录音草稿。
+        try {
+          mergeRecordings(paths, destination).then((durationMs: number) => {
+            const payload: Record<string, ESObject> = {
+              'filePath': destination,
+              'durationMs': durationMs
+            };
+            result.success(payload);
+          }).catch((error: Error) => {
+            result.error('MERGE_ERROR', error.message, null);
+          });
+        } catch (error) {
+          // NAPI参数校验可同步抛错，仍须兑现当前Flutter调用，不能让草稿一直等待。
+          result.error('MERGE_ERROR', (error as Error).message, null);
+        }
+        return;
+      }
       default:
         result.notImplemented();
     }

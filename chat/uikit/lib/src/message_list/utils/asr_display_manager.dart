@@ -1,18 +1,44 @@
 import 'package:flutter/foundation.dart';
 
-/// Manages the display state of ASR (Automatic Speech Recognition) text bubbles.
-///
-/// Core features:
-/// - Hidden set mode: Uses an in-memory Set<String> to store message IDs that are hidden in this session
-/// - Shown by default: When asrText has value, the ASR text bubble is shown by default
-/// - Session-only: Hidden state only affects current session, lost when exiting message list
-/// - Re-entering chat: If asrText has value, it will be shown again
-///
-/// 管理 ASR（自动语音识别）文本气泡的显示状态。
-///
-/// 核心功能: - 隐藏设置模式: 使用内存中的 Set<String> 来存储本次会话中隐藏的消息 ID - 默认显示: 当 asrText 有值时，ASR 文本气泡默认显示 - 仅限本会话:
-/// 隐藏状态仅影响当前会话，退出消息列表后消失 - 重新进入聊天: 如果 asrText 有值，会再次显示
+/// 维护当前列表的识别显示、失败、过期及已播放状态；账号切换或列表销毁后不复用。
+/// 已识别正文及持久化标记由腾讯SDK保存，此处只协调界面状态。
 class AsrDisplayManager extends ChangeNotifier {
+  /// 失败与过期分别保存，失败可重试，真实过期隐藏转换入口。
+  final Set<String> _failed = {};
+  final Set<String> _expired = {};
+
+  /// 已实际开始播放或确认过期的本会话标记，不与会话未读条数混用。
+  final Set<String> _played = {};
+
+  /// 当前消息最近一次识别失败，供附件展示与重新识别使用。
+  bool hasFailed(String id) => _failed.contains(id);
+
+  /// 资源已由刷新后的腾讯地址明确确认不存在。
+  bool isExpired(String id) => _expired.contains(id);
+
+  /// 本会话已经播放过，持久化事实另由腾讯localCustomInt提供。
+  bool wasPlayed(String id) => _played.contains(id);
+
+  /// 只有状态实际变化才通知列表，不重复重建所有气泡。
+  void setFailed(String id, bool value) {
+    final changed = value ? _failed.add(id) : _failed.remove(id);
+    if (changed) notifyListeners();
+  }
+
+  /// 真实过期同时移除未播放标记，不能由普通下载失败调用。
+  void setExpired(String id) {
+    _expired.add(id);
+    _played.add(id);
+    _failed.remove(id);
+    _convertingMessageIDs.remove(id);
+    notifyListeners();
+  }
+
+  /// 真实播放开始后隐藏红点，不把请求播放本身当作听过。
+  void markPlayed(String id) {
+    if (_played.add(id)) notifyListeners();
+  }
+
   /// Set of message IDs that are hidden in this session
   ///
   /// 本次会话中隐藏的消息 ID 集合
@@ -55,16 +81,13 @@ class AsrDisplayManager extends ChangeNotifier {
     }
   }
 
-  /// Mark message as converting
-  ///
-  /// 标记消息为正在转换
+  /// 开始识别时清除失败和隐藏状态；结束请求只清理进行中标记，不删除SDK正文。
   void setConverting(String messageID, bool converting) {
     bool changed = false;
     if (converting) {
       changed = _convertingMessageIDs.add(messageID);
-      // When starting conversion, remove from hidden set so it shows
-      //
-      // 开始转换时，从隐藏集合中移除以便显示
+      _failed.remove(messageID);
+      // 重试必须重新展示附件，不能沿用上次隐藏结果造成无反馈。
       _hiddenMessageIDs.remove(messageID);
     } else {
       changed = _convertingMessageIDs.remove(messageID);
@@ -74,13 +97,18 @@ class AsrDisplayManager extends ChangeNotifier {
     }
   }
 
-  /// Clear all display states
-  ///
-  /// 清除所有显示状态
+  /// 列表销毁或账号切换时清除界面状态，SDK持久化正文仍由SDK维护。
   void clear() {
+    final voiceChanged =
+        _failed.isNotEmpty || _expired.isNotEmpty || _played.isNotEmpty;
+    _failed.clear();
+    _expired.clear();
+    _played.clear();
     if (_hiddenMessageIDs.isNotEmpty || _convertingMessageIDs.isNotEmpty) {
       _hiddenMessageIDs.clear();
       _convertingMessageIDs.clear();
+      notifyListeners();
+    } else if (voiceChanged) {
       notifyListeners();
     }
   }

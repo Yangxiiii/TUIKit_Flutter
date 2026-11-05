@@ -27,6 +27,9 @@ class ChatPage extends AppBaseStatefulPage {
   /// 宿主派生的姓名与昵称；为空时保留 SDK 会话标题。
   final String? displayName;
 
+  /// 宿主提供的主职组织名称；为空时不展示副标题，也不从长组织路径推测部门。
+  final String? subtitle;
+
   /// SDK 全局真实未读数，仅显示封顶，不改变未读状态。
   final ValueListenable<int>? totalUnreadCount;
 
@@ -73,6 +76,7 @@ class ChatPage extends AppBaseStatefulPage {
     super.key,
     required this.conversation,
     this.displayName,
+    this.subtitle,
     this.totalUnreadCount,
     this.localMessagesLoader,
     this.aggregateMessages = false,
@@ -516,14 +520,35 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
       context.appColors.surface;
 
   @override
-  Widget titleWidgetOf(BuildContext context, Locale locale) => Text(
-        widget.displayName ??
-            widget.conversation.title ??
-            AppLocalization.text(context, LocaleKeys.chat_title, '聊天'),
-        style: FontScheme.caption1Medium,
-        overflow: TextOverflow.ellipsis,
-        maxLines: 1,
-      );
+  Widget titleWidgetOf(BuildContext context, Locale locale) {
+    final title = Text(
+      widget.displayName ??
+          widget.conversation.title ??
+          AppLocalization.text(context, LocaleKeys.chat_title, '聊天'),
+      style: FontScheme.caption1Medium,
+      overflow: TextOverflow.ellipsis,
+      maxLines: 1,
+    );
+    final subtitle = widget.subtitle?.trim();
+    if (subtitle == null || subtitle.isEmpty) return title;
+    // 姓名和组织分属两行，固定导航栏高度内保留各自的字号与省略边界。
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      title,
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        Flexible(
+            child: Text(subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 10,
+                    height: 14 / 10,
+                    fontWeight: FontWeight.w400,
+                    color: context.appColors.textTertiary))),
+        const SizedBox(width: 4),
+        Icon(AppIcons.expand, size: 10, color: context.appColors.textTertiary),
+      ]),
+    ]);
+  }
 
   @override
   double? get leadingWidth => widget.totalUnreadCount == null ? null : 84;
