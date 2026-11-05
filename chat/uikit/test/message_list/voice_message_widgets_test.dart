@@ -88,15 +88,29 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     var route = 0;
     var close = 0;
-    await tester.pumpWidget(_host(Align(
-        alignment: Alignment.bottomCenter,
-        child: MessageActionSheet(items: [
-          MessageMenuItem(
-              id: 'audio-route', title: '听筒播放', onTap: () => route++),
-          MessageMenuItem(id: 'voice-text', title: '语音转文字', onTap: () {}),
-          MessageMenuItem(id: 'recall', title: '撤回', onTap: () {}),
-        ], onClose: () => close++, onBounds: (_) {}))));
+    await tester.pumpWidget(_host(MediaQuery(
+      data: const MediaQueryData(
+          size: Size(390, 844), viewPadding: EdgeInsets.only(bottom: 34)),
+      child: Align(
+          alignment: Alignment.bottomCenter,
+          child: MessageActionSheet(items: [
+            MessageMenuItem(
+                id: 'audio-route', title: '听筒播放', onTap: () => route++),
+            MessageMenuItem(id: 'voice-text', title: '语音转文字', onTap: () {}),
+            MessageMenuItem(id: 'recall', title: '撤回', onTap: () {}),
+          ], onClose: () => close++, onBounds: (_) {})),
+    )));
     await tester.pump();
+    expect(find.byIcon(AppIcons.format), findsOneWidget);
+    expect(find.byIcon(AppIcons.text), findsNothing);
+    expect(tester.getSize(find.byType(MessageActionSheet)).height, 614);
+    expect(
+        844 -
+            tester
+                .getBottomRight(
+                    find.bySemanticsIdentifier('tim.message.action.delete'))
+                .dy,
+        34);
     expect(tester.getTopLeft(find.text('听筒播放')).dy,
         lessThan(tester.getTopLeft(find.text('语音转文字')).dy));
     expect(tester.getTopLeft(find.text('语音转文字')).dy,

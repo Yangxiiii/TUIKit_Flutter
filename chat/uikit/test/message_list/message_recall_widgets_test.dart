@@ -117,8 +117,19 @@ void main() {
     )));
     await tester.pump();
     expect(find.text('撤回'), findsOneWidget);
+    final heightWithRecall =
+        tester.getSize(find.byType(MessageActionSheet)).height;
     await tester.pump(const Duration(seconds: 1));
     expect(find.text('撤回'), findsNothing);
+    expect(tester.getSize(find.byType(MessageActionSheet)).height,
+        heightWithRecall - 48);
+    expect(
+        844 -
+            tester
+                .getBottomRight(
+                    find.bySemanticsIdentifier('tim.message.action.delete'))
+                .dy,
+        25);
     await tester.pumpWidget(_host(
         MessageActionSheet(items: const [], onClose: () {}, onBounds: (_) {})));
     await tester.pump();

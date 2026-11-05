@@ -1,5 +1,6 @@
 import 'package:tencent_chat_uikit/src/emoji_picker/emoji_manager.dart';
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
 import '../../emoji_picker/emoji_picker_model.dart';
@@ -308,59 +309,61 @@ class _MessageActionSheetState extends State<MessageActionSheet> {
       color: colors.referenceBackground,
       borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
       clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-          height: voice == null ? 541 : 652,
-          child: Stack(children: [
-            // 拖拽条不占据内容高度，面板全部区域都参与遮挡测量。
-            Positioned(
-                top: 8,
-                left: 0,
-                right: 0,
-                child: Center(
-                    child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                      color: colors.textSecondary.withValues(alpha: 0.18),
-                      borderRadius: BorderRadius.circular(20)),
-                ))),
-            Padding(
-                padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
-                child: SingleChildScrollView(
-                    child: Column(children: [
-                  _buildEmojis(),
-                  const SizedBox(height: 15),
-                  _buildQuickActions(),
-                  const SizedBox(height: 15),
-                  // 语音增加设计中的两行独立分组，其他消息保持原有面板高度。
-                  if (voice != null) ...[
-                    _group([
-                      _action('audio-route', voice.title,
-                          voice.icon ?? AppIcons.ear),
-                      if (asr != null)
-                        _action('voice-text', asr.title, AppIcons.text),
-                    ]),
-                    const SizedBox(height: 15),
-                  ],
-                  _group([
-                    // 不合资格的消息和已跨过120秒的菜单都不保留撤回入口。
-                    if (_item('recall') != null && !_recallExpired)
-                      _action('recall', '撤回', AppIcons.recall1),
-                    // 只有符合消息类型、所有权和时限时才展示编辑入口。
-                    if (_item('edit') != null)
-                      _action('edit', '编辑消息', AppIcons.editMessage),
-                    _action('urgent', '加急', AppIcons.urgent),
-                    // selected字形内含数字1，多选操作使用不带计数的复选列表字形。
-                    _action('multiSelect', '多选', AppIcons.multipleChoice),
-                  ]),
-                  const SizedBox(height: 15),
-                  _group([
-                    _action('top', '置顶消息', AppIcons.topMessage),
-                    _action('pin', 'Pin', AppIcons.pin),
-                    _action('delete', '删除', AppIcons.delete)
-                  ]),
-                ]))),
-          ])),
+      // 隐藏无资格的菜单行后随内容收缩，不将原行高留成底部空白。
+      child: Stack(children: [
+        // 拖拽条不占据内容高度，面板全部区域都参与遮挡测量。
+        Positioned(
+            top: 8,
+            left: 0,
+            right: 0,
+            child: Center(
+                child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                  color: colors.textSecondary.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(20)),
+            ))),
+        Padding(
+            // 设计底距为25，系统手势安全区只取较大值，不重复累加。
+            padding: EdgeInsets.fromLTRB(16, 24, 16,
+                math.max(25.0, MediaQuery.viewPaddingOf(context).bottom)),
+            child: SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+              _buildEmojis(),
+              const SizedBox(height: 15),
+              _buildQuickActions(),
+              const SizedBox(height: 15),
+              // 语音按实际可用操作增加分组，面板高度随内容变化。
+              if (voice != null) ...[
+                _group([
+                  _action(
+                      'audio-route', voice.title, voice.icon ?? AppIcons.ear),
+                  if (asr != null)
+                    _action(
+                        'voice-text', asr.title, asr.icon ?? AppIcons.format),
+                ]),
+                const SizedBox(height: 15),
+              ],
+              _group([
+                // 不合资格的消息和已跨过120秒的菜单都不保留撤回入口。
+                if (_item('recall') != null && !_recallExpired)
+                  _action('recall', '撤回', AppIcons.recall1),
+                // 只有符合消息类型、所有权和时限时才展示编辑入口。
+                if (_item('edit') != null)
+                  _action('edit', '编辑消息', AppIcons.editMessage),
+                _action('urgent', '加急', AppIcons.urgent),
+                // selected字形内含数字1，多选操作使用不带计数的复选列表字形。
+                _action('multiSelect', '多选', AppIcons.multipleChoice),
+              ]),
+              const SizedBox(height: 15),
+              _group([
+                _action('top', '置顶消息', AppIcons.topMessage),
+                _action('pin', 'Pin', AppIcons.pin),
+                _action('delete', '删除', AppIcons.delete)
+              ]),
+            ]))),
+      ]),
     );
   }
 }

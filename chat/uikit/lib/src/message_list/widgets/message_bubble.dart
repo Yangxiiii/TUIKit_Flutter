@@ -1248,7 +1248,7 @@ class _MessageBubbleState extends State<MessageBubble>
         items.add(MessageMenuItem(
             id: 'voice-text',
             title: text.isNotEmpty && !hidden ? '取消转文字' : '语音转文字',
-            icon: AppIcons.text,
+            icon: AppIcons.format,
             onTap: () {
               if (text.isNotEmpty && !hidden) {
                 widget.asrDisplayManager?.hide(widget.message.msgID);
@@ -1260,7 +1260,7 @@ class _MessageBubbleState extends State<MessageBubble>
     } else if (_shouldShowConvertToTextMenuItem()) {
       items.add(MessageMenuItem(
           title: atomicLocal.convertToText,
-          icon: AppIcons.text,
+          icon: AppIcons.format,
           onTap: () => unawaited(_handleConvertVoiceToText())));
     }
     items.addAll(_buildCommonMenuItems());

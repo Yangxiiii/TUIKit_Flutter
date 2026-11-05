@@ -204,7 +204,14 @@ void main() {
         greaterThan(tester.getTopLeft(find.text('撤回')).dy));
     expect(tester.getTopLeft(find.text('编辑消息')).dy,
         lessThan(tester.getTopLeft(find.text('加急')).dy));
-    expect(tester.getSize(find.byType(MessageActionSheet)).height, 541);
+    expect(tester.getSize(find.byType(MessageActionSheet)).height, 542);
+    expect(
+        844 -
+            tester
+                .getBottomRight(
+                    find.bySemanticsIdentifier('tim.message.action.delete'))
+                .dy,
+        25);
     expect(find.text('翻译'), findsNothing);
     expect(find.text('从当前听'), findsNothing);
     expect(find.text('其他扩展操作'), findsNothing);
