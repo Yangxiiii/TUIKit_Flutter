@@ -984,7 +984,18 @@ class MessageInputState extends State<MessageInput>
     );
   }
 
-  /// 在统一并发边界内发送普通文字，保留现有发送前清理与失败消息重试策略。
+  /// 纯业务表情使用SDK表情消息，混合正文保留文字消息；表情令牌作为自定义数据透传。
+  MessageInfo _createTextOrFaceMessage(String text) {
+    final isFace = EmojiManager.isOnlyEmojis(text);
+    return MessageInfo(
+      messageType: isFace ? MessageType.face : MessageType.text,
+      messagePayload: isFace
+          ? FaceMessagePayload(faceData: text)
+          : TextMessagePayload(text: text),
+    );
+  }
+
+  /// 在统一并发边界内发送文字或纯表情，保留现有发送前清理与失败消息重试策略。
   Future<void> _handleTextSendMessagePayload() async {
     await _runTextSend(() async {
       final rawText = _textEditingController.text;
@@ -992,9 +1003,7 @@ class MessageInputState extends State<MessageInput>
           messageTextCharacterCount(rawText) > messageTextCharacterLimit) {
         return false;
       }
-      final messageInfo = MessageInfo()
-        ..messageType = MessageType.text
-        ..messagePayload = TextMessagePayload(text: rawText.trim())
+      final messageInfo = _createTextOrFaceMessage(rawText.trim())
         ..atUserList = _textEditingController.mentionList
             .map((mention) => mention.userID)
             .toList();
@@ -1276,6 +1285,15 @@ class MessageInputState extends State<MessageInput>
   }) =>
       _runTextSend(() async {
         if (!_canSubmitRichContentDraft(draft)) return false;
+        // 不含附件的纯表情草稿也走同一表情协议，不能把附件或混合正文误转换后丢失。
+        final text = draft.plainTextPreview.trim();
+        if (draft.blocks.every((block) => block is RichContentDraftTextBlock) &&
+            EmojiManager.isOnlyEmojis(text)) {
+          final result = await _sendMessage(
+              _createTextOrFaceMessage(text)..atUserList = atUserList);
+          if (result.isSuccess) _clearSentRichContentDraft(draft);
+          return result.isSuccess;
+        }
         // 纯文字及已上传草稿直接交给 SDK，由其现有气泡管理发送和失败状态。
         if (draft.toMessage() case final RichContentMessage content) {
           final result = await _sendMessage(MessageInfo(
@@ -1938,9 +1956,7 @@ class MessageInputState extends State<MessageInput>
       return false;
     }
     return _runTextSend(() async {
-      final messageInfo = MessageInfo()
-        ..messageType = MessageType.text
-        ..messagePayload = TextMessagePayload(text: trimmed);
+      final messageInfo = _createTextOrFaceMessage(trimmed);
       final result = await _sendMessage(messageInfo);
       if (!result.isSuccess && mounted) Toast.error(context, '发送失败，请重试');
       return result.isSuccess;

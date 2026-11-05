@@ -97,6 +97,65 @@ void main() {
         matching: find.byType(IconButton),
       ));
 
+  testWidgets('单个及多个纯表情调用SDK表情消息，混合正文仍调用文本消息', (tester) async {
+    EmojiManager.configure(assetPackage: 'tuikit_atomic_x', emojis: const [
+      EmojiPickerModelItem(
+          name: '[ZDEmoji_Like]',
+          label: '点赞',
+          path: 'call_assets/handsfree_on.png'),
+      EmojiPickerModelItem(
+          name: '[ZDEmoji_Smile]',
+          label: '微笑',
+          path: 'call_assets/handsfree_on.png'),
+    ]);
+    await mount(tester);
+    sdk.conversations.completeDraft('');
+    await tester.pump();
+    for (final source in [
+      '[ZDEmoji_Like]',
+      '[ZDEmoji_Like][ZDEmoji_Smile]',
+      '你好[ZDEmoji_Like]',
+      '[ZDEmoji_Unknown]',
+    ]) {
+      final faces = sdk.messages.faceMessages.length;
+      await enter(tester, source);
+      await tester
+          .tap(find.bySemanticsIdentifier('tim.message_input_toolbar.send'));
+      await tester.pump();
+      if (EmojiManager.isOnlyEmojis(source)) {
+        expect(sdk.messages.faceMessages.length, faces + 1);
+        expect(sdk.messages.faceMessages.last, (index: 0, data: source));
+      } else {
+        expect(sdk.messages.faceMessages.length, faces);
+        expect(sdk.messages.textMessages.last, source);
+      }
+      sdk.messages.completeSend();
+      await tester.pump();
+    }
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('纯表情富文本草稿不再编码成自定义富文本消息', (tester) async {
+    EmojiManager.configure(assetPackage: 'tuikit_atomic_x', emojis: const [
+      EmojiPickerModelItem(
+          name: '[ZDEmoji_Like]',
+          label: '点赞',
+          path: 'call_assets/handsfree_on.png'),
+    ]);
+    await mount(tester);
+    sdk.conversations.completeDraft(const RichContentDraft(
+      blocks: [RichContentDraftTextBlock(1, '[ZDEmoji_Like]')],
+    ).toPersistedString());
+    await tester.pump();
+    await tester
+        .tap(find.bySemanticsIdentifier('tim.message_input_toolbar.send'));
+    await tester.pump();
+    expect(sdk.messages.faceMessages, [(index: 0, data: '[ZDEmoji_Like]')]);
+    expect(sdk.messages.customData, isEmpty);
+    sdk.messages.completeSend();
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('权限等待期间松手或离开后，不补启动原生采音', (tester) async {
     // 共享硬件队列属于同一应用会话，两个场景在同一测试Zone中逐次释放。
     for (final leavePage in [false, true]) {
@@ -905,6 +964,8 @@ final class _Conversations implements V2TIMConversationManager {
 final class _Messages implements V2TIMMessageManager {
   int created = 0;
   final customData = <String>[];
+  final textMessages = <String>[];
+  final faceMessages = <({int index, String data})>[];
   final pending = <Completer<V2TimValueCallback<V2TimMessage>>>[];
 
   void completeSend({int code = 0}) => pending.removeAt(0).complete(
@@ -915,7 +976,16 @@ final class _Messages implements V2TIMMessageManager {
   dynamic noSuchMethod(Invocation call) {
     switch (call.memberName) {
       case #createTextMessage:
+      case #createFaceMessage:
       case #createCustomMessage:
+        if (call.memberName == #createTextMessage) {
+          textMessages.add(call.namedArguments[#text] as String);
+        } else if (call.memberName == #createFaceMessage) {
+          faceMessages.add((
+            index: call.namedArguments[#index] as int,
+            data: call.namedArguments[#data] as String
+          ));
+        }
         if (call.memberName == #createCustomMessage) {
           customData.add(call.namedArguments[#data] as String);
         }

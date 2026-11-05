@@ -5,12 +5,52 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_message.dart';
+import 'package:tencent_chat_uikit/src/message_list/widgets/message_bubble.dart';
 
 const _profileAvatar = 'https://example.com/profile.png';
 const _rawAvatar = 'https://example.com/raw.png';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('发送与接收表情消息按同一目录显示多个表情，不落入不支持消息', (tester) async {
+    EmojiManager.configure(assetPackage: 'tuikit_atomic_x', emojis: const [
+      EmojiPickerModelItem(
+          name: '[ZDEmoji_Like]',
+          label: '点赞',
+          path: 'call_assets/handsfree_on.png'),
+      EmojiPickerModelItem(
+          name: '[ZDEmoji_Smile]',
+          label: '微笑',
+          path: 'call_assets/handsfree_on.png'),
+    ]);
+    for (final isSelf in [false, true]) {
+      await tester.pumpWidget(MaterialApp(
+        theme: AppThemeFactory.create(
+            const AppNormalColorScheme(), Brightness.light),
+        home: Scaffold(
+            body: MessageBubble(
+          message: MessageInfo(
+              msgID: 'face',
+              messageType: MessageType.face,
+              status: MessageStatus.sendSuccess,
+              messagePayload: FaceMessagePayload(
+                  faceData: '[ZDEmoji_Like][ZDEmoji_Smile]')),
+          conversationID: 'c2c_peer',
+          isSelf: isSelf,
+          maxWidth: 390,
+          config: ChatMessageListConfig(enableReadReceipt: false),
+          messageListStore: _ListStore(),
+        )),
+      ));
+      final images = tester.widgetList<Image>(find.byType(Image)).toList();
+      expect(images.map((image) => image.semanticLabel), ['点赞', '微笑']);
+      expect(images.map((image) => image.width), everyElement(48));
+      expect(
+          find.bySemanticsIdentifier('tim.chat.message.face'), findsOneWidget);
+    }
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   Future<void> mount(WidgetTester tester, MessageInfo message,
           {String alignment = 'two-sided'}) =>

@@ -13,6 +13,28 @@ import '../fixtures/emoji_fixture.dart';
 void main() {
   setUp(configureEmojiFixture);
 
+  test('纯表情只接受完整已注册令牌，混合文字、未知令牌和Unicode保留文本', () {
+    for (final text in [
+      '[ZDEmoji_Like]',
+      '[ZDEmoji_Like][ZDEmoji_Smile]',
+      ' [ZDEmoji_Like]\n[ZDEmoji_Smile] ',
+    ]) {
+      expect(EmojiManager.isOnlyEmojis(text), isTrue);
+    }
+    for (final text in [
+      '',
+      ' \n ',
+      '你好[ZDEmoji_Like]',
+      '[ZDEmoji_Like][ZDEmoji_Unknown]',
+      '[ZDEmoji_Like',
+      '😀',
+    ]) {
+      expect(EmojiManager.isOnlyEmojis(text), isFalse);
+    }
+    EmojiManager.configure(assetPackage: 'feature_tim', emojis: const []);
+    expect(EmojiManager.isOnlyEmojis('[ZDEmoji_Like]'), isFalse);
+  });
+
   test('空目录不误匹配，注册后计数和退格立刻使用新目录', () {
     EmojiManager.configure(assetPackage: 'feature_tim', emojis: const []);
     expect(EmojiManager.tokenPattern.hasMatch('甲[ZDEmoji_Smile]乙'), isFalse);

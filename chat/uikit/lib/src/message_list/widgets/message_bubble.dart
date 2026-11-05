@@ -10,6 +10,7 @@ import 'super_tooltip.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_resender.dart';
 import 'package:tencent_chat_uikit/src/emoji_picker/emoji_picker_model.dart';
+import 'package:tencent_chat_uikit/src/emoji_picker/emoji_manager.dart';
 import 'package:tencent_chat_uikit/src/message_list/message_list.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/asr_display_manager.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/calling_message_data_provider.dart';
@@ -419,6 +420,10 @@ class _MessageBubbleState extends State<MessageBubble>
     Widget messageWidget;
 
     switch (widget.message.messageType) {
+      case MessageType.face:
+        messageWidget = _buildFaceMessage();
+        break;
+
       case MessageType.text:
         messageWidget = TextMessageWidget(
           message: widget.message,
@@ -1566,6 +1571,35 @@ class _MessageBubbleState extends State<MessageBubble>
 
   String _getMultiSelectText() {
     return atomicLocal.multiSelect;
+  }
+
+  /// 发送、接收和记录详情共用已注册表情目录；多表情保留顺序，未知数据沿用不支持提示。
+  Widget _buildFaceMessage() {
+    final payload = widget.message.messagePayload;
+    final data = payload is FaceMessagePayload ? payload.faceData : null;
+    // 外部表情数据不保证来自本目录，未知编码不能拼接成图片路径。
+    if (data == null || !EmojiManager.isOnlyEmojis(data)) {
+      return _buildUnsupportedMessage(context);
+    }
+    // 表情使用独立图片展示，仍复用原气泡锚点、长按菜单和定位高亮。
+    return GestureDetector(
+      key: _messageKey,
+      onLongPress: _longPressCallback,
+      child: _wrapMediaHighlight(
+          ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: widget.maxWidth * .9),
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Text.rich(
+                TextSpan(
+                  children: EmojiManager.buildInlineSpans(data, size: 48),
+                ),
+                textWidthBasis: TextWidthBasis.longestLine,
+              ),
+            ),
+          ),
+          SemanticColorScheme.of(context)),
+    );
   }
 
   Widget _buildUnsupportedMessage(BuildContext context) {

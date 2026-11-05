@@ -51,6 +51,11 @@ class EmojiManager {
   /// 从当前目录精确查找令牌，未知内容不替换成其他表情。
   static EmojiPickerModelItem? getEmoji(String code) => _emojis[code];
 
+  /// 只有已注册表情及空白时才视为纯表情；未知令牌和系统Unicode表情仍保留文字语义。
+  static bool isOnlyEmojis(String text) =>
+      text.trim().isNotEmpty &&
+      text.replaceAll(tokenPattern, '').trim().isEmpty;
+
   /// 会话行沿用名称映射入口，内容仅由当前业务目录生成。
   static Map<String, String> getEmojiMap(BuildContext context) => {
         for (final emoji in emojis) emoji.name: '[${emoji.label}]',
