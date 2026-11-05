@@ -10,6 +10,7 @@ class GroupApplicationList extends StatefulWidget {
   State<GroupApplicationList> createState() => _GroupApplicationListState();
 }
 
+/// 处理入群申请列表，申请人的头像使用个人标识而非群标识。
 class _GroupApplicationListState extends State<GroupApplicationList> {
   final GroupStore _groupStore = GroupStore.shared;
   late SemanticColorScheme colorsTheme;
@@ -121,6 +122,7 @@ class _GroupApplicationListState extends State<GroupApplicationList> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Avatar.image(
+                userID: application.fromUser,
                 name: _getDisplayUserName(application),
                 url: application.fromUserAvatarURL,
               ),

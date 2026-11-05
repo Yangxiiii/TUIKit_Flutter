@@ -13,6 +13,7 @@ class StartC2CChat extends StatefulWidget {
   State<StartC2CChat> createState() => _StartC2CChatState();
 }
 
+/// 展示可发起单聊的联系人，并保留真实用户标识供公共头像关联。
 class _StartC2CChatState extends State<StartC2CChat> {
   final ContactStore _contactStore = ContactStore.shared;
   late SemanticColorScheme colorsTheme;
@@ -70,6 +71,7 @@ class _StartC2CChatState extends State<StartC2CChat> {
           final dataSource = friendList
               .map((contact) => AZOrderedListItem(
                     key: contact.userID,
+                    userID: contact.userID,
                     label: (contact.nickname?.isNotEmpty == true
                         ? contact.nickname!
                         : contact.userID),

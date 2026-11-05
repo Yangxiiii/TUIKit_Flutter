@@ -25,6 +25,7 @@ class JoinInGroupCallWidget extends StatefulWidget {
   State<JoinInGroupCallWidget> createState() => _JoinInGroupCallWidgetState();
 }
 
+/// 展示可加入通话的成员资料，个人头像不参与呼叫状态或通话权限处理。
 class _JoinInGroupCallWidgetState extends State<JoinInGroupCallWidget> {
   bool _isExpand = false;
   final List<String> _userAvatars = [];
@@ -138,6 +139,7 @@ class _JoinInGroupCallWidgetState extends State<JoinInGroupCallWidget> {
                                                     Radius.circular(5)),
                                               ),
                                               child: Avatar.image(
+                                                userID: widget.userIDs[index],
                                                 name: widget.userIDs[index],
                                                 url: _userAvatars[index],
                                                 size: AvatarSize.xl,

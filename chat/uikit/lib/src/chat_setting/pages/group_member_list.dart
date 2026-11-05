@@ -28,6 +28,7 @@ class GroupMemberList extends StatefulWidget {
   State<GroupMemberList> createState() => _GroupMemberListState();
 }
 
+/// 维护群成员分页及操作，成员列表保留用于头像关联的真实用户标识。
 class _GroupMemberListState extends State<GroupMemberList> {
   late SemanticColorScheme colorsTheme;
   late AppLocalizedText atomicLocale;
@@ -228,6 +229,7 @@ class _GroupMemberListState extends State<GroupMemberList> {
           final dataSource = members.map((member) {
             return AZOrderedListItem(
               key: member.userID,
+              userID: member.userID,
               label: UIKitUtil.memberDisplayName(member),
               avatarURL: member.avatarURL,
               extraData: member,

@@ -527,6 +527,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                       }
                     },
               child: _groupAvatar(Avatar(
+                userID: message.from.userID,
                 content: AvatarImageContent(
                     url: displayAvatarUrl, name: displaySenderName),
               )),
@@ -681,6 +682,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                 }
               },
               child: _groupAvatar(Avatar(
+                userID: message.from.userID,
                 content: AvatarImageContent(
                     url: displayAvatarUrl, name: displaySenderName),
               )),
@@ -777,6 +779,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
       if (config.isShowRightAvatar) SizedBox(width: config.avatarSpacing),
       if (config.isShowRightAvatar)
         _groupAvatar(Avatar(
+                userID: message.from.userID,
           content: AvatarImageContent(
               url: displayAvatarUrl, name: displaySenderName),
         )),
@@ -815,6 +818,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                   }
                 },
           child: _groupAvatar(Avatar(
+                userID: message.from.userID,
             content: AvatarImageContent(
                 url: displayAvatarUrl, name: displaySenderName),
           )),

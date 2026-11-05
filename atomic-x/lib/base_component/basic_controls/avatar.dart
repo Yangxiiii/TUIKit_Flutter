@@ -101,7 +101,10 @@ class CountBadge extends AvatarBadge {
   const CountBadge(this.count);
 }
 
+/// 保留SDK头像的形状、角标和点击能力，个人用户内容统一交给公共头像渲染。
 class Avatar extends StatelessWidget {
+  /// 真实个人用户标识；群组头像不传，避免使用个人Sort。
+  final String? userID;
   final AvatarContent content;
   final AvatarSize size;
   final AvatarShape? shape;
@@ -117,12 +120,14 @@ class Avatar extends StatelessWidget {
     this.status = AvatarStatus.none,
     this.badge = const NoBadge(),
     this.onClick,
+    this.userID,
   });
 
   Avatar.image({
     Key? key,
     String? url,
     String? name,
+    String? userID,
     AvatarSize size = AvatarSize.m,
     AvatarShape? shape,
     badge = const NoBadge(),
@@ -135,6 +140,7 @@ class Avatar extends StatelessWidget {
           status: AvatarStatus.none,
           badge: badge,
           onClick: onClick,
+          userID: userID,
         );
 
   TextStyle _fontForAvatarSize(AvatarSize size) {
@@ -190,11 +196,15 @@ class Avatar extends StatelessWidget {
     }
   }
 
+  /// 个人用户交给公共头像读取编号和缓存，群组及其他SDK图片保持原有展示入口。
   Widget _buildImageAvatar(
     BuildContext context,
     AvatarImageContent imageContent,
     SemanticColorScheme colors,
   ) {
+    if (userID?.isNotEmpty == true) {
+      return _buildUserAvatar(context, imageContent.name ?? '', imageContent.url);
+    }
     if (imageContent.url != null && imageContent.url!.isNotEmpty) {
       return CachedNetworkImage(
         imageUrl: imageContent.url!,
@@ -216,7 +226,24 @@ class Avatar extends StatelessWidget {
     String name,
     SemanticColorScheme colors,
   ) {
+    if (userID?.isNotEmpty == true) return _buildUserAvatar(context, name, null);
     return _buildTextOrSymbolAvatar(context, name, colors);
+  }
+
+  /// 用户默认头像共用全局编号与图片缓存，SDK仍负责外层形状、角标和交互。
+  Widget _buildUserAvatar(BuildContext context, String name, String? url) {
+    final actualShape = _getAvatarShape(shape, size);
+    return AppUserAvatar(
+      userId: userID,
+      name: name,
+      url: url,
+      size: size.value,
+      borderRadius: actualShape == AvatarShape.round
+          ? null
+          : BorderRadius.circular(
+              actualShape == AvatarShape.rectangle ? 0 : size.borderRadius,
+            ),
+    );
   }
 
   Widget _buildSymbolAvatar(

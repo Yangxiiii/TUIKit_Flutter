@@ -340,6 +340,7 @@ class _ReactionUserList extends StatelessWidget {
   }
 }
 
+/// 展示单个表情回应者的头像和资料，点击动作仍交给外层处理。
 class _ReactionUserItem extends StatelessWidget {
   final UserProfile user;
   final bool isSelf;
@@ -366,6 +367,7 @@ class _ReactionUserItem extends StatelessWidget {
         child: Row(
           children: [
             Avatar(
+              userID: user.userID,
               content: AvatarImageContent(
                 url: user.avatarURL,
                 name: displayName,

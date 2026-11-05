@@ -50,6 +50,7 @@ class GroupChatSetting extends StatefulWidget {
   State<GroupChatSetting> createState() => _GroupChatSettingState();
 }
 
+/// 管理群资料和成员预览，群组头像与个人成员头像分别处理。
 class _GroupChatSettingState extends State<GroupChatSetting> {
   late GroupMemberStore _memberStore;
   late ConversationListStore _conversationListStore;
@@ -572,6 +573,7 @@ class _GroupChatSettingState extends State<GroupChatSetting> {
         child: Row(
           children: [
             Avatar.image(
+              userID: member.userID,
               url: member.avatarURL,
               name: UIKitUtil.memberDisplayName(member),
               size: AvatarSize.m,

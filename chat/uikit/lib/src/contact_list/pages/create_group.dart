@@ -24,6 +24,7 @@ class CreateGroup extends StatefulWidget {
   State<CreateGroup> createState() => _CreateGroupState();
 }
 
+/// 维护建群选择和已选成员展示，头像加载不改变成员选择事实。
 class _CreateGroupState extends State<CreateGroup> {
   final TextEditingController _groupNameController = TextEditingController();
   final TextEditingController _groupIdController = TextEditingController();
@@ -251,6 +252,7 @@ class _CreateGroupState extends State<CreateGroup> {
                         clipBehavior: Clip.none,
                         children: [
                           Avatar.image(
+                            userID: member.userID,
                             name: displayName,
                             url: member.avatarURL,
                           ),

@@ -28,6 +28,7 @@ class ContactList extends StatefulWidget {
   State<ContactList> createState() => _ContactListState();
 }
 
+/// 组织联系人分区和导航，统一列表携带个人用户标识以复用头像资料。
 class _ContactListState extends State<ContactList> {
   final ContactStore _contactStore = ContactStore.shared;
   late SemanticColorScheme colorsTheme;
@@ -119,6 +120,7 @@ class _ContactListState extends State<ContactList> {
                 final dataSource = friendList
                     .map((contact) => AZOrderedListItem(
                           key: contact.userID,
+                          userID: contact.userID,
                           label: (contact.nickname?.isNotEmpty == true
                               ? contact.nickname!
                               : contact.userID),

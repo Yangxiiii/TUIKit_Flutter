@@ -13,6 +13,7 @@ class AddFriend extends StatefulWidget {
   State<AddFriend> createState() => _AddFriendState();
 }
 
+/// 管理好友搜索与添加详情，两种资料入口使用同一用户标识渲染头像。
 class _AddFriendState extends State<AddFriend> {
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _remarkController = TextEditingController();
@@ -233,6 +234,7 @@ class _AddFriendState extends State<AddFriend> {
           children: [
             Avatar.image(
               name: nickname,
+              userID: userID,
               url: faceURL,
             ),
             const SizedBox(width: 16),
@@ -300,6 +302,7 @@ class _AddFriendState extends State<AddFriend> {
               children: [
                 Avatar.image(
                   name: nickname,
+                  userID: userID,
                   url: faceURL,
                 ),
                 const SizedBox(width: 18),

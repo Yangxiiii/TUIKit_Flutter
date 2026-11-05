@@ -31,6 +31,7 @@ class SearchResultMorePage extends StatefulWidget {
   State<SearchResultMorePage> createState() => _SearchResultMorePageState();
 }
 
+/// 展示完整搜索分区并处理导航，个人用户与群组头像按各自身份关联。
 class _SearchResultMorePageState extends State<SearchResultMorePage> {
   final ScrollController _scrollController = ScrollController();
   late final TextEditingController _textEditingController;
@@ -246,7 +247,8 @@ class _SearchResultMorePageState extends State<SearchResultMorePage> {
           contentPadding:
               const EdgeInsets.symmetric(horizontal: leadingPadding),
           leading: Avatar.image(
-            name: displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
+            userID: friend.userID,
+            name: displayName,
             url: avatar,
             size: AvatarSize.m,
           ),
@@ -350,7 +352,9 @@ class _SearchResultMorePageState extends State<SearchResultMorePage> {
           contentPadding:
               const EdgeInsets.symmetric(horizontal: leadingPadding),
           leading: Avatar.image(
-            name: displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
+            userID: messageResult.conversationID.startsWith('c2c_')
+                ? messageResult.conversationID.substring(4) : null,
+            name: displayName,
             url: avatar,
             size: AvatarSize.m,
           ),

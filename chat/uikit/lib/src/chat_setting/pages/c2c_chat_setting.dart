@@ -21,6 +21,7 @@ class C2CChatSetting extends StatefulWidget {
   State<C2CChatSetting> createState() => _C2CChatSettingState();
 }
 
+/// 协调单聊设置和联系人资料，个人头像按真实用户标识接入宿主规则。
 class _C2CChatSettingState extends State<C2CChatSetting> {
   final ContactStore _contactStore = ContactStore.shared;
   late ConversationListStore _conversationListStore;
@@ -124,6 +125,7 @@ class _C2CChatSettingState extends State<C2CChatSetting> {
     return Column(
       children: [
         Avatar(
+          userID: widget.userID,
           content: AvatarImageContent(url: avatarURL, name: nickname),
           size: AvatarSize.xl,
         ),

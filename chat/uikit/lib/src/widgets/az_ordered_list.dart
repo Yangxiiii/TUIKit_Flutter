@@ -8,6 +8,9 @@ import 'package:tuikit_atomic_x/base_component/basic_controls/avatar.dart';
 
 class AZOrderedListItem {
   final String key;
+
+  /// 仅个人用户提供资料关联标识，群组列表不传。
+  final String? userID;
   final String label;
   final String? avatarURL;
   final dynamic extraData;
@@ -15,6 +18,7 @@ class AZOrderedListItem {
 
   const AZOrderedListItem({
     required this.key,
+    this.userID,
     required this.label,
     this.avatarURL,
     this.extraData,
@@ -69,6 +73,7 @@ class AZOrderedList extends StatefulWidget {
   State<AZOrderedList> createState() => _AZOrderedListState();
 }
 
+/// 管理拼音索引和列表滚动，只有显式标记的个人条目查询用户头像资料。
 class _AZOrderedListState extends State<AZOrderedList> {
   List<ItemModel> _itemList = [];
   late SemanticColorScheme colorsTheme;
@@ -263,6 +268,7 @@ class _AZOrderedListState extends State<AZOrderedList> {
           children: [
             Avatar.image(
               name: item.label,
+              userID: item.userID,
               url: item.avatarURL,
               size: AvatarSize.l,
             ),

@@ -21,6 +21,7 @@ class GroupManagement extends StatefulWidget {
   State<GroupManagement> createState() => _GroupManagementState();
 }
 
+/// 管理群权限和禁言成员，成员头像与其他聊天入口共用用户资料。
 class _GroupManagementState extends State<GroupManagement> {
   late SemanticColorScheme colorsTheme;
   late AppLocalizedText atomicLocale;
@@ -256,34 +257,11 @@ class _GroupManagementState extends State<GroupManagement> {
       color: colorsTheme.bgColorOperate,
       child: Row(
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(20),
-              image: member.avatarURL?.isNotEmpty == true
-                  ? DecorationImage(
-                      image: NetworkImage(member.avatarURL!),
-                      fit: BoxFit.cover,
-                    )
-                  : null,
-              color: member.avatarURL?.isEmpty != false
-                  ? colorsTheme.listColorHover
-                  : null,
-            ),
-            child: member.avatarURL?.isEmpty != false
-                ? Center(
-                    child: Text(
-                      () {
-                        final n = UIKitUtil.memberDisplayName(member);
-                        return n.isNotEmpty ? n[0].toUpperCase() : '?';
-                      }(),
-                      style: FontScheme.caption1Medium.copyWith(
-                        color: colorsTheme.textColorButton,
-                      ),
-                    ),
-                  )
-                : null,
+          AppUserAvatar(
+            userId: member.userID,
+            name: UIKitUtil.memberDisplayName(member),
+            url: member.avatarURL,
+            size: 40,
           ),
           const SizedBox(width: 12),
           Expanded(

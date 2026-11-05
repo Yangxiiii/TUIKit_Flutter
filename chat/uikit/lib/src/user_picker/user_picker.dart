@@ -77,6 +77,7 @@ class UserPicker extends StatefulWidget {
   State<UserPicker> createState() => _UserPickerState();
 }
 
+/// 维护用户选择与已选展示，行头像和已选头像共享同一个用户标识。
 class _UserPickerState extends State<UserPicker> {
   List<SelectableItemModel> _itemList = [];
   List<UserPickerData> _selectedItems = [];
@@ -430,6 +431,7 @@ class _UserPickerState extends State<UserPicker> {
                   clipBehavior: Clip.none,
                   children: [
                     Avatar.image(
+                      userID: item.key,
                       name: item.label,
                       url: item.avatarURL,
                     ),
@@ -498,6 +500,7 @@ class _UserPickerState extends State<UserPicker> {
               padding: const EdgeInsets.only(bottom: 12),
               margin: const EdgeInsets.only(right: 12),
               child: Avatar.image(
+                userID: item.key,
                 name: item.label,
                 url: item.avatarURL,
               ),

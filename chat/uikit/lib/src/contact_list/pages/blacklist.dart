@@ -18,6 +18,7 @@ class Blacklist extends StatefulWidget {
   State<Blacklist> createState() => _BlacklistState();
 }
 
+/// 维护黑名单展示和移除操作，用户头像复用公共资料而不改变名单状态。
 class _BlacklistState extends State<Blacklist> {
   final ContactStore _contactStore = ContactStore.shared;
   late SemanticColorScheme colorsTheme;
@@ -77,6 +78,7 @@ class _BlacklistState extends State<Blacklist> {
           final dataSource = blackList
               .map((contact) => AZOrderedListItem(
                     key: contact.userID,
+                    userID: contact.userID,
                     label: (contact.nickname?.isNotEmpty == true
                         ? contact.nickname!
                         : contact.userID),

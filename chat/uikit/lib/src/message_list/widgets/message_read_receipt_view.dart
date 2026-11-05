@@ -22,6 +22,7 @@ class MessageReadReceiptView extends StatefulWidget {
   State<MessageReadReceiptView> createState() => _MessageReadReceiptViewState();
 }
 
+/// 按已读状态组织成员列表，头像复用个人资料而不改变已读回执。
 class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
   bool _isReadSectionExpanded = true;
   bool _isUnreadSectionExpanded = true;
@@ -525,6 +526,7 @@ class _MessageReadReceiptViewState extends State<MessageReadReceiptView> {
       child: Row(
         children: [
           Avatar.image(
+            userID: member.userID,
             url: member.avatarURL,
             name: (member.nickname?.isNotEmpty ?? false)
                 ? member.nickname!

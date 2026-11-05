@@ -39,8 +39,15 @@ void main() {
       cache.clearLiveImages();
     });
     final image = (await tester.runAsync(() => createTestImage()))!;
+    final pixelSize =
+        (AvatarSize.m.value * tester.view.devicePixelRatio).ceil();
+    final avatarKey = await ResizeImage.resizeIfNeeded(
+      pixelSize,
+      pixelSize,
+      const CachedNetworkImageProvider(_profileAvatar),
+    ).obtainKey(ImageConfiguration.empty);
     cache.putIfAbsent(
-        const CachedNetworkImageProvider(_profileAvatar),
+        avatarKey,
         () => OneFrameImageStreamCompleter(
             Future.value(ImageInfo(image: image))));
     for (final alignment in ['two-sided', 'left', 'right']) {
@@ -119,6 +126,36 @@ void main() {
       }
     }
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('SDK个人头像使用公共Sort渐变并保留角标和点击动作', (tester) async {
+    var taps = 0;
+    await tester.pumpWidget(MaterialApp(
+      theme: AppThemeFactory.create(
+          const AppNormalColorScheme(), Brightness.light),
+      home: AppUserAvatarScope(
+        accountId: 'account',
+        sorts: const {'peer': '0'},
+        requestUsers: null,
+        child: Scaffold(
+            body: Center(
+                child: Avatar.image(
+          userID: 'peer',
+          name: 'Alice',
+          shape: AvatarShape.roundedRectangle,
+          badge: const CountBadge(3),
+          onClick: () => taps++,
+        ))),
+      ),
+    ));
+    expect(find.text('Al'), findsOneWidget);
+    expect(find.text('3'), findsOneWidget);
+    final avatar = tester.widget<AppUserAvatar>(find.byType(AppUserAvatar));
+    expect(avatar.userId, 'peer');
+    expect(
+        avatar.borderRadius, BorderRadius.circular(AvatarSize.m.borderRadius));
+    await tester.tap(find.text('Al'));
+    expect(taps, 1);
   });
 }
 

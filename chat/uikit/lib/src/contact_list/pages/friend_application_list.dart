@@ -10,6 +10,7 @@ class FriendApplicationList extends StatefulWidget {
   State<FriendApplicationList> createState() => _FriendApplicationListState();
 }
 
+/// 展示好友申请并处理申请动作，申请用户头像复用统一用户资料。
 class _FriendApplicationListState extends State<FriendApplicationList> {
   final ContactStore _contactStore = ContactStore.shared;
   late SemanticColorScheme colorsTheme;
@@ -120,6 +121,7 @@ class _FriendApplicationListState extends State<FriendApplicationList> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Avatar.image(
+                userID: application.userID,
                 name: application.title ?? application.userID,
                 url: application.avatarURL,
               ),

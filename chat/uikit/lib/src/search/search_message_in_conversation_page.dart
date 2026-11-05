@@ -229,9 +229,8 @@ class _SearchMessageInConversationPageState
   Widget _buildConversationHeader() {
     return ListTile(
       leading: Avatar.image(
-        name: widget.conversationName.isNotEmpty
-            ? widget.conversationName[0].toUpperCase()
-            : '?',
+        userID: widget.conversationID.startsWith('c2c_') ? widget.conversationID.substring(4) : null,
+        name: widget.conversationName,
         url: widget.conversationAvatar,
         size: AvatarSize.m,
       ),
@@ -270,7 +269,8 @@ class _SearchMessageInConversationPageState
 
     return ListTile(
       leading: Avatar.image(
-        name: senderName.isNotEmpty ? senderName[0].toUpperCase() : '?',
+        userID: message.from.userID,
+        name: senderName,
         url: senderAvatar,
         size: AvatarSize.m,
       ),

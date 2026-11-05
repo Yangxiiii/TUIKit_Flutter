@@ -380,8 +380,10 @@ class _ConversationItemState extends State<ConversationItem> {
     }
 
     return Avatar.image(
+      userID: widget.conversation.conversationID.startsWith('c2c_')
+          ? widget.conversation.conversationID.substring(4) : null,
       name: _getAvatarText(),
-      url: widget.conversation.avatarURL!,
+      url: widget.conversation.avatarURL,
       badge: hasDot ? DotBadge() : NoBadge(),
       size: AvatarSize.l,
     );
@@ -393,7 +395,7 @@ class _ConversationItemState extends State<ConversationItem> {
       return '?';
     }
 
-    return widget.conversation.title!.substring(0, 1).toUpperCase();
+    return widget.conversation.title!;
   }
 
   String _formatUnreadCount(int count) {

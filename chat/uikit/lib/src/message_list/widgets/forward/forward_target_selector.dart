@@ -56,6 +56,7 @@ class ForwardTargetSelectorPage extends StatefulWidget {
   }
 }
 
+/// 维护SDK转发目标选择，个人目标接入共享头像，群组目标保留原有规则。
 class _ForwardTargetSelectorPageState extends State<ForwardTargetSelectorPage> {
   final ConversationListStore _conversationListStore =
       ConversationListStore.create();
@@ -222,6 +223,8 @@ class _ForwardTargetSelectorPageState extends State<ForwardTargetSelectorPage> {
               ),
             // Avatar
             Avatar(
+              userID: conversation.conversationID.startsWith('c2c_')
+                  ? conversation.conversationID.substring(4) : null,
               content: AvatarImageContent(
                 url: conversation.avatarURL,
                 name: conversation.title ?? '',

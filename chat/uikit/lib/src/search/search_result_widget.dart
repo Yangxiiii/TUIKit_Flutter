@@ -10,6 +10,7 @@ import 'search_bar.dart';
 import 'search_message_in_conversation_page.dart';
 import 'search_result_more_page.dart';
 
+/// 组合联系人、群组和消息结果，完整用户姓名交给统一默认头像生成。
 class SearchResultWidget extends StatelessWidget {
   final SearchStore searchStore;
   final String keyword;
@@ -263,7 +264,8 @@ class SearchResultWidget extends StatelessWidget {
           contentPadding:
               const EdgeInsets.symmetric(horizontal: leadingPadding),
           leading: Avatar.image(
-            name: displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
+            userID: friend.userID,
+            name: displayName,
             url: avatar,
             size: AvatarSize.m,
           ),
@@ -371,7 +373,9 @@ class SearchResultWidget extends StatelessWidget {
           contentPadding:
               const EdgeInsets.symmetric(horizontal: leadingPadding),
           leading: Avatar.image(
-            name: displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
+            userID: messageResult.conversationID.startsWith('c2c_')
+                ? messageResult.conversationID.substring(4) : null,
+            name: displayName,
             url: avatar,
             size: AvatarSize.m,
           ),
