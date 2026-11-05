@@ -364,11 +364,15 @@ class _MessageListState extends State<MessageList>
     }
   }
 
-  /// 本机删除记录只影响展示，不改变SDK窗口的分页游标或云端内容。
-  List<MessageInfo> _visibleMessages(Iterable<MessageInfo> messages) => messages
-      .where(
-          (message) => !widget.config.hiddenMessageIDs.contains(message.msgID))
-      .toList();
+  /// 先应用删除与已确认撤回，快照恢复和SDK刷新均不能重新展示失效正文。
+  List<MessageInfo> _visibleMessages(Iterable<MessageInfo> messages) {
+    final visible = messages
+        .where((message) =>
+            !widget.config.hiddenMessageIDs.contains(message.msgID))
+        .toList();
+    _localWindow.reconcileRevocations(visible);
+    return visible;
+  }
 
   /// SDK异常不能成为未处理Future；定位或刷新失败保留列表并给出可重试反馈。
   Future<void> _updateStickyWindow(MessageInfo? target) async {

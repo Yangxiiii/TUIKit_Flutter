@@ -42,6 +42,47 @@ void main() {
     expect(window.merge([]), isEmpty);
   });
 
+  test('本机撤回及退出快照优先于迟到普通状态，重新进入不恢复原文', () {
+    final window = LocalMessageWindow();
+    window.seed([message('same', 100)]);
+    final recalled = message('same', 100, status: MessageStatus.revoked);
+    final snapshot = window.merge([recalled]);
+    window.update(message('same', 100));
+    expect(window.merge([]).single.status, MessageStatus.revoked);
+    window.clear();
+    expect(window.merge([message('same', 100)]).single.status,
+        MessageStatus.revoked);
+
+    final reopened = LocalMessageWindow();
+    reopened.reconcileRevocations(snapshot);
+    final stale = message('same', 100);
+    expect(reopened.merge([stale]).single.status, MessageStatus.revoked);
+    expect(LocalMessageWindow().merge([message('same', 100)]).single.status,
+        MessageStatus.sendSuccess);
+    final deleted = message('same', 100, status: MessageStatus.deleted);
+    reopened.reconcileRevocations([deleted]);
+    expect(deleted.status, MessageStatus.deleted);
+    reopened.seed([deleted]);
+    reopened.revoke('same');
+    expect(deleted.status, MessageStatus.deleted);
+  });
+
+  test('同批旧副本排在撤回状态前面时也不能恢复正文', () {
+    final window = LocalMessageWindow();
+    final stale = message('same', 100);
+    window.seed([
+      stale,
+      message('same', 100, status: MessageStatus.revoked),
+    ]);
+    expect(window.merge([]).single.status, MessageStatus.revoked);
+    final unidentified = message('', 100);
+    window.reconcileRevocations([
+      unidentified,
+      message('', 100, status: MessageStatus.revoked),
+    ]);
+    expect(unidentified.status, MessageStatus.sendSuccess);
+  });
+
   test('头像聚合跨类型但在换人、撤回、61秒、跨日和未知时间断组', () {
     final start = DateTime(2026, 10, 30, 12).millisecondsSinceEpoch ~/ 1000;
     final older = message('a', start);
