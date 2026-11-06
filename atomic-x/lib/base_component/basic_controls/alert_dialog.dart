@@ -1,8 +1,6 @@
 import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart' hide AlertDialog;
-import 'package:flutter/material.dart' as material show AlertDialog;
 import '../base_component.dart';
-import '../theme/color_scheme.dart';
 
 enum TextColorPreset { primary, grey, blue, red }
 
@@ -59,6 +57,7 @@ class AlertDialogConfig {
   });
 }
 
+/// 保留 Navigator 返回值的 SDK 确认框，外观复用项目基础弹窗。
 class AlertDialog extends StatelessWidget {
   final AlertDialogConfig config;
 
@@ -102,7 +101,6 @@ class AlertDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorsTheme = SemanticColorScheme.of(context);
     final appLocale = AppLocalization.of(context);
 
     final effectiveCancelConfig = config.cancelConfig ??
@@ -120,82 +118,36 @@ class AlertDialog extends StatelessWidget {
               )
             : null);
 
-    return material.AlertDialog(
-      backgroundColor: colorsTheme.bgColorDialog,
-      title: config.title.isNotEmpty
-          ? Text(
-              config.title,
-              style: TextStyle(
-                color: colorsTheme.textColorPrimary,
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-              ),
-            )
-          : null,
-      content: (config.content?.isNotEmpty ?? false)
-          ? Text(
-              config.content!,
-              style: TextStyle(
-                color: colorsTheme.textColorSecondary,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            )
-          : null,
-      actions: [
-        if (effectiveCancelConfig != null)
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop(false);
-              effectiveCancelConfig.onClick?.call();
-            },
-            child: Text(
-              effectiveCancelConfig.text.isNotEmpty
-                  ? effectiveCancelConfig.text
-                  : appLocale.cancel,
-              style: TextStyle(
-                color: colorsTheme.textColorPrimary,
-                fontSize: 16,
-              ),
-            ),
-          ),
-        if (effectiveConfirmConfig != null)
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop(true);
-              effectiveConfirmConfig.onClick?.call();
-            },
-            child: Text(
-              effectiveConfirmConfig.text.isNotEmpty
-                  ? effectiveConfirmConfig.text
-                  : appLocale.confirm,
-              style: TextStyle(
-                color: _resolveButtonTextColor(
-                    effectiveConfirmConfig.type, colorsTheme),
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-      ],
+    return AppAlertDialog(
+      title: config.title,
+      titleLeading: config.iconWidget,
+      content: config.content ?? '',
+      cancelText: effectiveCancelConfig?.text.isNotEmpty == true
+          ? effectiveCancelConfig!.text
+          : appLocale.cancel,
+      confirmText: effectiveConfirmConfig?.text.isNotEmpty == true
+          ? effectiveConfirmConfig!.text
+          : appLocale.confirm,
+      showCancelButton: effectiveCancelConfig != null,
+      showConfirmButton: effectiveConfirmConfig != null,
+      confirmBackgroundColor:
+          effectiveConfirmConfig?.type == TextColorPreset.red
+              ? context.appColors.danger
+              : null,
+      semanticsIdentifier: 'sdk.alert',
+      onCancel: () {
+        Navigator.of(context).pop(false);
+        effectiveCancelConfig?.onClick?.call();
+      },
+      onConfirm: () {
+        Navigator.of(context).pop(true);
+        effectiveConfirmConfig?.onClick?.call();
+      },
     );
-  }
-
-  Color _resolveButtonTextColor(
-      TextColorPreset type, SemanticColorScheme colorsTheme) {
-    switch (type) {
-      case TextColorPreset.red:
-        return colorsTheme.textColorError;
-      case TextColorPreset.blue:
-        return colorsTheme.textColorLink;
-      case TextColorPreset.primary:
-        return colorsTheme.textColorPrimary;
-      case TextColorPreset.grey:
-        return colorsTheme.textColorSecondary;
-    }
   }
 }
 
+/// 保留 SDK 浮层与倒计时生命周期，普通确认框复用项目基础弹窗。
 class AtomicAlertDialog extends StatefulWidget {
   final AlertDialogConfig config;
 
@@ -334,8 +286,12 @@ class AtomicAlertDialog extends StatefulWidget {
   State<AtomicAlertDialog> createState() => _AtomicAlertDialogState();
 }
 
+/// 在浮层存活期间维护取消倒计时，卸载后不继续更新或触发回调。
 class _AtomicAlertDialogState extends State<AtomicAlertDialog> {
+  /// 当前倒计时余量；组件卸载后停止后续更新。
   late int _remainingSeconds;
+
+  /// 倒计时取消按钮文案，普通弹窗仍使用配置原文。
   String _cancelDisplayText = '';
 
   @override
@@ -371,6 +327,29 @@ class _AtomicAlertDialogState extends State<AtomicAlertDialog> {
     final widthScale =
         MediaQuery.sizeOf(context).width / AtomicAlertDialog.designWidth;
 
+    // 多项菜单继续保留原有入口；单/双按钮统一使用基础组件。
+    if (widget.config.itemList.isEmpty) {
+      final config = widget.config;
+      return AppAlertDialog(
+        title: config.title,
+        titleLeading: config.iconWidget,
+        content: config.content ?? '',
+        cancelText: config.countdownDuration > 0
+            ? _cancelDisplayText
+            : config.cancelConfig?.text ?? '',
+        confirmText: config.confirmConfig?.text ?? '',
+        showCancelButton: config.cancelConfig != null,
+        showConfirmButton: config.confirmConfig != null,
+        confirmBackgroundColor:
+            config.confirmConfig?.type == TextColorPreset.red
+                ? context.appColors.danger
+                : null,
+        semanticsIdentifier: 'sdk.alert',
+        onCancel: config.cancelConfig?.onClick,
+        onConfirm: config.confirmConfig?.onClick,
+      );
+    }
+
     return Container(
       width: 259 * widthScale,
       decoration: BoxDecoration(
@@ -387,7 +366,7 @@ class _AtomicAlertDialogState extends State<AtomicAlertDialog> {
           _buildContent(colorsTheme),
           const SizedBox(height: 20),
           Divider(height: 0.0, color: colorsTheme.strokeColorSecondary),
-          _buildActionButtons(colorsTheme),
+          _buildItemListButtons(colorsTheme),
         ],
       ),
     );
@@ -447,21 +426,6 @@ class _AtomicAlertDialogState extends State<AtomicAlertDialog> {
     );
   }
 
-  Widget _buildActionButtons(SemanticColorScheme colorsTheme) {
-    if (widget.config.itemList.isNotEmpty) {
-      return _buildItemListButtons(colorsTheme);
-    }
-    return IntrinsicHeight(
-      child: Row(
-        children: [
-          _buildCancelButton(colorsTheme),
-          _buildButtonDivider(colorsTheme),
-          _buildConfirmButton(colorsTheme),
-        ],
-      ),
-    );
-  }
-
   Widget _buildItemListButtons(SemanticColorScheme colorsTheme) {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -497,69 +461,6 @@ class _AtomicAlertDialogState extends State<AtomicAlertDialog> {
           ],
         );
       }).toList(),
-    );
-  }
-
-  Widget _buildCancelButton(SemanticColorScheme colorsTheme) {
-    final cancelConfig = widget.config.cancelConfig;
-    return Visibility(
-      visible: cancelConfig != null,
-      child: Expanded(
-        child: TextButton(
-          style: ButtonStyle(
-            overlayColor: WidgetStateProperty.all<Color>(Colors.transparent),
-          ),
-          onPressed: cancelConfig?.onClick,
-          child: Text(
-            widget.config.countdownDuration > 0
-                ? _cancelDisplayText
-                : (cancelConfig?.text ?? ''),
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: (cancelConfig?.isBold ?? false)
-                  ? FontWeight.bold
-                  : FontWeight.normal,
-              color: _resolveButtonTextColor(
-                  cancelConfig?.type ?? TextColorPreset.grey, colorsTheme),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildButtonDivider(SemanticColorScheme colorsTheme) {
-    return Visibility(
-      visible: widget.config.confirmConfig != null &&
-          widget.config.cancelConfig != null,
-      child: VerticalDivider(width: 1, color: colorsTheme.strokeColorSecondary),
-    );
-  }
-
-  Widget _buildConfirmButton(SemanticColorScheme colorsTheme) {
-    final confirmConfig = widget.config.confirmConfig;
-    return Visibility(
-      visible: confirmConfig != null,
-      child: Expanded(
-        child: TextButton(
-          style: ButtonStyle(
-            overlayColor: WidgetStateProperty.all<Color>(Colors.transparent),
-          ),
-          onPressed: confirmConfig?.onClick,
-          child: Text(
-            confirmConfig?.text ?? '',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: (confirmConfig?.isBold ?? false)
-                  ? FontWeight.bold
-                  : FontWeight.normal,
-              color: _resolveButtonTextColor(
-                  confirmConfig?.type ?? TextColorPreset.blue, colorsTheme),
-            ),
-          ),
-        ),
-      ),
     );
   }
 

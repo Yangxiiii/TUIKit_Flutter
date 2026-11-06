@@ -10,6 +10,7 @@ const BANNER_HORIZONTAL_INSET_VP: number = 8;
 const BANNER_HEIGHT_VP: number = 92;
 const BANNER_TOP_OFFSET_VP: number = 48;
 
+/** 为原生通话和 Flutter 未就绪时的来电管理子窗口。 */
 export class SubWindowManager {
   private static _instance: SubWindowManager | null = null;
 
@@ -76,6 +77,12 @@ export class SubWindowManager {
    * 应用一个新路由。每个分支都是幂等的。
    */
   private applyRoute(next: CallRoute): void {
+    // 单聊使用 Flutter 根视图，同一通电话只保留一个可交互页面。
+    if (RouterManager.presentInFlutter(next)) {
+      this._currentRoute = CallRoute.none;
+      void this.teardownSubWindow();
+      return;
+    }
     if (next === this._currentRoute && this._subWindow !== null) {
       return;
     }

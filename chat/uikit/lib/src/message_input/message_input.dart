@@ -1,4 +1,5 @@
 import 'chat_media_sender.dart';
+import 'widget/call_selection_sheet.dart';
 import '../message_list/utils/big_file_message.dart';
 import '../message_list/utils/rich_content_markdown_format.dart';
 import 'dart:async';
@@ -1717,10 +1718,43 @@ class MessageInputState extends State<MessageInput>
     }
   }
 
+  /// 单聊工具栏先选择媒体；群聊继续沿用既有成员选择，不引入第二套呼叫入口。
+  Future<void> _selectCallType() =>
+      _textSendGuard.singleFlight('tim.call.select', () async {
+        // 通话选择使用整页底部浮板，先收起输入法及光标手柄，避免键盘占据浮板区域。
+        FocusScope.of(context).unfocus();
+        if (ChatUtil.getGroupID(widget.conversationID).isNotEmpty) {
+          await _onVideoCallTap();
+          return;
+        }
+        final selected = await AppDialog.showSheet<CallMediaType>(
+          showCloseButton: false,
+          topRadius: 16,
+          backgroundColor: context.appColors.surface,
+          maskColor: context.appColors.scrim.withValues(alpha: .7),
+          // SafeArea由公共Sheet添加；按不随键盘变化的viewPadding补足48像素留白，避免重复计算。
+          child: Padding(
+            padding: EdgeInsets.only(
+                bottom: (48 -
+                        MediaQueryData.fromView(View.of(context))
+                            .viewPadding
+                            .bottom)
+                    .clamp(0.0, 48.0)),
+            child: CallSelectionSheet(
+                name: widget.conversationDisplayName ??
+                    _conversationInfo?.title ??
+                    ChatUtil.getUserID(widget.conversationID)),
+          ),
+        );
+        if (!mounted || selected == null) return;
+        await _startCall(selected);
+      });
+
   Future<void> _onAudioCallTap() => _startCall(CallMediaType.audio);
 
   Future<void> _onVideoCallTap() => _startCall(CallMediaType.video);
 
+  /// 保留单聊直接呼叫与群聊选人入口；单聊振铃上限由统一 Manager 校验。
   Future<void> _startCall(CallMediaType mediaType) async {
     final groupID = ChatUtil.getGroupID(widget.conversationID);
     final isGroup = groupID.isNotEmpty;
@@ -1754,7 +1788,7 @@ class MessageInputState extends State<MessageInput>
         "participantIds": participantIds,
         "mediaType": mediaType,
         "chatGroupId": chatGroupId,
-        "timeout": 30,
+        "timeout": isGroup ? 30 : 45,
       };
     TUIEventBus.shared.publish("call.startCall", null, params);
     UIKitUtil.reportChatInvokeCall();
@@ -2546,7 +2580,7 @@ class MessageInputState extends State<MessageInput>
       onVideo: _isRichContentEditorOpen
           ? null
           : widget.config.isShowVideoCall
-              ? _onVideoCallTap
+              ? _selectCallType
               : null,
       onImage: _isRichContentEditorOpen || widget.config.isShowAlbum
           ? _onPickAlbum

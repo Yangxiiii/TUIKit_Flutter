@@ -256,7 +256,13 @@ final class RichContentInputToolbar extends StatelessWidget {
           _iconButton(_showKeyboard ? AppIcons.inputKeyboard : AppIcons.emoji,
               _emojiTooltip, _onEmoji, colors),
           _iconButton(AppIcons.a, '提及成员', _onMention, colors),
-          _iconButton(AppIcons.startVideoConference, '视频通话', _onVideo, colors),
+          MergeSemantics(
+            child: Semantics(
+              identifier: 'tim.$_keyPrefix.call',
+              child: _iconButton(
+                  AppIcons.startVideoConference, '视频通话', _onVideo, colors),
+            ),
+          ),
           MergeSemantics(
             child: Semantics(
               identifier: 'tim.$_keyPrefix.album',

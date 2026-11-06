@@ -10,6 +10,7 @@ import 'system_message_widget.dart';
 
 typedef BackgroundBuilder = Widget Function(Widget child);
 
+/// 展示已有腾讯通话记录，点击时按原媒体类型和公开收发方字段回拨。
 class CallMessageWidget extends StatefulWidget {
   final MessageInfo message;
   final bool isSelf;
@@ -42,6 +43,7 @@ class CallMessageWidget extends StatefulWidget {
   State<CallMessageWidget> createState() => _CallMessageWidgetState();
 }
 
+/// 组合原消息状态和通话记录，回拨直接使用当前消息公开的对端资料。
 class _CallMessageWidgetState extends State<CallMessageWidget>
     with MessageStatusMixin {
   @override
@@ -87,18 +89,18 @@ class _CallMessageWidgetState extends State<CallMessageWidget>
         final isVideoCall =
             provider.streamMediaType == CallStreamMediaType.video;
 
-        // Get the userID of the other party from the message
-        //
-        // 从消息中获取对方的 userID
+        // 使用公开收发方字段，离线或重建消息不依赖 SDK 内部 rawMessage。
         final userID = widget.message.isSentBySelf
-            ? widget.message.rawMessage?.userID ?? ''
-            : widget.message.rawMessage?.sender ?? '';
+            ? widget.message.to
+            : widget.message.from.userID;
 
         if (widget.onCallMessageClick != null && userID.isNotEmpty) {
           widget.onCallMessageClick!(userID, isVideoCall);
         }
       },
-      child: bubble,
+      child: Semantics(
+          identifier: 'tim.message.call.${widget.message.msgID}',
+          child: bubble),
     );
   }
 
@@ -159,14 +161,14 @@ class _CallMessageWidgetState extends State<CallMessageWidget>
     IconData iconData;
 
     if (provider.streamMediaType == CallStreamMediaType.audio) {
-      iconData = Icons.phone;
+      iconData = AppIcons.phone3;
     } else {
-      iconData = Icons.videocam;
+      iconData = AppIcons.cameraOn;
     }
 
     return Icon(
       iconData,
-      size: 16,
+      size: 20,
       color: widget.isSelf
           ? colors.textColorAntiPrimary
           : colors.textColorSecondary,

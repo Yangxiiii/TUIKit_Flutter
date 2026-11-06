@@ -1,181 +1,51 @@
-import 'dart:async';
-
-import 'package:tuikit_atomic_x/atomicx.dart';
+import 'package:app_ui/app_ui.dart';
+import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
+import 'call_hint_messages.dart';
 
-import '../../core/common/call_colors.dart';
-
-class _HintDisplayTracker {
-  static String? _currentCallId;
-  static bool _hadShowAcceptText = false;
-
-  static bool shouldShowAcceptText(String callId) {
-    if (_currentCallId != callId) {
-      _currentCallId = callId;
-      _hadShowAcceptText = false;
-    }
-    return !_hadShowAcceptText;
-  }
-
-  static void markAcceptTextShown(String callId) {
-    if (_currentCallId == callId) {
-      _hadShowAcceptText = true;
-    }
-  }
-}
-
-class HintWidget extends StatefulWidget {
+/// 从 SDK 连接时长及双方网络状态生成提示，不在 build 中启动计时器。
+class HintWidget extends StatelessWidget {
   const HintWidget({super.key});
 
   @override
-  State<StatefulWidget> createState() => _HintWidgetState();
-}
-
-class _HintWidgetState extends State<HintWidget> {
-  final _acceptTextDisplayDuration = const Duration(seconds: 1);
-  Timer? _acceptTextTimer;
-
-  @override
-  void dispose() {
-    _acceptTextTimer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalization.of(context);
-    return ValueListenableBuilder(
-      valueListenable: CallStore.shared.state.selfInfo,
-      builder: (context, selfInfo, child) {
-        return _buildConnectionHint(selfInfo, l10n) ??
-            _buildStatusHint(selfInfo, l10n) ??
-            _buildNetworkQualityHint(selfInfo, l10n) ??
-            const SizedBox.shrink();
-      },
-    );
-  }
-
-  Widget? _buildConnectionHint(
-    CallParticipantInfo selfInfo,
-    AppLocalizedText l10n,
-  ) {
-    final activeCall = CallStore.shared.state.activeCall.value;
-    final callId = activeCall.callId;
-
-    if (selfInfo.status != CallParticipantStatus.accept ||
-        !_HintDisplayTracker.shouldShowAcceptText(callId)) {
-      return null;
-    }
-
-    _acceptTextTimer?.cancel();
-    _acceptTextTimer = Timer(_acceptTextDisplayDuration, () {
-      if (mounted) {
-        _HintDisplayTracker.markAcceptTextShown(callId);
-        setState(() {});
-      }
-    });
-
-    return Text(
-      l10n.callConnected,
-      style: const TextStyle(
-        fontSize: 12,
-        fontWeight: FontWeight.w600,
-        color: CallColors.colorG7,
-      ),
-    );
-  }
-
-  Widget? _buildStatusHint(
-    CallParticipantInfo selfInfo,
-    AppLocalizedText l10n,
-  ) {
-    if (selfInfo.status != CallParticipantStatus.waiting) {
-      return null;
-    }
-
-    final activeCall = CallStore.shared.state.activeCall.value;
-
-    if (selfInfo.id == activeCall.inviterId) {
-      return Text(
-        l10n.callWaitingForInvitationAcceptance,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: _getHintTextColor(),
-        ),
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: Listenable.merge([
+          CallStore.shared.state.activeCall,
+          CallStore.shared.state.selfInfo,
+          CallStore.shared.state.networkQualities
+        ]),
+        builder: (context, _) {
+          final state = CallStore.shared.state;
+          final call = state.activeCall.value;
+          final self = state.selfInfo.value;
+          final text = AppLocalization.of(context);
+          final List<String> hints = [];
+          if (self.status == CallParticipantStatus.waiting) {
+            hints.add(self.id == call.inviterId
+                ? text.callWaitingForInvitationAcceptance
+                : call.mediaType == CallMediaType.video
+                    ? text.callInvitedToVideoCall
+                    : text.callInvitedToAudioCall);
+          } else if (self.status == CallParticipantStatus.accept) {
+            // 已接通展示 3 秒；恢复通话页面时仍沿用 SDK 时长，不重新倒数。
+            if (call.duration < 3) hints.add(text.callConnected);
+            final qualities = state.networkQualities.value;
+            if (_badNetwork(qualities[self.id])) {
+              hints.add(text.callSelfNetworkLowQuality);
+            }
+            if (qualities.entries.any(
+                (entry) => entry.key != self.id && _badNetwork(entry.value))) {
+              hints.add(text.callOtherPartyNetworkLowQuality);
+            }
+          }
+          return CallHintMessages(
+              messages: hints,
+              waiting: self.status == CallParticipantStatus.waiting);
+        },
       );
-    } else {
-      final hintText = activeCall.mediaType == CallMediaType.audio
-          ? l10n.callInvitedToAudioCall
-          : l10n.callInvitedToVideoCall;
 
-      return Text(
-        hintText,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: _getHintTextColor(),
-        ),
-      );
-    }
-  }
-
-  Widget? _buildNetworkQualityHint(
-    CallParticipantInfo selfInfo,
-    AppLocalizedText l10n,
-  ) {
-    return ValueListenableBuilder(
-      valueListenable: CallStore.shared.state.networkQualities,
-      builder: (context, networkQualities, child) {
-        final hintText = _getNetworkQualityHintText(
-          selfInfo,
-          networkQualities,
-          l10n,
-        );
-        return hintText.isNotEmpty
-            ? Text(
-                hintText,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: _getHintTextColor(),
-                ),
-              )
-            : const SizedBox();
-      },
-    );
-  }
-
-  String _getNetworkQualityHintText(
-    CallParticipantInfo selfInfo,
-    Map<String, NetworkQuality> networkQualities,
-    AppLocalizedText l10n,
-  ) {
-    final selfNetwork = networkQualities[selfInfo.id];
-    if (selfNetwork != null && _isBadNetwork(selfNetwork)) {
-      return l10n.callSelfNetworkLowQuality;
-    }
-
-    for (var entry in networkQualities.entries) {
-      if (entry.key != selfInfo.id && _isBadNetwork(entry.value)) {
-        return l10n.callOtherPartyNetworkLowQuality;
-      }
-    }
-
-    return '';
-  }
-
-  bool _isBadNetwork(NetworkQuality? network) {
-    return network == NetworkQuality.bad ||
-        network == NetworkQuality.veryBad ||
-        network == NetworkQuality.down;
-  }
-
-  Color _getHintTextColor() {
-    if (CallStore.shared.state.activeCall.value.mediaType ==
-        CallMediaType.video) {
-      return CallColors.colorWhite;
-    }
-    return CallColors.colorG7;
-  }
+  bool _badNetwork(NetworkQuality? quality) =>
+      quality == NetworkQuality.bad ||
+      quality == NetworkQuality.veryBad ||
+      quality == NetworkQuality.down;
 }

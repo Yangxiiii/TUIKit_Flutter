@@ -1,12 +1,10 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:io';
+import 'package:app_ui/app_ui.dart';
 
-import 'package:tuikit_atomic_x/base_component/base_component.dart'
-    show AppChatLocalizedText, AppLocalization, AppLocalizedText;
-import 'package:tuikit_atomic_x/permission/permission.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
 import 'package:tuikit_atomic_x/atomicx.dart';
 import 'package:tencent_calls_uikit/src/common/utils/app_lifecycle.dart';
 import '../common/metrics/key_metrics.dart';
@@ -22,7 +20,7 @@ class CallPageCallbacks {
   final VoidCallback? onShowPip;
   final VoidCallback? onShowInvitePage;
   final void Function(DragUpdateDetails details, Size screenSize)?
-  onFloatDragUpdate;
+      onFloatDragUpdate;
   final Size Function()? getOriginScreenSize;
   final void Function(Size size)? setOriginScreenSize;
 
@@ -43,6 +41,7 @@ class InviteUserCallbacks {
   const InviteUserCallbacks({this.onShowCalling});
 }
 
+/// 以单一浮层协调通话、来电横幅与小窗，权限返回后核对邀请仍有效。
 class CallPageRouter {
   final GlobalKey<NavigatorState> _callNavigatorKey =
       GlobalKey<NavigatorState>();
@@ -70,17 +69,29 @@ class CallPageRouter {
     );
   }
 
-  static const double _floatWindowWidth = 121.0;
-  static const double _floatWindowHeight = 181.0;
-  double _floatViewTop = 128.0;
-  double _floatViewRight = 20.0;
+  /// 应用内小窗遵循当前媒体尺寸，不缩放整个通话页导致文字不可读。
+  double get _floatWindowWidth =>
+      _isSingleCall ? (_isVideoCall ? 98 : 80) : 120;
+  double get _floatWindowHeight =>
+      _isSingleCall ? (_isVideoCall ? 211 : 80) : 180;
 
-  static const double _bannerContentHeight = 100.0;
+  /// 群聊保留 SDK 原有悬浮尺寸，定制布局仅作用于单聊。
+  bool get _isSingleCall =>
+      CallStore.shared.state.activeCall.value.chatGroupId.isEmpty &&
+      CallStore.shared.state.activeCall.value.inviteeIds.length <= 1;
+  bool get _isVideoCall =>
+      CallStore.shared.state.activeCall.value.mediaType == CallMediaType.video;
+
+  /// 初始位置对齐聊天右上角；拖动仍由现有路由统一维护。
+  double _floatViewTop = 148.0;
+
+  /// 小窗距右侧的逻辑像素偏移，拖动由同一路由持有。
+  double _floatViewRight = 8.0;
 
   NavigatorState? get callNavigator => _callNavigatorKey.currentState;
 
   CallPageRouter({required NavigatorState? Function() navigatorGetter})
-    : _navigatorGetter = navigatorGetter;
+      : _navigatorGetter = navigatorGetter;
 
   void showCallingPage() {
     pipController.onEnterPip = () {
@@ -140,8 +151,10 @@ class CallPageRouter {
 
     final overlay = _navigatorGetter()?.overlay;
     if (overlay == null) return;
-    if (AppLifecycle.instance.currentState.value == AppLifecycleState.detached)
+    if (AppLifecycle.instance.currentState.value ==
+        AppLifecycleState.detached) {
       return;
+    }
 
     if (isManualSwitch &&
         (pageType == CallPageType.calling ||
@@ -293,7 +306,10 @@ class CallPageRouter {
         final top = _floatViewTop - 40;
         return Rect.fromLTWH(left, top, _floatWindowWidth, _floatWindowHeight);
       case CallPageType.banner:
-        final bannerHeight = viewPadding.top + _bannerContentHeight;
+        // 浮层只占横幅及状态栏所需的高度，底层消息页保留交互。
+        final bannerHeight = viewPadding.top +
+            IncomingBannerContent.topGap +
+            IncomingBannerContent.height;
         return Rect.fromLTWH(0, 0, screenSize.width, bannerHeight);
       case CallPageType.calling:
       case CallPageType.invite:
@@ -375,7 +391,12 @@ class CallPageRouter {
         page = SafeArea(
           bottom: false,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.fromLTRB(
+              IncomingBannerContent.horizontalInset,
+              IncomingBannerContent.topGap,
+              IncomingBannerContent.horizontalInset,
+              0,
+            ),
             child: IncomingBannerWidget(
               onShowCalling: () {
                 showCallingPage();
@@ -445,77 +466,73 @@ class CallPageRouter {
     );
   }
 
-  void handleNoPermissionAndEndCall() async {
+  /// 拒绝权限时只结束触发提示的旧邀请，不能拒绝权限弹窗期间新到达的通话。
+  Future<void> handleNoPermissionAndEndCall(
+      {PermissionType type = PermissionType.microphone}) async {
+    final blockedCallId = CallStore.shared.state.activeCall.value.callId;
     final overlay = _navigatorGetter()?.overlay;
-    bool? goSettings;
-    if (overlay != null) {
-      goSettings = await _showPermissionSettingsOverlay(overlay);
+    if (overlay == null) return;
+    final camera = type == PermissionType.camera;
+    final goSettings = await _showPermissionAlert(overlay, camera: camera);
+    final current = CallStore.shared.state.activeCall.value;
+    if (blockedCallId.isNotEmpty &&
+        current.callId == blockedCallId &&
+        CallStore.shared.state.selfInfo.value.status ==
+            CallParticipantStatus.waiting) {
+      if (current.inviterId == CallStore.shared.state.selfInfo.value.id) {
+        await CallStore.shared.hangup();
+      } else {
+        await CallStore.shared.reject();
+      }
     }
-
-    final selfStatus = CallStore.shared.state.selfInfo.value.status;
-    if (selfStatus == CallParticipantStatus.waiting) {
-      CallStore.shared.reject();
-    }
-
-    if (goSettings == true) {
-      await Permission.openAppSettings();
+    if (goSettings && !await Permission.openAppSettings() && overlay.mounted) {
+      await _showPermissionAlert(overlay, camera: camera, settingsFailed: true);
     }
   }
 
-  Future<bool> _showPermissionSettingsOverlay(OverlayState overlay) {
+  /// 使用公共基础弹窗保留权限类型及设置失败的独立文案，关闭后释放 OverlayEntry。
+  Future<bool> _showPermissionAlert(OverlayState overlay,
+      {required bool camera, bool settingsFailed = false}) {
     final completer = Completer<bool>();
-    OverlayEntry? overlayEntry;
+    late OverlayEntry entry;
+    void finish(bool result) {
+      entry.remove();
+      entry.dispose();
+      if (!completer.isCompleted) completer.complete(result);
+    }
 
-    overlayEntry = OverlayEntry(
-      builder: (context) {
-        final l10n = AppLocalization.of(context);
-        return Material(
-          color: Colors.black54,
-          child: Center(
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 40),
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    l10n.callNeedToAccessMicrophoneAndCameraPermissions,
-                    style: const TextStyle(fontSize: 16),
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(
-                        onPressed: () {
-                          overlayEntry?.remove();
-                          if (!completer.isCompleted) completer.complete(false);
-                        },
-                        child: Text(l10n.cancel),
-                      ),
-                      const SizedBox(width: 10),
-                      TextButton(
-                        onPressed: () {
-                          overlayEntry?.remove();
-                          if (!completer.isCompleted) completer.complete(true);
-                        },
-                        child: Text(l10n.callGoToSettings),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-
-    overlay.insert(overlayEntry);
+    entry = OverlayEntry(builder: (context) {
+      final text = AppLocalization.of(context);
+      final device = camera ? 'camera' : 'microphone';
+      final title = settingsFailed
+          ? text.resolve('chat.uikit.callSettingsFailedTitle', '无法自动跳转')
+          : text.resolve('chat.uikit.callPermissionTitle.$device',
+              camera ? '摄像头权限未开启' : '麦克风权限未开启');
+      final guide = Platform.isIOS ? 'ios' : 'android';
+      final content = settingsFailed
+          ? text.resolve(
+              'chat.uikit.callSettingsGuide.$device.$guide',
+              camera
+                  ? '抱歉，系统未能自动为您打开设置页面。请手动前往系统设置，找到并允许本应用访问摄像头。\n\n操作指引：打开设置→应用管理，找到应用名称→权限，开启摄像头权限。'
+                  : '抱歉，系统未能自动为您打开设置页面。请手动前往系统设置，找到并允许本应用访问麦克风。\n\n操作指引：打开手机设置→应用管理，找到应用名称→权限，开启麦克风权限。')
+          : text.resolve('chat.uikit.callPermissionContent.$device',
+              camera ? '无法使用视频功能，请前往系统设置开启摄像头权限。' : '无法使用语音功能，请前往系统设置开启麦克风权限。');
+      return Material(
+        color: context.appColors.scrim.withValues(alpha: .7),
+        child: AppAlertDialog(
+            title: title,
+            content: content,
+            semanticsIdentifier: 'call.permission',
+            cancelText: text.resolve('chat.uikit.callPermissionLater', '暂不开启'),
+            confirmText: settingsFailed
+                ? text.resolve('chat.uikit.callUnderstood', '我知道了')
+                : text.callGoToSettings,
+            showCancelButton: !settingsFailed,
+            onCancel: () => finish(false),
+            onConfirm: () => finish(!settingsFailed)),
+      );
+    });
+    overlay.insert(entry);
     return completer.future;
   }
 }
@@ -540,9 +557,8 @@ class _CallOverlayLayout extends StatelessWidget {
     final rect = rectGetter(screenSize, mq.viewPadding);
     final borderRadius = borderRadiusGetter();
     final shouldAnimate = isAnimatingGetter();
-    final duration = shouldAnimate
-        ? const Duration(milliseconds: 250)
-        : Duration.zero;
+    final duration =
+        shouldAnimate ? const Duration(milliseconds: 250) : Duration.zero;
 
     return Stack(
       children: [

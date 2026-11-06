@@ -305,13 +305,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
         cancelText: '取消',
         confirmText: '撤回',
         semanticsIdentifier: 'tim.message.recallDialog',
-        contentStyle: TextStyle(
-          fontSize: 16,
-          height: 24 / 16,
-          color: colors.textPrimary,
-        ),
-        cancelTextStyle: TextStyle(fontSize: 16, color: colors.textTertiary),
-        confirmTextStyle: TextStyle(fontSize: 16, color: colors.danger),
+        confirmBackgroundColor: colors.danger,
         maskColor: colors.scrim.withValues(alpha: .7),
       );
       if (!mounted || confirmed != true) return;
@@ -488,7 +482,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
       "participantIds": [userID],
       "mediaType": isVideoCall ? CallMediaType.video : CallMediaType.audio,
       "chatGroupId": null,
-      "timeout": 30,
+      "timeout": 45,
     };
     TUIEventBus.shared.publish("call.startCall", null, params);
     UIKitUtil.reportChatInvokeCall();

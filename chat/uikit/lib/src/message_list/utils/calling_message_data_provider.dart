@@ -25,6 +25,7 @@ enum CallParticipantRole { unknown, caller, callee }
 
 enum CallMessageDirection { incoming, outcoming }
 
+/// 解析腾讯通话信令用于气泡及摘要；兼容在线原始消息与离线自定义载荷，不发送信令。
 class CallingMessageDataProvider {
   bool _isExcludedFromLastMessage = false;
   bool _isExcludedFromUnreadCount = false;
@@ -79,16 +80,27 @@ class CallingMessageDataProvider {
     _isExcludedFromUnreadCount =
         messageInfo.rawMessage?.isExcludedFromUnreadCount ?? false;
 
-    final customElem = messageInfo.rawMessage?.customElem;
+    // 腾讯历史信令外层包含 JSON 字符串 data；离线快照只有 CustomMessagePayload，不能强依赖 rawMessage。
+    final payload = messageInfo.messagePayload;
+    final raw = payload is CustomMessagePayload ? payload.customData : null;
     try {
-      if (customElem?.data != null) {
-        final customData = jsonDecode(customElem!.data!);
-        _groupID = customData['groupID'];
-        _inviteeList = customData['inviteeList'];
-        _actionType = customData['actionType'];
-        _jsonData = jsonDecode(customData['data']);
+      if (raw == null || raw.isEmpty) return;
+      final outer = jsonDecode(raw);
+      if (outer is! Map<String, dynamic>) return;
+      final inner = outer['data'];
+      final decoded = inner is String ? jsonDecode(inner) : inner;
+      if (decoded is! Map<String, dynamic>) return;
+      _jsonData = decoded;
+      _groupID = outer['groupID'] is String ? outer['groupID'] as String : '';
+      _inviteeList = outer['inviteeList'] is List
+          ? (outer['inviteeList'] as List).whereType<String>().toList()
+          : [];
+      _actionType = outer['actionType'] is int ? outer['actionType'] as int : 0;
+      if (_jsonData['data'] != null &&
+          _jsonData['data'] is! Map<String, dynamic>) {
+        return;
       }
-    } catch (err) {
+    } on FormatException {
       return;
     }
 
@@ -135,7 +147,7 @@ class CallingMessageDataProvider {
             _protocolType = CallProtocolType.unknown;
           }
         } else {
-          final callEnd = _jsonData!['call_end'];
+          final callEnd = _jsonData['call_end'];
           if (callEnd != null) {
             _protocolType = CallProtocolType.hangup;
           } else {
@@ -147,7 +159,7 @@ class CallingMessageDataProvider {
         _protocolType = CallProtocolType.cancel;
         break;
       case 3:
-        final data = _jsonData!['data'];
+        final data = _jsonData['data'];
         if (data != null) {
           final cmd = data['cmd'];
           if (cmd != null) {
@@ -164,7 +176,7 @@ class CallingMessageDataProvider {
         }
         break;
       case 4:
-        if (_jsonData!['line_busy'] != null) {
+        if (_jsonData['line_busy'] != null) {
           _protocolType = CallProtocolType.lineBusy;
         } else {
           _protocolType = CallProtocolType.reject;
@@ -186,7 +198,7 @@ class CallingMessageDataProvider {
       return;
     }
 
-    final callType = _jsonData!['call_type'];
+    final callType = _jsonData['call_type'];
     if (callType != null) {
       if (callType == 1) {
         _streamMediaType = CallStreamMediaType.audio;
@@ -196,7 +208,7 @@ class CallingMessageDataProvider {
     }
 
     if (_protocolType == CallProtocolType.send) {
-      final data = _jsonData!['data'];
+      final data = _jsonData['data'];
       if (data != null) {
         final cmd = data['cmd'];
         if (cmd != null) {
@@ -226,25 +238,25 @@ class CallingMessageDataProvider {
     }
   }
 
-  _setCallerId() async {
+  void _setCallerId() {
     if (_protocolType == CallProtocolType.unknown) {
       return;
     }
 
-    final data = _jsonData!['data'];
+    final data = _jsonData['data'];
     if (data != null) {
       final inviter = data['inviter'];
-      if (inviter != null) {
-        _callerId = inviter as String;
+      if (inviter is String) {
+        _callerId = inviter;
       }
     }
 
     if (_callerId.isEmpty) {
-      _callerId = LoginStore.shared.loginState.loginUserInfo!.userID;
+      _callerId = LoginStore.shared.loginState.loginUserInfo?.userID ?? '';
     }
   }
 
-  _setParticipantRole() async {
+  void _setParticipantRole() {
     final loginUserId = LoginStore.shared.loginState.loginUserInfo?.userID;
 
     if (_callerId == loginUserId) {
@@ -287,8 +299,10 @@ class CallingMessageDataProvider {
             ? atomicLocale.callCancelCaller
             : atomicLocale.callCancelCallee;
       } else if (_protocolType == CallProtocolType.hangup) {
-        final time = _getShowTime(_jsonData['call_end']);
-        _content = '${atomicLocale.stopCallTip}:$time';
+        final duration = _jsonData['call_end'];
+        _content = duration is num && duration >= 0
+            ? '${atomicLocale.stopCallTip} ${_getShowTime(duration.toInt())}'
+            : atomicLocale.callEndedTheCall;
       } else if (_protocolType == CallProtocolType.timeout) {
         _content = isCaller
             ? atomicLocale.callTimeoutCaller
@@ -324,10 +338,14 @@ class CallingMessageDataProvider {
           }
         }
         if (_protocolType == CallProtocolType.lineBusy) {
-          _content = inviteeNames.substring(0, inviteeNames.length - 1) +
+          _content = (inviteeNames.isEmpty
+                  ? ''
+                  : inviteeNames.substring(0, inviteeNames.length - 1)) +
               atomicLocale.callLineBusyCallee;
         } else {
-          _content = inviteeNames.substring(0, inviteeNames.length - 1) +
+          _content = (inviteeNames.isEmpty
+                  ? ''
+                  : inviteeNames.substring(0, inviteeNames.length - 1)) +
               atomicLocale.groupCallNoAnswer;
         }
       } else if (_protocolType == CallProtocolType.reject) {

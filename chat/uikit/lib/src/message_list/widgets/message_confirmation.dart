@@ -24,12 +24,7 @@ Future<void> confirmMessageAction(
           : text.messageRetryConfirmation,
       cancelText: text.cancel,
       confirmText: isDelete ? text.delete : text.messageRetryAction,
-      contentStyle:
-          TextStyle(fontSize: 16, height: 1.5, color: colors.textPrimary),
-      cancelTextStyle: TextStyle(color: colors.textTertiary),
-      confirmTextStyle:
-          TextStyle(color: isDelete ? colors.danger : colors.primary),
-      showActionDivider: true,
+      confirmBackgroundColor: isDelete ? colors.danger : null,
       theme: Theme.of(context),
     );
     // 弹窗期间消息可能已撤回或页面已离开，不能继续执行旧目标。

@@ -1,6 +1,11 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:app_core/app_core.dart';
+import 'package:app_service/app_service.dart';
+import 'package:app_ui/app_ui.dart';
+import 'manager/call_duration_limit.dart';
+
 import 'package:tencent_calls_uikit/src/common/metrics/key_metrics.dart';
 import 'package:tuikit_atomic_x/atomicx.dart';
 import 'package:tencent_calls_uikit/src/common/widget/global.dart';
@@ -25,10 +30,21 @@ class TUICallKitImpl implements TUICallKit {
   static TUICallKitImpl get instance => _instance;
   late final CallPageRouter pageRouter;
   IosPipFeature? pictureInPictureFeature;
-  late final voIPDataSyncHandler;
-  late final fcmDataSyncHandler;
+  late final VoIPDataSyncHandler voIPDataSyncHandler;
+  late final FcmDataSyncHandler fcmDataSyncHandler;
   final contactStore = ContactStore.shared;
   bool isNotificationPreparing = false;
+
+  /// 时长限制独立于页面生命周期；最小化和恢复继续使用同一 SDK 时长。
+  late final _durationLimit = CallDurationLimit(onLimit: () async {
+    if (!await CallManager.instance.hangup()) {
+      throw StateError('Call duration limit hangup failed');
+    }
+    AppToast.show(
+        AppLocalization.of(Global.appContext())
+            .resolve('chat.uikit.callDurationLimit', '已达通话最长时长，通话结束'),
+        duration: const Duration(seconds: 3));
+  });
   late CallEventListener callEventListener = CallEventListener(
     onCallStarted: (callId, mediaType) async {
       await CallManager.instance.prepareCallDevices(
@@ -42,47 +58,38 @@ class TUICallKitImpl implements TUICallKit {
     },
     onCallReceived:
         (String callId, CallMediaType mediaType, String userData) async {
-          KeyMetrics.instance.countUV(EventId.received);
-          if (mediaType == CallMediaType.video) {
-            await CallManager.instance.openLocalCameraIfPermitted();
-          }
-        },
+      CallManager.instance.invalidateDevicePreparation();
+      KeyMetrics.instance.countUV(EventId.received);
+      if (mediaType == CallMediaType.video) {
+        await CallManager.instance.openLocalCameraIfPermitted();
+      }
+    },
     onCallEnded: (callId, mediaType, reason, userId) {
+      CallManager.instance.invalidateDevicePreparation();
       CallManager.instance.closeLocalMicrophone();
       aiTranscriberConfigManager.reset(preserveSettings: false);
       _closePage();
       ForegroundService.stop();
-      if (CallStore.shared.state.activeCall.value.inviteeIds.length > 1 ||
-          CallStore.shared.state.activeCall.value.chatGroupId.isNotEmpty ||
-          CallStore.shared.state.selfInfo.value.id == userId) {
-        return;
-      }
-      final l10n = AppLocalization.of(Global.appContext());
-      switch (reason) {
-        case CallEndReason.hangup:
-          TUIToast.show(content: l10n.callOtherPartyHungUp);
-          break;
-        case CallEndReason.unknown:
-          break;
-        case CallEndReason.reject:
-          TUIToast.show(content: l10n.callOtherPartyDeclinedCallRequest);
-          break;
-        case CallEndReason.noResponse:
-          TUIToast.show(content: l10n.callOtherPartyNoResponse);
-          break;
-        case CallEndReason.offline:
-          break;
-        case CallEndReason.lineBusy:
-          TUIToast.show(content: l10n.callOtherPartyBusy);
-          break;
-        case CallEndReason.canceled:
-          break;
-        case CallEndReason.otherDeviceAccepted:
-          break;
-        case CallEndReason.otherDeviceReject:
-          break;
-        case CallEndReason.endByServer:
-          break;
+      if (_durationLimit.isEnding(callId)) return;
+      final call = CallStore.shared.state.activeCall.value;
+      if (call.inviteeIds.length > 1 || call.chatGroupId.isNotEmpty) return;
+      final local = CallStore.shared.state.selfInfo.value.id == userId;
+      final text = AppLocalization.of(Global.appContext());
+      final String? message = switch (reason) {
+        CallEndReason.hangup =>
+          text.resolve('chat.uikit.callEndedToast', '通话结束'),
+        CallEndReason.canceled =>
+          local ? text.resolve('chat.uikit.callCancelledToast', '呼叫已取消') : null,
+        CallEndReason.reject =>
+          local ? null : text.callOtherPartyDeclinedCallRequest,
+        CallEndReason.noResponse || CallEndReason.offline => local
+            ? null
+            : text.resolve('chat.uikit.callUnavailableToast', '暂时无法接通，建议稍后尝试'),
+        CallEndReason.lineBusy => text.callOtherPartyBusy,
+        _ => null,
+      };
+      if (message != null) {
+        AppToast.show(message, duration: const Duration(seconds: 3));
       }
     },
   );
@@ -165,13 +172,24 @@ class TUICallKitImpl implements TUICallKit {
     callMediaType, [
     CallParams? params,
   ]) async {
-    final handler = await CallManager.instance.calls(
-      userIdList,
-      callMediaType,
-      params,
-    );
-    handleErrorCode(handler.errorCode);
-    return handler;
+    // 普通入口与消息回拨共享宿主守卫，错误提示也留在同一 action 内只执行一次。
+    return AppServiceLocator.get<ActionGuard>().singleFlight('tim.call.start',
+        () async {
+      final handler =
+          await CallManager.instance.calls(userIdList, callMediaType, params);
+      if (handler.errorCode != -1101) handleErrorCode(handler.errorCode);
+      if (handler.errorCode != 0 &&
+          handler.errorCode != -1101 &&
+          ErrorParser.getErrorMessage(
+                  handler.errorCode, AppLocalization.of(Global.appContext())) ==
+              null) {
+        AppToast.show(
+            AppLocalization.of(Global.appContext())
+                .callFailedToInitiateOrJoinCall,
+            duration: const Duration(seconds: 3));
+      }
+      return handler;
+    });
   }
 
   @override
@@ -225,12 +243,17 @@ class TUICallKitImpl implements TUICallKit {
     );
     CallStore.shared.addListener(callEventListener);
     CallingBellFeature.instance.init();
+    CallStore.shared.state.activeCall.removeListener(_checkDurationLimit);
+    CallStore.shared.state.activeCall.addListener(_checkDurationLimit);
     if (Platform.isIOS) {
       pictureInPictureFeature = IosPipFeature();
     }
   }
 
   void handleLogoutSuccess() async {
+    CallManager.instance.invalidateDevicePreparation();
+    CallStore.shared.state.activeCall.removeListener(_checkDurationLimit);
+    _durationLimit.reset();
     TUICallEngine.instance.unInit();
     CallStore.shared.removeListener(callEventListener);
     CallingBellFeature.instance.dispose();
@@ -239,6 +262,22 @@ class TUICallKitImpl implements TUICallKit {
       pictureInPictureFeature!.dispose();
       pictureInPictureFeature = null;
     }
+  }
+
+  /// SDK 每次更新时长时检查限制，挂断失败记录日志并等待下一次状态更新重试。
+  void _checkDurationLimit() {
+    final call = CallStore.shared.state.activeCall.value;
+    unawaited(_durationLimit
+        .update(
+      callId: call.callId,
+      seconds: call.duration.toInt(),
+      connected: CallStore.shared.state.selfInfo.value.status ==
+          CallParticipantStatus.accept,
+      singleCall: call.chatGroupId.isEmpty && call.inviteeIds.length == 1,
+    )
+        .catchError((Object error, StackTrace stack) {
+      appLogger.error('达到通话时长上限后结束失败', error: error, stackTrace: stack);
+    }));
   }
 
   void _subscribeState() {

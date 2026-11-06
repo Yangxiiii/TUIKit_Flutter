@@ -32,7 +32,8 @@ class EventBusHandler extends TUIObserver {
     List<String> participantIds = params?.data?["participantIds"] ?? [];
     String chatGroupId = params?.data?["chatGroupId"] ?? "";
     CallMediaType mediaType = params?.data?["mediaType"] ?? CallMediaType.audio;
-    int timeout = params?.data?["timeout"] ?? 30;
+    int timeout = params?.data?["timeout"] ??
+        (chatGroupId.isEmpty && participantIds.length == 1 ? 45 : 30);
 
     CallParams callParams = CallParams();
     callParams.chatGroupId = chatGroupId;

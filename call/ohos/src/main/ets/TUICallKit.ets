@@ -128,6 +128,7 @@ class PendingNotificationAction {
   }
 }
 
+/** 管理腾讯原生呼叫、系统来电通知和通话设备生命周期。 */
 class TUICallKitImpl extends TUICallKit {
   private context: common.UIAbilityContext;
   private listener: CallEventListener | null = null;
@@ -337,11 +338,11 @@ class TUICallKitImpl extends TUICallKit {
     //
     // 前台 vs 后台的决定在功能内部做。
     void IncomingNotificationFeature.shared().publish();
-    if (GlobalState().enableIncomingBanner) {
-      RouterManager.showBannerView();
-    } else {
-      RouterManager.showCallingView();
-    }
+    // Flutter 只接管单聊，群聊来电继续遵循原生横幅开关。
+    const call = CallStore.shared().state.activeCall;
+    const useFlutterBanner = RouterManager.hasFlutterPresenter() &&
+      call.chatGroupId.length === 0 && call.inviteeIds.length <= 1;
+    RouterManager.showBannerView(useFlutterBanner);
     this.setFramework();
 
     const pending = this.pendingNotificationAction;

@@ -430,7 +430,17 @@ class MessageUtil {
         CallingMessageDataProvider provider =
             CallingMessageDataProvider(messageInfo, context);
         if (provider.isCallingSignal) {
-          return provider.content;
+          if (provider.content.isEmpty) return '';
+          if (provider.participantType != CallParticipantType.c2c) {
+            return provider.content;
+          }
+          final video = provider.streamMediaType == CallStreamMediaType.video;
+          final label = localizations.resolve(
+              video
+                  ? 'chat.uikit.callVideoPrefix'
+                  : 'chat.uikit.callAudioPrefix',
+              video ? '[视频通话]' : '[语音通话]');
+          return '$label ${provider.content}';
         }
 
         final event = StickyMessageEvent.fromMessage(messageInfo);

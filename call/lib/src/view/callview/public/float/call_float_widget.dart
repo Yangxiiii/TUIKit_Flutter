@@ -1,216 +1,105 @@
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
 
-import 'package:tuikit_atomic_x/ai/ai_transcriber.dart';
-import '../../core/common/call_colors.dart';
-import '../../core/common/constants.dart';
-import '../transcriber/ai_subtitle.dart';
-import '../../core/common/utils/utils.dart';
 import '../controls/single_call_controls_widget.dart';
 import '../hint/hint_widget.dart';
 import '../hint/timer_widget.dart';
+import '../participant/call_video_view.dart';
+import 'call_scene.dart';
 
+/// 在共享通话界面中嵌入腾讯视频，保持接通后主次画面的位置。
 class CallFloatWidget extends StatefulWidget {
+  const CallFloatWidget(
+      {super.key, required this.controller, this.enableAITranscriber = false});
+
+  /// SDK 布局控制器仍由上层创建和释放，群聊及系统画中画继续复用。
   final CallCoreController controller;
+
+  /// 保留既有配置兼容；本次单聊设计不显示 AI 入口。
   final bool enableAITranscriber;
 
-  const CallFloatWidget({
-    super.key,
-    required this.controller,
-    this.enableAITranscriber = false,
-  });
-
   @override
-  State<StatefulWidget> createState() => _CallFloatWidgetState();
+  State<CallFloatWidget> createState() => _CallFloatWidgetState();
 }
 
+/// 映射 SDK 状态，保存独立布局下的主次位置。
 class _CallFloatWidgetState extends State<CallFloatWidget> {
-  final GlobalKey _controlsKey = GlobalKey();
-  double _controlsHeight = 120;
+  /// 每个参与者独占一个渲染视图，交换大小画面时移动现有纹理。
+  final _localVideoKey = GlobalKey();
+  final _remoteVideoKey = GlobalKey();
 
-  void _measureControlsHeight() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final renderBox =
-          _controlsKey.currentContext?.findRenderObject() as RenderBox?;
-      if (renderBox != null && mounted) {
-        final height = renderBox.size.height;
-        if (height != _controlsHeight) {
-          setState(() {
-            _controlsHeight = height;
-          });
-        }
-      }
-    });
-  }
+  /// 只在用户点击小画面时交换主次位置。
+  bool _localInMainView = false;
 
   @override
-  Widget build(BuildContext context) {
-    _measureControlsHeight();
-    return ValueListenableBuilder(
-      valueListenable: CallStore.shared.state.selfInfo,
-      builder: (context, self, child) {
-        final isAudioCall = CallStore.shared.state.activeCall.value.mediaType ==
-            CallMediaType.audio;
-        return Stack(
-          children: [
-            if (isAudioCall)
-              const Positioned.fill(
-                child: ColoredBox(color: Color(0xFF2D2D2D)),
-              )
-            else
-              CallCoreView(
-                controller: widget.controller,
-                defaultAvatar: Constants.defaultAvatarImage,
-              ),
-            _buildUserInfoWidget(context),
-            Positioned(
-              top: MediaQuery.of(context).size.height * 2 / 3,
-              width: MediaQuery.of(context).size.width,
-              child: const Center(child: HintWidget()),
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 40 +
-                  _controlsHeight +
-                  8 +
-                  MediaQuery.of(context).padding.bottom,
-              child: Container(
-                constraints: BoxConstraints(
-                  maxWidth: MediaQuery.of(context).size.width * 0.9,
-                  maxHeight: MediaQuery.of(context).size.height * 0.3,
-                ),
-                child: AISubtitle(
-                  userId: CallStore.shared.state.selfInfo.value.id,
-                ),
-              ),
-            ),
-            if (widget.enableAITranscriber &&
-                self.status == CallParticipantStatus.accept)
-              AITranscriberPanel(
-                bottomOffset: _controlsHeight +
-                    48 +
-                    MediaQuery.of(context).padding.bottom,
-                animationDuration: Duration.zero,
-              ),
-            Positioned(
-              right: 0,
-              left: 0,
-              bottom: 40 + MediaQuery.of(context).padding.bottom,
-              child: SingleCallControlsWidget(key: _controlsKey),
-            ),
-            _getTimerWidget(),
-            _buildAITranscriberBtnWidget(),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildUserInfoWidget(BuildContext context) {
-    if (CallStore.shared.state.activeCall.value.mediaType ==
-            CallMediaType.video &&
-        CallStore.shared.state.selfInfo.value.status ==
-            CallParticipantStatus.accept) {
-      return Container();
-    }
-    return Positioned(
-      top: MediaQuery.of(context).size.height / 4,
-      width: MediaQuery.of(context).size.width,
-      child: ValueListenableBuilder(
-        valueListenable: CallStore.shared.state.allParticipants,
-        builder: (context, allParticipants, child) {
-          CallParticipantInfo? remoteParticipant;
-          for (var participant in allParticipants) {
-            if (participant.id != CallStore.shared.state.selfInfo.value.id) {
-              remoteParticipant = participant;
-            }
-          }
-          return Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                height: 100,
-                width: 100,
-                clipBehavior: Clip.hardEdge,
-                decoration: const BoxDecoration(
-                  borderRadius: BorderRadius.all(Radius.circular(8)),
-                ),
-                child: Image(
-                  image: NetworkImage(
-                    StringStream.makeNull(
-                      remoteParticipant?.avatarURL,
-                      Constants.defaultAvatar,
-                    ),
-                  ),
-                  fit: BoxFit.cover,
-                  errorBuilder: (ctx, err, stackTrace) => Image.asset(
-                    'call_assets/user_icon.png',
-                    package: 'tuikit_atomic_x',
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                remoteParticipant != null
-                    ? _getUserDisplayName(remoteParticipant)
-                    : "",
-                textScaleFactor: 1.0,
-                style: TextStyle(
-                  fontSize: 18,
-                  color: _getUserNameColor(),
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: Listenable.merge([
+          CallStore.shared.state.activeCall,
+          CallStore.shared.state.selfInfo,
+          CallStore.shared.state.allParticipants,
+          DeviceStore.shared.state.cameraStatus,
+        ]),
+        builder: (context, _) {
+          final state = CallStore.shared.state;
+          final self = state.selfInfo.value;
+          final call = state.activeCall.value;
+          final remote = state.allParticipants.value
+              .where((p) => p.id != self.id)
+              .firstOrNull;
+          final video = call.mediaType == CallMediaType.video;
+          final accepted = self.status == CallParticipantStatus.accept;
+          // 腾讯单聊模板通过邀请资料查找远端，等参与者标识齐全后再挂载。
+          final canRenderVideo = video &&
+              self.id.isNotEmpty &&
+              call.inviterId.isNotEmpty &&
+              call.inviteeIds.isNotEmpty &&
+              self.status != CallParticipantStatus.none;
+          final selfUser = _user(
+            self,
+            cameraOn: canRenderVideo &&
+                DeviceStore.shared.state.cameraStatus.value == DeviceStatus.on,
+          );
+          final remoteUser = remote == null
+              ? null
+              : _user(remote,
+                  cameraOn: canRenderVideo && remote.isCameraOpened);
+          return CallScene(
+            key: ValueKey(call.callId),
+            self: selfUser,
+            remote: remoteUser,
+            video: video,
+            accepted: accepted,
+            localInMainView: _localInMainView,
+            onSwap: () => setState(() => _localInMainView = !_localInMainView),
+            // 接通后固定使用双槽布局。开关摄像头时由画面组件切换头像和视频。
+            combinedVideo: !accepted && selfUser.cameraOn
+                ? CallCoreView(
+                    key: ValueKey(call.callId), controller: widget.controller)
+                : null,
+            videoBuilder: (id) => accepted && canRenderVideo
+                ? CallVideoView(
+                    key: id == self.id ? _localVideoKey : _remoteVideoKey,
+                    userId: id,
+                    local: id == self.id)
+                : const SizedBox.shrink(),
+            controls: const SingleCallControlsWidget(),
+            hint: const HintWidget(),
+            timer: const TimerWidget(fontSize: 16, fontWeight: FontWeight.w600),
           );
         },
-      ),
-    );
-  }
+      );
 
-  Widget _getTimerWidget() {
-    return Positioned(
-      top: 20,
-      width: MediaQuery.of(context).size.width,
-      height: 100,
-      child: const Center(child: TimerWidget()),
-    );
-  }
-
-  String _getUserDisplayName(CallParticipantInfo info) {
-    if (info.remark.isNotEmpty) {
-      return info.remark;
-    } else if (info.name.isNotEmpty) {
-      return info.name;
-    } else {
-      return info.id;
-    }
-  }
-
-  _getUserNameColor() {
-    return CallStore.shared.state.activeCall.value.mediaType ==
-            CallMediaType.audio
-        ? CallColors.colorG7
-        : CallColors.colorWhite;
-  }
-
-  _buildAITranscriberBtnWidget() {
-    return ValueListenableBuilder(
-      valueListenable: CallStore.shared.state.selfInfo,
-      builder: (context, selfInfo, child) {
-        if (selfInfo.status != CallParticipantStatus.accept ||
-            !widget.enableAITranscriber) {
-          return const SizedBox();
-        }
-        return const Positioned(
-          left: 52,
-          top: 52,
-          width: 40,
-          height: 40,
-          child: AITranscriberButton(),
-        );
-      },
-    );
-  }
+  /// 映射 SDK 资料，画面尚不可渲染时按头像状态展示。
+  CallSceneUser _user(CallParticipantInfo info, {required bool cameraOn}) => (
+        id: info.id,
+        name: info.remark.isNotEmpty
+            ? info.remark
+            : info.name.isNotEmpty
+                ? info.name
+                : info.id,
+        avatarUrl: info.avatarURL,
+        // 腾讯基础资料没有可核实的机构职务字段，不映射猜测的自定义键。
+        subtitle: '',
+        cameraOn: cameraOn,
+      );
 }
