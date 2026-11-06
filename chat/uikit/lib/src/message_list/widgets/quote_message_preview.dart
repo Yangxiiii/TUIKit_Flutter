@@ -16,11 +16,15 @@ class QuoteMessagePreview extends StatelessWidget {
   final VoidCallback? onTap;
   final double maxWidth;
 
+  /// Web 回复使用单行摘要并可独立定位原消息；未指定时沿用原生富媒体预览。
+  final String? compactIdentifier;
+
   const QuoteMessagePreview({
     super.key,
     required this.quoteInfo,
     this.onTap,
     this.maxWidth = 200,
+    this.compactIdentifier,
   });
 
   @override
@@ -28,6 +32,36 @@ class QuoteMessagePreview extends StatelessWidget {
     final colors = SemanticColorScheme.of(context);
     final locale = AppLocalization.of(context);
 
+    if (compactIdentifier != null) {
+      final available = quoteInfo.status != MessageStatus.revoked &&
+          quoteInfo.status != MessageStatus.deleted;
+      final text = available
+          ? '${quoteInfo.sender.nickname ?? ''}：${(quoteInfo.messagePayload as TextMessagePayload?)?.text ?? ''}'
+          : quoteInfo.status == MessageStatus.revoked
+              ? locale.quotedMessageRevoked
+              : locale.quotedMessageNotFound;
+      return Semantics(
+        identifier: compactIdentifier,
+        button: true,
+        child: InkWell(
+          onTap: () => _handleTap(context, locale),
+          child: Container(
+            constraints: BoxConstraints(maxWidth: maxWidth),
+            margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            padding: const EdgeInsets.only(left: 6),
+            decoration: BoxDecoration(
+              border:
+                  Border(left: BorderSide(color: colors.strokeColorPrimary)),
+            ),
+            child: Text(text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: FontScheme.caption2Regular
+                    .copyWith(color: colors.textColorSecondary)),
+          ),
+        ),
+      );
+    }
     return GestureDetector(
       onTap: () => _handleTap(context, locale),
       child: Container(

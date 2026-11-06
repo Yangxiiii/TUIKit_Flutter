@@ -11,6 +11,9 @@ class LocalMessageWindow {
   /// 当前会话已确认撤回的ID，刷新时保留，重进时从退出快照恢复。
   final Set<String> _revoked = {};
 
+  /// 即使源消息不在当前页，已收到的撤回事实仍用于隐藏 Web 引用摘要。
+  bool isRevoked(String id) => _revoked.contains(id);
+
   /// 安装本地首屏；已记录的删除、撤回与更新结果优先于迟到候选。
   void seed(List<MessageInfo> messages) {
     reconcileRevocations(messages);

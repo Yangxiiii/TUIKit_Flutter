@@ -110,6 +110,12 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   // 从长按菜单选择“引用”时的回调
   final void Function(MessageInfo message)? onQuoteMessage;
 
+  /// Web 回复的快照，非空时优先于原生引用的当前正文。
+  final MessageQuoteInfo? replyQuote;
+
+  /// 单条原消息的直接回复入口，跟随气泡方向对齐。
+  final Widget? replyIndicator;
+
   /// In merged detail view: the bundle's full message list, used as the
   /// static data source for image / video viewers when [isInMergedDetailView]
   /// is true. The page's MessageListStore is empty in that mode, so the
@@ -146,6 +152,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     this.onTranslationBubbleLongPress,
     this.onQuotePreviewTap,
     this.onQuoteMessage,
+    this.replyQuote,
+    this.replyIndicator,
     this.mergedMediaMessages,
   });
 
@@ -182,7 +190,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
       }
     }
 
-    Widget messageBubble = MessageBubble(
+    final messageBubble = MessageBubble(
       message: message,
       conversationID: conversationID,
       isSelf: isSelf,
@@ -200,6 +208,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
       onTranslationBubbleLongPress: onTranslationBubbleLongPress,
       onCallMessageClick: onCallMessageClick,
       onQuotePreviewTap: onQuotePreviewTap,
+      replyQuote: replyQuote,
       mergedMediaMessages: mergedMediaMessages,
     );
 
@@ -566,6 +575,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                 // Bug-956459.
                 //
                 // ASR/翻译气泡（存在时）挂在行*下方*，不会把回执往下推——见
+                if (replyIndicator != null) replyIndicator!,
                 if (attachment != null) attachment,
                 // Violation hint text below the bubble
                 //
@@ -653,6 +663,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                     Flexible(child: messageBubble),
                   ],
                 ),
+                if (replyIndicator != null) replyIndicator!,
                 if (attachment != null) attachment,
                 // Violation hint text below the bubble
                 //
@@ -723,12 +734,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
 
     final attachment = _buildAttachmentIfAny(true);
 
-    // When the other side's left avatar is shown, add a left spacer for self messages
-    // so the bubble's left edge aligns with other-message bubble's left edge
-    // and doesn't overlap with the other side's avatar.
-    //
-    // 当显示对方的左边头像时，为自己消息添加左侧间隔，这样气泡的左边缘就能和对方消息气泡的左边缘对齐，不会覆盖对方的头像。
-    final needLeftSpacer = config.isShowLeftAvatar;
+    // 普通消息按对侧头像对齐，回复可以使用这段留白，实际头像和回执继续独立排列。
+    final needLeftSpacer = config.isShowLeftAvatar && replyQuote == null;
     final leftSpacerWidth =
         needLeftSpacer ? AvatarSize.m.value + config.avatarSpacing : 0.0;
 
@@ -763,6 +770,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                 Flexible(child: messageBubble),
               ],
             ),
+            // 计数独立占一行，避免把正文旁的回执拉到计数的底部。
+            if (replyIndicator != null) replyIndicator!,
             if (attachment != null) attachment,
             // Violation hint text below the bubble
             //
@@ -779,7 +788,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
       if (config.isShowRightAvatar) SizedBox(width: config.avatarSpacing),
       if (config.isShowRightAvatar)
         _groupAvatar(Avatar(
-                userID: message.from.userID,
+          userID: message.from.userID,
           content: AvatarImageContent(
               url: displayAvatarUrl, name: displaySenderName),
         )),
@@ -818,7 +827,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                   }
                 },
           child: _groupAvatar(Avatar(
-                userID: message.from.userID,
+            userID: message.from.userID,
             content: AvatarImageContent(
                 url: displayAvatarUrl, name: displaySenderName),
           )),
@@ -837,6 +846,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                 ),
               ),
             messageBubble,
+            if (replyIndicator != null) replyIndicator!,
             if (attachment != null) attachment,
             // Violation hint text below the bubble
             //
@@ -850,12 +860,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
           ],
         ),
       ),
-      // When self's right avatar is shown, add a right spacer for other messages
-      // so the bubble's right edge aligns with self-message bubble's right edge
-      // and doesn't overlap with self's avatar.
-      //
-      // 当显示自己的右边头像时，为对方消息添加右侧间隔，这样气泡的右边缘就能和自己消息气泡的右边缘对齐，不会覆盖自己的头像。
-      if (config.isShowRightAvatar)
+      // 对方普通消息按己方头像对齐，回复摘要可使用这段留白。
+      if (config.isShowRightAvatar && replyQuote == null)
         SizedBox(width: AvatarSize.m.value + config.avatarSpacing),
     ];
   }

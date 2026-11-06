@@ -33,6 +33,9 @@ class CustomMessageWidget extends StatelessWidget {
   final VoidCallback? onLongPress;
   final MessageListStore? messageListStore;
 
+  /// 回复详情与聊天气泡共用附件解析和预览，详情正文使用独立排版。
+  final ({Widget? receipt})? replyDetail;
+
   const CustomMessageWidget({
     super.key,
     required this.message,
@@ -42,6 +45,7 @@ class CustomMessageWidget extends StatelessWidget {
     this.onTap,
     this.onLongPress,
     this.messageListStore,
+    this.replyDetail,
   });
 
   @override
@@ -114,8 +118,19 @@ class CustomMessageWidget extends StatelessWidget {
     RichContentMessage content, {
     bool localPreview = false,
   }) {
-    final foreground =
-        isSelf ? colors.textColorAntiPrimary : colors.textColorPrimary;
+    final detail = replyDetail;
+    final receipt = detail?.receipt;
+    final receiptIndex = receipt == null
+        ? -1
+        : content.blocks.lastIndexWhere((block) => block is RichTextBlock);
+    final foreground = detail != null
+        ? app.AppColorBuildContext(context).appColors.textPrimary
+        : isSelf
+            ? colors.textColorAntiPrimary
+            : colors.textColorPrimary;
+    final textStyle = detail == null
+        ? FontScheme.caption1Regular.copyWith(color: foreground)
+        : TextStyle(fontSize: 14, height: 20 / 14, color: foreground);
     // 文字气泡在不同对齐方式下的尾角方向必须保持一致。
     final tailOnRight =
         config.alignment == 'right' || (config.alignment != 'left' && isSelf);
@@ -123,18 +138,25 @@ class CustomMessageWidget extends StatelessWidget {
     return GestureDetector(
       onLongPress: onLongPress,
       child: Container(
-        constraints: BoxConstraints(maxWidth: maxWidth * 0.7),
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-        decoration: BoxDecoration(
-          color:
-              isSelf ? colors.bgColorBubbleOwn : colors.bgColorBubbleReciprocal,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(radius),
-            topRight: Radius.circular(radius),
-            bottomLeft: Radius.circular(tailOnRight ? radius : 0),
-            bottomRight: Radius.circular(tailOnRight ? 0 : radius),
-          ),
+        constraints: BoxConstraints(
+          maxWidth: detail == null ? maxWidth * 0.7 : maxWidth,
         ),
+        padding: detail == null
+            ? const EdgeInsets.fromLTRB(16, 8, 16, 8)
+            : EdgeInsets.zero,
+        decoration: detail == null
+            ? BoxDecoration(
+                color: isSelf
+                    ? colors.bgColorBubbleOwn
+                    : colors.bgColorBubbleReciprocal,
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(radius),
+                  topRight: Radius.circular(radius),
+                  bottomLeft: Radius.circular(tailOnRight ? radius : 0),
+                  bottomRight: Radius.circular(tailOnRight ? 0 : radius),
+                ),
+              )
+            : null,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -143,12 +165,8 @@ class CustomMessageWidget extends StatelessWidget {
             for (final (index, block) in content.blocks.indexed) ...[
               if (index > 0) const SizedBox(height: 8),
               switch (block) {
-                RichTextBlock(:final text) => RichContentMarkdown(
-                    data: text,
-                    textStyle: FontScheme.caption1Regular.copyWith(
-                      color: foreground,
-                    ),
-                  ),
+                RichTextBlock(:final text) => _buildRichText(
+                    text, textStyle, index == receiptIndex ? receipt : null),
                 RichImageBlock(:final url, :final width, :final height) =>
                   _buildImage(
                     context,
@@ -195,9 +213,21 @@ class CustomMessageWidget extends StatelessWidget {
                       localPreview: localPreview),
               },
             ],
+            if (receipt != null && receiptIndex < 0) receipt,
           ],
         ),
       ),
+    );
+  }
+
+  /// 回执与正文同一行，长正文保留折行，后续图片继续独立占行。
+  Widget _buildRichText(String text, TextStyle style, Widget? receipt) {
+    final body = RichContentMarkdown(data: text, textStyle: style);
+    if (receipt == null) return body;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [Flexible(child: body), const SizedBox(width: 8), receipt],
     );
   }
 
@@ -214,7 +244,7 @@ class CustomMessageWidget extends StatelessWidget {
     final size = width != null && height != null
         ? _mediaDisplaySize(width, height)
         : null;
-    final displayWidth = size?.width ?? math.max(1.0, maxWidth * 0.7 - 24);
+    final displayWidth = size?.width ?? _mediaWidth;
     // 无尺寸消息交由图片解码确定比例，仍限制最大高度，避免长图撑满聊天窗口。
     final displayHeight = size?.height;
     return Semantics(
@@ -223,7 +253,9 @@ class CustomMessageWidget extends StatelessWidget {
         behavior: HitTestBehavior.opaque,
         onTap: onPreview,
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: replyDetail == null
+              ? BorderRadius.circular(8)
+              : BorderRadius.zero,
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: displayWidth, maxHeight: 240),
             child: Image(
@@ -265,8 +297,12 @@ class CustomMessageWidget extends StatelessWidget {
   Size _mediaDisplaySize(int width, int height) => applyBoxFit(
         BoxFit.contain,
         Size(width.toDouble(), height.toDouble()),
-        Size(math.max(1.0, maxWidth * 0.7 - 24), 240),
+        Size(_mediaWidth, 240),
       ).destination;
+
+  /// 详情媒体最大宽度为设计的 208 逻辑像素，窄屏随正文宽度收缩。
+  double get _mediaWidth => math.max(1.0,
+      replyDetail == null ? maxWidth * 0.7 - 24 : math.min(maxWidth, 208.0));
 
   /// 与编辑器一致，按展示物理像素的 1.5 倍解码；保持比例且不放大小图。
   ResizeImage _resizeMediaImage(

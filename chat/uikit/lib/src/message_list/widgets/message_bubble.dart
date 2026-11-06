@@ -228,6 +228,12 @@ class MessageBubble extends StatefulWidget {
   // 点击引用预览时的回调（用于导航到被引用的消息）
   final void Function(MessageInfo message)? onQuotePreviewTap;
 
+  /// Web 回复保留发送时的引用摘要，原生引用继续走既有展示。
+  final MessageQuoteInfo? replyQuote;
+
+  /// 回复详情只展示当前消息内容，图文块可在正文旁显示回执。
+  final ({Widget? receipt})? replyDetail;
+
   /// In merged detail view: the bundle's full message list, used as the
   /// static data source for image / video viewers (the page's
   /// MessageListStore is empty in this mode).
@@ -254,6 +260,8 @@ class MessageBubble extends StatefulWidget {
     this.onTranslationBubbleLongPress,
     this.onCallMessageClick,
     this.onQuotePreviewTap,
+    this.replyQuote,
+    this.replyDetail,
     this.mergedMediaMessages,
   });
 
@@ -264,6 +272,11 @@ class MessageBubble extends StatefulWidget {
 /// 管理消息气泡的高亮动画与菜单生命周期，并渲染对应消息类型。
 class _MessageBubbleState extends State<MessageBubble>
     with SingleTickerProviderStateMixin {
+  /// 回复详情已展示原消息，独立的聊天引用摘要只在其他入口渲染。
+  MessageQuoteInfo? get _quoteInfo => widget.replyDetail == null
+      ? widget.replyQuote ?? widget.message.quoteInfo
+      : null;
+
   /// 当前消息及列表模式的菜单回调，保留气泡状态时仍随Widget更新替换。
   late MessageMenuCallbacks _menuCallbacks;
   final _voiceFallbackGuard = ActionGuard();
@@ -430,12 +443,10 @@ class _MessageBubbleState extends State<MessageBubble>
           isSelf: widget.isSelf,
           maxWidth: widget.maxWidth,
           config: widget.config,
-          onLongPress:
-              widget.message.quoteInfo != null ? null : _longPressCallback,
-          bubbleKey: widget.message.quoteInfo != null ? null : _messageKey,
-          backgroundBuilder: widget.message.quoteInfo != null
-              ? (child) => child
-              : backgroundBuilder,
+          onLongPress: _quoteInfo != null ? null : _longPressCallback,
+          bubbleKey: _quoteInfo != null ? null : _messageKey,
+          backgroundBuilder:
+              _quoteInfo != null ? (child) => child : backgroundBuilder,
           onResendTap: widget.message.status == MessageStatus.sendFail
               ? _showResendConfirmDialog
               : null,
@@ -575,6 +586,7 @@ class _MessageBubbleState extends State<MessageBubble>
             config: widget.config,
             onLongPress: _longPressCallback,
             messageListStore: widget.messageListStore,
+            replyDetail: widget.replyDetail,
           );
         }
         break;
@@ -628,14 +640,19 @@ class _MessageBubbleState extends State<MessageBubble>
         messageWidget = _buildUnsupportedMessage(context);
     }
 
-    // Wrap with quote message preview if this message has quoteInfo
-    // The quote preview is placed INSIDE the bubble (same background)
-    //
-    // 如果消息有 quoteInfo，就用引用消息预览包裹。引用预览放在气泡内部（同样的背景）。
-    if (widget.message.quoteInfo != null) {
+    // 引用与正文共享气泡背景，Web 回复使用单行快照，定位仍交给原列表。
+    final quoteInfo = _quoteInfo;
+    if (quoteInfo != null) {
+      // Web 引用使用消息行在头像和回执之外的可用宽度。
+      final quoteWidth =
+          widget.replyQuote == null ? _getBubbleMaxWidth() : widget.maxWidth;
       final quotePreview = QuoteMessagePreview(
-        quoteInfo: widget.message.quoteInfo!,
-        maxWidth: widget.maxWidth * 0.7,
+        quoteInfo: quoteInfo,
+        compactIdentifier: widget.replyQuote == null ||
+                widget.message.msgID.isEmpty
+            ? null
+            : 'tim.reply.quote.${Uri.encodeComponent(widget.message.msgID)}',
+        maxWidth: quoteWidth,
         onTap: widget.onQuotePreviewTap != null
             ? () => widget.onQuotePreviewTap!(widget.message)
             : null,
@@ -672,7 +689,7 @@ class _MessageBubbleState extends State<MessageBubble>
               curve: const Interval(0.6, 1.0, curve: Curves.easeOut),
             ));
             return Container(
-              constraints: BoxConstraints(maxWidth: widget.maxWidth * 0.7),
+              constraints: BoxConstraints(maxWidth: quoteWidth),
               decoration: BoxDecoration(
                 color: _highlightAnimationController.value <= 0.5
                     ? colorAnimation.value
@@ -686,7 +703,7 @@ class _MessageBubbleState extends State<MessageBubble>
         );
       } else {
         bubbleContainer = Container(
-          constraints: BoxConstraints(maxWidth: widget.maxWidth * 0.7),
+          constraints: BoxConstraints(maxWidth: quoteWidth),
           decoration: BoxDecoration(
             color: _getBubbleColor(colorsTheme),
             borderRadius: _getBubbleBorderRadius(),
@@ -695,6 +712,10 @@ class _MessageBubbleState extends State<MessageBubble>
         );
       }
       messageWidget = GestureDetector(
+        key: widget.replyQuote != null &&
+                widget.message.messageType == MessageType.text
+            ? _messageKey
+            : null,
         onLongPress: _longPressCallback,
         child: bubbleContainer,
       );

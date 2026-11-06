@@ -41,9 +41,11 @@ void main() {
 
   Future<void> mount(WidgetTester tester,
           {RichContentAttachmentUploader? uploader,
+          ChatMessageReplyConfig? replyConfig,
           bool voicePreview = false}) =>
       tester.pumpWidget(
         MaterialApp(
+          builder: replyConfig == null ? null : AppDialog.init(),
           theme: AppThemeFactory.create(
             const AppNormalColorScheme(),
             Brightness.light,
@@ -53,6 +55,7 @@ void main() {
               const Spacer(),
               MessageInput(
                 conversationID: 'c2c_test',
+                replyConfig: replyConfig,
                 config: ChatMessageInputConfig(
                     actionGuard: ActionGuard(),
                     previewVoiceBeforeSend: voicePreview,
@@ -552,6 +555,55 @@ void main() {
     state.invalidateRecalledQuote([message]);
     await tester.pump();
     expect(find.textContaining('应被清除的引用原文'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('回复卡片共享摘要和输入区，超限显示回复提示且保留正文', (tester) async {
+    await mount(tester,
+        replyConfig: ChatMessageReplyConfig(
+          project: (window, isRevoked) => (quotes: {}, replies: {}),
+          openDetails: (context, message, replies, store) {},
+          sendError: (_) => (message: '', reset: false),
+          canStart: (context, message, count) => true,
+          contentTooLongMessage: '回复内容超长',
+        ));
+    sdk.conversations.completeDraft('');
+    await tester.pump();
+    final state = tester.state<MessageInputState>(find.byType(MessageInput));
+    state.setQuotedMessage(ChatUtil.convertToUIMessage(V2TimMessage.fromJson({
+      'message_msg_id': 'quoted',
+      'message_conv_id': 'test',
+      'message_conv_type': 1,
+      'message_status': 2,
+      'message_risk_type_identified': 0,
+      'message_elem_array': [
+        {'elem_type': 0, 'text_elem_content': '被回复的原文'},
+      ],
+    })
+      ..nickName = '原作者'));
+    await tester.pump();
+    final cancel = find.bySemanticsIdentifier('tim.reply.cancel');
+    final input = find.byType(ExtendedTextField);
+    expect(
+        tester.widget<ExtendedTextField>(input).decoration?.hintText, '发送给原作者');
+    expect(
+        tester.getBottomLeft(cancel).dy, lessThan(tester.getTopLeft(input).dy));
+    expect(find.byKey(const Key('open_rich_content_editor')), findsNothing);
+    expect(tester.testTextInput.isVisible, isTrue);
+    expect(sendButton(tester).onPressed, isNull);
+
+    final content = '字' * 4001;
+    await enter(tester, content);
+    await tester.pump();
+    expect(find.text('回复内容超长'), findsOneWidget);
+    expect(sendButton(tester).onPressed, isNull);
+    await tester.tap(cancel);
+    await tester.pump();
+    expect(cancel, findsNothing);
+    expect(find.byKey(const Key('open_rich_content_editor')), findsOneWidget);
+    expect(tester.widget<ExtendedTextField>(input).controller!.text, content);
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
     await tester.pumpWidget(const SizedBox.shrink());
   });
 

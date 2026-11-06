@@ -282,7 +282,7 @@ class _MessageActionSheetState extends State<MessageActionSheet> {
     final colors = context.appColors;
     return Row(children: [
       for (final entry in [
-        ('reply', '回复', AppIcons.reply),
+        ('reply', '回复', AppIcons.reply1),
         ('forward', '转发', AppIcons.forward),
         ('mark', '标记', AppIcons.mark),
         ('copy', '复制', AppIcons.copy)

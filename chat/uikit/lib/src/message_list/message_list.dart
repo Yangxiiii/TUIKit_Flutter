@@ -15,6 +15,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show setEquals;
 import 'widgets/message_actions_scope.dart';
 import 'widgets/message_overlay_avoider.dart';
+import 'message_reply_config.dart';
+import 'widgets/message_reply_count.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_list/message_list_config.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/at_mention_utils.dart';
@@ -144,6 +146,9 @@ class MessageList extends StatefulWidget {
   final bool aggregateMessages;
   final String conversationID;
   final MessageListConfigProtocol config;
+
+  /// 非空时由宿主解析 Web 回复并打开详情，未配置的会话保持原引用行为。
+  final ChatMessageReplyConfig? replyConfig;
   final MessageInfo? locateMessage;
   final OnUserClick? onUserClick;
 
@@ -212,6 +217,7 @@ class MessageList extends StatefulWidget {
     this.onUserLongPress,
     this.onCallMessageClick,
     this.onQuoteMessage,
+    this.replyConfig,
     this.customActions = const [],
     this.onMessagesChanged,
     this.onMessagesDeleted,
@@ -1448,7 +1454,11 @@ class _MessageListState extends State<MessageList>
   }
 
   /// 时间组仍留24像素；连续头像组留8像素，其他消息使用宿主间距，隐藏消息不占布局。
-  Widget _renderItem(BuildContext context, int index) {
+  Widget _renderItem(
+    BuildContext context,
+    int index,
+    ChatMessageReplyView? replies,
+  ) {
     if (index >= _messages.length) return Container();
     final message = _messages[index];
 
@@ -1490,7 +1500,13 @@ class _MessageListState extends State<MessageList>
       child: Column(
         children: [
           if (shouldShowTime) _buildTimeDivider(timeString, colors),
-          _buildMessageItem(message, colors, isContinuation: isContinuation),
+          _buildMessageItem(
+            message,
+            colors,
+            isContinuation: isContinuation,
+            replyQuote: replies?.quotes[message.msgID],
+            replyIds: replies?.replies[message.msgID] ?? const [],
+          ),
           if (_isLoadingNewer && index == _messages.length - 1)
             const Padding(
               padding: EdgeInsets.all(16),
@@ -1503,7 +1519,9 @@ class _MessageListState extends State<MessageList>
 
   /// 每条气泡保留独立操作与可见性检测，聚合只隐藏头像，不合并消息身份。
   Widget _buildMessageItem(MessageInfo message, SemanticColorScheme colors,
-      {bool isContinuation = false}) {
+      {bool isContinuation = false,
+      MessageQuoteInfo? replyQuote,
+      List<String> replyIds = const []}) {
     bool isGroup = widget.conversationID.startsWith(groupConversationIDPrefix);
 
     final messageWidget = RepaintBoundary(
@@ -1546,8 +1564,29 @@ class _MessageListState extends State<MessageList>
             onAsrBubbleLongPress: _showAsrTextMenu,
             translationDisplayManager: _translationDisplayManager,
             onTranslationBubbleLongPress: _showTranslationTextMenu,
-            onQuotePreviewTap: _onQuotePreviewTap,
-            onQuoteMessage: widget.onQuoteMessage,
+            onQuotePreviewTap: (message) =>
+                _onQuotePreviewTap(message, replyQuote),
+            onQuoteMessage: (target) {
+              if (widget.replyConfig
+                      ?.canStart(context, target, replyIds.length) !=
+                  false) {
+                widget.onQuoteMessage?.call(target);
+              }
+            },
+            replyQuote: replyQuote,
+            replyIndicator: replyIds.isEmpty || _isMultiSelectMode
+                ? null
+                : MessageReplyCount(
+                    count: replyIds.length,
+                    identifier:
+                        'tim.reply.count.${Uri.encodeComponent(message.msgID)}',
+                    onTap: () => widget.replyConfig?.openDetails(
+                      context,
+                      message,
+                      replyIds,
+                      _messageListStore,
+                    ),
+                  ),
           );
         },
       ),
@@ -1595,6 +1634,9 @@ class _MessageListState extends State<MessageList>
     // 必须调用super.build；需要AutomaticKeepAliveClientMixin。
     super.build(context);
     final colorsTheme = SemanticColorScheme.of(context);
+    // 每个窗口只合并一次回复索引，滚动复用同一份派生数据。
+    final replies =
+        widget.replyConfig?.project(_messages, _localWindow.isRevoked);
 
     return Expanded(
       child: MessageOverlayAvoider(
@@ -1626,7 +1668,8 @@ class _MessageListState extends State<MessageList>
                             initialScrollIndex: _initialScrollIndex,
                             initialAlignment: _initialScrollAlignment,
                             itemCount: _messages.length,
-                            itemBuilder: _renderItem,
+                            itemBuilder: (context, index) =>
+                                _renderItem(context, index, replies),
                             addRepaintBoundaries: true,
                             addAutomaticKeepAlives: true,
                             addSemanticIndexes: false,
@@ -2124,8 +2167,8 @@ class _MessageListState extends State<MessageList>
   /// Handle tap on quote preview inside a message bubble — navigate to quoted message
   ///
   /// 处理消息气泡内引用预览的点击 — 导航到被引用的消息
-  void _onQuotePreviewTap(MessageInfo message) {
-    final quoteInfo = message.quoteInfo;
+  void _onQuotePreviewTap(MessageInfo message, [MessageQuoteInfo? replyQuote]) {
+    final quoteInfo = replyQuote ?? message.quoteInfo;
     if (quoteInfo == null || quoteInfo.msgID.isEmpty) return;
 
     // Capture the full source MessageInfo (not just msgID) — the reverse

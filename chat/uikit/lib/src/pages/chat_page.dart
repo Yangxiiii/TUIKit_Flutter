@@ -63,6 +63,9 @@ class ChatPage extends AppBaseStatefulPage {
   /// 宿主提供的单聊撤回与原设备重新编辑能力；为空时沿用UIKit原行为。
   final ChatMessageRecallConfig? messageRecallConfig;
 
+  /// 单聊回复沿用原引用输入、定位和消息窗口。
+  final ChatMessageReplyConfig? messageReplyConfig;
+
   /// 宿主提供单聊唯一置顶、横幅及状态变化；群聊不传此配置。
   final ChatMessageStickyConfig? messageStickyConfig;
 
@@ -91,6 +94,7 @@ class ChatPage extends AppBaseStatefulPage {
     this.messageListConfig = const ChatMessageListConfig(),
     this.messageEditConfig,
     this.messageRecallConfig,
+    this.messageReplyConfig,
     this.messageStickyConfig,
     this.isShowAppBarActions = true,
     this.onOpenSettings,
@@ -358,8 +362,10 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
 
   /// 只派生当前SDK窗口的标识；目标被撤回或删除时立即结束其可保存状态。
   void _onEditWindowChanged(List<MessageInfo> messages) {
-    // 撤回事件不仅使原地编辑失效，也必须移除普通输入区尚未发送的引用。
-    _messageInputKey.currentState?.invalidateRecalledQuote(messages);
+    // 普通引用随撤回失效；单聊回复保留到提交时，以便提示具体失败原因。
+    if (widget.messageReplyConfig == null) {
+      _messageInputKey.currentState?.invalidateRecalledQuote(messages);
+    }
     widget.messageEditConfig
         ?.onMessageWindowChanged(messages.map((m) => m.msgID).toList());
     final target = _editingMessage;
@@ -651,6 +657,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
               overlayController: _overlay,
               conversationID: widget.conversation.conversationID,
               config: widget.messageListConfig,
+              replyConfig: widget.messageReplyConfig,
               locateMessage: _locateMessage ?? widget.message,
               onMessagesChanged: widget.messageStickyConfig?.onMessagesChanged,
               onMessagesDeleted: widget.messageStickyConfig?.onMessagesDeleted,
@@ -706,6 +713,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
                 key: _messageInputKey,
                 conversationID: widget.conversation.conversationID,
                 config: widget.messageInputConfig,
+                replyConfig: widget.messageReplyConfig,
                 onLocalMessageSent:
                     widget.messageRecallConfig?.onLocalMessageSent,
               ),

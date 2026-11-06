@@ -43,6 +43,8 @@ export 'src/video_recorder/video_recorder.dart';
 export 'src/widgets/az_ordered_list.dart';
 export 'src/message_list/message_edit_config.dart';
 export 'src/message_list/message_recall_config.dart';
+export 'src/message_list/message_reply_config.dart';
+export 'src/message_list/widgets/message_reply_count.dart';
 export 'src/message_list/message_sticky_config.dart';
 export 'src/message_list/utils/sticky_message_event.dart';
 export 'src/message_list/widgets/message_types/image_message_widget.dart';

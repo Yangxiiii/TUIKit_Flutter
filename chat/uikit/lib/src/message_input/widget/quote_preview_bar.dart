@@ -1,23 +1,26 @@
 import 'package:tencent_chat_uikit/src/message_list/utils/big_file_message.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
+import 'package:app_ui/app_ui.dart' show AppIcons, AppColorBuildContext;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_input/src/chat_special_text_span_builder.dart';
 import 'package:tencent_chat_uikit/src/third_party/extended_text/extended_text.dart';
+import '../../message_list/utils/message_utils.dart';
 
-/// A preview bar displayed below the message input when quoting a message.
-/// Shows sender name + content preview (text / thumbnail / icon) + close button.
-///
-/// 引用消息时在消息输入框下显示的预览栏。显示发送者姓名 + 内容预览（文本/缩略图/图标）+ 关闭按钮。
+/// 引用预览栏。单聊回复在输入行上方展示单行摘要，原生引用保留媒体预览。
 class QuotePreviewBar extends StatelessWidget {
   final MessageInfo quotedMessage;
   final VoidCallback onClose;
+
+  /// 单聊回复的摘要位于共享输入卡片内，旧引用仍展示对应媒体预览。
+  final bool compactReply;
 
   const QuotePreviewBar({
     super.key,
     required this.quotedMessage,
     required this.onClose,
+    this.compactReply = false,
   });
 
   @override
@@ -26,6 +29,44 @@ class QuotePreviewBar extends StatelessWidget {
     final locale = AppLocalization.of(context);
     final senderName = ChatUtil.getMessageSenderName(quotedMessage);
 
+    if (compactReply) {
+      final appColors = context.appColors;
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        height: 32,
+        decoration: BoxDecoration(
+          color: appColors.referenceBackground,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(
+          children: [
+            // 关闭动作固定在左侧，任意消息类型的摘要都只占一行。
+            Semantics(
+              identifier: 'tim.reply.cancel',
+              label: '取消回复',
+              button: true,
+              child: InkWell(
+                onTap: onClose,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(AppIcons.close,
+                      size: 14, color: appColors.textSecondary),
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                '$senderName：${MessageUtil.getMessageAbstract(quotedMessage, context)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, color: appColors.textSecondary),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(

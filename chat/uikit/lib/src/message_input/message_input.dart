@@ -1,12 +1,13 @@
 import 'chat_media_sender.dart';
 import 'widget/call_selection_sheet.dart';
+import '../message_list/message_reply_config.dart';
 import '../message_list/utils/big_file_message.dart';
 import '../message_list/utils/rich_content_markdown_format.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:app_core/app_core.dart';
 import 'package:app_ui/app_ui.dart'
-    show AppIcons, AppDialog, AppColorBuildContext;
+    show AppIcons, AppDialog, AppColorBuildContext, AppToast;
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:atomic_x_core/impl/message/message_input_store_impl.dart';
 import 'package:atomic_x_core/impl/message/message_list_store_impl.dart';
@@ -75,6 +76,9 @@ class MessageInput extends StatefulWidget {
   /// 宿主配置的可见能力、附件上传器和统一操作守卫。
   final MessageInputConfigProtocol config;
 
+  /// 单聊发送失败使用宿主回复提示；其他会话继续使用 SDK 通用提示。
+  final ChatMessageReplyConfig? replyConfig;
+
   /// 仅当前输入流程的本机成功发送事件，用于宿主证明原发送设备。
   final ValueChanged<MessageInfo>? onLocalMessageSent;
 
@@ -84,6 +88,7 @@ class MessageInput extends StatefulWidget {
     this.conversationDisplayName,
     this.config = const ChatMessageInputConfig(),
     this.onLocalMessageSent,
+    this.replyConfig,
   });
 
   @override
@@ -736,7 +741,7 @@ class MessageInputState extends State<MessageInput>
     _handleMentionDetection();
   }
 
-  /// 超限时沿用宿主全局Toast，保留输入供修改；回到上限内后允许再次提示。
+  /// 超限时保留输入供修改，回复态使用回复专用文案；回到上限内可再次提示。
   void _updateTextLimitFeedback(int characterCount) {
     final exceeded = characterCount > messageTextCharacterLimit;
     final shouldNotify = exceeded && !_wasOverTextLimit;
@@ -745,8 +750,14 @@ class MessageInputState extends State<MessageInput>
     // 草稿恢复也可能触发校验，等当前帧结束后再展示覆盖层。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _wasOverTextLimit) {
-        Toast.error(
-            context, AppLocalization.of(context).messageTextLimitExceeded);
+        final reply = _quotedMessage == null ? null : widget.replyConfig;
+        if (reply == null) {
+          Toast.error(
+              context, AppLocalization.of(context).messageTextLimitExceeded);
+        } else {
+          AppToast.show(reply.contentTooLongMessage,
+              pill: true, semanticsIdentifier: 'tim.reply.error');
+        }
       }
     });
   }
@@ -1407,8 +1418,8 @@ class MessageInputState extends State<MessageInput>
         ..errorMessage = "Unsupported payload";
     }
 
-    // If quoting a message, set quoteInfo on the outgoing message
-    MessageInfo? quotedMsg = _quotedMessage;
+    // 固定本次回复目标，用户在异步发送中选择另一条消息时保留新引用。
+    final quotedMsg = _quotedMessage;
     if (quotedMsg != null) {
       messageInfo.quoteInfo = MessageQuoteInfo(
         msgID: quotedMsg.msgID,
@@ -1435,12 +1446,24 @@ class MessageInputState extends State<MessageInput>
     );
     if (!result.isSuccess) {
       if (mounted) {
-        Toast.error(context, atomicLocale.sendMessageFail);
+        final failure = quotedMsg == null
+            ? null
+            : widget.replyConfig?.sendError(result.errorCode);
+        if (failure == null) {
+          Toast.error(context, atomicLocale.sendMessageFail);
+        } else {
+          AppToast.show(failure.message,
+              pill: true, semanticsIdentifier: 'tim.reply.error');
+          if (failure.reset && identical(_quotedMessage, quotedMsg)) {
+            _textEditingController.clear();
+            _clearDraft();
+            clearQuotedMessage();
+          }
+        }
       }
-    } else {
-      // Clear quoted message after successful send
-      //
-      // 成功发送后清除引用消息
+    } else if (mounted &&
+        quotedMsg != null &&
+        identical(_quotedMessage, quotedMsg)) {
       clearQuotedMessage();
     }
 
@@ -2436,7 +2459,7 @@ class MessageInputState extends State<MessageInput>
         return Column(
           children: [
             _buildInputWidget(colors),
-            if (_quotedMessage != null)
+            if (_quotedMessage != null && widget.replyConfig == null)
               QuotePreviewBar(
                 quotedMessage: _quotedMessage!,
                 onClose: clearQuotedMessage,
@@ -2486,38 +2509,65 @@ class MessageInputState extends State<MessageInput>
     return true;
   }
 
-  /// 输入行与44高快捷栏分别承载，展开态仍保留原输入连接。
-  Widget _buildInputWidget(SemanticColorScheme colorsTheme) => Container(
-        color: colorsTheme.bgColorInput,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 只隐藏输入行，键盘与草稿继续由同一输入状态持有。
-            Offstage(
-              key: const Key('message_input_normal_input_offstage'),
-              offstage: _isRichContentEditorOpen,
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: _buildInputRow(colorsTheme),
+  /// 回复态将摘要和正文放进同一张卡片，快捷栏仍沿用聊天页的位置。
+  Widget _buildInputWidget(SemanticColorScheme colorsTheme) {
+    final reply = widget.replyConfig == null ? null : _quotedMessage;
+    return Container(
+      color: colorsTheme.bgColorInput,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 只隐藏输入行，键盘与草稿继续由同一输入状态持有。
+          Offstage(
+            key: const Key('message_input_normal_input_offstage'),
+            offstage: _isRichContentEditorOpen,
+            child: Container(
+              margin: reply == null
+                  ? EdgeInsets.zero
+                  : const EdgeInsets.fromLTRB(4, 4, 4, 0),
+              padding: reply == null
+                  ? const EdgeInsets.all(8)
+                  : const EdgeInsets.fromLTRB(6, 6, 6, 0),
+              decoration: BoxDecoration(
+                color: reply == null
+                    ? Colors.transparent
+                    : colorsTheme.bgColorOperate,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (reply != null)
+                    QuotePreviewBar(
+                      quotedMessage: reply,
+                      onClose: clearQuotedMessage,
+                      compactReply: true,
+                    ),
+                  _buildInputRow(colorsTheme, reply: reply),
+                ],
               ),
             ),
-            if (_inputMode != _InputMode.voice)
-              KeyedSubtree(
-                key: _sharedToolbarAnchorKey,
-                child: _buildSharedToolbar(
-                  key: const Key('message_input_shared_toolbar'),
-                ),
+          ),
+          if (_inputMode != _InputMode.voice)
+            KeyedSubtree(
+              key: _sharedToolbarAnchorKey,
+              child: _buildSharedToolbar(
+                key: const Key('message_input_shared_toolbar'),
               ),
-          ],
-        ),
-      );
+            ),
+        ],
+      ),
+    );
+  }
 
-  /// 语音入口固定在输入区底部，文本增高时不跟随正文滚动。
-  Widget _buildInputRow(SemanticColorScheme colorsTheme) => Row(
+  /// 普通输入保留独立录音入口，回复卡片全宽留给文字正文。
+  Widget _buildInputRow(SemanticColorScheme colorsTheme,
+          {required MessageInfo? reply}) =>
+      Row(
         key: const Key('message_input_normal_input_row'),
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          if (widget.config.isShowAudioRecorder) ...[
+          if (reply == null && widget.config.isShowAudioRecorder) ...[
             SizedBox(
               width: 36,
               height: 44,
@@ -2539,7 +2589,7 @@ class MessageInputState extends State<MessageInput>
           Expanded(
             child: _inputMode == _InputMode.voice
                 ? _buildHoldToTalkButton(colorsTheme)
-                : _buildTextInputArea(colorsTheme),
+                : _buildTextInputArea(colorsTheme, reply: reply),
           ),
         ],
       );
@@ -2605,17 +2655,18 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// 根据输入状态创建文本框，空闲时移除文本输入连接以便键盘及时收起。
-  Widget _buildTextInputArea(SemanticColorScheme colorsTheme) {
-    if (_inputMode == _InputMode.idle) {
+  Widget _buildTextInputArea(SemanticColorScheme colorsTheme,
+      {required MessageInfo? reply}) {
+    if (_inputMode == _InputMode.idle && reply == null) {
       return _buildIdleInputArea(colorsTheme);
     }
     return Container(
-      constraints: const BoxConstraints(minHeight: 44),
+      constraints: BoxConstraints(minHeight: reply == null ? 44 : 36),
       decoration: BoxDecoration(
         color: colorsTheme.bgColorOperate,
         borderRadius: BorderRadius.circular(8),
       ),
-      child: _buildInputTextField(colorsTheme: colorsTheme),
+      child: _buildInputTextField(colorsTheme: colorsTheme, reply: reply),
     );
   }
 
@@ -2796,7 +2847,11 @@ class MessageInputState extends State<MessageInput>
     );
   }
 
-  Widget _buildInputTextField({required SemanticColorScheme colorsTheme}) {
+  /// 回复态的占位指向原发送者，展开按钮由普通输入态承载。
+  Widget _buildInputTextField({
+    required SemanticColorScheme colorsTheme,
+    required MessageInfo? reply,
+  }) {
     return _MentionTextField(
       controller: _textEditingController,
       focusNode: _textEditingFocusNode,
@@ -2811,9 +2866,11 @@ class MessageInputState extends State<MessageInput>
       imageLoadingPlaceholder: widget.config.imageLoadingPlaceholder,
       videoLoadingPlaceholder: widget.config.videoLoadingPlaceholder,
       colorsTheme: colorsTheme,
-      hintText:
-          '发送给 ${widget.conversationDisplayName ?? _conversationInfo?.title ?? widget.conversationID}',
-      onExpand: _openRichContentEditor,
+      hintText: reply == null
+          ? '发送给 ${widget.conversationDisplayName ?? _conversationInfo?.title ?? widget.conversationID}'
+          : '发送给${ChatUtil.getMessageSenderName(reply)}',
+      onExpand: reply == null ? _openRichContentEditor : null,
+      compactReply: reply != null,
       onTap: () {
         if (_showEmojiPanel ||
             _showMorePanel ||
@@ -3078,6 +3135,9 @@ class _MentionTextField extends StatefulWidget {
   /// 展开编辑器时交回父输入区保留当前草稿。
   final VoidCallback? onExpand;
 
+  /// 回复正文位于摘要下方，使用卡片内边距。
+  final bool compactReply;
+
   /// 父输入区提供的格式同步约束，不在此截断超限正文。
   final TextInputFormatter? inputFormatter;
 
@@ -3101,6 +3161,7 @@ class _MentionTextField extends StatefulWidget {
     this.onTap,
     this.hintText,
     this.onExpand,
+    this.compactReply = false,
     this.inputFormatter,
     this.inlineAttachments = const {},
     this.videoPlayIcon,
@@ -3236,7 +3297,9 @@ class _MentionTextFieldState extends State<_MentionTextField> {
               Expanded(
                 // 上下留白放在轨道外侧，确保轨道长度与正文滚动视口完全一致。
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  padding: EdgeInsets.symmetric(
+                    vertical: widget.compactReply ? 6 : 10,
+                  ),
                   child: ClipRect(
                     child: Semantics(
                       identifier: 'tim.input.scrollbar',
@@ -3291,8 +3354,8 @@ class _MentionTextFieldState extends State<_MentionTextField> {
                               enabledBorder: InputBorder.none,
                               focusedBorder: InputBorder.none,
                               disabledBorder: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: widget.compactReply ? 0 : 12,
                               ),
                             ),
                             specialTextSpanBuilder:
