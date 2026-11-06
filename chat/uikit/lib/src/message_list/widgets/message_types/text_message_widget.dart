@@ -11,7 +11,7 @@ import '../message_actions_scope.dart';
 
 typedef BackgroundBuilder = Widget Function(Widget child);
 
-/// 渲染文字正文与气泡外观，发送状态及头像由外层消息项协调。
+/// 渲染文本型消息的共用气泡，支持纯文本正文和带媒体图标的通话记录。
 class TextMessageWidget extends StatefulWidget {
   /// 当前正文及发送状态的数据来源。
   final MessageInfo message;
@@ -34,6 +34,9 @@ class TextMessageWidget extends StatefulWidget {
   /// 自定义背景包裹器；未提供时使用配置中的气泡外观。
   final BackgroundBuilder? backgroundBuilder;
 
+  /// 可替换正文以保留业务图标，传入的样式与普通消息正文一致。
+  final Widget Function(TextStyle style)? contentBuilder;
+
   /// 交由业务重发失败消息，不在展示组件内创建发送任务。
   final VoidCallback? onResendTap;
 
@@ -53,6 +56,7 @@ class TextMessageWidget extends StatefulWidget {
     this.onLongPress,
     this.bubbleKey,
     this.backgroundBuilder,
+    this.contentBuilder,
     this.onResendTap,
     this.isInMergedDetailView = false,
   });
@@ -108,6 +112,11 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
 
   /// 只有实际显示内部时间或状态时才预留间隔，普通正文不保留空白尾槽。
   Widget _buildTextWithStatusAndTime(SemanticColorScheme colors) {
+    final style = FontScheme.caption1Regular.copyWith(
+      height: 1.5,
+      color:
+          widget.isSelf ? colors.textColorAntiPrimary : colors.textColorPrimary,
+    );
     final indicators = buildStatusAndTimeWidgets(
       message: widget.message,
       isSelf: widget.isSelf,
@@ -122,7 +131,9 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Flexible(
-          child: _buildTextContent(colors),
+          // 通话记录复用外框和状态栏，正文沿用自己的图标与文案。
+          child: widget.contentBuilder?.call(style) ??
+              _buildTextContent(colors, style),
         ),
         if (indicators.isNotEmpty) ...[
           const SizedBox(width: 8),
@@ -133,7 +144,7 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
   }
 
   /// 保留正文的链接及表情解析，仅在SDK附加数据已确认编辑后追加展示标签。
-  Widget _buildTextContent(SemanticColorScheme colorsTheme) {
+  Widget _buildTextContent(SemanticColorScheme colorsTheme, TextStyle style) {
     final text =
         (widget.message.messagePayload as TextMessagePayload?)?.text ?? '';
 
@@ -143,12 +154,6 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
             .contains(widget.message.msgID) ??
         false;
     // 编辑标识仅是展示文本，复制、引用和SDK正文仍使用原messagePayload。
-    final style = FontScheme.caption1Regular.copyWith(
-      height: 1.5,
-      color: widget.isSelf
-          ? colorsTheme.textColorAntiPrimary
-          : colorsTheme.textColorPrimary,
-    );
     final builder = ChatSpecialTextSpanBuilder(
       colorScheme: colorsTheme,
       onTapUrl: _launchUrl,

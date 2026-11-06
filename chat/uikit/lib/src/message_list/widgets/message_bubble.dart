@@ -574,6 +574,9 @@ class _MessageBubbleState extends State<MessageBubble>
             message: widget.message,
             isSelf: widget.isSelf,
             maxWidth: widget.maxWidth,
+            bubbleKey: _quoteInfo != null ? null : _messageKey,
+            backgroundBuilder:
+                _quoteInfo != null ? (child) => child : backgroundBuilder,
             isInMergedDetailView: widget.isInMergedDetailView,
             config: widget.config,
             onCallMessageClick: widget.onCallMessageClick,
