@@ -25,6 +25,7 @@ export interface AudioPlayerListener {
   onError?(errorMessage: string): void;
 }
 
+/** 统一管理聊天语音播放实例，并在播放结束后归还本次使用的音频路由。 */
 export default class AudioPlayerHelper {
   private static readonly TAG = 'ChatUiKit.AudioPlayerHelper';
   private static readonly PROGRESS_INTERVAL_MS = 200;
@@ -83,8 +84,9 @@ export default class AudioPlayerHelper {
       if (this.previousSpeaker === null) this.previousSpeaker = previous;
       this.appliedSpeaker = speaker;
     } catch (error) {
+      // 先恢复路由，再用 ArkTS 支持的 Error 向调用方保留原失败信息。
       await routing.setCommunicationDevice(audio.CommunicationDeviceType.SPEAKER, previous);
-      throw error;
+      throw new Error((error as Error).message);
     }
   }
 
