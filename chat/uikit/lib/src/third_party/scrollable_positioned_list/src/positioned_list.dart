@@ -13,22 +13,14 @@ import 'item_positions_notifier.dart';
 import 'scroll_view.dart';
 import 'wrapping.dart';
 
-/// A list of widgets similar to [ListView], except scroll control
-/// and position reporting is based on index rather than pixel offset.
-///
-/// [PositionedList] lays out children in the same way as [ListView].
-///
-/// The list can be displayed with the item at [positionIndex] positioned at a
-/// particular [alignment].  See [ItemScrollController.jumpTo] for an
-/// explanation of alignment.
-///
-/// All other parameters are the same as specified in [ListView].
+/// 围绕指定索引和对齐比例布局列表，并按索引报告可见项。
 class PositionedList extends StatefulWidget {
   /// Create a [PositionedList].
   const PositionedList({
     Key? key,
     required this.itemCount,
     required this.itemBuilder,
+    required this.leadingItemsInserted,
     this.separatorBuilder,
     this.controller,
     this.itemPositionsNotifier,
@@ -51,6 +43,9 @@ class PositionedList extends StatefulWidget {
 
   /// Number of items the [itemBuilder] can produce.
   final int itemCount;
+
+  /// 已补偿的头部插入总数，用于维持消息行的布局身份。
+  final int leadingItemsInserted;
 
   /// Called to build children for the list with
   /// 0 <= index < itemCount.
@@ -136,6 +131,7 @@ class PositionedList extends StatefulWidget {
   State<StatefulWidget> createState() => _PositionedListState();
 }
 
+/// 围绕中心索引布局消息，并在布局结束后发布可见位置。
 class _PositionedListState extends State<PositionedList> {
   final Key _centerKey = UniqueKey();
 
@@ -161,7 +157,26 @@ class _PositionedListState extends State<PositionedList> {
   @override
   void didUpdateWidget(PositionedList oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.leadingItemsInserted != widget.leadingItemsInserted &&
+        scrollController.hasClients) {
+      // 中心从索引 0 移开时，头部留白移到新增项外侧，需要扣除这段偏移。
+      final paddingChange =
+          _centerLeadingPadding(widget) - _centerLeadingPadding(oldWidget);
+      if (paddingChange != 0) {
+        scrollController.position.correctBy(paddingChange);
+      }
+    }
     _schedulePositionNotificationUpdate();
+  }
+
+  /// 计算索引 0 仍在中心分段时计入滚动原点的留白。
+  double _centerLeadingPadding(PositionedList list) {
+    final padding = list.padding;
+    if (list.positionedIndex != 0 || padding == null) return 0;
+    return switch (list.scrollDirection) {
+      Axis.vertical => list.reverse ? padding.bottom : padding.top,
+      Axis.horizontal => list.reverse ? padding.right : padding.left,
+    };
   }
 
   @override
@@ -245,7 +260,8 @@ class _PositionedListState extends State<PositionedList> {
 
   Widget _buildItem(int index) {
     return RegisteredElementWidget(
-      key: ValueKey(index),
+      // Sliver 中相邻旧消息的相对顺序没变，继续复用原有气泡状态。
+      key: ValueKey(index - widget.leadingItemsInserted),
       child: widget.addSemanticIndexes
           ? IndexedSemantics(
               index: index, child: widget.itemBuilder(context, index))
@@ -329,6 +345,7 @@ class _PositionedListState extends State<PositionedList> {
           }
 
           final ValueKey<int> key = element.widget.key as ValueKey<int>;
+          final index = key.value + widget.leadingItemsInserted;
           // Skip this element if `box` has never been laid out.
           if (!box.hasSize) continue;
           if (widget.scrollDirection == Axis.vertical) {
@@ -337,7 +354,7 @@ class _PositionedListState extends State<PositionedList> {
             final itemOffset =
                 reveal - viewport.offset.pixels + anchor * viewport.size.height;
             positions.add(ItemPosition(
-                index: key.value,
+                index: index,
                 itemLeadingEdge: itemOffset.round() /
                     scrollController.position.viewportDimension,
                 itemTrailingEdge: (itemOffset + box.size.height).round() /
@@ -347,7 +364,7 @@ class _PositionedListState extends State<PositionedList> {
                 box.localToGlobal(Offset.zero, ancestor: viewport).dx;
             if (!itemOffset.isFinite) continue;
             positions.add(ItemPosition(
-                index: key.value,
+                index: index,
                 itemLeadingEdge: (widget.reverse
                             ? scrollController.position.viewportDimension -
                                 (itemOffset + box.size.width)

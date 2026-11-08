@@ -1495,6 +1495,47 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     expect(tester.takeException(), isNull);
   });
+  testWidgets('最新消息仍部分可见时也保持阅读位置，贴底后恢复跟随', (tester) async {
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/history');
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    addTearDown(MessageList.clearViewportSnapshots);
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: Column(
+            children: [MessageList(conversationID: 'c2c_history_visual')]),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    final listFinder = find.byType(ScrollablePositionedList);
+    final list = tester.widget<ScrollablePositionedList>(listFinder);
+    await tester.drag(listFinder, const Offset(0, 35));
+    await tester.pumpAndSettle();
+    expect(list.itemScrollController!.isAtLeadingEdge, isFalse);
+    expect(
+        list.itemPositionsNotifier!.itemPositions.value
+            .any((position) => position.index == 0),
+        isTrue);
+    final anchor = find.text('history-19');
+    final anchorTop = tester.getTopLeft(anchor).dy;
+
+    sdk.messages.listener!.onRecvNewMessage(_Message('new-21'));
+    await tester.pump();
+    expect(tester.getTopLeft(anchor).dy, closeTo(anchorTop, .01));
+    await tester.pumpAndSettle();
+    expect(find.text('1 条新消息'), findsOneWidget);
+
+    await tester.tap(find.text('1 条新消息'));
+    await tester.pumpAndSettle();
+    expect(list.itemScrollController!.isAtLeadingEdge, isTrue);
+    sdk.messages.listener!.onRecvNewMessage(_Message('new-22'));
+    await tester.pumpAndSettle();
+    expect(find.text('new-22').hitTestable(), findsOneWidget);
+    expect(find.text('1 条新消息'), findsNothing);
+  });
+
   testWidgets('长会话滚离最新位置后收到新消息保留数量提示', (tester) async {
     final original = TencentImSDKPlugin.v2TIMManager;
     final sdk = _Sdk('/history');
@@ -1530,14 +1571,22 @@ void main() {
     final anchorFinder = find.byWidgetPredicate((widget) =>
         widget is TextMessageWidget && widget.message.msgID == anchorID);
     final anchorTop = tester.getTopLeft(anchorFinder).dy;
+    final anchorElement = tester.element(anchorFinder);
 
     sdk.messages.listener!.onRecvNewMessage(_Message('new-21'));
+    // 首帧就要保留原位置和气泡状态，不能先错位再跳回。
+    await tester.pump();
+    expect(tester.getTopLeft(anchorFinder).dy, closeTo(anchorTop, .01));
+    expect(tester.element(anchorFinder), same(anchorElement));
     await tester.pumpAndSettle();
     expect(find.byType(MessageTongueWidget), findsOneWidget);
     expect(find.text('1 条新消息'), findsOneWidget);
     for (var index = 22; index <= 120; index++) {
       sdk.messages.listener!.onRecvNewMessage(_Message('new-$index'));
     }
+    await tester.pump();
+    expect(tester.getTopLeft(anchorFinder).dy, closeTo(anchorTop, .01));
+    expect(tester.element(anchorFinder), same(anchorElement));
     await tester.pumpAndSettle();
     expect(find.text('100 条新消息'), findsOneWidget);
     expect(tester.getTopLeft(anchorFinder).dy, closeTo(anchorTop, .01));

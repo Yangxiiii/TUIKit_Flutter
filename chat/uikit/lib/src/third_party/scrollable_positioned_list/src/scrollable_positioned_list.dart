@@ -18,22 +18,9 @@ import 'scroll_offset_notifier.dart';
 /// Number of screens to scroll when scrolling a long distance.
 const int _screenScrollCount = 2;
 
-/// A scrollable list of widgets similar to [ListView], except scroll control
-/// and position reporting is based on index rather than pixel offset.
+/// 支持按索引定位和报告可见项，并可在头部插入消息后保持阅读位置。
 ///
-/// [ScrollablePositionedList] lays out children in the same way as [ListView].
-///
-/// The list can be displayed with the item at [initialScrollIndex] positioned
-/// at a particular [initialAlignment].
-///
-/// The [itemScrollController] can be used to scroll or jump to particular items
-/// in the list.  The [itemPositionsNotifier] can be used to get a list of items
-/// currently laid out by the list.
-///
-/// The [scrollOffsetListener] can be used to get updates about scroll position
-/// changes.
-///
-/// All other parameters are the same as specified in [ListView].
+/// 首次布局使用 [initialScrollIndex] 和 [initialAlignment]，后续通过控制器定位。
 class ScrollablePositionedList extends StatefulWidget {
   /// Create a [ScrollablePositionedList] whose items are provided by
   /// [itemBuilder].
@@ -48,6 +35,7 @@ class ScrollablePositionedList extends StatefulWidget {
     ScrollOffsetListener? scrollOffsetListener,
     this.initialScrollIndex = 0,
     this.initialAlignment = 0,
+    this.leadingItemsInserted = 0,
     this.scrollDirection = Axis.vertical,
     this.reverse = false,
     this.physics,
@@ -92,10 +80,14 @@ class ScrollablePositionedList extends StatefulWidget {
         assert(separatorBuilder != null),
         itemPositionsNotifier = itemPositionsListener as ItemPositionsNotifier?,
         scrollOffsetNotifier = scrollOffsetListener as ScrollOffsetNotifier?,
+        leadingItemsInserted = 0,
         super(key: key);
 
   /// Number of items the [itemBuilder] can produce.
   final int itemCount;
+
+  /// 从列表创建起需要保持视口不动的头部插入数量，包含尚未布局的批次。
+  final int leadingItemsInserted;
 
   /// Called to build children for the list with
   /// 0 <= index < itemCount.
@@ -190,13 +182,21 @@ class ScrollablePositionedList extends StatefulWidget {
   State<StatefulWidget> createState() => _ScrollablePositionedListState();
 }
 
-/// Controller to jump or scroll to a particular position in a
-/// [ScrollablePositionedList].
+/// 控制定位列表的跳转与滚动，并读取当前视口是否贴住边界。
 class ItemScrollController {
   /// Whether any ScrollablePositionedList objects are attached this object.
   ///
   /// If `false`, then [jumpTo] and [scrollTo] must not be called.
   bool get isAttached => _scrollableListState != null;
+
+  /// 当前视口是否仍贴着索引 0 一侧的物理边界。
+  bool get isAtLeadingEdge {
+    final controller = _scrollableListState?.primary.scrollController;
+    if (controller == null || !controller.hasClients) return true;
+    final position = controller.position;
+    // 首次布局前按最新位置处理，允许亚像素舍入误差。
+    return !position.hasContentDimensions || position.extentBefore < 0.5;
+  }
 
   _ScrollablePositionedListState? _scrollableListState;
 
@@ -393,6 +393,11 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
         secondary.target = 0;
       });
     } else {
+      // 新索引与消息内容在同一帧更新，保留现有滚动偏移及手势。
+      final inserted =
+          widget.leadingItemsInserted - oldWidget.leadingItemsInserted;
+      primary.target += inserted;
+      secondary.target += inserted;
       if (primary.target > widget.itemCount - 1) {
         setState(() {
           primary.target = widget.itemCount - 1;
@@ -422,6 +427,7 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
                 onNotification: (_) => _isTransitioning,
                 child: PositionedList(
                   itemBuilder: widget.itemBuilder,
+                  leadingItemsInserted: widget.leadingItemsInserted,
                   separatorBuilder: widget.separatorBuilder,
                   itemCount: widget.itemCount,
                   positionedIndex: primary.target,
@@ -452,6 +458,7 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
                   onNotification: (_) => false,
                   child: PositionedList(
                     itemBuilder: widget.itemBuilder,
+                    leadingItemsInserted: widget.leadingItemsInserted,
                     separatorBuilder: widget.separatorBuilder,
                     itemCount: widget.itemCount,
                     itemPositionsNotifier: secondary.itemPositionsNotifier,

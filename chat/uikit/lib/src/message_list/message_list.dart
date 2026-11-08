@@ -423,11 +423,11 @@ class _MessageListState extends State<MessageList>
   /// 滚动过程中最近一次有效锚点，退出页面采样失败时作为兜底。
   MessageViewportAnchor? _currentViewportAnchor;
 
-  /// 连续插入消息期间固定的历史锚点；布局与位置通知稳定后才允许消费可见未读。
-  MessageViewportAnchor? _pendingInsertionAnchor;
+  /// 累加阅读历史时插入最新端的消息数，让同一帧内的多次更新一起补偿。
+  int _leadingItemsInserted = 0;
 
-  /// 使旧批次的布局回调失效，避免它提前释放新批次的锚点。
-  int _insertionRevision = 0;
+  /// 新窗口尚未发布可见位置时，退出快照仍使用上一次有效采样。
+  bool _awaitingInsertionLayout = false;
 
   /// 列表首次创建时使用的消息索引和视口对齐比例。
   int _initialScrollIndex = 0;
@@ -660,12 +660,13 @@ class _MessageListState extends State<MessageList>
 
   @override
   void dispose() {
-    // 批量插入尚未稳定时保留固定锚点，否则读取退出瞬间的真实视口并以最近采样兜底。
-    final viewportAnchor = _pendingInsertionAnchor ??
-        selectMessageViewportAnchor(
-          messages: _messages,
-          positions: _itemPositionsListener.itemPositions.value,
-        ) ??
+    // 插入尚未布局时，不能拿上一帧的可见索引去读取新的消息窗口。
+    final viewportAnchor = (_awaitingInsertionLayout
+            ? null
+            : selectMessageViewportAnchor(
+                messages: _messages,
+                positions: _itemPositionsListener.itemPositions.value,
+              )) ??
         _currentViewportAnchor;
     if (viewportAnchor != null && _messages.isNotEmpty) {
       final snapshot = createMessageViewportSnapshot(
@@ -702,21 +703,16 @@ class _MessageListState extends State<MessageList>
   }
 
   void _scrollListener() {
-    if (_pendingInsertionAnchor != null) return;
+    _awaitingInsertionLayout = false;
     final positions = _itemPositionsListener.itemPositions.value;
     if (positions.isEmpty) return;
 
-    // Single-pass: compute minIndex, maxIndex, isAtBottom in one traversal
-    //
-    // 单次遍历：在一次遍历中计算 minIndex、maxIndex、isAtBottom
     int minIndex = positions.first.index;
     int maxIndex = minIndex;
-    bool isAtBottom = minIndex <= 1;
     for (final pos in positions) {
       final idx = pos.index;
       if (idx < minIndex) minIndex = idx;
       if (idx > maxIndex) maxIndex = idx;
-      if (!isAtBottom && idx <= 1) isAtBottom = true;
     }
 
     // Don't kick off auto-loads while any user-initiated navigation is in
@@ -736,28 +732,11 @@ class _MessageListState extends State<MessageList>
       }
     }
 
-    // Load newer messages when the user has scrolled to the bottom
-    // (reverse:true → "bottom" = newest = index 0 area).
-    //
-    // Uses `isAtBottom` (minIndex <= 1) rather than the stricter
-    // `minIndex <= 0` so this trigger matches the rest of the file's
-    // notion of "at bottom" (see `_isUserAtBottom()` and the
-    // `isAtBottom` flag above). With reverse:true,
-    // ScrollablePositionedList does not always pin index 0 at the
-    // leading edge once a scroll reaches its physical limit — index 0
-    // may stay fully visible while minIndex sits at 1 — so requiring
-    // `<= 0` would silently skip the load even after the user is
-    // visibly at the bottom of the loaded page.
-    //
-    // 当用户滚动到底部时加载更新的消息
-    //
-    // 使用 `isAtBottom`（minIndex <= 1）而不是更严格的 `minIndex <= 0`，这样触发条件与文件中其他 “到底部” 的定义一致（参见
-    // `_isUserAtBottom()` 和上面的 `isAtBottom` 标志）。使用 reverse:true 时，ScrollablePositionedList
-    // 并不总是在滚动到物理极限时把索引 0 固定在前端——索引 0 可能仍完全可见，而 minIndex 为 1——所以要求 `<= 0` 会导致即使用户看起来已经到底，加载也会被静默跳过。
+    // 历史分页可以在接近当前窗口底部时提前触发，实时新消息跟随则要求实际贴底。
     if (!_isLoadingNewer &&
         isNavIdle &&
         _messageListStore.state.hasNewerMessages.value) {
-      if (_highlightedMessageId == null && isAtBottom) {
+      if (_highlightedMessageId == null && minIndex <= 1) {
         _loadNewerMessages();
       }
     }
@@ -775,7 +754,7 @@ class _MessageListState extends State<MessageList>
     //
     // 小舌头可见性逻辑
     if (!widget.config.isSupportTongue || !_isInitialRenderComplete) return;
-    _updateTongueState(minIndex, isAtBottom);
+    _updateTongueState(minIndex, _isUserAtBottom());
   }
 
   void _updateTongueState(int minIndex, bool isAtBottom) {
@@ -1153,130 +1132,45 @@ class _MessageListState extends State<MessageList>
 
     // 本地补齐与SDK合并后再过滤，迟到窗口不能复活已删除消息。
     final nextMessages = visibleWindow;
-    final oldLength = _messages.length;
-    // Remember the first message's ID to detect head-insertion (new messages)
-    // vs tail-append (older history messages).
-    //
-    // 记住第一条消息的 ID，以便检测是头部插入（新消息）还是尾部追加（历史旧消息）。
-    final oldFirstMsgID = _messages.isNotEmpty ? _messages.first.msgID : null;
+    final oldFirst = _messages.firstOrNull?.msgID;
+    // 用原首条消息的新索引计算最新端插入数，旧页追加不能算进补偿。
+    final insertedAtHead = oldFirst == null ||
+            oldFirst.isEmpty ||
+            nextMessages.firstOrNull?.msgID == oldFirst
+        ? 0
+        : nextMessages.indexWhere((message) => message.msgID == oldFirst);
 
-    setState(() {
-      _messages = nextMessages;
-    });
-
-    // Only compensate when new messages are inserted at the HEAD of the list
-    // (index 0 = newest in reverse list).  Detect this by checking whether
-    // the first message's ID has changed — if it changed, newer messages were
-    // prepended; if it didn't, older messages were appended at the tail and
-    // no compensation is needed (existing item indices are unchanged).
-    //
-    // 仅当新消息插入在列表的 HEAD 时才进行补偿。
-    //
-    // 第一条消息的 ID 已更改——如果它更改了，说明有新消息被添加到前面；如果没有更改，说明旧消息被追加到尾部，不需要补偿（现有条目索引保持不变）。
-    final insertedCount = _messages.length - oldLength;
-    final newFirstMsgID = _messages.isNotEmpty ? _messages.first.msgID : null;
-    final isHeadInsertion = insertedCount > 0 &&
-        oldFirstMsgID != null &&
-        newFirstMsgID != oldFirstMsgID;
-
-    // 本地首屏补齐及显式定位收到的己方历史都不是主动发送，不能抢走目标锚点。
+    // 首屏同步到的己方历史不能抢走初始锚点，显式加载更新页也有自己的定位逻辑。
     final isSyncedSelfHistory =
         (widget.localMessagesLoader != null || widget.locateMessage != null) &&
             _isInitialLoad &&
-            _messages.isNotEmpty &&
-            _messages.first.status == MessageStatus.sendSuccess;
-
-    // If the new head message is sent by self, auto-scroll to bottom.
-    //
-    // Must also skip while _loadNewerMessages is in flight: when a page of
-    // newer messages happens to include a self-sent tail (e.g. the user
-    // earlier sent a quote message and we now scroll-to-load the page
-    // containing it), the new _messages.first will be self-sent — but
-    // this was not a fresh "user just hit send" event. _loadNewerMessages
-    // is already running its own scroll-preserving jumpTo(insertedCount)
-    // after the await, and if we also schedule a postFrame jumpTo(0)
-    // here, that postFrame fires last and clobbers the scroll-preserve,
-    // visibly snapping the user to the very bottom on every second load.
-    //
-    // 在 _loadNewerMessages 正在进行时也必须跳过：当一页更新的消息恰好包含自己发送的尾部（例如用户之前发送了一条引用消息，而我们现在滚动加载包含它的页面），新的
-    // _messages.first 会是自己发送的消息——但这并不是一个新的“用户刚发送消息”的事件。_loadNewerMessages 已经在 await 之后运行它自己的滚动保持
-    // jumpTo(insertedCount)，如果我们在这里还安排 postFrame jumpTo(0)，postFrame 会最后触发，覆盖滚动保持，让用户在每次第二次加载时明显地跳到最底部。
-    if (isHeadInsertion &&
+            nextMessages.firstOrNull?.status == MessageStatus.sendSuccess;
+    final followSelfSend = insertedAtHead > 0 &&
         !isSyncedSelfHistory &&
         !_isLoadingNewer &&
-        _messages.isNotEmpty &&
-        _messages.first.isSentBySelf) {
-      // 主动发送交回最新位置，不能继续沿用接收消息时固定的历史锚点。
-      _pendingInsertionAnchor = null;
-      _insertionRevision++;
-      if (_messageListStore.state.hasNewerMessages.value) {
-        // List was loaded around an older position, need to reload latest
-        //
-        // 列表加载到一个较旧的位置附近，需要重新加载最新内容
-        _reloadLatestMessages();
-      } else if (_itemScrollController.isAttached) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted && _itemScrollController.isAttached) {
-            _itemScrollController.jumpTo(index: 0);
-          }
-        });
-      }
-    }
-    // Skip compensation when _loadNewerMessages is in progress — it already
-    // does its own jumpTo after the await returns.
-    //
-    // 当 _loadNewerMessages 进行中时跳过补偿——它自己在 await 返回后已经做了 jumpTo。
-    else if (isHeadInsertion &&
+        nextMessages.first.isSentBySelf;
+    final preserveViewport = insertedAtHead > 0 &&
+        !followSelfSend &&
         !_isLoadingNewer &&
         _navigationState is _NavIdle &&
-        !_isUserAtBottom() &&
-        _itemScrollController.isAttached) {
-      // 同一帧可连续到达多条消息，旧位置索引尚未刷新；按稳定消息ID重定位，避免只补偿最后一条。
-      final stableAnchor = _pendingInsertionAnchor ?? _currentViewportAnchor;
-      if (stableAnchor != null) {
-        _restoreInsertedMessageAnchor(stableAnchor);
+        !_isUserAtBottom();
+
+    setState(() {
+      _messages = nextMessages;
+      if (preserveViewport) {
+        // 消息与索引偏移一起进入布局，保留当前滚动位置和已挂载的气泡。
+        _leadingItemsInserted += insertedAtHead;
+        _awaitingInsertionLayout = true;
+      }
+    });
+
+    if (followSelfSend) {
+      if (state.hasNewerMessages.value) {
+        _reloadLatestMessages();
       } else {
-        // 首个可见消息锚点尚未建立时，保留原有位置索引补偿。
-        final positions = _itemPositionsListener.itemPositions.value;
-        if (positions.isNotEmpty) {
-          final anchor = positions.reduce(
-            (a, b) => a.itemLeadingEdge < b.itemLeadingEdge ? a : b,
-          );
-          _itemScrollController.jumpTo(
-            index: anchor.index + insertedCount,
-            alignment: anchor.itemLeadingEdge,
-          );
-        }
+        _scrollToBottom();
       }
     }
-  }
-
-  /// 先让列表接收新增数量，再按稳定消息ID恢复历史位置，最后恢复可见未读统计。
-  void _restoreInsertedMessageAnchor(MessageViewportAnchor anchor) {
-    _pendingInsertionAnchor = anchor;
-    final revision = ++_insertionRevision;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || revision != _insertionRevision) return;
-      // jumpTo会按当前Widget的itemCount截断索引，必须等待新增数量进入布局。
-      if (_navigationState is _NavIdle && _itemScrollController.isAttached) {
-        final index = _messages
-            .indexWhere((message) => message.msgID == anchor.message.msgID);
-        if (index >= 0) {
-          _itemScrollController.jumpTo(
-              index: index, alignment: anchor.alignment);
-        }
-      }
-      // 跳转后的索引和可见位置分帧发布，稳定前不把旧索引映射到新增消息。
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted || revision != _insertionRevision) return;
-          _pendingInsertionAnchor = null;
-          _scrollListener();
-        });
-        WidgetsBinding.instance.scheduleFrame();
-      });
-      WidgetsBinding.instance.scheduleFrame();
-    });
   }
 
   void _onMessageEvent(MessageEvent event) {
@@ -1339,12 +1233,8 @@ class _MessageListState extends State<MessageList>
     // 当新消息添加到消息列表时，MessageListStore的内部监听器现在会自动获取反应。
   }
 
-  bool _isUserAtBottom() {
-    if (_pendingInsertionAnchor != null) return false;
-    if (!_itemScrollController.isAttached) return true;
-    final positions = _itemPositionsListener.itemPositions.value;
-    return positions.isNotEmpty && positions.any((pos) => pos.index <= 1);
-  }
+  /// 实时收消息只在视口贴住底部时跟随，部分露出的最新消息仍属于历史阅读。
+  bool _isUserAtBottom() => _itemScrollController.isAtLeadingEdge;
 
   /// 返回SDK真实加载结果，业务仅在成功后清除会话未读。
   Future<bool> _loadLatestMessages() async {
@@ -1413,9 +1303,10 @@ class _MessageListState extends State<MessageList>
     }
   }
 
+  /// 等最新消息完成布局后再滚动到底部，已退出的页面不再执行。
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_itemScrollController.isAttached && _messages.isNotEmpty) {
+      if (mounted && _itemScrollController.isAttached && _messages.isNotEmpty) {
         _itemScrollController.jumpTo(index: 0);
       }
     });
@@ -1669,6 +1560,7 @@ class _MessageListState extends State<MessageList>
                             initialScrollIndex: _initialScrollIndex,
                             initialAlignment: _initialScrollAlignment,
                             itemCount: _messages.length,
+                            leadingItemsInserted: _leadingItemsInserted,
                             itemBuilder: (context, index) =>
                                 _renderItem(context, index, replies),
                             addRepaintBoundaries: true,
