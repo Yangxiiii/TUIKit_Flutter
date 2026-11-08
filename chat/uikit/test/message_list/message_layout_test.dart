@@ -104,6 +104,55 @@ void main() {
     });
   }
 
+  testWidgets('从搜索返回已打开的聊天时使用唯一归档定位键高亮', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/single');
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    addTearDown(MessageList.clearViewportSnapshots);
+    final target = ValueNotifier<MessageInfo?>(null);
+    addTearDown(target.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Column(children: [
+          ValueListenableBuilder(
+            valueListenable: target,
+            builder: (_, message, __) => MessageList(
+              conversationID: 'c2c_visual',
+              locateMessage: message,
+            ),
+          ),
+        ]),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    final stamp = DateTime(2026, 11, 3, 12).millisecondsSinceEpoch ~/ 1000;
+    final gate = sdk.messages.historyGate =
+        Completer<V2TimValueCallback<List<V2TimMessage>>>();
+    target.value = MessageInfo(
+      msgID: 'archive-key',
+      timestamp: stamp + 9,
+      sequence: 9,
+      from: MessageSenderInfo(userID: 'history_visual'),
+      conversationType: ConversationType.c2c,
+    );
+    await tester.pump();
+    gate.complete(V2TimValueCallback(code: 0, desc: '', data: [
+      for (var index = 12; index >= 0; index--)
+        _Message('search-$index', timestampOverride: stamp + index),
+    ]));
+    for (var frame = 0; frame < 4; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    final row = find.byWidgetPredicate((widget) =>
+        widget is MessageItem && widget.message.msgID == 'search-9');
+    expect(row, findsOneWidget);
+    expect(tester.widget<MessageItem>(row).isHighlighted, isTrue);
+    await tester.pumpAndSettle();
+  });
+
   for (final reason in ['重复候选', '缺少序列号', '发送者不匹配']) {
     testWidgets('HTTP搜索$reason时不误高亮其他消息', (tester) async {
       SharedPreferences.setMockInitialValues({});

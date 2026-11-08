@@ -289,6 +289,7 @@ class _NavToAtMention extends _NavigationState {
   const _NavToAtMention(this.targetSeq);
 }
 
+/// 在原生列表加载后消费一次定位请求，并保持定位后的滚动状态。
 class _NavToQuotedMessage extends _NavigationState {
   final String? targetMsgID;
 
@@ -328,11 +329,15 @@ class _NavToQuotedMessage extends _NavigationState {
   /// 故意将其作为独立字段与 [tongueAfter] 分开：目前在前进/后退的使用中两者碰巧一致，但它们是正交概念，将来主叫方（例如“导航到搜索结果”）可能只需要其中一个而不是另一个。
   final bool highlightTarget;
 
+  /// 归档搜索的原始定位键，消息 ID 不同时用它核对唯一候选。
+  final MessageInfo? searchTarget;
+
   const _NavToQuotedMessage(
     this.targetMsgID,
     this.tongueAfter,
-    this.highlightTarget,
-  );
+    this.highlightTarget, [
+    this.searchTarget,
+  ]);
 }
 
 class _NavReloadingLatest extends _NavigationState {
@@ -388,15 +393,19 @@ class _MessageListState extends State<MessageList>
         if (!await _loadLatestMessages() && mounted) {
           Toast.error(context, '消息刷新失败，请稍后重试');
         }
-      } else if (_messages.any((message) => message.msgID == target.msgID)) {
-        _scrollToMessageAndHighlight(target.msgID);
       } else {
+        final index = _findLocatedMessageIndex(target);
+        if (index >= 0) {
+          _scrollToMessageAndHighlight(_messages[index].msgID);
+          return;
+        }
         await _loadAndNavigateToMessage(
           cursorMessage: target,
           targetMsgID: target.msgID,
           tongueAfter: TongueType.backToLatest,
           highlightTarget: true,
           debugLabel: 'sticky',
+          searchTarget: target,
         );
       }
     } on Object {
@@ -405,7 +414,7 @@ class _MessageListState extends State<MessageList>
           isLoading = false;
           _navigationState = const _NavIdle();
         });
-        Toast.error(context, '消息加载失败，请稍后重试');
+        Toast.error(context, target == null ? '消息加载失败，请稍后重试' : '跳转失败，请稍后重试');
       }
     }
   }
@@ -1100,27 +1109,29 @@ class _MessageListState extends State<MessageList>
           targetMsgID: final targetMsgID?,
           tongueAfter: final tongueAfter,
           highlightTarget: final highlightTarget,
+          searchTarget: final searchTarget,
         ):
         debugPrint('messageList, _onMessageListStateChanged [QUOTE], '
             'targetMsgID: $targetMsgID, '
             'tongueAfter: $tongueAfter, '
             'highlight: $highlightTarget, '
             'messageCount: ${state.messageList.value.length}');
+        late final int targetIndex;
         setState(() {
           _messages = _visibleMessages(state.messageList.value.reversed);
           isLoading = false;
-          if (highlightTarget) {
-            _highlightedMessageId = targetMsgID;
+          // 搜索归档消息的 SDK ID 可能不同，仍要求会话、时间、序列和发送人唯一匹配。
+          targetIndex = searchTarget == null
+              ? _messages.indexWhere((msg) => msg.msgID == targetMsgID)
+              : _findLocatedMessageIndex(searchTarget);
+          if (highlightTarget && targetIndex >= 0) {
+            _highlightedMessageId = _messages[targetIndex].msgID;
           }
           _tongueType = tongueAfter;
-          // Same processed-once guard as the at-mention branch.
-          //
-          // 与 @ 提及分支相同的“已处理一次”保护。
+          // 标记为已消费，后续窗口通知不能再次跳转。
           _navigationState =
               _NavToQuotedMessage(null, tongueAfter, highlightTarget);
         });
-        final targetIndex =
-            _messages.indexWhere((msg) => msg.msgID == targetMsgID);
         if (targetIndex != -1 && _itemScrollController.isAttached) {
           _itemScrollController.jumpTo(index: targetIndex, alignment: 0.3);
         }
@@ -2188,6 +2199,7 @@ class _MessageListState extends State<MessageList>
     required TongueType tongueAfter,
     required bool highlightTarget,
     String debugLabel = 'message',
+    MessageInfo? searchTarget,
   }) async {
     debugPrint('messageList, _loadAndNavigateToMessage [$debugLabel], '
         'targetMsgID: $targetMsgID, '
@@ -2205,8 +2217,8 @@ class _MessageListState extends State<MessageList>
     // 进入“引用导航进行中”状态。实际的 setState/jumpTo/按钮操作是在 `_onMessageListStateChanged` 里面发生的（`_NavToQuotedMessage`
     // 情况），当 Store 触发 notifyListeners 时 —— 跟 _NavToAtMention 的原子帧模式一样。
     setState(() {
-      _navigationState =
-          _NavToQuotedMessage(targetMsgID, tongueAfter, highlightTarget);
+      _navigationState = _NavToQuotedMessage(
+          targetMsgID, tongueAfter, highlightTarget, searchTarget);
       isLoading = true;
     });
 
@@ -2216,7 +2228,17 @@ class _MessageListState extends State<MessageList>
       direction: MessageLoadDirection.both,
     );
 
-    await _messageListStore.loadMessages(option: option);
+    final result = await _messageListStore.loadMessages(option: option);
+    if (searchTarget != null &&
+        mounted &&
+        (!result.isSuccess || _findLocatedMessageIndex(searchTarget) == -1)) {
+      // 明确失败或窗口里缺少原消息时，不能让跳转停留在加载状态。
+      setState(() {
+        isLoading = false;
+        _navigationState = const _NavIdle();
+      });
+      Toast.error(context, '跳转失败，请稍后重试');
+    }
 
     // Defer exiting the nav state by two frames so the scroll listener
     // that fires off the back of our synchronous jumpTo has settled
