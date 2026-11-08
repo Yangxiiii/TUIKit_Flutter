@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'package:atomic_x_core/impl/message/message_action_store_impl.dart';
+import 'package:atomic_x_core/impl/message/message_input_store_impl.dart';
+import 'package:atomic_x_core/impl/message/message_list_store_impl.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_bubble.dart';
 import 'package:app_core/app_core.dart';
 import 'package:flutter/foundation.dart';
@@ -506,6 +509,75 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpAndSettle();
     }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('较早的文件上传完成后仍显示在后来发送的文件上方', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    TencentImSDKPlugin.v2TIMManager = _Sdk('/single');
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    addTearDown(MessageList.clearViewportSnapshots);
+    const conversationId = 'c2c_visual';
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Column(children: [
+          MessageList(
+            conversationID: conversationId,
+            localMessagesLoader: () async => [],
+          ),
+        ]),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    MessageInfo uploading(String id, int timestamp) => MessageInfo(
+          msgID: id,
+          isSentBySelf: true,
+          status: MessageStatus.sending,
+          timestamp: timestamp,
+          messageType: MessageType.file,
+          messagePayload: FileMessagePayload(fileName: '$id.pdf', fileSize: 1),
+        );
+    void begin(MessageInfo message) => notificationCenter.post(
+          MessageSendNotifyKey.messageSendBegin,
+          MessageSendEventData(
+              conversationID: conversationId, message: message),
+        );
+    Finder row(String id) => find.byWidgetPredicate(
+          (widget) => widget is MessageItem && widget.message.msgID == id,
+        );
+    final first = uploading('oa_upload_first', 100);
+    final second = uploading('oa_upload_second', 101);
+    begin(first);
+    begin(second);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(tester.getTopLeft(row(first.msgID)).dy,
+        lessThan(tester.getTopLeft(row(second.msgID)).dy));
+
+    // SDK 先追加正式消息，宿主稍后删除本地占位。
+    begin(MessageInfo(
+      msgID: 'sdk-first',
+      isSentBySelf: true,
+      status: MessageStatus.sending,
+      timestamp: 102,
+      messageType: MessageType.custom,
+      messagePayload: CustomMessagePayload(
+        extensionInfo: first.msgID,
+        customData: const BigFileMessage(
+                url: 'https://files.test/first.pdf', name: 'first.pdf', size: 1)
+            .toCustomData(),
+      ),
+    ));
+    await tester.pump();
+    expect(row(first.msgID), findsNothing);
+    notificationCenter.post(MessageActionNotifyKey.messageDelete,
+        MessageDeleteEventData(messageIDList: [first.msgID]));
+    await tester.pump();
+    expect(tester.getTopLeft(row('sdk-first')).dy,
+        lessThan(tester.getTopLeft(row(second.msgID)).dy));
     expect(tester.takeException(), isNull);
   });
 

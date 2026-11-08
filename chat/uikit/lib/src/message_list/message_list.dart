@@ -2,6 +2,7 @@ import 'package:app_ui/app_ui.dart';
 import 'dart:async';
 import 'utils/sticky_message_event.dart';
 import 'utils/local_message_window.dart';
+import 'utils/upload_message_order.dart';
 import 'package:tencent_cloud_chat_sdk/tencent_im_sdk_plugin.dart';
 import 'package:tencent_cloud_chat_sdk/enum/V2TimAdvancedMsgListener.dart';
 import 'package:tencent_cloud_chat_sdk/manager/v2_tim_message_manager.dart';
@@ -370,14 +371,14 @@ class _MessageListState extends State<MessageList>
     }
   }
 
-  /// 先应用删除与已确认撤回，快照恢复和SDK刷新均不能重新展示失效正文。
+  /// 先应用删除和撤回，再按上传占位顺序展示仍可见的消息。
   List<MessageInfo> _visibleMessages(Iterable<MessageInfo> messages) {
     final visible = messages
         .where((message) =>
             !widget.config.hiddenMessageIDs.contains(message.msgID))
         .toList();
     _localWindow.reconcileRevocations(visible);
-    return visible;
+    return _uploadMessageOrder.apply(visible);
   }
 
   /// SDK异常不能成为未处理Future；定位或刷新失败保留列表并给出可重试反馈。
@@ -444,6 +445,9 @@ class _MessageListState extends State<MessageList>
 
   /// 仅补齐 SDK 尚未接管的本机记录，不取代原 SDK 消息源。
   final LocalMessageWindow _localWindow = LocalMessageWindow();
+
+  /// 当前窗口的上传占位顺序独立于 SDK 的发送完成顺序。
+  final UploadMessageOrder _uploadMessageOrder = UploadMessageOrder();
 
   /// 与首次读取使用同一 SDK 管理器，销毁时从原实例注销。
   V2TIMMessageManager? _localMessageManager;
@@ -1378,7 +1382,14 @@ class _MessageListState extends State<MessageList>
         !_isSystemMessage(message) &&
         !_isSystemMessage(_messages[olderIndex]) &&
         MessageUtil.isAvatarContinuation(
-            _messages[olderIndex], message, context);
+          _messages[olderIndex],
+          message,
+          context,
+          olderDisplayTimestamp:
+              _uploadMessageOrder.displayTimestamp(_messages[olderIndex]),
+          currentDisplayTimestamp:
+              _uploadMessageOrder.displayTimestamp(message),
+        );
     final topSpacing = olderIndex == _messages.length
         ? 0.0
         : shouldShowTime
@@ -2692,6 +2703,7 @@ class _MessageListState extends State<MessageList>
     return false;
   }
 
+  /// 按展示时间计算分隔条，隐藏行和撤回提示不单独占用时间分组。
   String? _getMessageTimeString(int index) {
     if (index < 0 || index >= _messages.length) return null;
 
@@ -2710,8 +2722,10 @@ class _MessageListState extends State<MessageList>
       return null;
     }
 
+    // 文件完成后沿用原气泡时间，避免分隔条随着 SDK 发送时刻跳动。
+    final timestamp = _uploadMessageOrder.displayTimestamp(message) ?? 0;
     if (index == _messages.length - 1) {
-      return _getTimeString(message.timestamp ?? 0);
+      return _getTimeString(timestamp);
     }
 
     // Find the previous message, skipping system messages if they are hidden
@@ -2736,13 +2750,13 @@ class _MessageListState extends State<MessageList>
 
     // If no valid previous message found, show time for this message
     if (prevMessage == null) {
-      return _getTimeString(message.timestamp ?? 0);
+      return _getTimeString(timestamp);
     }
 
-    final timeInterval =
-        _getIntervalSeconds(message.timestamp!, prevMessage.timestamp!);
+    final timeInterval = _getIntervalSeconds(
+        timestamp, _uploadMessageOrder.displayTimestamp(prevMessage) ?? 0);
     if (timeInterval > _messageAggregationTime) {
-      return _getTimeString(message.timestamp ?? 0);
+      return _getTimeString(timestamp);
     }
 
     return null;

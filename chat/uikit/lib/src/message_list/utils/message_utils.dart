@@ -63,10 +63,12 @@ class MessageUtil {
   }
 
   /// 聚合同一自然日0～60秒内相邻且展示者相同的气泡，撤回和未知时间断组。
+  /// 上传消息可传入占位时间，使正式消息接管时继续使用原气泡的分组。
   static bool isAvatarContinuation(
-      MessageInfo older, MessageInfo current, BuildContext context) {
-    final before = older.timestamp;
-    final after = current.timestamp;
+      MessageInfo older, MessageInfo current, BuildContext context,
+      {int? olderDisplayTimestamp, int? currentDisplayTimestamp}) {
+    final before = olderDisplayTimestamp ?? older.timestamp;
+    final after = currentDisplayTimestamp ?? current.timestamp;
     if (before == null ||
         after == null ||
         before <= 0 ||
