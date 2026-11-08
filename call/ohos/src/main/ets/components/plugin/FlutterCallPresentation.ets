@@ -44,8 +44,14 @@ export class FlutterCallPresentation {
       this.channel.invokeMethod('harmonyPresentationChanged', false);
       return false;
     }
-    const call = CallStore.shared().state.activeCall;
-    if (call.callId.length === 0 || call.chatGroupId.length > 0 || call.inviteeIds.length > 1) {
+    const state = CallStore.shared().state;
+    const call = state.activeCall;
+    // 主叫振铃时信令标识可能未回填，Flutter 页面仍用独立展示序号接管。
+    const outgoingVoiceWaiting = route === CallRoute.fullView && call.mediaType === CallMediaType.audio &&
+      state.selfInfo.status === CallParticipantStatus.waiting && state.selfInfo.id.length > 0 &&
+      call.inviterId === state.selfInfo.id && call.inviteeIds.length === 1;
+    if ((call.callId.length === 0 && !outgoingVoiceWaiting) ||
+      call.chatGroupId.length > 0 || call.inviteeIds.length > 1) {
       return false;
     }
     if (this.presentationId.length === 0) {

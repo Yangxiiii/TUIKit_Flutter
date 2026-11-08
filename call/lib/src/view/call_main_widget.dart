@@ -24,8 +24,7 @@ class CallMainWidget extends StatefulWidget {
   /// 当前路由展示类型，更新时只改变画面形态。
   final CallPageType? callPageType;
 
-  const CallMainWidget({Key? key, this.callbacks, this.callPageType})
-      : super(key: key);
+  const CallMainWidget({super.key, this.callbacks, this.callPageType});
 
   @override
   State<CallMainWidget> createState() => _CallMainWidgetState();
@@ -193,7 +192,11 @@ class _CallMainWidgetState extends State<CallMainWidget>
   Widget _buildCompactContent() {
     final call = CallStore.shared.state.activeCall.value;
     if (call.chatGroupId.isEmpty && call.inviteeIds.length <= 1) {
-      return const CallCompactWidget();
+      return CallCompactWidget(
+        onRestore: _openCallingPage,
+        isCurrentPresentation: () =>
+            widget.callbacks?.isCurrentPresentation?.call() ?? false,
+      );
     }
     final screenWidth = MediaQuery.sizeOf(context).width;
     final scale = 120 / screenWidth;
@@ -307,12 +310,17 @@ class _CallMainWidgetState extends State<CallMainWidget>
 
   /// 只有仍在全屏展示的原通话可以响应最小化。
   bool _canMinimize(String callId) {
-    if (!mounted || callId.isEmpty) return false;
+    if (!mounted) return false;
     final state = CallStore.shared.state;
     return (_currentPageType ?? CallPageType.calling) == CallPageType.calling &&
-        state.activeCall.value.callId == callId &&
         state.activeCall.value.mediaType != null &&
-        state.selfInfo.value.status != CallParticipantStatus.none;
+        matchesFloatingCall(
+          expectedId: callId,
+          call: state.activeCall.value,
+          self: state.selfInfo.value,
+          isCurrentPresentation:
+              widget.callbacks?.isCurrentPresentation?.call() ?? false,
+        );
   }
 
   void _openInviteUser() {

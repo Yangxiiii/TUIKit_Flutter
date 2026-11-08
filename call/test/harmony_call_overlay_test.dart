@@ -29,11 +29,15 @@ void main() {
       'peer': {'id': 'peer', 'name': '对端', 'avatar': '', 'camera': false},
     };
     final actions = <Map<Object?, Object?>>[];
+    var allowAccept = false;
     messenger.setMockMethodCallHandler(channel, (call) async {
       if (call.method == 'harmonyPresentationAction') {
         final data = call.arguments as Map<Object?, Object?>;
         actions.add(data);
         if (data['action'] == 'expand') snapshot['banner'] = false;
+        if (data['action'] == 'accept' && allowAccept) {
+          snapshot['accepted'] = true;
+        }
         return null;
       }
       return snapshot;
@@ -62,9 +66,32 @@ void main() {
     await tester.tap(find.bySemanticsIdentifier('call.minimize'));
     await tester.pumpAndSettle();
     expect(find.byType(CallScene), findsNothing);
+    final card = find.byType(CallCompactAudioContent);
+    expect(tester.getRect(card), const Rect.fromLTWH(302, 118, 80, 80));
+    expect(
+      find.ancestor(of: card, matching: find.byType(CallCompactAudioSurface)),
+      findsOneWidget,
+    );
+    expect(find.text('待接听'), findsOneWidget);
+    final avatar =
+        find.descendant(of: card, matching: find.byType(AppUserAvatar));
+    expect(tester.getRect(avatar), const Rect.fromLTWH(324, 128, 36, 36));
+
+    // 接听未成功时保留浮窗，确认接通后再恢复同一通话。
+    final accept = find.bySemanticsIdentifier('call.compact.accept');
+    await tester.tap(accept);
+    await tester.pumpAndSettle();
+    expect(actions.last, {'id': 'call-1', 'action': 'accept'});
+    expect(card, findsOneWidget);
     await tester.tap(find.bySemanticsIdentifier('call.restore'));
     await tester.pumpAndSettle();
     expect(find.byType(CallScene), findsOneWidget);
+    await tester.tap(find.bySemanticsIdentifier('call.minimize'));
+    await tester.pumpAndSettle();
+    allowAccept = true;
+    await tester.tap(accept);
+    await tester.pumpAndSettle();
+    expect(tester.widget<CallScene>(find.byType(CallScene)).accepted, isTrue);
 
     // 原生结束事件立即清空页面，旧通话的动作与轮询不应再恢复浮层。
     await messenger.handlePlatformMessage(
@@ -76,6 +103,79 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(CallScene), findsNothing);
     expect(find.text('聊天页'), findsOneWidget);
+  });
+
+  testWidgets('语音主叫可在浮窗取消，接通后同一浮窗更新通话时长', (tester) async {
+    const channel = MethodChannel('tencent_calls_uikit/harmony_presentation');
+    final messenger = tester.binding.defaultBinaryMessenger;
+    final snapshot = <String, Object?>{
+      'id': 'voice-outgoing',
+      'video': false,
+      'accepted': false,
+      'incoming': false,
+      'duration': 0,
+      'self': {'id': 'self', 'name': '本人', 'avatar': '', 'camera': false},
+      'peer': {'id': 'peer', 'name': '对端', 'avatar': '', 'camera': false},
+    };
+    final actions = <Object?>[];
+    var active = true;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'harmonyPresentationAction') {
+        actions.add(call.arguments);
+        active = false;
+        return null;
+      }
+      return active ? snapshot : null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    await tester.pumpWidget(const MaterialApp(
+      home: HarmonyCallOverlay(child: Scaffold(body: Text('聊天页'))),
+    ));
+    await tester.pumpAndSettle();
+
+    // 点击头像恢复同一通话，点击取消则发送原通话的结束动作。
+    final minimize = find.bySemanticsIdentifier('call.minimize');
+    final card = find.byType(CallCompactAudioContent);
+    final cancel = find.bySemanticsIdentifier('call.compact.cancel');
+    await tester.tap(minimize);
+    await tester.pumpAndSettle();
+    expect(find.text('取消'), findsOneWidget);
+    final avatar =
+        find.descendant(of: card, matching: find.byType(AppUserAvatar));
+    await tester.tapAt(tester.getCenter(avatar));
+    await tester.pumpAndSettle();
+    expect(find.byType(CallScene), findsOneWidget);
+    expect(actions, isEmpty);
+    await tester.tap(minimize);
+    await tester.pumpAndSettle();
+    await tester.tap(cancel);
+    await tester.pumpAndSettle();
+    expect(actions, [
+      {'id': 'voice-outgoing', 'action': 'end'}
+    ]);
+    expect(card, findsNothing);
+
+    // 下一次主叫在浮窗等待时收到接通事件，位置保持且取消切换为时长。
+    active = true;
+    snapshot['id'] = 'voice-next';
+    const codec = StandardMethodCodec();
+    await messenger.handlePlatformMessage(
+      channel.name,
+      codec.encodeMethodCall(
+          const MethodCall('harmonyPresentationChanged', true)),
+      (_) {},
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(minimize);
+    await tester.pumpAndSettle();
+    final rect = tester.getRect(card);
+    snapshot['accepted'] = true;
+    snapshot['duration'] = 125;
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(card), rect);
+    expect(find.text('02:05'), findsOneWidget);
+    expect(cancel, findsNothing);
   });
 
   testWidgets('鸿蒙语音设备和结束按钮发送原通话操作，空快照清除残留页面', (tester) async {

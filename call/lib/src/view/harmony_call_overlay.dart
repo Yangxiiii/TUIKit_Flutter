@@ -138,6 +138,13 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
           _combinedVideoKey = GlobalKey();
           _localVideoKey = GlobalKey();
           _remoteVideoKey = GlobalKey();
+        } else if (_compact &&
+            !next.video &&
+            next.incoming &&
+            _call?.accepted == false &&
+            next.accepted) {
+          // 被叫接听成功后才展开，权限拒绝时保留待接听浮窗。
+          _compact = false;
         }
         _call = next;
       });
@@ -255,13 +262,14 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
   Widget _buildCompact(BuildContext context, _HarmonyCallSnapshot call) {
     final size = MediaQuery.sizeOf(context);
     final padding = MediaQuery.paddingOf(context);
-    final width = call.video ? 98.0 : 80.0;
-    final height = call.video ? 211.0 : 80.0;
+    final width = call.video ? 98.0 : CallCompactAudioContent.dimension;
+    final height = call.video ? 211.0 : CallCompactAudioContent.dimension;
+    final topGap = call.video ? 62.0 : CallCompactAudioContent.topGap;
     final maxLeft = (size.width - width).clamp(0.0, size.width);
     final maxTop =
         (size.height - padding.bottom - height).clamp(padding.top, size.height);
     final left = (size.width - width - 8 + _drag.dx).clamp(0.0, maxLeft);
-    final top = (padding.top + 62 + _drag.dy).clamp(padding.top, maxTop);
+    final top = (padding.top + topGap + _drag.dy).clamp(padding.top, maxTop);
     void restore() => setState(() => _compact = false);
     return Positioned(
       left: left,
@@ -279,21 +287,31 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
           behavior: HitTestBehavior.opaque,
           onTap: restore,
           onPanUpdate: (details) => setState(() {
-            _drag =
-                Offset(left - size.width + width + 8, top - padding.top - 62) +
-                    details.delta;
+            _drag = Offset(
+                    left - size.width + width + 8, top - padding.top - topGap) +
+                details.delta;
           }),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: call.video
-                ? _buildCompactVideo(size, call)
-                : CallCompactAudioContent(
+          // 视频需要裁剪纹理，语音浮窗的阴影绘制在卡片边界之外。
+          child: call.video
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: _buildCompactVideo(size, call),
+                )
+              : CallCompactAudioSurface(
+                  child: CallCompactAudioContent(
                     id: call.peer.id,
                     name: call.peer.name,
                     avatarUrl: call.peer.avatarUrl,
+                    incoming: call.incoming,
                     duration: call.accepted ? call.duration : null,
+                    onWaitingAction: () {
+                      // 卡片更新前的旧手势不能影响新通话或已接通的通话。
+                      if (_call?.id == call.id && _call?.accepted == false) {
+                        unawaited(_act(call.incoming ? 'accept' : 'end'));
+                      }
+                    },
                   ),
-          ),
+                ),
         ),
       ),
     );

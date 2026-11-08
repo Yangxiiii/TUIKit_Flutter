@@ -9,6 +9,7 @@ import 'package:tuikit_atomic_x/atomicx.dart';
 import 'package:tencent_calls_uikit/src/common/utils/app_lifecycle.dart';
 import '../common/metrics/key_metrics.dart';
 import '../view/call_main_widget.dart';
+import '../view/callview/public/float/call_compact_widget.dart';
 import '../view/component/incoming_banner/incoming_banner_widget.dart';
 import '../view/component/inviter/invite_user_widget.dart';
 
@@ -24,6 +25,9 @@ class CallPageCallbacks {
   final Size Function()? getOriginScreenSize;
   final void Function(Size size)? setOriginScreenSize;
 
+  /// 路由是否仍属于原通话浮层，可在 SDK 尚未分配呼叫标识时校验操作。
+  final bool Function()? isCurrentPresentation;
+
   const CallPageCallbacks({
     this.onShowCalling,
     this.onShowFloating,
@@ -32,6 +36,7 @@ class CallPageCallbacks {
     this.onFloatDragUpdate,
     this.getOriginScreenSize,
     this.setOriginScreenSize,
+    this.isCurrentPresentation,
   });
 }
 
@@ -70,10 +75,12 @@ class CallPageRouter {
   }
 
   /// 应用内小窗遵循当前媒体尺寸，不缩放整个通话页导致文字不可读。
-  double get _floatWindowWidth =>
-      _isSingleCall ? (_isVideoCall ? 98 : 80) : 120;
-  double get _floatWindowHeight =>
-      _isSingleCall ? (_isVideoCall ? 211 : 80) : 180;
+  double get _floatWindowWidth => _isSingleCall
+      ? (_isVideoCall ? 98 : CallCompactAudioContent.dimension)
+      : 120;
+  double get _floatWindowHeight => _isSingleCall
+      ? (_isVideoCall ? 211 : CallCompactAudioContent.dimension)
+      : 180;
 
   /// 群聊保留 SDK 原有悬浮尺寸，定制布局仅作用于单聊。
   bool get _isSingleCall =>
@@ -82,8 +89,17 @@ class CallPageRouter {
   bool get _isVideoCall =>
       CallStore.shared.state.activeCall.value.mediaType == CallMediaType.video;
 
+  /// 只有单聊语音卡片需要在通话路由外包裹带阴影的外壳。
+  bool get _isAudioCard =>
+      _currentPageType == CallPageType.floating &&
+      _isSingleCall &&
+      CallStore.shared.state.activeCall.value.mediaType == CallMediaType.audio;
+
+  /// 保留既有拖动坐标系，语音卡片额外按状态栏定位。
+  static const double _initialFloatViewTop = 148.0;
+
   /// 初始位置对齐聊天右上角；拖动仍由现有路由统一维护。
-  double _floatViewTop = 148.0;
+  double _floatViewTop = _initialFloatViewTop;
 
   /// 小窗距右侧的逻辑像素偏移，拖动由同一路由持有。
   double _floatViewRight = 8.0;
@@ -289,6 +305,7 @@ class CallPageRouter {
       rectGetter: _getPageRect,
       borderRadiusGetter: _getPageBorderRadius,
       isAnimatingGetter: () => _shouldAnimateRect,
+      showAudioSurface: _isAudioCard,
       child: Navigator(
         key: _callNavigatorKey,
         initialRoute: _getRouteName(_currentPageType),
@@ -303,7 +320,11 @@ class CallPageRouter {
     switch (_currentPageType) {
       case CallPageType.floating:
         final left = screenSize.width - _floatViewRight - _floatWindowWidth;
-        final top = _floatViewTop - 40;
+        final top = _isAudioCard
+            ? viewPadding.top +
+                CallCompactAudioContent.topGap +
+                (_floatViewTop - _initialFloatViewTop)
+            : _floatViewTop - 40;
         return Rect.fromLTWH(left, top, _floatWindowWidth, _floatWindowHeight);
       case CallPageType.banner:
         // 浮层只占横幅及状态栏所需的高度，底层消息页保留交互。
@@ -418,7 +439,8 @@ class CallPageRouter {
     if (isFloating) {
       return PageRouteBuilder(
         settings: settings,
-        opaque: false,
+        // 语音小窗外壳提供底色，停止绘制后面的全屏通话页。
+        opaque: _isAudioCard,
         pageBuilder: (context, animation, secondaryAnimation) => page,
         transitionDuration: Duration.zero,
         reverseTransitionDuration: Duration.zero,
@@ -454,6 +476,7 @@ class CallPageRouter {
   }
 
   CallPageCallbacks _buildCallPageCallbacks() {
+    final presentation = _callOverlayEntry;
     return CallPageCallbacks(
       onShowCalling: () => showCallingPage(),
       onShowFloating: () => showFloatingPage(),
@@ -463,6 +486,8 @@ class CallPageRouter {
           updateFloatPosition(details, screenSize),
       getOriginScreenSize: () => originScreenSize,
       setOriginScreenSize: (size) => setOriginScreenSize(size),
+      isCurrentPresentation: () =>
+          presentation != null && identical(_callOverlayEntry, presentation),
     );
   }
 
@@ -537,16 +562,21 @@ class CallPageRouter {
   }
 }
 
+/// 用当前路由的几何裁剪通话浮层，保留必要的卡片阴影。
 class _CallOverlayLayout extends StatelessWidget {
   final Rect Function(Size screenSize, EdgeInsets viewPadding) rectGetter;
   final BorderRadius Function() borderRadiusGetter;
   final bool Function() isAnimatingGetter;
+
+  /// 语音浮窗在导航层之外裁剪卡片并绘制阴影。
+  final bool showAudioSurface;
   final Widget child;
 
   const _CallOverlayLayout({
     required this.rectGetter,
     required this.borderRadiusGetter,
     required this.isAnimatingGetter,
+    required this.showAudioSurface,
     required this.child,
   });
 
@@ -569,7 +599,9 @@ class _CallOverlayLayout extends StatelessWidget {
           top: rect.top,
           width: rect.width,
           height: rect.height,
-          child: ClipRRect(borderRadius: borderRadius, child: child),
+          child: showAudioSurface
+              ? CallCompactAudioSurface(child: child)
+              : ClipRRect(borderRadius: borderRadius, child: child),
         ),
       ],
     );
