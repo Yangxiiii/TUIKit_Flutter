@@ -62,8 +62,9 @@ class MessageUtil {
     return "${date.year}/${date.month}/${date.day} $timeStr";
   }
 
-  /// 仅聚合相邻、同发送人且同一自然日0～60秒内的普通消息；撤回和未知时间断组。
-  static bool isAvatarContinuation(MessageInfo older, MessageInfo current) {
+  /// 聚合同一自然日0～60秒内相邻且展示者相同的气泡，撤回和未知时间断组。
+  static bool isAvatarContinuation(
+      MessageInfo older, MessageInfo current, BuildContext context) {
     final before = older.timestamp;
     final after = current.timestamp;
     if (before == null ||
@@ -71,12 +72,10 @@ class MessageUtil {
         before <= 0 ||
         after <= 0 ||
         after < before ||
-        after - before > 60 ||
-        older.from.userID.isEmpty ||
-        older.from.userID != current.from.userID ||
-        older.isSentBySelf != current.isSentBySelf) {
+        after - before > 60) {
       return false;
     }
+    // 系统提示没有普通消息的头像列，不能把两侧消息接成同一组。
     for (final message in [older, current]) {
       if (message.status == MessageStatus.revoked ||
           message.status == MessageStatus.deleted ||
@@ -87,7 +86,28 @@ class MessageUtil {
     }
     final a = DateTime.fromMillisecondsSinceEpoch(before * 1000);
     final b = DateTime.fromMillisecondsSinceEpoch(after * 1000);
-    return a.year == b.year && a.month == b.month && a.day == b.day;
+    if (a.year != b.year || a.month != b.month || a.day != b.day) return false;
+
+    final olderSender = _avatarGroupSender(older, context);
+    return olderSender.userId.isNotEmpty &&
+        olderSender == _avatarGroupSender(current, context);
+  }
+
+  /// 通话信令的发送者可能是挂断方，头像身份以气泡展示方向为准。
+  static ({bool isSelf, String userId}) _avatarGroupSender(
+      MessageInfo message, BuildContext context) {
+    if (message.messageType == MessageType.custom) {
+      final call = CallingMessageDataProvider(message, context);
+      final isOutgoing = call.isOutgoingC2c;
+      if (isOutgoing != null && isOutgoing != message.isSentBySelf) {
+        // 单聊的 to 始终记录会话对端，己方发起的通话从信令取发起人。
+        return (
+          isSelf: isOutgoing,
+          userId: isOutgoing ? call.callerId : message.to
+        );
+      }
+    }
+    return (isSelf: message.isSentBySelf, userId: message.from.userID);
   }
 
   static String getSystemInfoDisplayString(

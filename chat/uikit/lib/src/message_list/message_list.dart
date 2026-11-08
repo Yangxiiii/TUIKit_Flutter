@@ -1486,7 +1486,8 @@ class _MessageListState extends State<MessageList>
         olderIndex < _messages.length &&
         !_isSystemMessage(message) &&
         !_isSystemMessage(_messages[olderIndex]) &&
-        MessageUtil.isAvatarContinuation(_messages[olderIndex], message);
+        MessageUtil.isAvatarContinuation(
+            _messages[olderIndex], message, context);
     final topSpacing = olderIndex == _messages.length
         ? 0.0
         : shouldShowTime

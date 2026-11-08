@@ -1,4 +1,5 @@
 import 'package:atomic_x_core/atomicxcore.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/local_message_window.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_utils.dart';
@@ -83,37 +84,32 @@ void main() {
     expect(unidentified.status, MessageStatus.sendSuccess);
   });
 
-  test('头像聚合跨类型但在换人、撤回、61秒、跨日和未知时间断组', () {
+  testWidgets('头像聚合跨类型但在换人、撤回、61秒、跨日和未知时间断组', (tester) async {
+    await tester.pumpWidget(const SizedBox.shrink());
+    final context = tester.element(find.byType(SizedBox));
+    bool isContinuation(MessageInfo older, MessageInfo current) =>
+        MessageUtil.isAvatarContinuation(older, current, context);
     final start = DateTime(2026, 10, 30, 12).millisecondsSinceEpoch ~/ 1000;
     final older = message('a', start);
     expect(
-        MessageUtil.isAvatarContinuation(
+        isContinuation(
             older, message('b', start + 60, type: MessageType.image)),
         isTrue);
-    expect(
-        MessageUtil.isAvatarContinuation(older, message('b', start)), isTrue);
-    expect(MessageUtil.isAvatarContinuation(older, message('b', start + 61)),
-        isFalse);
-    expect(MessageUtil.isAvatarContinuation(older, message('b', start - 1)),
-        isFalse);
-    expect(
-        MessageUtil.isAvatarContinuation(
-            older, message('b', start + 1, sender: 'other')),
+    expect(isContinuation(older, message('b', start)), isTrue);
+    expect(isContinuation(older, message('b', start + 61)), isFalse);
+    expect(isContinuation(older, message('b', start - 1)), isFalse);
+    expect(isContinuation(older, message('b', start + 1, sender: 'other')),
         isFalse);
     expect(
-        MessageUtil.isAvatarContinuation(
+        isContinuation(
             older, message('b', start + 1, status: MessageStatus.revoked)),
         isFalse);
-    expect(
-        MessageUtil.isAvatarContinuation(older, message('b', null)), isFalse);
+    expect(isContinuation(older, message('b', null)), isFalse);
     final midnight = DateTime(2026, 10, 31).millisecondsSinceEpoch ~/ 1000;
-    expect(
-        MessageUtil.isAvatarContinuation(
-            message('a', midnight - 1), message('b', midnight)),
+    expect(isContinuation(message('a', midnight - 1), message('b', midnight)),
         isFalse);
     expect(
-        MessageUtil.isAvatarContinuation(
-            older, message('b', start + 1, type: MessageType.tips)),
+        isContinuation(older, message('b', start + 1, type: MessageType.tips)),
         isFalse);
   });
 }

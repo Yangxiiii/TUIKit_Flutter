@@ -1,4 +1,5 @@
 import 'package:atomic_x_core/atomicxcore.dart';
+import 'package:flutter/foundation.dart' show mergeSort;
 
 /// 补齐本机首屏，并保留已确认的撤回与删除事实，防止迟到窗口恢复旧正文。
 class LocalMessageWindow {
@@ -24,7 +25,7 @@ class LocalMessageWindow {
     }
   }
 
-  /// SDK 结果优先并按 ID 去重；未出现在窗口中不等于已删除。
+  /// SDK 结果优先并按 ID 去重，同秒消息保留来源顺序。
   List<MessageInfo> merge(Iterable<MessageInfo> newestFirst) {
     final latest = newestFirst.toList();
     reconcileRevocations(latest);
@@ -36,8 +37,11 @@ class LocalMessageWindow {
       }
     }
     byId.addAll(_pending);
-    return byId.values.toList()
-      ..sort((a, b) => (b.timestamp ?? 0).compareTo(a.timestamp ?? 0));
+    // 同一秒内的对端消息仍须留在原位，作为下一段连续发送的分界。
+    final ordered = byId.values.toList();
+    mergeSort(ordered,
+        compare: (a, b) => (b.timestamp ?? 0).compareTo(a.timestamp ?? 0));
+    return ordered;
   }
 
   /// 显式删除作为墓碑，避免云端或本地迟到结果使旧消息复活。

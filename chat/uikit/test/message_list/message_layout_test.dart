@@ -634,6 +634,126 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('同秒实时插入对端消息后，己方下一条重新开始头像组', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/single');
+    final stamp = DateTime(2026, 10, 30, 12).millisecondsSinceEpoch ~/ 1000;
+    // 足够长的同秒窗口会触发旧排序的换位，打乱对端消息插入的位置。
+    sdk.messages.chronologicalHistory = List.generate(
+        40, (index) => _Message('history-$index', timestampOverride: stamp));
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    addTearDown(MessageList.clearViewportSnapshots);
+    await tester.pumpWidget(MaterialApp(
+      home: Column(children: [
+        MessageList(
+          conversationID: 'c2c_visual',
+          aggregateMessages: true,
+          localMessagesLoader: () async => [],
+          config: const ChatMessageListConfig(isShowRightAvatar: true),
+        ),
+      ]),
+    ));
+    await tester.pumpAndSettle();
+
+    Future<void> append(String id, {required bool isSelf}) async {
+      final message =
+          _Message(id, timestampOverride: stamp, isSelfOverride: isSelf);
+      sdk.messages.listener!.onRecvNewMessage(message);
+      await tester.pumpAndSettle();
+    }
+
+    Finder item(String id) => find.byWidgetPredicate(
+        (widget) => widget is MessageItem && widget.message.msgID == id);
+    bool continues(String id) =>
+        tester.widget<MessageItem>(item(id)).isContinuation;
+    await append('selfFirst', isSelf: true);
+    await append('selfSecond', isSelf: true);
+    expect(continues('selfSecond'), isTrue);
+    await append('peer', isSelf: false);
+    await append('selfRestart', isSelf: true);
+    expect(continues('peer'), isFalse);
+    expect(continues('selfRestart'), isFalse);
+    await append('selfNext', isSelf: true);
+    expect(continues('selfNext'), isTrue);
+    final ids = ['selfFirst', 'selfSecond', 'peer', 'selfRestart', 'selfNext'];
+    final positions = ids.map((id) => tester.getTopLeft(item(id)).dy).toList();
+    expect(positions, orderedEquals(positions.toList()..sort()));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('连续通话记录按展示方聚合，切换气泡侧时显示首条头像', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/single');
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    addTearDown(MessageList.clearViewportSnapshots);
+    final cloud = sdk.messages.historyGate =
+        Completer<V2TimValueCallback<List<V2TimMessage>>>();
+    final stamp = DateTime(2026, 10, 30, 12).millisecondsSinceEpoch ~/ 1000;
+    MessageInfo incomingCall(String id, int timestamp, bool sentBySelf) =>
+        MessageInfo(
+          msgID: id,
+          timestamp: timestamp,
+          isSentBySelf: sentBySelf,
+          from: MessageSenderInfo(userID: sentBySelf ? 'self' : 'visual'),
+          to: 'visual',
+          messageType: MessageType.custom,
+          messagePayload: CustomMessagePayload(
+            customData: '{"actionType":1,"data":{"businessID":"av_call",'
+                '"call_type":2,"call_end":4,"data":{"cmd":"hangup",'
+                '"inviter":"visual"}}}',
+          ),
+        );
+    await tester.pumpWidget(MaterialApp(
+      home: Column(children: [
+        MessageList(
+          conversationID: 'c2c_visual',
+          aggregateMessages: true,
+          config: const ChatMessageListConfig(isShowRightAvatar: true),
+          localMessagesLoader: () async => [
+            MessageInfo(
+              msgID: 'outgoingText',
+              timestamp: stamp,
+              from: MessageSenderInfo(userID: 'self'),
+              isSentBySelf: true,
+              messageType: MessageType.text,
+              messagePayload: TextMessagePayload(text: '1'),
+            ),
+            // 两次来电由不同一方挂断，信令方向不同，气泡都在对端一侧。
+            incomingCall('firstCall', stamp + 10, true),
+            incomingCall('secondCall', stamp + 20, false),
+          ],
+        ),
+      ]),
+    ));
+    await tester.pumpAndSettle();
+    Finder item(String id) => find.byWidgetPredicate(
+        (widget) => widget is MessageItem && widget.message.msgID == id);
+    Finder bubble(String id) =>
+        find.descendant(of: item(id), matching: find.byType(TextMessageWidget));
+    expect(
+        tester.widget<MessageItem>(item('firstCall')).isContinuation, isFalse);
+    expect(
+        tester.widget<MessageItem>(item('secondCall')).isContinuation, isTrue);
+    final outgoing = tester.getRect(bubble('outgoingText'));
+    final firstCall = tester.getRect(bubble('firstCall'));
+    final secondCall = tester.getRect(bubble('secondCall'));
+    expect(firstCall.left, lessThan(outgoing.left));
+    expect(secondCall.left, closeTo(firstCall.left, .01));
+    expect(secondCall.top - firstCall.bottom, closeTo(8, .01));
+    cloud.complete(V2TimValueCallback(code: 1, desc: '离线'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('仅成功消息可删除，二次确认取消零调用且删除成功通知宿主', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final original = TencentImSDKPlugin.v2TIMManager;

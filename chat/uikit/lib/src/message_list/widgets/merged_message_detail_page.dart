@@ -274,8 +274,8 @@ class _MergedMessageDetailPageState extends State<MergedMessageDetailPage> {
     final showTime = _config.isShowTimeMessage &&
         (previous == null ||
             (timestamp - (previous.timestamp ?? 0)).abs() > 300);
-    final isContinuation =
-        previous != null && MessageUtil.isAvatarContinuation(previous, message);
+    final isContinuation = previous != null &&
+        MessageUtil.isAvatarContinuation(previous, message, context);
     // 时间分组、同发送人聚合和普通间距沿用聊天列表规则，正文宽度不重复扣头像列。
     final topSpacing = previous == null
         ? 0.0

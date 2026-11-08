@@ -58,6 +58,12 @@ class CallingMessageDataProvider {
   // 上屏信息的方向信息
   CallMessageDirection get direction => _direction;
 
+  /// 单聊通话气泡是否展示在己方一侧，其他消息没有通话展示方向。
+  bool? get isOutgoingC2c =>
+      isCallingSignal && participantType == CallParticipantType.c2c
+          ? direction == CallMessageDirection.outcoming
+          : null;
+
   // 是否需要上屏
   bool get excludeFromHistory => _excludeFromHistory;
 

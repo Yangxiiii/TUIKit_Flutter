@@ -176,16 +176,16 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     ]
         .whereType<String>()
         .firstWhere((name) => name.isNotEmpty, orElse: () => '');
-    CallingMessageDataProvider provider =
-        CallingMessageDataProvider(message, context);
+    final provider = CallingMessageDataProvider(message, context);
+    final isOutgoingCall = provider.isOutgoingC2c;
 
-    if (provider.isCallingSignal &&
-        provider.participantType == CallParticipantType.c2c) {
+    // 通话方向跟随发起人，来电头像使用会话对端资料。
+    if (isOutgoingCall != null) {
       if (provider.content.isEmpty) {
         return Container();
       }
 
-      isSelf = provider.direction == CallMessageDirection.outcoming;
+      isSelf = isOutgoingCall;
       if (!isSelf) {
         return _buildWithConversationInfo(isSelf, avatarURL, senderName);
       }
