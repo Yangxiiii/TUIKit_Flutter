@@ -148,6 +148,8 @@ export default class AlbumPicker implements MethodCallHandler, StreamHandler {
       'mediaPath': m.item.filePath,
       'fileExtension': m.item.extension,
       'fileSize': m.item.fileSize,
+      // 鸿蒙选择器直接复制原件，不经过腾讯相册压缩。
+      'isOriginal': true,
       'videoThumbnailPath': (thumb !== undefined && thumb.length > 0) ? thumb : null,
       'duration': m.item.durationMs,
     };

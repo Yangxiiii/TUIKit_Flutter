@@ -61,6 +61,7 @@ class AlbumPickerTheme {
   });
 }
 
+/// 相册返回的媒体资料，分别记录选择时的原件和处理后的本地文件。
 class AlbumMedia {
   final int id;
   final String uri;
@@ -71,6 +72,15 @@ class AlbumMedia {
   final String? videoThumbnailPath;
   final int duration;
 
+  /// 发送原件或平台直接复制原件时为真，未知时由导出结果决定上传通道。
+  final bool isOriginal;
+
+  /// 选择时原件的文件名，提供者未返回时为空。
+  final String? sourceFileName;
+
+  /// 选择时原件的字节数，未知时以导出结果分流。
+  final int? sourceFileSize;
+
   AlbumMedia({
     required this.id,
     this.uri = '',
@@ -80,6 +90,9 @@ class AlbumMedia {
     this.fileSize = 0,
     this.videoThumbnailPath,
     this.duration = 0,
+    this.isOriginal = false,
+    this.sourceFileName,
+    this.sourceFileSize,
   });
 
   @override
@@ -90,7 +103,11 @@ class AlbumMedia {
   }
 }
 
+/// 配置腾讯相册的选择界面和本地导出。
 class AlbumPickerConfig {
+  /// 原生接收的最大正整数，将实际大小限制交给发送层。
+  static const unrestrictedOutputFileSizeInMB = 0x7fffffff;
+
   final AlbumPickerMediaFilter? mediaFilter;
   final int? maxSelectionCount;
   final int? itemsPerRow;
@@ -100,6 +117,9 @@ class AlbumPickerConfig {
   final AlbumPickerCompressQuality? compressQuality;
   final int? maxVideoDurationInSeconds;
   final int? maxOutputFileSizeInMB;
+
+  /// 在选择确认事件补充原件资料，供聊天在创建占位前分流。
+  final bool includeSourceMetadata;
 
   const AlbumPickerConfig({
     this.mediaFilter,
@@ -111,6 +131,7 @@ class AlbumPickerConfig {
     this.compressQuality,
     this.maxVideoDurationInSeconds,
     this.maxOutputFileSizeInMB,
+    this.includeSourceMetadata = false,
   });
 }
 

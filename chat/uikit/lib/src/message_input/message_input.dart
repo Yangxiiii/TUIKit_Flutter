@@ -1371,12 +1371,18 @@ class MessageInputState extends State<MessageInput>
       return;
     }
     final locale = Localizations.localeOf(context);
+    final canUploadLargeFiles = widget.config.mediaSender != null;
 
     AlbumPickerConfig config = AlbumPickerConfig(
       mediaFilter: AlbumPickerMediaFilter.imageAndVideo,
       maxSelectionCount: 9,
       itemsPerRow: 3,
       showsCameraItem: false,
+      // 保留腾讯相册界面，确认时读取原件大小供占位和发送分流。
+      includeSourceMetadata: canUploadLargeFiles,
+      maxOutputFileSizeInMB: canUploadLargeFiles
+          ? AlbumPickerConfig.unrestrictedOutputFileSizeInMB
+          : null,
       style: AlbumPickerStyle.likeWeChat,
       language: _localeToAlbumPickerLanguage(locale),
     );
@@ -1394,6 +1400,7 @@ class MessageInputState extends State<MessageInput>
       );
     } catch (e) {
       debugPrint("_onPickAlbum error: $e");
+      if (mounted) Toast.error(context, atomicLocale.sendMessageFail);
     }
   }
 
@@ -1410,7 +1417,8 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// 所有独立消息在此组合引用与推送选项，再交给宿主统一分流媒体。
-  Future<CompletionHandler> _sendMessage(MessageInfo messageInfo) async {
+  Future<CompletionHandler> _sendMessage(MessageInfo messageInfo,
+      {MessageInfo? albumUploadPlaceholder}) async {
     final payload = _convertToSendPayload(messageInfo.messagePayload);
     if (payload == null) {
       return CompletionHandler()
@@ -1437,6 +1445,7 @@ class MessageInputState extends State<MessageInput>
       message: messageInfo,
       conversationID: widget.conversationID,
       sender: widget.config.mediaSender,
+      albumUploadPlaceholder: albumUploadPlaceholder,
       onRetryFailure: () {
         if (mounted) Toast.error(context, atomicLocale.sendMessageFail);
       },
@@ -1514,6 +1523,8 @@ class MessageInputState extends State<MessageInput>
           videoType: p.videoType ?? '',
           duration: p.videoDuration,
           snapshotPath: p.videoSnapshotPath ?? '',
+          snapshotWidth: p.videoSnapshotWidth,
+          snapshotHeight: p.videoSnapshotHeight,
         );
       case AudioMessagePayload p:
         return AudioSendMessagePayload(
@@ -3427,6 +3438,7 @@ class _MorePanelItem {
 //
 // MARK: - AlbumPickerMediaSendListener 实现
 
+/// 将相册的导出结果转交当前输入框的统一消息发送流程。
 class _AlbumPickerMediaSendListenerImpl
     implements AlbumPickerMediaSendListener {
   final MessageInputState _state;
@@ -3434,8 +3446,12 @@ class _AlbumPickerMediaSendListenerImpl
   _AlbumPickerMediaSendListenerImpl(this._state);
 
   @override
-  void onSendMessage(MessageInfo messageInfo) {
-    _state._sendMessage(messageInfo).then((result) {
+  void onSendMessage(MessageInfo messageInfo,
+      {MessageInfo? albumUploadPlaceholder}) {
+    _state
+        ._sendMessage(messageInfo,
+            albumUploadPlaceholder: albumUploadPlaceholder)
+        .then((result) {
       if (!result.isSuccess) {
         debugPrint(
           "AlbumPicker onSendMessage failed: ${result.errorCode}, ${result.errorMessage}",
@@ -3452,5 +3468,12 @@ class _AlbumPickerMediaSendListenerImpl
   @override
   void onRemovePlaceholderMessage(MessageInfo placeholder) {
     _state._removePlaceholderMessage(placeholder);
+  }
+
+  @override
+  void onMediaPreparationFailed() {
+    if (_state.mounted) {
+      Toast.error(_state.context, _state.atomicLocale.sendMessageFail);
+    }
   }
 }

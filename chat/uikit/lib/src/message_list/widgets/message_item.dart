@@ -6,6 +6,7 @@ import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_list/message_list.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/asr_display_manager.dart';
+import 'package:tencent_chat_uikit/src/message_list/utils/big_file_message.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/calling_message_data_provider.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_resender.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_utils.dart';
@@ -374,6 +375,38 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         child: avatar,
       );
 
+  /// 单聊媒体卡片的发送提示和回执共用一列，状态切换时保持正文可用宽度。
+  Widget? _mediaStatusLane(Widget? indicator,
+      {required bool isSelf, required bool beforeBubble}) {
+    if (!isSelf ||
+        isGroup ||
+        message.conversationType == ConversationType.group ||
+        isInMergedDetailView) {
+      return null;
+    }
+    final payload = message.messagePayload;
+    final stableMedia = switch (message.messageType) {
+      MessageType.file || MessageType.image || MessageType.video => true,
+      MessageType.custom => payload is CustomMessagePayload &&
+          BigFileMessage.tryParse(payload.customData) != null,
+      _ => false,
+    };
+    if (!stableMedia) return null;
+    return Padding(
+      padding: beforeBubble
+          ? const EdgeInsets.only(right: 8)
+          : const EdgeInsets.only(left: 8),
+      child: SizedBox(
+        width: 18,
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          heightFactor: 1,
+          child: indicator,
+        ),
+      ),
+    );
+  }
+
   /// 通话资料异步补齐后仍使用相同菜单回调，删除与聚合规则不随布局路径丢失。
   Widget _buildMessageLayout(
       bool isSelf, String? avatarUrl, String senderName, BuildContext context) {
@@ -497,6 +530,10 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         : null;
 
     final attachment = _buildAttachmentIfAny(isSelf);
+    final mediaStatus = _mediaStatusLane(
+        statusIndicator ?? readReceiptIndicator,
+        isSelf: isSelf,
+        beforeBubble: false);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
@@ -560,11 +597,13 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Flexible(child: messageBubble),
-                    if (statusIndicator != null) ...[
+                    if (mediaStatus != null) mediaStatus,
+                    if (mediaStatus == null && statusIndicator != null) ...[
                       const SizedBox(width: 6),
                       statusIndicator,
                     ],
-                    if (readReceiptIndicator != null) ...[
+                    if (mediaStatus == null &&
+                        readReceiptIndicator != null) ...[
                       const SizedBox(width: 4),
                       readReceiptIndicator,
                     ],
@@ -627,6 +666,10 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         : null;
 
     final attachment = _buildAttachmentIfAny(isSelf);
+    final mediaStatus = _mediaStatusLane(
+        statusIndicator ?? readReceiptIndicator,
+        isSelf: isSelf,
+        beforeBubble: true);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
@@ -652,11 +695,13 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                   mainAxisAlignment: MainAxisAlignment.end,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    if (readReceiptIndicator != null) ...[
+                    if (mediaStatus != null) mediaStatus,
+                    if (mediaStatus == null &&
+                        readReceiptIndicator != null) ...[
                       readReceiptIndicator,
                       const SizedBox(width: 4),
                     ],
-                    if (statusIndicator != null) ...[
+                    if (mediaStatus == null && statusIndicator != null) ...[
                       statusIndicator,
                       const SizedBox(width: 6),
                     ],
@@ -733,6 +778,10 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     );
 
     final attachment = _buildAttachmentIfAny(true);
+    final mediaStatus = _mediaStatusLane(
+        statusIndicator ?? readReceiptIndicator,
+        isSelf: true,
+        beforeBubble: true);
 
     // 普通消息按对侧头像对齐，回复可以使用这段留白，实际头像和回执继续独立排列。
     final needLeftSpacer = config.isShowLeftAvatar && replyQuote == null;
@@ -759,11 +808,12 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
               mainAxisAlignment: MainAxisAlignment.end,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                if (readReceiptIndicator != null) ...[
+                if (mediaStatus != null) mediaStatus,
+                if (mediaStatus == null && readReceiptIndicator != null) ...[
                   readReceiptIndicator,
                   const SizedBox(width: 4),
                 ],
-                if (statusIndicator != null) ...[
+                if (mediaStatus == null && statusIndicator != null) ...[
                   statusIndicator,
                   const SizedBox(width: 8),
                 ],

@@ -1,11 +1,11 @@
 import Flutter
 import UIKit
 import AlbumPicker
+import AlbumPickerCore
 import Photos
 import AVFoundation
 
-/// Bridges Flutter method calls to the AlbumPicker Pod library,
-/// and relays delegate callbacks back via EventChannel.
+/// 桥接腾讯相册，并将选择资料和本地导出进度回传给 Flutter。
 class AlbumPickerHandler: NSObject {
     fileprivate weak var registrar: FlutterPluginRegistrar?
     private var eventSink: ((Any) -> Void)?
@@ -73,7 +73,8 @@ class AlbumPickerHandler: NSObject {
               + " gridCount: \(config.itemsPerRow ?? 0),"
               + " sessionId: \(sessionId)")
 
-        presentAlbumPicker(config: config, theme: theme, sessionId: sessionId)
+        presentAlbumPicker(config: config, theme: theme, sessionId: sessionId,
+                           includeSourceMetadata: args["includeSourceMetadata"] as? Bool == true)
     }
 
     // MARK: - Argument Parsing
@@ -135,7 +136,8 @@ class AlbumPickerHandler: NSObject {
 
     // MARK: - Presentation
 
-    private func presentAlbumPicker(config: AlbumPickerConfig, theme: AlbumPickerTheme, sessionId: String) {
+    private func presentAlbumPicker(config: AlbumPickerConfig, theme: AlbumPickerTheme, sessionId: String,
+                                    includeSourceMetadata: Bool) {
         print("[AlbumPickerHandler] presentAlbumPicker sessionId=\(sessionId)")
         DispatchQueue.main.async { [weak self] in
             guard let self = self, let viewController = self.viewController else {
@@ -160,10 +162,12 @@ class AlbumPickerHandler: NSObject {
 
             let proxy = AlbumPickerDelegateProxy(
                 sessionId: sessionId,
-                handler: self
+                handler: self,
+                includeSourceMetadata: includeSourceMetadata
             )
             self.delegateProxies[sessionId] = proxy
             albumPickerView.delegate = proxy
+            proxy.pickerView = albumPickerView
 
             albumPickerView.initialize(config: config, theme: theme)
 
@@ -384,21 +388,75 @@ class AlbumPickerHandler: NSObject {
 
 // MARK: - AlbumPickerDelegateProxy
 
+/// 保持单次相册确认与导出事件的先后顺序。
 class AlbumPickerDelegateProxy: NSObject, AlbumPickerDelegate {
     let sessionId: String
     private weak var handler: AlbumPickerHandler?
+    /// 仅在确认时访问原选择界面，不延长其生命周期。
+    weak var pickerView: AlbumPickerView?
 
     private let serialQueue: DispatchQueue
+    /// 只有聊天分流需要查询原件，其他入口沿用原有回调。
+    private let includeSourceMetadata: Bool
 
-    init(sessionId: String, handler: AlbumPickerHandler) {
+    init(sessionId: String, handler: AlbumPickerHandler, includeSourceMetadata: Bool) {
         self.sessionId = sessionId
         self.handler = handler
         self.serialQueue = DispatchQueue(label: "com.albumpicker.event-queue.\(sessionId)", qos: .userInitiated)
+        self.includeSourceMetadata = includeSourceMetadata
         super.init()
+    }
+
+    /// 腾讯当前回调未公开勾选状态；按 Store 类型读取，结构变更时回退到导出大小。
+    private func isSendingOriginal() -> Bool {
+        guard let picker = pickerView else { return false }
+        for view in picker.subviews {
+            for field in Mirror(reflecting: view).children {
+                if let store = field.value as? AlbumPickerStore {
+                    return store.state.isOriginalSelected
+                }
+            }
+        }
+        return false
+    }
+
+    /// 并行读取本地照片资料；云端原件或超时不阻塞相册导出。
+    private func sourceMetadata(_ media: [AlbumMedia]) -> [UInt64: [String: Any]] {
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var metadata: [UInt64: [String: Any]] = [:]
+        for item in media {
+            guard let asset = item.asset else { continue }
+            let id = item.id
+            if let name = PHAssetResource.assetResources(for: asset).first?.originalFilename {
+                lock.lock()
+                metadata[id, default: [:]]["sourceFileName"] = name
+                lock.unlock()
+            }
+            let options = PHContentEditingInputRequestOptions()
+            options.isNetworkAccessAllowed = false
+            group.enter()
+            asset.requestContentEditingInput(with: options) { input, _ in
+                defer { group.leave() }
+                let url = input?.fullSizeImageURL ?? (input?.audiovisualAsset as? AVURLAsset)?.url
+                guard let url = url, let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
+                    return
+                }
+                lock.lock()
+                metadata[id, default: [:]]["sourceFileSize"] = size
+                lock.unlock()
+            }
+        }
+        // 等待时间只影响确认事件，资料未就绪时由导出文件大小兜底。
+        _ = group.wait(timeout: .now() + .milliseconds(500))
+        lock.lock()
+        defer { lock.unlock() }
+        return metadata
     }
 
     func onPickConfirm(pickedAlbumMedias: [AlbumMedia], textMessage: String?) {
         print("[AlbumPickerHandler] onPickConfirm: \(pickedAlbumMedias.count) items, sessionId=\(sessionId)")
+        let original = includeSourceMetadata && isSendingOriginal()
 
         DispatchQueue.main.async { [weak handler] in
             handler?.viewController?.dismiss(animated: true)
@@ -407,23 +465,29 @@ class AlbumPickerDelegateProxy: NSObject, AlbumPickerDelegate {
         serialQueue.async { [weak self] in
             guard let self = self else { return }
 
-            for media in pickedAlbumMedias {
-                guard media.videoThumbnailPath == nil else { continue }
-                if let path = self.handler?.generateThumbnailForMedia(media) {
-                    media.videoThumbnailPath = path
-                }
-            }
-
+            let source = original ? self.sourceMetadata(pickedAlbumMedias) : [:]
+            // 先回传分流依据，封面准备随后仍在同一队列完成。
             var event: [String: Any] = [
                 "type": "onPickConfirm",
                 "sessionId": self.sessionId,
-                "pickedAlbumMedias": pickedAlbumMedias.map { self.handler?.buildMediaDataDict(albumMedia: $0) ?? [:] },
+                "pickedAlbumMedias": pickedAlbumMedias.map { media in
+                    var data = self.handler?.buildMediaDataDict(albumMedia: media) ?? [:]
+                    if original { data["isOriginal"] = true }
+                    return data.merging(source[media.id] ?? [:]) { current, _ in current }
+                },
             ]
             if let textMessage = textMessage {
                 event["textMessage"] = textMessage
             }
             print("[AlbumPickerHandler] onPickConfirm dispatching to Flutter, sessionId=\(self.sessionId)")
             self.handler?.sendEvent(event)
+
+            for media in pickedAlbumMedias {
+                guard media.videoThumbnailPath == nil else { continue }
+                if let path = self.handler?.generateThumbnailForMedia(media) {
+                    media.videoThumbnailPath = path
+                }
+            }
 
             if pickedAlbumMedias.isEmpty {
                 DispatchQueue.main.async { [weak self] in

@@ -9,6 +9,7 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.provider.OpenableColumns
 import android.util.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
@@ -62,7 +63,8 @@ class AlbumPickerHandler(
 
             Companion.pendingConfig = config
             Companion.pendingTheme = theme
-            Companion.pendingListener = createAlbumPickerListener()
+            Companion.pendingListener =
+                createAlbumPickerListener(call.argument<Boolean>("includeSourceMetadata") == true)
 
             launchHostActivity()
         } catch (e: Exception) {
@@ -157,31 +159,33 @@ class AlbumPickerHandler(
         context.startActivity(intent)
     }
 
-    /// 各回调绑定原选择会话，确认事件不能等待缩略图或导出完成。
-    private fun createAlbumPickerListener(): AlbumPickerListener {
+    /// 确认事件先回传原件资料，再处理缩略图，导出进度与确认共用同一队列。
+    private fun createAlbumPickerListener(includeSourceMetadata: Boolean): AlbumPickerListener {
         val capturedSessionId = sessionId
 
         return object : AlbumPickerListener {
             override fun onPickConfirm(pickedAlbumMedias: List<AlbumMedia>, textMessage: String?) {
                 Log.d(TAG, "onPickConfirm: ${pickedAlbumMedias.size} items selected")
 
-                AlbumPickerHostActivity.currentInstance?.finish()
+                val host = AlbumPickerHostActivity.currentInstance
+                // 关闭界面前读取此次确认的选项，后台导出期间不再访问视图。
+                val original = includeSourceMetadata && host?.isSendingOriginal() == true
+                host?.finish()
 
-                // 确认先到 Flutter 预留可删除占位；视频首帧提取不能阻塞用户看到所选媒体。
-                try {
+                executor.execute {
                     val event = mutableMapOf<String, Any>(
                         "type" to "onPickConfirm",
-                        "pickedAlbumMedias" to pickedAlbumMedias.map { buildMediaDataMap(it) },
+                        "pickedAlbumMedias" to pickedAlbumMedias.map { media ->
+                            val data = buildMediaDataMap(media)
+                            if (original) data + sourceMetadata(media.uri) + ("isOriginal" to true)
+                            else data
+                        },
                     )
                     textMessage?.let { event["textMessage"] = it }
                     capturedSessionId?.let { event["sessionId"] = it }
                     mainHandler.post { eventSink(event) }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error building onPickConfirm event", e)
-                }
 
-                // 保留原有封面准备，处理结果仍按同一后台队列在确认事件之后发送。
-                executor.execute {
+                    // 先让聊天显示正确的占位，封面继续使用原有后台准备流程。
                     for (media in pickedAlbumMedias) {
                         if (media.videoThumbnailPath == null) {
                             media.videoThumbnailPath = generateThumbnailForMedia(media)
@@ -235,6 +239,30 @@ class AlbumPickerHandler(
                 completeSession()
             }
         }
+    }
+
+    /// 原件大小以内容提供者元数据为准，未知时留给导出结果判定。
+    private fun sourceMetadata(uri: Uri?): Map<String, Any> {
+        if (uri == null) return emptyMap()
+        val resolver = ContextProvider.appContext.contentResolver
+        val fields = mutableMapOf<String, Any>()
+        runCatching {
+            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)
+                ?.use { cursor ->
+                    if (!cursor.moveToFirst()) return@use
+                    val name = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    val size = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    if (name >= 0 && !cursor.isNull(name)) fields["sourceFileName"] = cursor.getString(name)
+                    if (size >= 0 && !cursor.isNull(size)) fields["sourceFileSize"] = cursor.getLong(size)
+                }
+        }
+        if (fields["sourceFileSize"] == null && uri.scheme == "file") {
+            uri.path?.let { File(it) }?.takeIf { it.isFile }?.let {
+                fields["sourceFileName"] = it.name
+                fields["sourceFileSize"] = it.length()
+            }
+        }
+        return fields
     }
 
     // MARK: - Thumbnail Generation

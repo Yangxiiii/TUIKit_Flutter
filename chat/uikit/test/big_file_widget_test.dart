@@ -8,6 +8,34 @@ import 'package:tencent_chat_uikit/src/message_list/utils/big_file_message.dart'
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/file_message_widget.dart';
 
 void main() {
+  testWidgets('相册压缩时显示活动进度，未知大小不显示为零', (tester) async {
+    final message = MessageInfo(
+      msgID: 'album_preparing',
+      status: MessageStatus.sending,
+      messageType: MessageType.file,
+      messagePayload: FileMessagePayload(fileName: '视频.mp4'),
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: FileMessageWidget(
+          message: message,
+          isSelf: true,
+          maxWidth: 300,
+          config: const ChatMessageListConfig(),
+        ),
+      ),
+    ));
+    expect(find.text('视频.mp4'), findsOneWidget);
+    expect(find.text('加载中…'), findsOneWidget);
+    expect(find.text('0 B'), findsNothing);
+    expect(
+      tester
+          .widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator))
+          .value,
+      isNull,
+    );
+  });
+
   testWidgets('大文件与普通文件采用同一卡片尺寸，上传进度与失败文字互斥且不覆盖文件信息', (tester) async {
     const file = BigFileMessage(
         url: 'https://files.test/a', name: '长文件名称.pdf', size: 104857601);

@@ -20,6 +20,7 @@ class _CallbackGroup {
   });
 }
 
+/// 传递相册配置，并将原生媒体事件交还给对应的选择会话。
 class AlbumPickerPlatform {
   static AlbumMediaType _convertMediaType(int mediaType) {
     if (mediaType >= 0 && mediaType < AlbumMediaType.values.length) {
@@ -56,6 +57,9 @@ class AlbumPickerPlatform {
       fileSize: data['fileSize'] as int? ?? 0,
       videoThumbnailPath: data['videoThumbnailPath'] as String?,
       duration: data['duration'] as int? ?? 0,
+      isOriginal: data['isOriginal'] == true,
+      sourceFileName: data['sourceFileName'] as String?,
+      sourceFileSize: data['sourceFileSize'] as int?,
     );
   }
 
@@ -149,7 +153,10 @@ class AlbumPickerPlatform {
     Function()? onMediaProcessed,
     Function()? onCancel,
   }) async {
-    if (!Platform.isAndroid && !Platform.isIOS && !_isOhos) {
+    if (kIsWeb ||
+        (defaultTargetPlatform != TargetPlatform.android &&
+            defaultTargetPlatform != TargetPlatform.iOS &&
+            !_isOhos)) {
       throw UnsupportedError(
           'Native AlbumPicker is only supported on Android, iOS and HarmonyOS');
     }
@@ -185,6 +192,7 @@ class AlbumPickerPlatform {
           'compressQuality': config?.compressQuality?.index,
           'maxVideoDurationInSeconds': config?.maxVideoDurationInSeconds,
           'maxOutputFileSizeInMB': config?.maxOutputFileSizeInMB,
+          'includeSourceMetadata': config?.includeSourceMetadata ?? false,
           'primaryColor': _convertColor(theme?.primaryColor),
           'backgroundColor': _convertColor(theme?.backgroundColor),
           'backgroundColorSecondary':

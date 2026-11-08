@@ -32,6 +32,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_overlay_avoider.dart';
 import 'package:tencent_chat_uikit/src/third_party/scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/text_message_widget.dart';
+import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/file_message_widget.dart';
+import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/video_message_widget.dart';
 import 'package:tencent_chat_uikit/src/third_party/extended_text/extended_text.dart';
 
 void main() {
@@ -504,6 +506,78 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpAndSettle();
     }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('单聊文件和视频从上传切换为已发送时卡片尺寸不变', (tester) async {
+    const file = BigFileMessage(
+        url: 'https://files.test/a.mp4', name: '压缩视频.mp4', size: 104857601);
+    final uploading = MessageInfo(
+      msgID: 'album_upload',
+      isSentBySelf: true,
+      status: MessageStatus.sending,
+      messageType: MessageType.file,
+      messagePayload: FileMessagePayload(
+          fileName: file.name, fileSize: file.size, filePath: '/cache/a.mp4'),
+    );
+    final sent = MessageInfo(
+      msgID: 'sent',
+      isSentBySelf: true,
+      status: MessageStatus.sendSuccess,
+      messageType: MessageType.custom,
+      needReadReceipt: true,
+      conversationType: ConversationType.c2c,
+      messagePayload: CustomMessagePayload(customData: file.toCustomData()),
+    );
+    Future<Rect> card(MessageInfo message, bool receipt,
+        [Type type = FileMessageWidget]) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Center(
+          child: SizedBox(
+            width: 358,
+            child: MessageItem(
+              message: message,
+              conversationID: 'c2c_visual',
+              maxWidth: 358,
+              config: ChatMessageListConfig(
+                isShowRightAvatar: true,
+                enableReadReceipt: receipt,
+                fileTransfers: const {
+                  'album_upload': ChatFileTransferView(progress: .5)
+                },
+              ),
+              messageListStore: _UnusedMenuListStore(),
+              isHighlighted: false,
+            ),
+          ),
+        ),
+      ));
+      return tester.getRect(find.byType(type));
+    }
+
+    final initial = await card(uploading, true);
+    for (final receipt in [false, true]) {
+      final completed = await card(sent, receipt);
+      expect(completed.size, initial.size);
+      expect(completed.right, initial.right);
+    }
+    final video = MessageInfo(
+      msgID: 'video',
+      isSentBySelf: true,
+      status: MessageStatus.sending,
+      messageType: MessageType.video,
+      needReadReceipt: true,
+      conversationType: ConversationType.c2c,
+      messagePayload: VideoMessagePayload(
+          videoSnapshotPath: 'https://files.test/cover.jpg',
+          videoSnapshotWidth: 1920,
+          videoSnapshotHeight: 1080),
+    );
+    final videoUploading = await card(video, true, VideoMessageWidget);
+    video.status = MessageStatus.sendSuccess;
+    final videoSent = await card(video, true, VideoMessageWidget);
+    expect(videoSent.size, videoUploading.size);
+    expect(videoSent.right, videoUploading.right);
     expect(tester.takeException(), isNull);
   });
 

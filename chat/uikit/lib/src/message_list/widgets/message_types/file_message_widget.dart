@@ -58,7 +58,7 @@ class FileMessageWidget extends StatefulWidget {
   State<FileMessageWidget> createState() => _FileMessageWidgetState();
 }
 
-/// 只管理当前卡片的打开动作和资源失效显示，上传状态来自宿主Controller。
+/// 展示文件导出和上传状态，管理卡片打开动作及资源失效反馈。
 class _FileMessageWidgetState extends State<FileMessageWidget> {
   bool _opening = false;
 
@@ -75,10 +75,11 @@ class _FileMessageWidgetState extends State<FileMessageWidget> {
   String get _name => widget.bigFile?.name ?? _payload?.fileName ?? '';
   int get _size => widget.bigFile?.size ?? _payload?.fileSize ?? 0;
 
-  /// 一次点击完成下载并打开，403与断网保留重试，不判为过期。
+  /// 等导出与发送结束后才允许打开，403 与断网保留重试，不判为过期。
   Future<void> _open() async {
     if (_opening ||
         _expired ||
+        widget.message.status == MessageStatus.sending ||
         widget.config.fileTransfers.containsKey(widget.message.msgID)) {
       return;
     }
@@ -126,13 +127,22 @@ class _FileMessageWidgetState extends State<FileMessageWidget> {
         widget.message.status == MessageStatus.sendFail;
     final sending = transfer != null && !failed ||
         widget.message.status == MessageStatus.sending;
+    // 相册导出阶段尚无本地路径，用持续动画提示处理中，不把未知大小显示为 0 B。
+    final preparing = sending &&
+        transfer == null &&
+        _payload != null &&
+        _payload?.filePath?.isNotEmpty != true;
+    final showSize = !preparing || _size > 0;
     final status = _expired
         ? AppLocalization.of(context).appFileExpired
         : transfer?.interrupted == true
             ? AppLocalization.of(context).appFileInterrupted
             : failed
                 ? AppLocalization.of(context).appFileFailed
-                : null;
+                : preparing
+                    ? AppLocalization.of(context)
+                        .resolve(LocaleKeys.common_loading, '加载中…')
+                    : null;
     final progress = transfer?.progress ??
         (sending && transfer == null
             ? widget.message.uploadMediaProgress / 100
@@ -148,7 +158,7 @@ class _FileMessageWidgetState extends State<FileMessageWidget> {
     return Semantics(
       identifier: 'tim.fileMessage.open.${widget.message.msgID}',
       button: true,
-      enabled: !_expired && transfer == null,
+      enabled: !_expired && !sending && transfer == null,
       child: GestureDetector(
         onTap: _open,
         onLongPress: widget.onLongPress,
@@ -209,17 +219,18 @@ class _FileMessageWidgetState extends State<FileMessageWidget> {
                                 height: 20 / 14,
                                 color: nameColor)),
                         const SizedBox(height: 4),
-                        // 大小独立保留，异常文案只占其后的剩余空间。
+                        // 已知大小独立显示，状态文案使用剩余空间。
                         Row(children: [
-                          Text(formatChatFileSize(_size),
-                              style: TextStyle(
-                                  fontSize: 14,
-                                  height: 20 / 14,
-                                  color: _expired
-                                      ? colors.textTertiary
-                                      : colors.textSecondary)),
+                          if (showSize)
+                            Text(formatChatFileSize(_size),
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    height: 20 / 14,
+                                    color: _expired
+                                        ? colors.textTertiary
+                                        : colors.textSecondary)),
                           if (status != null) ...[
-                            const SizedBox(width: 4),
+                            if (showSize) const SizedBox(width: 4),
                             Flexible(
                                 child: Text(status,
                                     maxLines: 1,
@@ -229,7 +240,9 @@ class _FileMessageWidgetState extends State<FileMessageWidget> {
                                         height: 20 / 14,
                                         color: _expired
                                             ? colors.textTertiary
-                                            : colors.danger))),
+                                            : preparing
+                                                ? colors.textSecondary
+                                                : colors.danger))),
                           ],
                         ]),
                       ])),
@@ -240,7 +253,8 @@ class _FileMessageWidgetState extends State<FileMessageWidget> {
                   right: 0,
                   bottom: 0,
                   child: LinearProgressIndicator(
-                      value: _opening ? null : progress?.clamp(0, 1),
+                      value:
+                          _opening || preparing ? null : progress?.clamp(0, 1),
                       minHeight: 2,
                       color: colors.primary,
                       backgroundColor: Colors.transparent)),

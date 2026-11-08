@@ -908,6 +908,8 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
         maxSelectionCount: 9,
         itemsPerRow: 3,
         showsCameraItem: false,
+        // 图文附件在宿主上传，相册保留本地导出能力。
+        maxOutputFileSizeInMB: AlbumPickerConfig.unrestrictedOutputFileSizeInMB,
         style: AlbumPickerStyle.likeWeChat,
         language: locale.languageCode == 'zh'
             ? AlbumPickerLanguage.zhHans

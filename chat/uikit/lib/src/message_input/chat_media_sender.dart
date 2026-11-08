@@ -109,6 +109,7 @@ final class ChatMediaSendRequest {
       required this.send,
       required this.showLocalMessage,
       required this.removeLocalMessage,
+      this.albumUploadPlaceholder,
       this.onRetryFailure});
 
   /// 原始待发消息，用于区分图片、语音、视频与普通文件。
@@ -131,6 +132,9 @@ final class ChatMediaSendRequest {
 
   /// 上传消息交接给SDK真实消息时删除占位，避免重复行。
   final void Function(String messageId) removeLocalMessage;
+
+  /// 已判定走直传的相册占位，上传接管同一行。原件导出变小也保持直传。
+  final MessageInfo? albumUploadPlaceholder;
 }
 
 /// 会话Controller提供的不可变上传视图，进度与重试不由消息Widget单独保存。
@@ -156,6 +160,7 @@ final class ChatFileTransferView {
 
 /// 普通发送与失败重发共用宿主分流入口，原生通知只在 UIKit 边界使用。
 /// onMessageCreated 在 SDK 发布真实消息时回调，用于交接上传阶段的本地气泡。
+/// albumUploadPlaceholder 仅由相册确认阶段创建，用于固定直传通道及占位身份。
 Future<CompletionHandler> sendChatMedia(
     {required MessageInfo message,
     required SendMessagePayload payload,
@@ -163,6 +168,7 @@ Future<CompletionHandler> sendChatMedia(
     required String conversationID,
     ChatMediaSender? sender,
     MessageInputStore? store,
+    MessageInfo? albumUploadPlaceholder,
     Future<void> Function()? beforeSend,
     void Function(MessageInfo message)? onMessageCreated,
     VoidCallback? onRetryFailure}) {
@@ -214,6 +220,7 @@ Future<CompletionHandler> sendChatMedia(
     payload: payload,
     option: option,
     send: send,
+    albumUploadPlaceholder: albumUploadPlaceholder,
     onRetryFailure: onRetryFailure,
     showLocalMessage: (local) => notificationCenter.post(
         MessageSendNotifyKey.messageSendBegin,
