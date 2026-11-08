@@ -25,6 +25,7 @@ import 'package:tencent_cloud_chat_sdk/models/v2_tim_callback.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_conversation.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_conversation_result.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_message.dart';
+import 'package:tencent_cloud_chat_sdk/enum/offlinePushInfo.dart' as sdk_model;
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_msg_create_info_result.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_value_callback.dart';
 import 'package:tencent_cloud_chat_sdk/tencent_im_sdk_plugin.dart';
@@ -466,6 +467,9 @@ void main() {
       results[2].complete('https://example.com/video.mp4');
       await tester.pump();
       expect(sdk.messages.created, createdBefore + 1);
+      expect(sdk.messages.customDescriptions.last, 'oarichimage oarichvideo');
+      expect(sdk.messages.pushDescriptions.last, isNotEmpty);
+      expect(sdk.messages.pushDescriptions.last, isNot(contains('oarich')));
       final message =
           RichContentMessage.tryParse(sdk.messages.customData.last)!;
       expect(message.blocks.whereType<RichImageBlock>().single.url,
@@ -1016,6 +1020,8 @@ final class _Conversations implements V2TIMConversationManager {
 final class _Messages implements V2TIMMessageManager {
   int created = 0;
   final customData = <String>[];
+  final customDescriptions = <String>[];
+  final pushDescriptions = <String?>[];
   final textMessages = <String>[];
   final faceMessages = <({int index, String data})>[];
   final pending = <Completer<V2TimValueCallback<V2TimMessage>>>[];
@@ -1040,6 +1046,7 @@ final class _Messages implements V2TIMMessageManager {
         }
         if (call.memberName == #createCustomMessage) {
           customData.add(call.namedArguments[#data] as String);
+          customDescriptions.add(call.namedArguments[#desc] as String);
         }
         created++;
         return Future.value(
@@ -1052,6 +1059,9 @@ final class _Messages implements V2TIMMessageManager {
           ),
         );
       case #sendMessage:
+        pushDescriptions.add((call.namedArguments[#offlinePushInfo]
+                as sdk_model.OfflinePushInfo?)
+            ?.desc);
         final result = Completer<V2TimValueCallback<V2TimMessage>>();
         pending.add(result);
         return result.future;

@@ -1312,7 +1312,9 @@ class MessageInputState extends State<MessageInput>
             messageType: MessageType.custom,
             messagePayload: CustomMessagePayload(
               customData: content.toCustomData(),
-              description: _trimPushDescription(content.plainTextPreview),
+              description: content.searchDescription(
+                _trimPushDescription(content.plainTextPreview),
+              ),
             ),
             atUserList: atUserList,
           ));
@@ -1324,7 +1326,7 @@ class MessageInputState extends State<MessageInput>
         final message = MessageInfo(
           messageType: MessageType.custom,
           messagePayload: CustomMessagePayload(
-            description: _trimPushDescription(preview.plainTextPreview),
+            description: _richContentPushDescription(preview),
           ),
           atUserList: atUserList,
         );
@@ -1606,9 +1608,7 @@ class MessageInputState extends State<MessageInput>
     return pushInfo;
   }
 
-  /// Create offline push description for a message
-  ///
-  /// 为消息创建离线推送描述
+  /// 按消息类型生成离线推送摘要，富文本优先取正文，其次使用媒体类型。
   String _createOfflinePushDescription(MessageInfo message) {
     String content;
     switch (message.messageType) {
@@ -1641,18 +1641,30 @@ class MessageInputState extends State<MessageInput>
         break;
       case MessageType.custom:
         final custom = message.messagePayload as CustomMessagePayload?;
-        // 本地富文本的推送先使用正文摘要，不能为生成推送把本地路径写入协议。
+        // 待上传富文本已经携带独立摘要，不能为生成推送把本地路径写入协议。
+        final richContent = RichContentMessage.tryParse(custom?.customData);
         content = BigFileMessage.tryParse(custom?.customData) != null
             ? atomicLocale.messageTypeFile
-            : RichContentMessage.tryParse(custom?.customData)
-                    ?.plainTextPreview ??
-                custom?.description ??
-                '';
+            : richContent != null
+                ? _richContentPushDescription(richContent)
+                : custom?.description ?? '';
         break;
       default:
         content = '';
     }
     return _trimPushDescription(content);
+  }
+
+  /// 无正文时用媒体类型生成推送摘要，避免 SDK 回退显示自定义消息的索引词。
+  String _richContentPushDescription(RichContentMessage content) {
+    final text = content.plainTextPreview;
+    if (text.isNotEmpty) return _trimPushDescription(text);
+    return [
+      if (content.mediaBlocks.any((block) => block is RichImageBlock))
+        atomicLocale.messageTypeImage,
+      if (content.mediaBlocks.any((block) => block is RichFileBlock))
+        atomicLocale.messageTypeVideo,
+    ].join(' ');
   }
 
   /// Trim push description to max length

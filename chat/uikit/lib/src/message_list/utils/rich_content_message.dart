@@ -8,17 +8,28 @@ final class RichContentMessage {
   /// 当前图文消息体的结构版本；版本变化时须保留旧版本解析或明确降级。
   static const version = 1;
 
+  /// 图片块的腾讯 IM 搜索词，发送和查询共用。
+  static const imageSearchKeyword = 'oarichimage';
+
+  /// 视频块的腾讯 IM 搜索词，发送和查询共用。
+  static const videoSearchKeyword = 'oarichvideo';
+
   /// 气泡内按发送时顺序排列的内容块。
   final List<RichContentBlock> blocks;
 
   const RichContentMessage(this.blocks);
 
   /// 编码为腾讯 IM 自定义消息的 customData；图片和视频必须提供正整数宽高。
-  String toCustomData() {
+  /// 转发已接收的旧附件时允许保留原有的缺省尺寸。
+  String toCustomData({bool preserveLegacyDimensions = false}) {
     return jsonEncode({
       'businessID': businessID,
       'version': version,
-      'payload': {'blocks': blocks.map(_encodeBlock).toList()},
+      'payload': {
+        'blocks': blocks
+            .map((block) => _encodeBlock(block, preserveLegacyDimensions))
+            .toList(),
+      },
     });
   }
 
@@ -28,6 +39,20 @@ final class RichContentMessage {
       .map((block) => block.text)
       .join(' ')
       .trim();
+
+  /// 保持正文顺序，仅提取可在媒体结果中单独预览的块。
+  Iterable<RichContentBlock> get mediaBlocks => blocks.where((block) =>
+      block is RichImageBlock ||
+      block is RichFileBlock && block.mimeType.startsWith('video/'));
+
+  /// 把媒体索引词放在原有可搜索正文前，推送仍独立使用正文摘要。
+  String searchDescription([String? text]) => [
+        if (mediaBlocks.any((block) => block is RichImageBlock))
+          imageSearchKeyword,
+        if (mediaBlocks.any((block) => block is RichFileBlock))
+          videoSearchKeyword,
+        if (text != null && text.isNotEmpty) text,
+      ].join(' ');
 
   /// 从 SDK 的 customData 解析图文消息；不属于本协议或内容不完整时返回 null。
   static RichContentMessage? tryParse(String? raw) {
@@ -105,14 +130,19 @@ final class RichContentMessage {
   }
 
   /// 将已校验的内容块编码为协议字段。
-  static Map<String, Object> _encodeBlock(RichContentBlock block) {
+  static Map<String, Object> _encodeBlock(
+    RichContentBlock block,
+    bool preserveLegacyDimensions,
+  ) {
     return switch (block) {
       RichTextBlock block => {'type': 'text', 'text': block.text},
       RichImageBlock block => {
           'type': 'image',
           'url': block.url,
-          'width': _requirePositiveDimension(block.width),
-          'height': _requirePositiveDimension(block.height),
+          if (!preserveLegacyDimensions || block.width != null)
+            'width': _requirePositiveDimension(block.width),
+          if (!preserveLegacyDimensions || block.height != null)
+            'height': _requirePositiveDimension(block.height),
         },
       RichFileBlock block => {
           'type': 'file',
@@ -121,9 +151,11 @@ final class RichContentMessage {
           'size': block.size,
           'mimeType': block.mimeType,
           if (block.thumbnailUrl != null) 'thumbnailUrl': block.thumbnailUrl!,
-          if (block.width != null || block.mimeType.startsWith('video/'))
+          if (block.width != null ||
+              !preserveLegacyDimensions && block.mimeType.startsWith('video/'))
             'width': _requirePositiveDimension(block.width),
-          if (block.height != null || block.mimeType.startsWith('video/'))
+          if (block.height != null ||
+              !preserveLegacyDimensions && block.mimeType.startsWith('video/'))
             'height': _requirePositiveDimension(block.height),
         },
     };

@@ -110,7 +110,11 @@ final class PendingRichContentMessage extends CustomMessagePayload {
             if (content == null) throw StateError('消息内容尚未就绪');
             final payload = CustomSendMessagePayload(
               customData: content.toCustomData(),
-              description: _option.offlinePushInfo?.description,
+              description: content.searchDescription(
+                content.plainTextPreview.isEmpty
+                    ? null
+                    : _option.offlinePushInfo?.description,
+              ),
               extensionInfo: message.msgID,
             );
             // SDK 发出真实气泡的开始通知后交接占位，上传与实际发送之间不出现空窗或重复行。

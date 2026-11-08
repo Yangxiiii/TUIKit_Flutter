@@ -27,7 +27,7 @@ export 'src/message_input/message_input.dart';
 export 'src/message_input/chat_media_sender.dart';
 export 'src/message_list/utils/big_file_message.dart';
 export 'src/message_list/utils/rich_content_message.dart'
-    show RichContentMessage;
+    show RichContentMessage, RichContentBlock, RichImageBlock, RichFileBlock;
 export 'src/message_list/utils/message_utils.dart' show MessageUtil;
 export 'src/message_list/message_list.dart';
 export 'src/message_list/widgets/merged_message_detail_page.dart'
