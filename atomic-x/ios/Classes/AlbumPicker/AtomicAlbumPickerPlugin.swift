@@ -2,6 +2,7 @@ import Flutter
 import UIKit
 import AlbumPicker
 
+/// 注册腾讯相册的选图事件和独立图片编辑通道。
 class AtomicAlbumPickerPlugin: NSObject, FlutterStreamHandler {
     private static let channelName = "atomic_x/album_picker"
     private static let eventChannelName = "atomic_x/album_picker_events"
@@ -56,6 +57,8 @@ class AtomicAlbumPickerPlugin: NSObject, FlutterStreamHandler {
         switch call.method {
         case "pickMedia":
             albumPickerHandler?.handlePickMedia(call: call, result: result)
+        case "editImage":
+            albumPickerHandler?.handleEditImage(call: call, result: result)
         default:
             result(FlutterMethodNotImplemented)
         }

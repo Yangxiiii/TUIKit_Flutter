@@ -27,6 +27,12 @@
             android:screenOrientation="portrait"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
 
+        <activity
+            android:name="io.trtc.tuikit.atomicx.albumpicker.AlbumImageEditActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
+
          <activity
             android:name=".imageuploader.SystemImageSourceActivity"
             android:exported="false"

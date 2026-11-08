@@ -143,6 +143,19 @@ class AlbumPickerPlatform {
     );
   }
 
+  /// 把本地路径交给相册的原生编辑器，等待用户确认或取消。
+  static Future<String?> editImageNative(String imagePath) {
+    if (kIsWeb ||
+        _isOhos ||
+        (defaultTargetPlatform != TargetPlatform.android &&
+            defaultTargetPlatform != TargetPlatform.iOS)) {
+      throw UnsupportedError('当前平台的相册选择器没有腾讯图片编辑组件');
+    }
+    return _methodChannel.invokeMethod<String>('editImage', {
+      'imagePath': imagePath,
+    });
+  }
+
   static Future<void> pickMediaNative({
     AlbumPickerConfig? config,
     AlbumPickerTheme? theme,

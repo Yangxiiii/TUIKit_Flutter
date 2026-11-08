@@ -44,24 +44,28 @@ class AtomicXPlugin: FlutterPlugin, ActivityAware {
   override fun onAttachedToActivity(binding: ActivityPluginBinding) {
     pipManager?.attachToActivity(binding.activity)
     permission?.onAttachedToActivity(binding)
+    albumPickerPlugin?.attachActivity(binding)
     imageUploaderPlugin?.onAttachedToActivity(binding)
   }
 
   override fun onDetachedFromActivityForConfigChanges() {
     pipManager?.updateActivity(null)
     permission?.onDetachedFromActivityForConfigChanges()
+    albumPickerPlugin?.detachActivity()
     imageUploaderPlugin?.onDetachedFromActivityForConfigChanges()
   }
 
   override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
     pipManager?.updateActivity(binding.activity)
     permission?.onReattachedToActivityForConfigChanges(binding)
+    albumPickerPlugin?.attachActivity(binding)
     imageUploaderPlugin?.onReattachedToActivityForConfigChanges(binding)
   }
 
   override fun onDetachedFromActivity() {
     pipManager?.detachFromActivity()
     permission?.onDetachedFromActivity()
+    albumPickerPlugin?.detachActivity(permanent = true)
     imageUploaderPlugin?.onDetachedFromActivity()
   }
 }

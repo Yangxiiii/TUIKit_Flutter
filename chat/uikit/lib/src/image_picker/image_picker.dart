@@ -3,7 +3,12 @@ import 'package:tuikit_atomic_x/album_picker/album_picker.dart';
 typedef ImagePickerModel = AlbumMedia;
 typedef ImagePickerConfig = AlbumPickerConfig;
 
+/// 提供聊天相册选图和同一套原生图片编辑。
 class ImagePicker {
+  /// 使用腾讯相册编辑当前本地图片，确认返回副本路径，取消返回 null。
+  static Future<String?> editImage({required String imagePath}) =>
+      AlbumPicker.editImage(imagePath: imagePath);
+
   static Future<void> pickImages({
     ImagePickerConfig? config,
     AlbumPickerTheme? theme,

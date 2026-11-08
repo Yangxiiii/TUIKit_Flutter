@@ -51,6 +51,24 @@ class AlbumPickerHandler: NSObject {
 
     // MARK: - Public Entry
 
+    /// 直接打开相册预览使用的原生编辑器，取消时返回空结果。
+    func handleEditImage(call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let path = args["imagePath"] as? String,
+              path.hasPrefix("/"),
+              let image = UIImage(contentsOfFile: path) else {
+            result(FlutterError(code: "ALBUM_EDIT_INPUT", message: "无法读取图片", details: nil))
+            return
+        }
+        guard let presenter = viewController, !(presenter is AlbumImageEditController) else {
+            result(FlutterError(code: "ALBUM_EDIT_UNAVAILABLE", message: "无法打开图片编辑", details: nil))
+            return
+        }
+        let controller = AlbumImageEditController(image: image, result: result)
+        controller.modalPresentationStyle = .fullScreen
+        presenter.present(controller, animated: true)
+    }
+
     func handlePickMedia(call: FlutterMethodCall, result: @escaping FlutterResult) {
         print("[AlbumPickerHandler] handlePickMedia called")
 
@@ -572,5 +590,61 @@ private class AlbumPickerHostViewController: UIViewController {
             albumPickerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             albumPickerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
+    }
+}
+
+
+/// 全屏承载腾讯相册编辑视图，并在关闭后把独立副本的路径回传给 Flutter。
+private final class AlbumImageEditController: UIViewController, ImageEditDelegate {
+    private let image: UIImage
+
+    /// 关闭或完成时消费一次，避免系统退出和 SDK 回调重复提交。
+    private var result: FlutterResult?
+
+    init(image: UIImage, result: @escaping FlutterResult) {
+        self.image = image
+        self.result = result
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { return nil }
+
+    override func loadView() {
+        let editor = ImageEditView(sourceImage: image)
+        editor.editDelegate = self
+        view = editor
+    }
+
+    override var prefersStatusBarHidden: Bool { true }
+
+    func imageEditView(_ editView: ImageEditView, didCompleteWithImage editedImage: UIImage) {
+        guard result != nil else { return }
+        // 相册组件导出独立的缓存副本，原消息路径不交给写入接口。
+        let path = AlbumPickerStore.saveImageToCache(editedImage)
+        if let path = path {
+            complete(path)
+        } else {
+            complete(FlutterError(code: "ALBUM_EDIT_OUTPUT", message: "无法导出编辑图片", details: nil))
+        }
+    }
+
+    func imageEditViewDidCancel(_ editView: ImageEditView) {
+        complete(nil)
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if isBeingDismissed {
+            let callback = result
+            result = nil
+            callback?(nil)
+        }
+    }
+
+    /// 先关闭原生界面，再允许 Flutter 恢复搜索预览的全屏状态。
+    private func complete(_ value: Any?) {
+        guard let callback = result else { return }
+        result = nil
+        dismiss(animated: true) { callback(value) }
     }
 }

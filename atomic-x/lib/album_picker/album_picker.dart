@@ -135,10 +135,15 @@ class AlbumPickerConfig {
   });
 }
 
+/// 提供腾讯原生相册选择和单张本地图片编辑。
 class AlbumPicker {
   static final AlbumPicker instance = AlbumPicker._internal();
 
   AlbumPicker._internal();
+
+  /// 直接编辑当前本地图片，原文件由调用方持有，返回的临时副本由调用方清理。
+  static Future<String?> editImage({required String imagePath}) =>
+      AlbumPickerPlatform.editImageNative(imagePath);
 
   /// Callbacks mirror native AlbumPickerDelegate / AlbumPickerListener:
   /// - [onPickConfirm]: User confirmed selection. Provides all selected media.
