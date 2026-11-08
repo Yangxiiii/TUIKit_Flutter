@@ -623,7 +623,10 @@ class _ImageItemViewState extends State<_ImageItemView>
 }
 
 /// 视频沿用单独消息的本地播放器；富文本封面可来自远端，下载由调用方处理。
+/// 根据本地文件与当前平台选择视频播放入口。
 class _VideoItemView extends StatelessWidget {
+  /// 搜索入口为右下快捷操作保留独立空间。
+  final bool compactControls;
   final ImageElement element;
   final bool isDownloading;
   final bool isCurrentPage;
@@ -636,6 +639,7 @@ class _VideoItemView extends StatelessWidget {
     required this.isCurrentPage,
     required this.onDownloadTap,
     required this.onClose,
+    required this.compactControls,
   });
 
   @override
@@ -664,7 +668,8 @@ class _VideoItemView extends StatelessWidget {
         snapshotUrl: remoteThumbnail ? element.imagePath : null,
       ),
       onClose: onClose,
-      showCloseButton: true,
+      showCloseButton: !compactControls,
+      compactControls: compactControls,
     );
   }
 
@@ -816,12 +821,16 @@ class ImageViewerWidget extends StatefulWidget {
   /// 浮层预览由调用方关闭当前浮层；不传时保留原页面路由返回行为。
   final VoidCallback? onClose;
 
+  /// 为搜索预览的右下操作栏让出空间，并切换到搜索用视频控制条。
+  final bool reserveActionBar;
+
   const ImageViewerWidget({
     Key? key,
     required this.imageElements,
     this.initialIndex = 0,
     required this.onEventTriggered,
     this.onClose,
+    this.reserveActionBar = false,
   }) : super(key: key);
 
   @override
@@ -1133,7 +1142,7 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
     final isCurrentPage = index == _currentIndex;
 
     if (element.isImage) {
-      return _ImageItemView(
+      final image = _ImageItemView(
         element: element,
         onTap: _onImageTap,
         onZoomChanged: (isZoomed) {
@@ -1144,6 +1153,24 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
           }
         },
       );
+      if (!widget.reserveActionBar) return image;
+      return Column(
+        children: [
+          Expanded(child: image),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _onImageTap,
+            child: SizedBox(
+              width: double.infinity,
+              // 搜索预览对齐设计保留区，系统栏隐藏后图片位置也保持稳定。
+              height: MediaQuery.paddingOf(context)
+                      .bottom
+                      .clamp(34.0, double.infinity) +
+                  4,
+            ),
+          ),
+        ],
+      );
     } else if (element.isVideo) {
       return _VideoItemView(
         element: element,
@@ -1151,6 +1178,7 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
         isCurrentPage: isCurrentPage,
         onDownloadTap: () => _downloadVideo(element),
         onClose: _onImageTap,
+        compactControls: widget.reserveActionBar,
       );
     }
 

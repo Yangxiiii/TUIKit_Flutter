@@ -1,17 +1,11 @@
+import 'package:app_ui/app_ui.dart' show AppColorBuildContext, AppIcons;
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'inline_video_player.dart';
 import 'video_player.dart';
 
-/// Full-screen video player widget with controls
-///
-/// This widget uses InlineVideoPlayer with Flutter controls overlay,
-/// thumbnail support, and back button.
-///
-/// 带控件的全屏视频播放器控件
-///
-/// 这个Widget使用带有 Flutter 控件覆盖的 InlineVideoPlayer，支持缩略图和返回按钮。
+/// 将本地视频画面、封面和控制条组合为全屏播放器，可为搜索预览预留操作区。
 class VideoPlayerWidget extends StatefulWidget {
   final VideoData video;
   final VoidCallback? onClose;
@@ -21,17 +15,22 @@ class VideoPlayerWidget extends StatefulWidget {
   /// 是否显示关闭按钮（默认：true）
   final bool showCloseButton;
 
+  /// 在搜索预览中将播放进度放在快捷操作栏上方，点击画面关闭预览。
+  final bool compactControls;
+
   const VideoPlayerWidget({
     super.key,
     required this.video,
     this.onClose,
     this.showCloseButton = true,
+    this.compactControls = false,
   });
 
   @override
   State<VideoPlayerWidget> createState() => _VideoPlayerWidgetState();
 }
 
+/// 持有视频控制器，并在页面销毁时释放播放器。
 class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   late InlineVideoPlayerController _controller;
   bool _showControls = true;
@@ -78,7 +77,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 
   void _togglePlayPause() {
     _controller.togglePlayPause();
-    _showControlsTemporarily();
+    if (!widget.compactControls) _showControlsTemporarily();
   }
 
   void _showControlsTemporarily() {
@@ -133,6 +132,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.compactControls) return _buildCompactPlayer();
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
@@ -211,6 +211,91 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       ),
     );
   }
+
+  /// 搜索版复用播放控制器，控制条和右下快捷操作分别命中手势。
+  Widget _buildCompactPlayer() => Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            // 封面和播放画面共享显示区，进度条固定在下方。
+            Padding(
+              padding: EdgeInsets.only(
+                  bottom: MediaQuery.sizeOf(context).height * .246),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  InlineVideoPlayer(controller: _controller),
+                  if (_showThumbnail) _buildThumbnail(),
+                ],
+              ),
+            ),
+            // 关闭手势置于原生画面上层，实播暂停后也不会被 PlatformView 拦截。
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _onClose,
+              ),
+            ),
+            // 紧凑控制条与右下角操作栏分别接收触控。
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 112,
+              child: Row(
+                children: [
+                  Semantics(
+                    identifier: 'tim.history.preview.playPause',
+                    child: IconButton(
+                      onPressed: _togglePlayPause,
+                      tooltip: _controller.isPlaying ? '暂停' : '播放',
+                      icon: Icon(
+                        _controller.isPlaying ? Icons.pause : AppIcons.play,
+                        color: Colors.white,
+                        size: 32,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${_formatDuration(_controller.position)} / ${_formatDuration(_controller.duration)}',
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 14),
+                        ),
+                        SizedBox(
+                            height: 20,
+                            child: SliderTheme(
+                              data: SliderTheme.of(context).copyWith(
+                                trackHeight: 6,
+                                padding: EdgeInsets.zero,
+                                thumbShape: const RoundSliderThumbShape(
+                                    enabledThumbRadius: 8),
+                              ),
+                              child: Semantics(
+                                identifier: 'tim.history.preview.progress',
+                                child: Slider(
+                                  value: _controller.progress.clamp(0.0, 1.0),
+                                  onChanged: (value) =>
+                                      _controller.seekToProgress(value),
+                                  thumbColor: Colors.white,
+                                  inactiveColor:
+                                      context.appColors.mediaPreviewControl,
+                                ),
+                              ),
+                            )),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
 
   Widget _buildThumbnail() {
     // Prefer snapshot file if available
