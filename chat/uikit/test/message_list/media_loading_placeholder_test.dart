@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:app_ui/app_ui.dart';
@@ -22,11 +21,7 @@ import 'package:tuikit_atomic_x/album_picker/album_picker.dart';
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  testWidgets('编辑器按媒体类型显示宿主占位图并保留 loading 和整体删除', (tester) async {
-    final bytes = base64Decode(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOQcHnxHwAEAAJEfJjuTwAAAABJRU5ErkJggg==');
-    final image = MemoryImage(bytes);
-    final video = MemoryImage(bytes, scale: 2);
+  testWidgets('编辑器图片和视频使用灰底，进度环只用于图片，两者均支持整体删除', (tester) async {
     for (final type in AlbumMediaType.values) {
       final key = GlobalKey<RichContentEditorSheetState>();
       await tester.pumpWidget(MaterialApp(
@@ -38,8 +33,6 @@ void main() {
                 conversationName: '测试',
                 initialDraft: const RichContentDraft(),
                 canUploadAttachments: true,
-                imageLoadingPlaceholder: image,
-                videoLoadingPlaceholder: video,
                 onSend: (_) async => false)),
       ));
       await tester.pump();
@@ -48,15 +41,17 @@ void main() {
       await tester.pump();
       final placeholder = find.byType(ChatMediaPlaceholder);
       expect(placeholder, findsOneWidget);
-      expect(tester.widget<ChatMediaPlaceholder>(placeholder).image,
-          type == AlbumMediaType.image ? image : video);
-      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(tester.widget<ChatMediaPlaceholder>(placeholder).image, isNull);
+      expect(find.byType(AppImageLoadingPlaceholder),
+          type == AlbumMediaType.image ? findsOneWidget : findsNothing);
+      expect(find.byType(CircularProgressIndicator),
+          type == AlbumMediaType.image ? findsOneWidget : findsNothing);
       expect(key.currentState!.canSend, isFalse);
       final rect = tester.getRect(placeholder);
       expect(rect.width, lessThanOrEqualTo(120));
       expect(rect.height, lessThanOrEqualTo(160));
       tester
-          .widget<ExtendedTextField>(find.byType(ExtendedTextField))
+          .widget<ExtendedTextField>(find.byKey(const Key('rich_content_text_1')))
           .controller!
           .clear();
       await tester.pump();
@@ -67,11 +62,7 @@ void main() {
     }
   });
 
-  testWidgets('普通及富文本媒体等待首帧时使用各自占位，首帧完成后移除且播放入口保留', (tester) async {
-    final bytes = base64Decode(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOQcHnxHwAEAAJEfJjuTwAAAABJRU5ErkJggg==');
-    final imagePlaceholder = MemoryImage(bytes);
-    final videoPlaceholder = MemoryImage(bytes, scale: 2);
+  testWidgets('图片和视频首帧前显示同款灰底，视频保留播放入口', (tester) async {
     final decoded =
         (await tester.runAsync(() => createTestImage(width: 64, height: 32)))!;
     final cache = PaintingBinding.instance.imageCache;
@@ -80,17 +71,8 @@ void main() {
       cache.clearLiveImages();
       decoded.dispose();
     });
-    for (final placeholder in [imagePlaceholder, videoPlaceholder]) {
-      cache.putIfAbsent(
-          placeholder,
-          () => OneFrameImageStreamCompleter(
-              Future.value(ImageInfo(image: decoded.clone()))));
-    }
-    final config = ChatMessageListConfig(
-        alignment: 'right',
-        enableReadReceipt: false,
-        imageLoadingPlaceholder: imagePlaceholder,
-        videoLoadingPlaceholder: videoPlaceholder);
+    const config =
+        ChatMessageListConfig(alignment: 'right', enableReadReceipt: false);
     for (final kind in [
       'plain_image',
       'plain_video',
@@ -160,12 +142,29 @@ void main() {
       await tester.pump();
       final loading = find.byType(ChatMediaPlaceholder);
       expect(loading, findsOneWidget, reason: kind);
-      expect(tester.widget<ChatMediaPlaceholder>(loading).image,
-          video ? videoPlaceholder : imagePlaceholder,
+      expect(tester.widget<ChatMediaPlaceholder>(loading).image, isNull,
           reason: kind);
       final rect = tester.getRect(loading);
       expect(rect.width, greaterThan(0));
       expect(rect.height, greaterThan(0));
+      final spinner = find.descendant(
+        of: loading,
+        matching: find.byType(CircularProgressIndicator),
+      );
+      final fill = find.descendant(
+        of: loading,
+        matching: find.byType(ColoredBox),
+      );
+      expect(tester.widget<ColoredBox>(fill).color, const Color(0xFF8E8E99));
+      if (video) {
+        expect(spinner, findsNothing);
+        expect(find.byIcon(rich ? AppIcons.videoPlay : Icons.play_arrow),
+            findsOneWidget);
+      } else {
+        expect(tester.getRect(spinner).center, rect.center);
+        expect(tester.widget<CircularProgressIndicator>(spinner).color,
+            Colors.white);
+      }
       frame.complete(ImageInfo(image: decoded.clone()));
       await tester.pumpAndSettle();
       expect(loading, findsNothing, reason: kind);
@@ -173,6 +172,8 @@ void main() {
       if (video) {
         expect(find.byIcon(rich ? AppIcons.videoPlay : Icons.play_arrow),
             findsOneWidget);
+      } else {
+        expect(tester.getRect(find.byType(RawImage)), rect);
       }
       expect(tester.takeException(), isNull, reason: kind);
       await tester.pumpWidget(const SizedBox.shrink());

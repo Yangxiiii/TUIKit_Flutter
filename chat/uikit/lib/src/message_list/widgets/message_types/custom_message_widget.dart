@@ -290,7 +290,10 @@ class CustomMessageWidget extends StatelessWidget {
   Widget _buildImagePlaceholder(double width, double? height) => SizedBox(
         width: width,
         height: height ?? 120,
-        child: ChatMediaPlaceholder(image: config.imageLoadingPlaceholder),
+        child: ChatMediaPlaceholder(
+          image: config.imageLoadingPlaceholder,
+          showLoading: config.imageLoadingPlaceholder == null,
+        ),
       );
 
   /// 宽高只用于比例，在气泡的宽高上限内等比缩放，避免长图或竖屏视频被裁剪。

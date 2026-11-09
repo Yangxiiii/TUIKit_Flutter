@@ -370,10 +370,8 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
       return SizedBox(
           width: width,
           height: height,
-          child: widget.config.videoLoadingPlaceholder == null
-              ? _buildPlaceholder(width, height, fallback, colorsTheme)
-              : ChatMediaPlaceholder(
-                  image: widget.config.videoLoadingPlaceholder));
+          child: ChatMediaPlaceholder(
+              image: widget.config.videoLoadingPlaceholder));
     }
 
     if (imagePath.startsWith('http')) {
@@ -457,7 +455,7 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
     );
   }
 
-  /// 缩略图尚无解码首帧时显示同一张视频占位，播放按钮仍由气泡外层叠加。
+  /// 缩略图首帧前展示视频占位，播放按钮由气泡外层叠加。
   Widget _buildLoadingFrame(
           BuildContext context, Widget child, int? frame, bool synchronous) =>
       synchronous || frame != null

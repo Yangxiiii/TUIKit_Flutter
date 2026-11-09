@@ -176,6 +176,7 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget>
         return Container(
           width: 200,
           height: ImageMessageWidget.kImageFixedHeight,
+          clipBehavior: Clip.hardEdge,
           decoration: BoxDecoration(
             color: colorsTheme.bgColorTopBar,
             borderRadius: BorderRadius.circular(8),

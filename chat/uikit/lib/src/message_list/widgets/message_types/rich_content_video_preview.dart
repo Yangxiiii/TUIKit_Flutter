@@ -44,7 +44,7 @@ final class RichContentVideoPreview extends StatelessWidget {
           child: Stack(fit: StackFit.expand, children: [
             // 编辑尺寸已按原比例计算，完整显示封面；消息气泡沿用原展示方式。
             ColoredBox(color: colors.bgColorInput),
-            if (image == null && loadingPlaceholder != null)
+            if (image == null)
               ChatMediaPlaceholder(image: loadingPlaceholder),
             if (image != null)
               Image(
