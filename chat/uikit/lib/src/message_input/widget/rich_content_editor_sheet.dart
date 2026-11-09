@@ -115,22 +115,26 @@ final class RichContentEditorOverlayLayout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        Positioned(
-          key: const Key('rich_content_editor_layer'),
-          top: 0,
-          left: 0,
-          right: 0,
-          height: editorBottom,
-          child: editor,
-        ),
-        Positioned.fromRect(
-          key: const Key('rich_content_toolbar_layer'),
-          rect: toolbarRect,
-          child: toolbar,
-        ),
-      ],
+    return BlockSemantics(
+      child: Stack(
+        children: [
+          // 编辑器和遮罩覆盖聊天窗口，底层聊天控件退出无障碍树。
+          Positioned(
+            key: const Key('rich_content_editor_layer'),
+            top: 0,
+            left: 0,
+            right: 0,
+            height: editorBottom,
+            child: editor,
+          ),
+          // 工具条单独绘制在编辑器上方，不参与面板的位移动画。
+          Positioned.fromRect(
+            key: const Key('rich_content_toolbar_layer'),
+            rect: toolbarRect,
+            child: toolbar,
+          ),
+        ],
+      ),
     );
   }
 }
@@ -427,6 +431,15 @@ final class RichContentEditorSheet extends StatefulWidget {
   /// 普通输入区扁平原文中的UTF-16选区，附件按编辑态令牌长度计算。
   final TextSelection? initialSelection;
 
+  /// iOS 已显示系统键盘时提供旧输入焦点，供正文挂载后接管连接。
+  final FocusNode? initialFocusSource;
+
+  /// iOS 键盘收起时，先完成面板入场，再自动聚焦正文。
+  final bool focusAfterEntrance;
+
+  /// 底层聊天布局保持原位时，收起沿用面板位移和遮罩动画。
+  final bool animateClose;
+
   const RichContentEditorSheet({
     super.key,
     required this.conversationName,
@@ -446,6 +459,9 @@ final class RichContentEditorSheet extends StatefulWidget {
     this.initialShowEmojiPanel = false,
     this.initialKeyboardHeight,
     this.initialSelection,
+    this.initialFocusSource,
+    this.focusAfterEntrance = false,
+    this.animateClose = false,
   });
 
   @override
@@ -454,6 +470,18 @@ final class RichContentEditorSheet extends StatefulWidget {
 
 /// 管理编辑器的正文、焦点、表情键盘与本地媒体占位；上传在发送时由宿主接管。
 final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
+  /// 键盘收起时的面板入场时长，动画结束后才请求显示系统键盘。
+  static const _entranceBeforeKeyboard = Duration(milliseconds: 200);
+
+  /// 入场绘制完成前保留初始正文焦点目标，关闭时取消。
+  FocusNode? _pendingEntranceFocus;
+
+  /// 退场期间禁止点击编辑器操作，动画结束后再交接草稿和焦点。
+  bool _isClosing = false;
+
+  /// 外部工具条在退场期间暂停响应点击。
+  bool get isClosing => _isClosing;
+
   late final TextEditingController _titleController;
 
   /// 标题也能主动切回系统键盘，焦点生命周期与编辑器一致。
@@ -551,11 +579,38 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
       block.controller.addListener(_refresh);
       block.focusNode.addListener(_refresh);
     }
-    // 在弹层首帧建立输入连接后接管焦点，键盘已展开时不会先收起再弹出。
+    final waitsForEntrance = widget.focusAfterEntrance && !widget.showToolbar;
+    if (waitsForEntrance) _pendingEntranceFocus = initialBlock.focusNode;
+    // 需要立即聚焦的场景在首帧布局后申请焦点，已打开键盘时沿用连接交接。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      initialBlock.focusNode.requestFocus();
+      if (!waitsForEntrance) {
+        final sourceEditable = widget.initialFocusSource?.context
+            ?.findAncestorStateOfType<ExtendedEditableTextState>();
+        if (sourceEditable == null) {
+          initialBlock.focusNode.requestFocus();
+        } else {
+          sourceEditable.transferKeyboardFocusTo(initialBlock.focusNode);
+        }
+      }
       widget.onToolbarChanged?.call();
+    });
+  }
+
+  /// 等入场最后一帧绘制后唤起键盘，保留用户在动画期间手动选择的焦点。
+  void _focusAfterEntrance() {
+    if (_pendingEntranceFocus == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final focus = _pendingEntranceFocus;
+      _pendingEntranceFocus = null;
+      if (focus == null || _showEmojiPanel || _titleFocusNode.hasFocus) return;
+      if (_blocks
+          .whereType<_TextEditorBlock>()
+          .any((block) => block.focusNode.hasFocus)) {
+        return;
+      }
+      focus.requestFocus();
     });
   }
 
@@ -725,7 +780,23 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     );
   }
 
+  /// 保持系统键盘和底层聊天布局，待面板滑出后才交接焦点。
   void _close() {
+    if (_isClosing) return;
+    if (!widget.showToolbar &&
+        widget.animateClose &&
+        !_showEmojiPanel &&
+        View.of(context).viewInsets.bottom > 0) {
+      setState(() => _isClosing = true);
+      widget.onToolbarChanged?.call();
+      return;
+    }
+    _finishClose();
+  }
+
+  /// 读取退场结束时的草稿，保留动画期间键盘已提交的输入。
+  void _finishClose() {
+    _pendingEntranceFocus = null;
     final result = RichContentEditorResult(draft: _buildDraft(), sent: false);
     final onClose = widget.onClose;
     if (onClose != null) {
@@ -747,6 +818,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
       if (!mounted || !sent || !_buildDraft().hasSameContentAs(draft)) {
         return;
       }
+      _pendingEntranceFocus = null;
       const result = RichContentEditorResult(
         draft: RichContentDraft(),
         sent: true,
@@ -1202,9 +1274,12 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
         ? panel
         : TweenAnimationBuilder<double>(
             key: const Key('rich_content_editor_entrance'),
-            tween: Tween(begin: 0, end: 1),
-            duration: const Duration(milliseconds: 180),
+            tween: Tween(begin: 0, end: _isClosing ? 0 : 1),
+            duration: widget.focusAfterEntrance
+                ? _entranceBeforeKeyboard
+                : const Duration(milliseconds: 180),
             curve: Curves.easeOutCubic,
+            onEnd: _isClosing ? _finishClose : _focusAfterEntrance,
             builder: (context, progress, child) {
               // 遮罩覆盖工具条上方全部区域，面板从下边界进入，确保共享工具条始终露出。
               return Stack(
@@ -1236,7 +1311,10 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
                 ],
               );
             },
-            child: panel,
+            // 位移动画复用编辑器绘制结果，键盘焦点和选区仍由原组件持有。
+            child: RepaintBoundary(
+              child: AbsorbPointer(absorbing: _isClosing, child: panel),
+            ),
           );
     return PopScope(
       canPop: false,
@@ -1263,7 +1341,8 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
           Expanded(
             child: Semantics(
               identifier: 'tim.rich.title',
-              child: TextField(
+              // 标题与正文共用焦点交接机制，收起时都能保留系统键盘。
+              child: ExtendedTextField(
                 key: const Key('rich_content_title'),
                 controller: _titleController,
                 focusNode: _titleFocusNode,

@@ -12,6 +12,7 @@ import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:atomic_x_core/impl/message/message_input_store_impl.dart';
 import 'package:atomic_x_core/impl/message/message_list_store_impl.dart';
 import 'package:atomic_x_core/impl/message/message_action_store_impl.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' hide IconButton;
 import 'package:flutter/material.dart' as material;
 import 'package:flutter/services.dart';
@@ -224,6 +225,10 @@ class MessageInputState extends State<MessageInput>
   /// 同时承载编辑器和顶层工具条视图，子节点顺序保证工具条不被动画遮挡。
   OverlayEntry? _richContentEditorOverlay;
   bool _isRichContentEditorOpen = false;
+
+  /// 从已聚焦的系统键盘进入时，原输入行继续占位，聊天列表沿用展开前的布局。
+  bool _keepNormalInputLayout = false;
+
   bool _isMentionPickerShowing = false;
 
   // Conversation info for offline push
@@ -576,8 +581,7 @@ class MessageInputState extends State<MessageInput>
     _isWaitingToStartRecord = false;
     _keyboardPanel?.dispose();
     unawaited(_localSendSubscription?.cancel());
-    _richContentEditorOverlay?.remove();
-    _richContentEditorOverlay = null;
+    _removeRichContentEditorOverlay();
     _removeRecordOverlay();
     _textEditingController.removeListener(_onTextChanged);
     _textEditingFocusNode.removeListener(_onFocusChanged);
@@ -1076,22 +1080,34 @@ class MessageInputState extends State<MessageInput>
     });
   }
 
-  /// 在现有工具条上方展开富文本编辑器，不重建键盘输入连接。
+  /// 在共享工具条上方展开富文本编辑器，保留已有选区和键盘状态。
   void _openRichContentEditor() {
     if (_richContentEditorOverlay != null) return;
+    // 捕获展开前的选区和面板状态；只有 iOS 系统键盘已显示时才交接原生输入连接。
     final keepEmoji = _showEmojiPanel;
     final keyboardHeight = _keyboardPanel?.height;
     final selection = _textEditingController.selection;
-    // 输入框已聚焦时保留输入连接，等待展开编辑器的正文首帧直接接管焦点。
+    final hasSystemKeyboard = View.of(context).viewInsets.bottom > 0;
+    final isIOS = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+    final keepNormalInputLayout = !keepEmoji &&
+        _textEditingFocusNode.hasPrimaryFocus &&
+        hasSystemKeyboard;
+    final initialFocusSource = isIOS && keepNormalInputLayout
+        ? _textEditingFocusNode
+        : null;
+    // 正文接管焦点时，普通输入框的失焦回调应保留当前编辑模式。
     if (_textEditingFocusNode.hasFocus) _isSwitchingPanel = true;
     setState(() {
       _showMorePanel = false;
       _isRichContentEditorOpen = true;
+      _keepNormalInputLayout = keepNormalInputLayout;
     });
     // 工具条完成本帧布局后再建立覆盖层，确保编辑器底部精确贴合工具条顶部。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_isRichContentEditorOpen) return;
       final overlay = Overlay.of(context);
+      // 首次构建时才读取草稿，纳入等待挂载期间完成的媒体处理结果。
+      RichContentDraft? initialDraft;
       final entry = OverlayEntry(
         builder: (overlayContext) {
           final overlayBox = overlay.context.findRenderObject() as RenderBox?;
@@ -1115,7 +1131,7 @@ class MessageInputState extends State<MessageInput>
               conversationName: widget.conversationDisplayName ??
                   _conversationInfo?.title ??
                   widget.conversationID,
-              initialDraft: _buildInlineRichContentDraft(),
+              initialDraft: initialDraft ??= _buildInlineRichContentDraft(),
               canUploadAttachments:
                   widget.config.richContentAttachmentUploader != null,
               videoPlayIcon: widget.config.videoPlayIcon,
@@ -1132,11 +1148,17 @@ class MessageInputState extends State<MessageInput>
               initialShowEmojiPanel: keepEmoji,
               initialKeyboardHeight: keyboardHeight,
               initialSelection: selection,
+              initialFocusSource: initialFocusSource,
+              focusAfterEntrance: isIOS && !keepEmoji && !hasSystemKeyboard,
+              animateClose: keepNormalInputLayout,
             ),
-            toolbar: Material(
-              type: MaterialType.transparency,
-              child: _buildSharedToolbar(
-                key: const Key('rich_content_overlay_toolbar'),
+            toolbar: AbsorbPointer(
+              absorbing: _richContentEditorKey.currentState?.isClosing == true,
+              child: Material(
+                type: MaterialType.transparency,
+                child: _buildSharedToolbar(
+                  key: const Key('rich_content_overlay_toolbar'),
+                ),
               ),
             ),
           );
@@ -1149,6 +1171,7 @@ class MessageInputState extends State<MessageInput>
 
   /// 缓存展开编辑器的最新草稿，并沿用输入区现有防抖保存策略。
   void _rememberRichContentDraft(RichContentDraft draft) {
+    if (!_isRichContentEditorOpen) return;
     if (!draft.hasSameContentAs(_richContentDraft)) {
       _draftRevision++;
     }
@@ -1182,37 +1205,69 @@ class MessageInputState extends State<MessageInput>
     _scheduleDraftSave();
   }
 
-  /// 收起时向普通输入交接草稿、选区和键盘模式，成功发送则清空并关闭表情面板。
+  /// 收起时向普通输入交接草稿和选区，iOS 系统键盘已显示时同时交接焦点。
   void _closeRichContentEditor(RichContentEditorResult result) {
+    if (!mounted || !_isRichContentEditorOpen) return;
+    // 只交接当前编辑器内仍在使用的系统输入连接，避免收起时主动唤起键盘。
     final editor = _richContentEditorKey.currentState;
     final keepEmoji = !result.sent && (editor?.showEmojiPanel ?? false);
     final keyboardHeight = editor?.keyboardPanel?.height;
     final selection = result.sent ? null : editor?.inlineSelection;
+    final focusedField = FocusManager.instance.primaryFocus;
+    final focusContext = focusedField?.context;
+    final editorOwnsFocus = editor != null &&
+        focusContext?.findAncestorStateOfType<RichContentEditorSheetState>() ==
+            editor;
+    final systemEditable = !result.sent &&
+            !keepEmoji &&
+            defaultTargetPlatform == TargetPlatform.iOS &&
+            View.of(context).viewInsets.bottom > 0 &&
+            editorOwnsFocus
+        ? focusContext?.findAncestorStateOfType<ExtendedEditableTextState>()
+        : null;
+    // 先回填正文、选区和格式。普通输入即使为空，也要挂载文本框来接收焦点。
     if (editor != null) {
       _showTextFormattingToolbar = editor.showFormatting;
       _activeInlineFormats
         ..clear()
         ..addAll(editor.activeFormats);
     }
-    _richContentEditorOverlay?.remove();
-    _richContentEditorOverlay = null;
-    if (!mounted) return;
     _restoreInlineRichContentDraft(result.draft, selection: selection);
     if (result.sent) _clearDraft();
     setState(() {
       _isRichContentEditorOpen = false;
+      _keepNormalInputLayout = false;
       _showEmojiPanel = keepEmoji;
-      _inputMode = !result.sent && (result.draft.hasContent || keepEmoji)
+      _inputMode = !result.sent &&
+              (result.draft.hasContent || keepEmoji || systemEditable != null)
           ? _InputMode.text
           : _inputMode;
       _inlineRichContentEnabled = !result.sent &&
           (result.draft.hasContent || _inlineRichContentEnabled);
     });
+    if (systemEditable != null) {
+      // 普通输入完成布局后先请求接管焦点。移除覆盖层将在下一帧生效。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (focusedField?.hasPrimaryFocus == true) {
+          systemEditable.transferKeyboardFocusTo(_textEditingFocusNode);
+        }
+        _removeRichContentEditorOverlay();
+      });
+      return;
+    }
+    _removeRichContentEditorOverlay();
     if (keepEmoji) {
       // 接收方先按custom模式重建，再交接焦点，收起编辑器不能触发系统键盘。
       _keyboardPanel!
           .showEmoji(_textEditingFocusNode, previousHeight: keyboardHeight);
     }
+  }
+
+  /// 释放编辑器及共享工具条的覆盖层，页面销毁时也走同一清理入口。
+  void _removeRichContentEditorOverlay() {
+    _richContentEditorOverlay?.remove();
+    _richContentEditorOverlay = null;
   }
 
   /// 把普通输入框的文字与附件令牌还原为有序富文本草稿。
@@ -1274,7 +1329,7 @@ class MessageInputState extends State<MessageInput>
 
   /// 把编辑器中的工具条模式同步回共享状态，避免展开和收起时回落默认值。
   void _refreshSharedToolbar() {
-    if (!mounted) return;
+    if (!mounted || !_isRichContentEditorOpen) return;
     final editor = _richContentEditorKey.currentState;
     setState(() {
       if (editor == null) return;
@@ -2540,10 +2595,10 @@ class MessageInputState extends State<MessageInput>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 只隐藏输入行，键盘与草稿继续由同一输入状态持有。
+          // 键盘已打开时让覆盖层盖住原输入行，保留聊天列表的可视范围和滚动位置。
           Offstage(
             key: const Key('message_input_normal_input_offstage'),
-            offstage: _isRichContentEditorOpen,
+            offstage: _isRichContentEditorOpen && !_keepNormalInputLayout,
             child: Container(
               margin: reply == null
                   ? EdgeInsets.zero

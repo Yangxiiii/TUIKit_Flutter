@@ -160,6 +160,29 @@ class ExtendedEditableText extends _EditableText {
 
 /// 保留特殊文本的编辑映射，并隔离自定义键盘期间的平台显示与失焦行为。
 class ExtendedEditableTextState extends _EditableTextState {
+  /// 只在已挂载的新输入框申请焦点时暂缓失焦清理。
+  bool _isTransferringKeyboardFocus = false;
+
+  /// 让已完成布局的输入框先接管焦点，再清理当前输入框的连接和组字状态。
+  void transferKeyboardFocusTo(FocusNode target) {
+    _isTransferringKeyboardFocus = _hasFocus && _hasInputConnection;
+    target.requestFocus();
+    if (!_isTransferringKeyboardFocus) return;
+    scheduleMicrotask(() {
+      _isTransferringKeyboardFocus = false;
+      if (mounted && !_hasFocus) {
+        super._openOrCloseInputConnectionIfNeeded();
+      }
+    });
+  }
+
+  @override
+  void _openOrCloseInputConnectionIfNeeded() {
+    // 焦点管理器先通知旧输入框。此时关闭连接会让 iOS 立即移除键盘的输入视图。
+    if (_isTransferringKeyboardFocus && !_hasFocus) return;
+    super._openOrCloseInputConnectionIfNeeded();
+  }
+
   /// 自定义面板首次获取焦点时不建立可见IME，切回系统模式后再正常连接。
   @override
   void _openInputConnection() {

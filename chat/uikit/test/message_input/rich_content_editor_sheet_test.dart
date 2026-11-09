@@ -334,7 +334,7 @@ void main() {
             videoThumbnailPath: '/tmp/cover.png'),
         readSize: (_) => dimensions.future);
     final controller = tester
-        .widget<ExtendedTextField>(find.byType(ExtendedTextField))
+        .widget<ExtendedTextField>(_richBodyFields())
         .controller!;
     final token =
         richContentAttachmentTokenPattern.firstMatch(controller.text)!;
@@ -367,7 +367,7 @@ void main() {
         onSend: (_) async => false));
     await tester.pump();
     final controller = tester
-        .widget<ExtendedTextField>(find.byType(ExtendedTextField))
+        .widget<ExtendedTextField>(_richBodyFields())
         .controller!;
     controller.selection = const TextSelection.collapsed(offset: 1);
     final first = key.currentState!.beginMediaPreparation(
@@ -891,7 +891,7 @@ void main() {
         readSize: (_) async => const ImageSize(540, 960));
     await tester.pump();
     final text = tester
-        .widget<ExtendedTextField>(find.byType(ExtendedTextField))
+        .widget<ExtendedTextField>(_richBodyFields())
         .controller!;
     text.value = TextEditingValue(
         text: '${text.text}\n',
@@ -1031,7 +1031,7 @@ void main() {
     expect(await insertion, isTrue);
     expect(field.controller!.selection.extentOffset,
         field.controller!.text.length - 1);
-    expect(find.byType(ExtendedTextField), findsOneWidget);
+    expect(_richBodyFields(), findsOneWidget);
     final preview = find.byKey(const Key('rich_content_inline_video_2'));
     expect(preview, findsOneWidget);
     final icon =
@@ -1089,7 +1089,7 @@ void main() {
         canUploadAttachments: true,
         onSend: (_) async => false));
     await tester.pump();
-    expect(find.byType(ExtendedTextField), findsOneWidget);
+    expect(_richBodyFields(), findsOneWidget);
     expect(
         find.byWidgetPredicate(
             (widget) => widget is Image && widget.image == playIcon),
@@ -1129,7 +1129,7 @@ void main() {
         RichContentAttachmentStatus.pending);
     expect(editorKey.currentState!.canSend, isTrue);
     final controller = tester
-        .widget<ExtendedTextField>(find.byType(ExtendedTextField))
+        .widget<ExtendedTextField>(_richBodyFields())
         .controller!;
     Future<void> backspaceVideo() async {
       final token =
@@ -1290,6 +1290,117 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('iOS 键盘已显示时双向切换富文本，接管连接且保留选区', (tester) async {
+    addTearDown(tester.view.resetViewInsets);
+    final chatScroll = ScrollController(initialScrollOffset: 80);
+    addTearDown(chatScroll.dispose);
+    await tester.pumpWidget(MaterialApp(
+      theme: AppThemeFactory.create(
+          const AppNormalColorScheme(), Brightness.light),
+      home: Scaffold(
+          body: Column(children: [
+        Expanded(
+          child: ListView.builder(
+            key: const Key('chat_viewport'),
+            controller: chatScroll,
+            reverse: true,
+            itemCount: 40,
+            itemExtent: 40,
+            itemBuilder: (_, index) => Text('消息 $index'),
+          ),
+        ),
+        const MessageInput(conversationID: 'c2c_visible_keyboard_handoff'),
+      ])),
+    ));
+    await tester.tap(find.text('发送给 c2c_visible_keyboard_handoff'));
+    await tester.pumpAndSettle();
+    final normal = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('message_input_text_field')));
+    const selection = TextSelection(baseOffset: 1, extentOffset: 2);
+    normal.controller!.value =
+        const TextEditingValue(text: '前中后', selection: selection);
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    await tester.pumpAndSettle();
+    expect(normal.focusNode!.hasPrimaryFocus, isTrue);
+    expect(tester.testTextInput.isVisible, isTrue);
+    final chat = find.byKey(const Key('chat_viewport'));
+    final chatRect = tester.getRect(chat);
+    final chatOffset = chatScroll.offset;
+    void expectChatUnchanged() {
+      expect(tester.getRect(chat), chatRect);
+      expect(chatScroll.offset, chatOffset);
+    }
+
+    tester.testTextInput.log.clear();
+
+    // 旧连接先清理会让 iOS 移除原生输入视图，即使同一轮焦点切换也会闪动。
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pump();
+    expectChatUnchanged();
+    await tester.pumpAndSettle();
+    expectChatUnchanged();
+    final calls = tester.testTextInput.log.map((call) => call.method);
+    expect(calls, contains('TextInput.setClient'));
+    expect(calls, isNot(contains('TextInput.clearClient')));
+    expect(calls, isNot(contains('TextInput.hide')));
+    final rich = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('rich_content_text_1')));
+    expect(rich.focusNode!.hasPrimaryFocus, isTrue);
+    expect(rich.controller!.selection, selection);
+    tester.testTextInput.enterText('继续编辑');
+    await tester.pump();
+    expect(rich.controller!.text, '继续编辑');
+    expect(normal.controller!.text, '前中后');
+
+    // 收起时用富文本最新正文和选区恢复普通输入，再移除编辑器。
+    rich.controller!.selection = selection;
+    await tester.pump();
+    tester.testTextInput.log.clear();
+    await tester.tap(find.byTooltip('收起富文本编辑器'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 90));
+    expectChatUnchanged();
+    final backdrop = tester.widget<Opacity>(
+      find.byKey(const Key('rich_content_editor_backdrop_opacity')),
+    );
+    expect(backdrop.opacity, inExclusiveRange(0, 1));
+    await tester.pumpAndSettle();
+    expectChatUnchanged();
+    expect(calls, contains('TextInput.setClient'));
+    expect(calls, isNot(contains('TextInput.clearClient')));
+    expect(calls, isNot(contains('TextInput.hide')));
+    expect(find.byType(RichContentEditorSheet), findsNothing);
+    expect(normal.focusNode!.hasPrimaryFocus, isTrue);
+    expect(normal.controller!.text, '继续编辑');
+    expect(normal.controller!.selection, selection);
+    tester.testTextInput.enterText('普通输入');
+    await tester.pump();
+    expect(normal.controller!.text, '普通输入');
+
+    // 标题也可能持有当前输入连接，收起后继续在普通输入框编辑正文。
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    final titleFinder = find.byKey(const Key('rich_content_title'));
+    await tester.tap(titleFinder);
+    await tester.pumpAndSettle();
+    final title = tester.widget<ExtendedTextField>(titleFinder);
+    expect(title.focusNode!.hasPrimaryFocus, isTrue);
+    tester.testTextInput.enterText('保留标题');
+    await tester.pump();
+    tester.testTextInput.log.clear();
+    await tester.tap(find.byTooltip('收起富文本编辑器'));
+    await tester.pumpAndSettle();
+    expect(calls, contains('TextInput.setClient'));
+    expect(calls, isNot(contains('TextInput.clearClient')));
+    expect(calls, isNot(contains('TextInput.hide')));
+    expect(normal.focusNode!.hasPrimaryFocus, isTrue);
+    expect(normal.controller!.text, '普通输入');
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<ExtendedTextField>(titleFinder).controller!.text,
+        '保留标题');
+  }, variant: const TargetPlatformVariant({TargetPlatform.iOS}));
+
   testWidgets('未弹键盘时直接展开，工具栏跟随键盘高度变化及收起且保留格式状态', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
@@ -1305,8 +1416,15 @@ void main() {
         MessageInput(conversationID: 'c2c_direct_rich_keyboard'),
       ])),
     ));
-    // 从空闲输入区直接展开，正文获得焦点后系统才开始改变键盘遮挡高度。
+    // iOS 先绘制面板入场，再建立输入连接，避免键盘启动打断面板位移。
+    tester.testTextInput.log.clear();
     await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(find.byType(RichContentEditorSheet), findsOneWidget);
+    expect(tester.testTextInput.log.map((call) => call.method),
+        isNot(contains('TextInput.show')));
     await tester.pumpAndSettle();
     final field = tester.widget<ExtendedTextField>(
         find.byKey(const Key('rich_content_text_1')));
@@ -1357,7 +1475,7 @@ void main() {
     tester.view.viewInsets = const FakeViewPadding();
     await tester.pump();
     expect(tester.takeException(), isNull);
-  });
+  }, variant: const TargetPlatformVariant({TargetPlatform.iOS}));
 
   testWidgets('发送期间的新编辑不会随旧快照成功而关闭', (tester) async {
     final editorKey = GlobalKey<RichContentEditorSheetState>();
@@ -1699,7 +1817,7 @@ void main() {
     );
 
     expect(find.byType(Divider), findsNothing);
-    final title = tester.widget<TextField>(
+    final title = tester.widget<ExtendedTextField>(
       find.byKey(const Key('rich_content_title')),
     );
     final body = tester.widget<ExtendedTextField>(
@@ -1891,7 +2009,7 @@ void main() {
     await tester.pump();
     final imageFinder = find.byKey(const Key('rich_content_inline_image_2'));
     expect(imageFinder, findsOneWidget);
-    expect(find.byType(ExtendedTextField), findsOneWidget);
+    expect(_richBodyFields(), findsOneWidget);
     final bodyWidth =
         tester.getSize(find.byKey(const Key('rich_content_body'))).width;
     expect(tester.getSize(imageFinder).width, lessThanOrEqualTo(bodyWidth / 2));
@@ -1950,8 +2068,12 @@ void main() {
       tester.widget<ExtendedTextField>(field).cursorHeight,
       closeTo(imageRect.height, 0.01),
     );
-    final renderEditable =
-        tester.allRenderObjects.whereType<ExtendedRenderEditable>().single;
+    final renderEditable = tester
+        .state<ExtendedEditableTextState>(find.descendant(
+          of: field,
+          matching: find.byType(ExtendedEditableText),
+        ))
+        .renderEditable as ExtendedRenderEditable;
     Rect globalCaretRect() {
       final localRect = renderEditable.getLocalRectForCaret(
         renderEditable.getActualSelection()!.extent,
@@ -2049,7 +2171,7 @@ void main() {
     );
     await tester.pump();
     expect(imageFinder, findsNothing);
-    expect(find.byType(ExtendedTextField), findsOneWidget);
+    expect(_richBodyFields(), findsOneWidget);
     expect(input.controller!.text, '前\n后');
 
     expect(await editorKey.currentState!.insertProcessedMedia(media), isFalse);
@@ -2591,5 +2713,11 @@ void _configureEditorEmojis() {
 }
 
 /// 按实际语义节点定位表情操作，避免顶部常用项与网格图片重名。
+/// 标题也使用 ExtendedTextField，正文断言只查正文列表。
+Finder _richBodyFields() => find.descendant(
+      of: find.byKey(const Key('rich_content_body')),
+      matching: find.byType(ExtendedTextField),
+    );
+
 Finder _emojiControl(String identifier) => find.byWidgetPredicate((widget) =>
     widget is Semantics && widget.properties.identifier == identifier);
