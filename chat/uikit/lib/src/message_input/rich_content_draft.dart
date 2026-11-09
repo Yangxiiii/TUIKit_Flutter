@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../emoji_picker/emoji_manager.dart';
 import 'message_input_config.dart';
 import 'message_text.dart';
 import '../message_list/utils/rich_content_message.dart';
@@ -51,7 +52,7 @@ final class RichContentDraftAttachmentBlock extends RichContentDraftBlock {
   /// 已上传视频首帧封面地址；收起、草稿恢复和再次发送均保留。
   final String? thumbnailUrl;
 
-  /// 当前上传状态；仅 uploaded 状态可编码进消息，本地待上传附件仍可提交发送。
+  /// 当前上传状态；仅 uploaded 状态的附件可随草稿发送。
   final RichContentAttachmentStatus status;
 
   const RichContentDraftAttachmentBlock(
@@ -210,24 +211,55 @@ final class RichContentDraft {
                 ),
           );
 
-  /// 草稿有有效内容、未超过文字上限且全部附件取得合法远端URL时可发送。
-  bool get canSend {
-    return hasContent &&
-        characterCount <= messageTextCharacterLimit &&
-        blocks.whereType<RichContentDraftAttachmentBlock>().every(
-              (block) => _isReadyAttachment(block),
-            );
+  /// 纯业务表情实际按表情消息发送，计数和发送使用同一份令牌。
+  String? get faceText {
+    if (blocks.any((block) => block is RichContentDraftAttachmentBlock)) {
+      return null;
+    }
+    final text = plainTextPreview.trim();
+    return EmojiManager.isOnlyEmojis(text) ? text : null;
   }
 
-  /// 内容须符合字数限制，媒体须有正整数宽高；附件须有远端资源或已完成本地处理。
+  /// 按最终消息体计数。尚未取得的 URL 和尺寸按缺省估算，不计入本地文件路径。
+  int get byteCount => messageTextByteCount(
+        faceText ??
+            _buildContent().toCustomData(preserveLegacyDimensions: true),
+      );
+
+  /// 恰好等于上限仍可发送。
+  bool get isOverByteLimit => byteCount > messageTextByteLimit;
+
+  /// 只有正文未超限且全部附件取得合法远端地址，才可提交给 SDK。
+  bool get canSend =>
+      hasContent &&
+      blocks.whereType<RichContentDraftAttachmentBlock>().every(
+            (block) => block.isReadyToSend,
+          ) &&
+      !isOverByteLimit;
+
+  /// 上传重试和旧气泡共用：本地附件须可上传，已知内容不能超过上限。
   bool get canSubmit =>
       hasContent &&
-      characterCount <= messageTextCharacterLimit &&
+      !isOverByteLimit &&
       blocks.whereType<RichContentDraftAttachmentBlock>().every((block) =>
           block.status != RichContentAttachmentStatus.preparing &&
           block.status != RichContentAttachmentStatus.preparationFailed &&
           block.attachment.hasRequiredDimensions &&
           (block.isReadyToSend || block.attachment.localPath.isNotEmpty));
+
+  /// 上传失败时允许用户重试；未完成的附件仍禁止实际发送。
+  bool get canRetryUploads {
+    final attachments = blocks.whereType<RichContentDraftAttachmentBlock>();
+    return attachments.any(
+          (block) => block.status == RichContentAttachmentStatus.failed,
+        ) &&
+        attachments.every(
+          (block) =>
+              block.isReadyToSend ||
+              block.status == RichContentAttachmentStatus.failed,
+        ) &&
+        canSubmit;
+  }
 
   /// 比较用户编辑的内容与附件身份，忽略上传状态和远端地址的变化。
   bool hasSameContentAs(RichContentDraft other) {
@@ -262,7 +294,7 @@ final class RichContentDraft {
   /// 仅本地发送气泡使用本地媒体预览；该结果不能交给 SDK，发送仍须经过 toMessage 校验。
   RichContentMessage get localPreview => _buildContent(localPreview: true);
 
-  /// 发送和预览保持同一排版，只有本地预览可使用文件路径代替远端地址。
+  /// 发送、计数和预览共用排版；仅本地预览可使用文件路径。
   RichContentMessage _buildContent({bool localPreview = false}) {
     final messageBlocks = <RichContentBlock>[];
     for (final block in blocks) {
@@ -276,10 +308,14 @@ final class RichContentDraft {
           final attachment = block.attachment;
           final url = localPreview && attachment.localPath.isNotEmpty
               ? Uri.file(attachment.localPath).toString()
-              : block.remoteUrl!;
+              : (block.remoteUrl ?? '');
+          // 处理中的媒体可能还没有有效尺寸，计数时先省略该字段。
+          final width = (attachment.width ?? 0) > 0 ? attachment.width : null;
+          final height =
+              (attachment.height ?? 0) > 0 ? attachment.height : null;
           if (attachment.type == RichContentAttachmentType.image) {
             messageBlocks.add(
-              RichImageBlock(url, attachment.width, attachment.height),
+              RichImageBlock(url, width, height),
             );
           } else {
             messageBlocks.add(
@@ -288,8 +324,8 @@ final class RichContentDraft {
                 attachment.fileName,
                 attachment.fileSize,
                 attachment.mimeType,
-                width: attachment.width,
-                height: attachment.height,
+                width: width,
+                height: height,
                 thumbnailUrl: localPreview && attachment.thumbnailPath != null
                     ? Uri.file(attachment.thumbnailPath!).toString()
                     : block.thumbnailUrl,
@@ -626,11 +662,15 @@ TextEditingValue? _splitMarkdownRangeAtNewline(
 /// 递归关闭光标左侧的各层格式并在右侧恢复，紧邻标签和空行不生成空格式段。
 ({String before, String after, int openingLength})? _splitMarkdownTextAt(
     String text, int offset) {
-  for (var start = 0; start < text.length; start++) {
+  // 只查找光标之前的候选标签，粘贴换行时无需扫描后续普通正文。
+  var start = text.indexOf(richContentMarkdownStartPattern);
+  while (start >= 0 && start < offset) {
     final format = parseRichContentMarkdownFormatAt(text, start);
-    if (format == null) continue;
-    if (offset < format.contentStart || offset > format.contentEnd) {
-      start = format.closeEnd - 1;
+    if (format == null ||
+        offset < format.contentStart ||
+        offset > format.contentEnd) {
+      start = text.indexOf(
+          richContentMarkdownStartPattern, format?.closeEnd ?? start + 1);
       continue;
     }
     // 内层先拆，再分别包回外层标签，防止只关闭最外层而留下断开的斜体或下划线。
@@ -860,9 +900,13 @@ TextRange? _insertedRange(String oldText, String newText) {
 _MarkdownMarkerRange? _markerRangeAt(String text, int offset, String marker,
     {int sourceStart = 0}) {
   // 读取共用格式边界，光标移动、删除和发送后的展示不能各自配对相邻标签。
-  for (var start = 0; start < text.length; start++) {
+  var start = text.indexOf(richContentMarkdownStartPattern);
+  while (start >= 0 && start < offset) {
     final format = parseRichContentMarkdownFormatAt(text, start);
-    if (format == null) continue;
+    if (format == null) {
+      start = text.indexOf(richContentMarkdownStartPattern, start + 1);
+      continue;
+    }
     if (format.markers.contains(marker) &&
         offset >= format.contentStart &&
         offset <= format.contentEnd) {
@@ -882,7 +926,7 @@ _MarkdownMarkerRange? _markerRangeAt(String text, int offset, String marker,
           sourceStart: sourceStart + format.contentStart);
       if (inner != null) return inner;
     }
-    start = format.closeEnd - 1;
+    start = text.indexOf(richContentMarkdownStartPattern, format.closeEnd);
   }
   return null;
 }

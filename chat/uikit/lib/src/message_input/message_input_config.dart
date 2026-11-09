@@ -102,7 +102,7 @@ abstract class MessageInputConfigProtocol {
   bool get isShowVideoCall;
   bool get isShowAudioCall;
 
-  /// 富文本附件上传入口，只在点击发送后调用；未配置时本地附件不能发送。
+  /// 本地富文本附件准备完成后调用此入口取得远端地址；未配置时本地附件不能发送。
   RichContentAttachmentUploader? get richContentAttachmentUploader;
 }
 

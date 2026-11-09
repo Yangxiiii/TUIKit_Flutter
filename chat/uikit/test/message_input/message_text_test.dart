@@ -12,21 +12,26 @@ void main() {
     expect(messageTextCharacterCount('[ZDEmoji_unknown]'), 17);
   });
 
-  test('普通与富文本的4000边界一致且隐藏格式不计数', () {
-    final text = '${'字' * 3999}😀';
-    expect(messageTextCharacterCount(text), 4000);
+  test('普通文本按UTF-8计数，富文本按实际JSON计入标题和转义', () {
+    expect(messageTextByteCount('${'字' * 3412}😀'), 10240);
+    final template = RichContentDraft(
+      title: '标题',
+      blocks: const [RichContentDraftTextBlock(1, '**正文**\n"')],
+    );
+    final overhead = messageTextByteCount(template.toMessage()!.toCustomData());
+    final body = '**正文**\n"${'a' * (10240 - overhead)}';
     final draft = RichContentDraft(
-      blocks: [RichContentDraftTextBlock(1, '**$text**')],
+      title: '标题',
+      blocks: [RichContentDraftTextBlock(1, body)],
     );
-    expect(draft.characterCount, 4000);
-    expect(draft.canSend, isTrue);
-    expect(
-      RichContentDraft(
-        title: '再',
-        blocks: draft.blocks,
-      ).canSend,
-      isFalse,
+    expect(messageTextByteCount(draft.toMessage()!.toCustomData()), 10240);
+    expect(draft.byteCount, 10240);
+    final tooLong = RichContentDraft(
+      title: draft.title,
+      blocks: [RichContentDraftTextBlock(1, '${body}a')],
     );
+    expect(tooLong.byteCount, 10241);
+    expect(tooLong.toMessage(), isNull);
   });
 
   test('有格式的纯空白仍不可发送', () {

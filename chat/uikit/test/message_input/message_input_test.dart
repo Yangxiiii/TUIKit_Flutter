@@ -11,9 +11,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart' hide IconButton;
 import 'package:tencent_chat_uikit/src/third_party/extended_text_field/extended_text_field.dart';
 import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
-import 'package:tencent_chat_uikit/src/message_input/pending_rich_content_message.dart';
-import 'package:atomic_x_core/impl/message/message_input_store_impl.dart';
-import 'package:atomic_x_core/impl/message/message_list_store_impl.dart';
 import 'package:tencent_chat_uikit/src/message_input/widget/rich_content_editor_sheet.dart';
 import 'package:tencent_chat_uikit/src/message_input/utils/image_size_reader.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_message.dart';
@@ -46,7 +43,7 @@ void main() {
           bool voicePreview = false}) =>
       tester.pumpWidget(
         MaterialApp(
-          builder: replyConfig == null ? null : AppDialog.init(),
+          builder: AppDialog.init(),
           theme: AppThemeFactory.create(
             const AppNormalColorScheme(),
             Brightness.light,
@@ -330,7 +327,11 @@ void main() {
   testWidgets('媒体加载时收起或重开仍可完成预览，普通输入区删除占位后不被迟到结果复活', (tester) async {
     final path = await createPreview(tester);
     for (final mode in ['normal', 'reopen', 'delete']) {
-      await mount(tester, uploader: (_) async => throw StateError('不应提前上传'));
+      var uploads = 0;
+      await mount(tester, uploader: (_) async {
+        uploads++;
+        return 'https://example.com/resource-$uploads';
+      });
       if (mode == 'normal') sdk.conversations.completeDraft('');
       await tester.pump();
       await tester.tap(find.byKey(const Key('open_rich_content_editor')));
@@ -352,7 +353,9 @@ void main() {
       expect(sendButton(tester).onPressed, isNull);
       await tester.tap(find.byTooltip('收起富文本编辑器'));
       await tester.pump();
-      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      final loading = find.bySemanticsIdentifier(
+          'tim.rich_content.media_loading.${placeholder.id}');
+      expect(loading, findsOneWidget);
       if (mode == 'reopen') {
         await tester.tap(find.byKey(const Key('open_rich_content_editor')));
         await tester.pump();
@@ -370,7 +373,11 @@ void main() {
       dimensions.complete(const ImageSize(120, 60));
       await tester.pump();
       await preparing;
-      expect(find.byType(CircularProgressIndicator), findsNothing);
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+      expect(loading, findsNothing);
+      expect(uploads, mode == 'delete' ? 0 : 2);
       if (mode == 'delete') {
         expect(find.byIcon(AppIcons.cameraOn), findsNothing);
         expect(sendButton(tester).onPressed, isNull);
@@ -383,119 +390,124 @@ void main() {
     }
   });
 
-  testWidgets('插入媒体只预览，点击发送后才上传全部资源并发送一次消息', (tester) async {
+  testWidgets('提前上传图和视频，返回的远端地址超限时保留草稿并禁发', (tester) async {
     final path = await createPreview(tester);
-    for (final mode in [
-      'normal',
-      'expanded',
-      'dispose_during',
-      'edit_during'
-    ]) {
-      final local = <PendingRichContentMessage>[];
-      final subscription = notificationCenter.addListener<MessageSendEventData>(
-          MessageSendNotifyKey.messageSendBegin, (event) {
-        if ((event.message as MessageInfo).messagePayload
-            case final PendingRichContentMessage pending) {
-          local.add(pending);
-        }
-      });
-      final uploads = <RichContentLocalAttachment>[];
-      final results = List.generate(3, (_) => Completer<String>());
-      final createdBefore = sdk.messages.created;
-      await mount(tester, uploader: (attachment) {
-        uploads.add(attachment);
-        return results[uploads.length - 1].future;
-      });
-      if (mode == 'normal') sdk.conversations.completeDraft('');
-      await tester.pump();
-      await tester.tap(find.byKey(const Key('open_rich_content_editor')));
-      await tester.pumpAndSettle();
-      final editor = tester.state<RichContentEditorSheetState>(
-          find.byType(RichContentEditorSheet));
-      await editor.insertProcessedMedia(
-          AlbumMedia(id: 1, mediaType: AlbumMediaType.image, mediaPath: path),
-          readSize: (_) async => const ImageSize(120, 60));
-      await editor.insertProcessedMedia(
-          AlbumMedia(
-              id: 2,
-              mediaType: AlbumMediaType.video,
-              mediaPath: '/tmp/video.mp4',
-              videoThumbnailPath: path),
-          readSize: (_) async => const ImageSize(120, 60));
-      expect(uploads, isEmpty);
-      expect(editor.canSend, isTrue);
-      await tester.pump();
-      if (mode == 'normal' || mode == 'edit_during') {
-        await tester.tap(find.byTooltip('收起富文本编辑器'));
-        await tester.pumpAndSettle();
-        final submit = sendButton(tester).onPressed!;
-        submit();
-        submit();
-      } else {
-        unawaited(editor.send());
-        unawaited(editor.send());
-      }
-      await tester.pump();
-      expect(uploads, hasLength(1));
-      expect(sdk.messages.created, createdBefore);
-      expect(sendButton(tester).onPressed, isNull);
-      expect(local, hasLength(1));
-      expect(local.single.message.status, MessageStatus.sending);
-      expect(find.byType(RichContentEditorSheet), findsNothing);
-      if (mode == 'dispose_during') {
-        await tester.pumpWidget(const SizedBox.shrink());
-      }
-      String? edited;
-      if (mode == 'edit_during') {
-        edited = '发送期间新增';
-        await enter(tester, edited);
-        expect(sendButton(tester).onPressed, isNotNull);
-      }
-      results[0].complete('https://example.com/image.png');
-      await tester.pump();
-      // 封面只读取本地文件元数据，让真实文件 IO 在异步测试区完成。
-      await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await tester.pump();
-      expect(uploads, hasLength(2));
-      expect(sdk.messages.created, createdBefore);
-      results[1].complete('https://example.com/cover.png');
-      await tester.pump();
-      expect(uploads, hasLength(3));
-      expect(uploads.last.isVideo, isTrue);
-      expect(sdk.messages.created, createdBefore);
-      results[2].complete('https://example.com/video.mp4');
-      await tester.pump();
-      expect(sdk.messages.created, createdBefore + 1);
-      expect(sdk.messages.customDescriptions.last, 'oarichimage oarichvideo');
-      expect(sdk.messages.pushDescriptions.last, isNotEmpty);
-      expect(sdk.messages.pushDescriptions.last, isNot(contains('oarich')));
-      final message =
-          RichContentMessage.tryParse(sdk.messages.customData.last)!;
-      expect(message.blocks.whereType<RichImageBlock>().single.url,
-          'https://example.com/image.png');
-      expect(message.blocks.whereType<RichFileBlock>().single.thumbnailUrl,
-          'https://example.com/cover.png');
-      final image = message.blocks.whereType<RichImageBlock>().single;
-      final video = message.blocks.whereType<RichFileBlock>().single;
-      expect((image.width, image.height), (120, 60));
-      expect((video.width, video.height), (120, 60));
-      sdk.messages.completeSend();
-      await tester.pumpAndSettle();
-      expect(find.byType(RichContentEditorSheet), findsNothing);
-      final field = find.byKey(const Key('message_input_text_field'));
-      if (field.evaluate().isNotEmpty) {
-        expect(tester.widget<ExtendedTextField>(field).controller!.text,
-            edited ?? '');
-      } else if (mode != 'dispose_during') {
-        expect(edited, isNull);
-        expect(find.textContaining('发送给 '), findsOneWidget);
-      }
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox.shrink());
-      unawaited(subscription.cancel());
-      await tester.pump();
-    }
+    final imageUrl = 'https://example.com/${'x' * 550}.png';
+    final coverUrl = Completer<String>();
+    final imageUpload = Completer<String>();
+    final videoUrl = Completer<String>();
+    final uploads = <RichContentLocalAttachment>[];
+    await mount(tester, uploader: (attachment) {
+      uploads.add(attachment);
+      if (attachment.isVideo) return videoUrl.future;
+      if (attachment.mimeType == 'image/*') return coverUrl.future;
+      return imageUpload.future;
+    });
+    sdk.conversations.completeDraft('a' * 9750);
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    final editor = tester.state<RichContentEditorSheetState>(
+        find.byType(RichContentEditorSheet));
+    await editor.insertProcessedMedia(
+        AlbumMedia(id: 1, mediaType: AlbumMediaType.image, mediaPath: path),
+        readSize: (_) async => const ImageSize(120, 60));
+    await editor.insertProcessedMedia(
+        AlbumMedia(
+            id: 2,
+            mediaType: AlbumMediaType.video,
+            mediaPath: '/tmp/video.mp4',
+            videoThumbnailPath: path),
+        readSize: (_) async => const ImageSize(120, 60));
+    await tester.pump();
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+    await tester.pump();
+    expect(uploads, hasLength(2));
+    expect(editor.canSend, isFalse);
+    expect(find.text('输入内容过长'), findsNothing);
+
+    coverUrl.complete('https://example.com/cover.png');
+    await tester.pump();
+    expect(uploads.last.isVideo, isTrue);
+    videoUrl.complete('https://example.com/video.mp4');
+    await tester.pump();
+    expect(sdk.messages.created, 0);
+    expect(find.text('输入内容过长'), findsNothing);
+
+    // 上传结果跨展开、收起边界后仍更新当前输入，不发布未校验的气泡。
+    await tester.tap(find.byTooltip('收起富文本编辑器'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(sendButton(tester).onPressed, isNull);
+    imageUpload.complete(imageUrl);
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('输入内容过长'), findsOneWidget);
+    expect(sendButton(tester).onPressed, isNull);
+    expect(sdk.messages.created, 0);
+    final field = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('message_input_text_field')));
+    expect(field.controller!.text, contains('a' * 9750));
+    await enter(tester, field.controller!.text.replaceFirst('a' * 9750, ''));
+    expect(sendButton(tester).onPressed, isNotNull);
+    sendButton(tester).onPressed!();
+    await tester.pump();
+    expect(sdk.messages.created, 1);
+    expect(uploads, hasLength(3));
+    expect(sdk.messages.customDescriptions.single, 'oarichimage oarichvideo');
+    expect(sdk.messages.pushDescriptions.single, isNotEmpty);
+    expect(sdk.messages.pushDescriptions.single, isNot(contains('oarich')));
+    final message =
+        RichContentMessage.tryParse(sdk.messages.customData.single)!;
+    final image = message.blocks.whereType<RichImageBlock>().single;
+    final video = message.blocks.whereType<RichFileBlock>().single;
+    expect(image.url, imageUrl);
+    expect(video.url, 'https://example.com/video.mp4');
+    expect(video.thumbnailUrl, 'https://example.com/cover.png');
+    expect((image.width, image.height), (120, 60));
+    expect((video.width, video.height), (120, 60));
+    sdk.messages.completeSend();
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('上传失败保留富文本，重试取得地址后才允许发送', (tester) async {
+    final path = await createPreview(tester);
+    var attempts = 0;
+    final retry = Completer<String>();
+    await mount(tester, uploader: (_) async {
+      if (++attempts == 1) throw StateError('模拟上传失败');
+      return retry.future;
+    });
+    sdk.conversations.completeDraft('');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    final editor = tester.state<RichContentEditorSheetState>(
+        find.byType(RichContentEditorSheet));
+    await editor.insertProcessedMedia(
+        AlbumMedia(id: 1, mediaType: AlbumMediaType.image, mediaPath: path),
+        readSize: (_) async => const ImageSize(120, 60));
+    await tester.pump();
+    expect(attempts, 1);
+    expect(editor.canSend, isTrue);
+    await editor.send();
+    await tester.pump();
+    expect(attempts, 2);
+    expect(editor.canSend, isFalse);
+    expect(sdk.messages.created, 0);
+    retry.complete('https://example.com/image.png');
+    await tester.pump();
+    expect(editor.canSend, isTrue);
+    expect(sdk.messages.created, 0);
+    unawaited(editor.send());
+    await tester.pump();
+    expect(sdk.messages.created, 1);
+    sdk.messages.completeSend();
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('撤回文本回填保留已有草稿，迟到加载不能覆盖回填内容', (tester) async {
@@ -808,11 +820,13 @@ void main() {
     expect(sdk.conversations.saved, isEmpty);
   });
 
-  testWidgets('4000字符可发、4001禁发并保留输入，回退后恢复', (tester) async {
+  testWidgets('普通消息按UTF-8字节校验，超限保留输入，回退后恢复', (tester) async {
     await mount(tester);
     sdk.conversations.completeDraft('');
     await tester.pump();
-    final text = '${'字' * 3999}😀';
+    await enter(tester, 'a' * 5000);
+    expect(sendButton(tester).onPressed, isNotNull);
+    final text = '${'字' * 3412}😀';
     await enter(tester, text);
     final send = find.bySemanticsIdentifier('tim.message_input_toolbar.send');
     expect(send, findsOneWidget);
@@ -823,22 +837,15 @@ void main() {
             .hasAction(SemanticsAction.tap),
         isTrue);
     expect(find.bySemanticsIdentifier('tim.input.text'), findsOneWidget);
-    expect(
-      tester
-          .getSemantics(find.bySemanticsIdentifier('tim.input.text'))
-          .getSemanticsData()
-          .hasAction(SemanticsAction.setText),
-      isTrue,
-    );
     await enter(tester, '$text甲');
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(
         tester
             .getSemantics(send)
             .getSemanticsData()
             .hasAction(SemanticsAction.tap),
         isFalse);
-    expect(find.text('字数超出限制无法发送'), findsOneWidget);
+    expect(find.text('输入内容过长'), findsOneWidget);
     expect(
       tester
           .widget<ExtendedTextField>(find.byType(ExtendedTextField).first)
@@ -846,6 +853,28 @@ void main() {
           .text,
       '$text甲',
     );
+    final toast = find.byWidgetPredicate((widget) =>
+        widget is Semantics &&
+        widget.properties.identifier == 'tim.input.text_limit');
+    expect(toast, findsOneWidget);
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    expect(toast, findsNothing);
+    final controller = tester
+        .widget<ExtendedTextField>(find.byType(ExtendedTextField).first)
+        .controller!;
+    controller.selection = const TextSelection.collapsed(offset: 0);
+    await tester.pump();
+    await tester.pump();
+    expect(toast, findsNothing);
+    await enter(tester, '$text甲乙');
+    await tester.pumpAndSettle();
+    expect(toast, findsOneWidget);
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    await enter(tester, '$text甲');
+    await tester.pumpAndSettle();
+    expect(toast, findsOneWidget);
     // 表情面板的回调也是实际发送入口，禁用态不能只由按钮外观保证。
     final state = tester.state<MessageInputState>(find.byType(MessageInput));
     await state.getEmojiPanelWidget();
@@ -860,6 +889,38 @@ void main() {
             .hasAction(SemanticsAction.tap),
         isTrue);
     await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('展开的富文本标题仍超限时，等长替换也再次提示', (tester) async {
+    await mount(tester);
+    sdk.conversations.completeDraft('');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    final editor = tester.state<RichContentEditorSheetState>(
+        find.byType(RichContentEditorSheet));
+    final title = tester
+        .widget<ExtendedTextField>(find.byKey(const Key('rich_content_title')))
+        .controller!;
+    final prefix = '字' * 3414;
+    final toast = find.text('输入内容过长');
+    title.text = '$prefix甲';
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(toast, findsOneWidget);
+    expect(editor.canSend, isFalse);
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    expect(toast, findsNothing);
+    title.text = '$prefix乙';
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(toast, findsOneWidget);
+    expect(editor.canSend, isFalse);
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
     await tester.pumpWidget(const SizedBox.shrink());
   });
 

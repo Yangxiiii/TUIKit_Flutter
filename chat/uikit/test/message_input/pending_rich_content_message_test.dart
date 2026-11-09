@@ -105,7 +105,14 @@ void main() {
     await tester.pump();
     expect(find.text('发送正文'), findsOneWidget);
     expect(find.byType(Image), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    // 只统计气泡外的发送转圈；媒体解码占位可能同时有自己的转圈。
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is CircularProgressIndicator && widget.strokeWidth == 1,
+      ),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
 
     upload.complete('https://example.com/image.png');

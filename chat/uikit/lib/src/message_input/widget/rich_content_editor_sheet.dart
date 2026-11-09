@@ -52,6 +52,7 @@ double? richContentAttachmentCursorHeight({
   required double maxImageWidth,
   required TextStyle textStyle,
 }) {
+  if (attachments.isEmpty) return null;
   final text = controller.text;
   final selection = controller.selection;
   if (!selection.isValid || !selection.isCollapsed) return null;
@@ -385,7 +386,7 @@ final class RichContentEditorSheet extends StatefulWidget {
   /// 上次收起时保存的富文本草稿。
   final RichContentDraft initialDraft;
 
-  /// 宿主是否支持在点击发送后上传本地附件；远端草稿不依赖此能力。
+  /// 宿主是否支持编辑期间上传本地附件及失败重试；远端草稿不依赖此能力。
   final bool canUploadAttachments;
 
   /// 保留宿主原有播放图标配置入口；展开和普通编辑态均使用视频时长角标。
@@ -546,12 +547,12 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
   /// 外部共享工具条当前的格式选中集合。
   Set<String> get activeFormats => Set.unmodifiable(_activeFormats);
 
-  /// 当前草稿是否满足富文本发送条件。
+  /// 当前发送按钮是否可用；上传失败且内容未超限时，点击只重试上传。
   bool get canSend {
     final draft = _buildDraft();
     return !_isSending &&
-        draft.canSubmit &&
-        (widget.canUploadAttachments || draft.canSend);
+        (draft.canSend ||
+            (widget.canUploadAttachments && draft.canRetryUploads));
   }
 
   /// 应用编辑状态后同步最新草稿和共享工具条，保证持久化读取更新后的内容。
@@ -581,10 +582,12 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     }
     final waitsForEntrance = widget.focusAfterEntrance && !widget.showToolbar;
     if (waitsForEntrance) _pendingEntranceFocus = initialBlock.focusNode;
-    // 需要立即聚焦的场景在首帧布局后申请焦点，已打开键盘时沿用连接交接。
+    // 首帧同步实际富文本大小；即使键盘延迟聚焦，也能立即校验恢复的草稿。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      widget.onDraftChanged?.call(_buildDraft());
       if (!waitsForEntrance) {
+        // 已打开键盘时沿用原输入连接，避免收起后重新弹出。
         final sourceEditable = widget.initialFocusSource?.context
             ?.findAncestorStateOfType<ExtendedEditableTextState>();
         if (sourceEditable == null) {
@@ -806,7 +809,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     }
   }
 
-  /// 提交当前快照；本地气泡接管后关闭未继续编辑的草稿，提交失败时释放忙碌态。
+  /// 提交当前快照；发送成功后关闭未继续编辑的草稿，提交失败时释放忙碌态。
   Future<void> send() async {
     final draft = _buildDraft();
     if (!canSend) return;
@@ -1122,15 +1125,24 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     }
   }
 
-  /// 只替换仍存在且身份相同的占位，删除、替换或重新选择后的旧结果不能复活元素。
+  /// 只更新仍在正文中的同一附件，避免处理或上传结果复活已删除的块。
   void applyPreparedMedia(RichContentDraftAttachmentBlock original,
       RichContentDraftAttachmentBlock result) {
-    if (!mounted ||
-        !identical(
-            _inlineMedia[original.id]?.attachment, original.attachment)) {
+    if (!mounted) return;
+    if (identical(_inlineMedia[original.id]?.attachment, original.attachment)) {
+      _setEditorState(() => _inlineMedia[original.id] = result);
       return;
     }
-    _setEditorState(() => _inlineMedia[original.id] = result);
+    // 非媒体文件在编辑器内仍使用独立卡片，也需要同步远端地址及上传状态。
+    final index = _blocks.indexWhere(
+      (block) =>
+          block is _AttachmentEditorBlock &&
+          block.id == original.id &&
+          identical(block.block.attachment, original.attachment),
+    );
+    if (index != -1) {
+      _setEditorState(() => _blocks[index] = _AttachmentEditorBlock(result));
+    }
   }
 
   /// 选择文件并插入当前正文位置。
@@ -1549,6 +1561,9 @@ final class _AttachmentEditorBlock extends _EditorBlock {
 /// 把附件令牌渲染为可由 ExtendedTextField 整体选择和删除的元素。
 final class RichContentAttachmentSpanBuilder
     extends ChatSpecialTextSpanBuilder {
+  /// 在同一次扫描中查找媒体、表情和链接令牌。
+  static RegExp? _attachmentTokenStartPattern;
+
   /// 保留宿主原有配置入口；编辑态统一使用右下角的视频字形。
   final ImageProvider? videoPlayIcon;
 
@@ -1582,6 +1597,11 @@ final class RichContentAttachmentSpanBuilder
     required super.mapMarkdownMarkers,
   }) : assert(devicePixelRatio > 0);
 
+  @override
+  RegExp get tokenStartPattern => _attachmentTokenStartPattern ??= RegExp(
+        '${super.tokenStartPattern.pattern}|$richContentAttachmentTokenStart',
+      );
+
   /// 媒体行只使用封面和间隔决定高度，文字行保留主题行距及原文偏移。
   @override
   TextSpan build(
@@ -1590,12 +1610,17 @@ final class RichContentAttachmentSpanBuilder
     SpecialTextGestureTapCallback? onTap,
   }) {
     // 相邻媒体共用一份 8px 间隔，避免上下边距叠加成 16px。
-    _mediaEnds = {
-      for (final match in richContentAttachmentTokenPattern.allMatches(data))
-        if (attachments[int.parse(match.group(1)!)]?.attachment.isInlineMedia ==
-            true)
-          match.end,
-    };
+    _mediaEnds = attachments.isEmpty
+        ? const {}
+        : {
+            for (final match
+                in richContentAttachmentTokenPattern.allMatches(data))
+              if (attachments[int.parse(match.group(1)!)]
+                      ?.attachment
+                      .isInlineMedia ==
+                  true)
+                match.end,
+          };
     final source = super.build(data, textStyle: textStyle, onTap: onTap);
     if (_mediaEnds.isEmpty) return source;
     final children = <InlineSpan>[];
@@ -1742,6 +1767,7 @@ final class _EditorAttachmentText extends SpecialText {
               builder: (context) => Semantics(
                     identifier:
                         'tim.rich_content.media_${loading ? 'loading' : 'failed'}.$id',
+                    container: true,
                     label: loading ? '媒体加载中' : '媒体加载失败，请删除后重新选择',
                     child: IgnorePointer(
                         child: Container(
@@ -1752,20 +1778,14 @@ final class _EditorAttachmentText extends SpecialText {
                         borderRadius: BorderRadius.circular(4),
                       ),
                       alignment: Alignment.center,
-                      child: loading && loadingPlaceholder != null
+                      child: loading
                           ? ClipRRect(
                               borderRadius: BorderRadius.circular(4),
                               child: ChatMediaPlaceholder(
-                                  image: loadingPlaceholder, showLoading: true))
-                          : loading
-                              ? SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: context.appColors.onScrim))
-                              : Icon(Icons.broken_image_outlined,
-                                  color: context.appColors.onScrim, size: 20),
+                                  image: loadingPlaceholder,
+                                  showLoading: !attachment.isVideo))
+                          : Icon(Icons.broken_image_outlined,
+                              color: context.appColors.onScrim, size: 20),
                     )),
                   )),
         ),
@@ -1831,7 +1851,10 @@ final class _EditorAttachmentText extends SpecialText {
             : SizedBox(
                 width: size.width,
                 height: size.height,
-                child: ChatMediaPlaceholder(image: imageLoadingPlaceholder)),
+                child: ChatMediaPlaceholder(
+                  image: imageLoadingPlaceholder,
+                  showLoading: imageLoadingPlaceholder == null,
+                )),
       ),
       margin: margin,
     );

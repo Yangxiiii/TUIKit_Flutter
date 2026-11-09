@@ -1,10 +1,15 @@
+import 'dart:convert';
+
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart' show StringCharacters;
 
 import '../emoji_picker/emoji_manager.dart';
 
-/// 单条文字消息的可见字符上限，换行也参与计数。
-const messageTextCharacterLimit = 4000;
+/// 单条聊天文字或富文本消息体的 UTF-8 字节上限。
+const messageTextByteLimit = 10 * 1024;
+
+/// 按实际发送的 UTF-8 编码计数，中文和表情可能占用多个字节。
+int messageTextByteCount(String text) => utf8.encode(text).length;
 
 /// 按可见字素计数；业务表情令牌和CRLF各视为一个字符。
 int messageTextCharacterCount(String text) => text

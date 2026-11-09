@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:app_core/app_core.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
@@ -9,6 +8,7 @@ import 'package:atomic_x_core/impl/message/message_action_store_impl.dart';
 
 import 'chat_media_sender.dart';
 import 'message_input_config.dart';
+import 'rich_content_attachment_upload.dart';
 import 'rich_content_draft.dart';
 
 /// 本地气泡持有完整发送任务，上传与 SDK 发送共用发送态；收起或销毁输入框不丢失任务。
@@ -106,6 +106,8 @@ final class PendingRichContentMessage extends CustomMessagePayload {
               await _upload(i, block);
               _checkAccount();
             }
+            // 兼容旧气泡重试：取得最终 URL 后仍按实际消息体拒绝超限内容。
+            if (_draft.isOverByteLimit) throw StateError('输入内容过长');
             final content = _draft.toMessage();
             if (content == null) throw StateError('消息内容尚未就绪');
             final payload = CustomSendMessagePayload(
@@ -156,33 +158,12 @@ final class PendingRichContentMessage extends CustomMessagePayload {
   Future<void> _upload(int index, RichContentDraftAttachmentBlock block) async {
     final uploader = _uploader;
     if (uploader == null) throw StateError('媒体上传服务不可用');
-    final attachment = block.attachment;
-    // 封面先就绪并单独保留，视频本体失败后无需再次上传同一封面。
-    if (attachment.isVideo &&
-        attachment.thumbnailPath != null &&
-        !isValidRichContentUrl(block.thumbnailUrl)) {
-      final file = File(attachment.thumbnailPath!);
-      final url = await uploader(RichContentLocalAttachment(
-        type: RichContentAttachmentType.image,
-        localPath: file.path,
-        fileName: file.uri.pathSegments.last,
-        fileSize: await file.length(),
-        mimeType: 'image/*',
-        width: attachment.width,
-        height: attachment.height,
-      ));
-      if (!isValidRichContentUrl(url)) throw StateError('视频封面上传失败');
-      block = block.copyWith(thumbnailUrl: url);
-      _replaceBlock(index, block);
-    }
-    _checkAccount();
-    // 上传返回合法远端 URL 后才标记附件可编码，原始本地路径始终留在任务内。
-    final url = await uploader(attachment);
-    if (!isValidRichContentUrl(url)) throw StateError('媒体上传失败');
-    _replaceBlock(
-        index,
-        block.copyWith(
-            remoteUrl: url, status: RichContentAttachmentStatus.uploaded));
+    await uploadRichContentAttachment(
+      block,
+      uploader,
+      onProgress: (result) => _replaceBlock(index, result),
+      checkCurrent: _checkAccount,
+    );
   }
 
   /// 每个成功阶段替换不可变草稿，失败重试继续使用同一份进度。

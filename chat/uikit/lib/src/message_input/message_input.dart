@@ -1,4 +1,5 @@
 import 'chat_media_sender.dart';
+import 'rich_content_attachment_upload.dart';
 import 'widget/call_selection_sheet.dart';
 import '../message_list/message_reply_config.dart';
 import '../message_list/utils/big_file_message.dart';
@@ -134,8 +135,8 @@ class MessageInputState extends State<MessageInput>
   /// 只用于区分正文变化与选区变化，不作为另一份可编辑文本。
   String _lastObservedText = '';
 
-  /// 记录上次是否超限，仅用于让全局提示在进入超限状态时显示一次。
-  bool _wasOverTextLimit = false;
+  /// 当前校验结果，用于识别附件就绪导致的超限，并在显示提示前确认仍超限。
+  bool _isOverTextLimit = false;
   bool _showEmojiPanel = false;
   bool _showMorePanel = false;
 
@@ -212,6 +213,9 @@ class MessageInputState extends State<MessageInput>
 
   /// 当前会话内收起后保留的富文本标题、正文顺序和附件上传状态。
   RichContentDraft _richContentDraft = const RichContentDraft();
+
+  /// 按附件实例记录正在上传的草稿块，避免编辑、收起和重开重复上传。
+  final _richContentUploads = Set<RichContentLocalAttachment>.identity();
 
   /// 普通输入框内附件令牌对应的富文本草稿块。
   final Map<int, RichContentDraftAttachmentBlock>
@@ -688,13 +692,15 @@ class MessageInputState extends State<MessageInput>
   }
 
   /// 同步输入校验与草稿版本，所有实际文字变化均走相同的保存与禁发规则。
-  void _onTextChanged() {
+  void _onTextChanged({bool fromEditorHandoff = false}) {
+    // 展开时以编辑器回传的草稿为准，底层输入框不参与计数或上传。
+    if (_isRichContentEditorOpen) return;
     // 选区移动不推进编辑版本，避免仅聚焦就阻止旧草稿正常恢复。
     final text = _textEditingController.text;
     final selection = _textEditingController.selection;
+    final textChanged = text != _lastObservedText;
     if (_inlineRichContentEnabled &&
-        !_isRichContentEditorOpen &&
-        text == _lastObservedText &&
+        !textChanged &&
         _lastFormatSelection.isValid &&
         selection.isValid &&
         selection.isCollapsed &&
@@ -711,7 +717,7 @@ class MessageInputState extends State<MessageInput>
       }
     }
     _lastFormatSelection = selection;
-    if (text != _lastObservedText) {
+    if (textChanged) {
       _draftRevision++;
       _lastObservedText = text;
     }
@@ -726,14 +732,17 @@ class MessageInputState extends State<MessageInput>
         _richContentDraft.title.isNotEmpty) {
       _richContentDraft = _buildInlineRichContentDraft();
     }
-    // 按钮与实际发送共用同一字符口径，非空到超限的变化也必须刷新。
-    final characterCount = _inlineRichContentEnabled
-        ? _richContentDraft.characterCount
-        : messageTextCharacterCount(text);
-    _updateTextLimitFeedback(characterCount);
+    // 普通正文按实际发送的文本计数；富文本按当前序列化结果计数。
+    final trimmed = text.trim();
+    final exceeded = _inlineRichContentEnabled
+        ? _richContentDraft.isOverByteLimit
+        : messageTextByteCount(trimmed) > messageTextByteLimit;
+    _updateTextLimitFeedback(exceeded,
+        edited: textChanged && !fromEditorHandoff);
+    if (_inlineRichContentEnabled) _queueRichContentUploads(_richContentDraft);
     final canSend = _inlineRichContentEnabled
         ? _canSubmitRichContentDraft(_richContentDraft)
-        : text.trim().isNotEmpty && characterCount <= messageTextCharacterLimit;
+        : trimmed.isNotEmpty && !exceeded;
     if (canSend != _showSendButton) {
       setState(() {
         _showSendButton = canSend;
@@ -745,25 +754,28 @@ class MessageInputState extends State<MessageInput>
     _handleMentionDetection();
   }
 
-  /// 超限时保留输入供修改，回复态使用回复专用文案；回到上限内可再次提示。
-  void _updateTextLimitFeedback(int characterCount) {
-    final exceeded = characterCount > messageTextCharacterLimit;
-    final shouldNotify = exceeded && !_wasOverTextLimit;
-    _wasOverTextLimit = exceeded;
+  /// 每次编辑后仍超限都提示；附件就绪等非编辑事件只在进入超限时提示。
+  void _updateTextLimitFeedback(bool exceeded, {bool edited = false}) {
+    final shouldNotify = exceeded && (edited || !_isOverTextLimit);
+    _isOverTextLimit = exceeded;
     if (!shouldNotify) return;
     // 草稿恢复也可能触发校验，等当前帧结束后再展示覆盖层。
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _wasOverTextLimit) {
-        final reply = _quotedMessage == null ? null : widget.replyConfig;
-        if (reply == null) {
-          Toast.error(
-              context, AppLocalization.of(context).messageTextLimitExceeded);
-        } else {
-          AppToast.show(reply.contentTooLongMessage,
-              pill: true, semanticsIdentifier: 'tim.reply.error');
-        }
+      if (mounted && _isOverTextLimit) {
+        _showTextLimitToast();
       }
     });
+  }
+
+  /// 使用应用通用提示浮层，引用回复沿用配置文案和胶囊样式。
+  void _showTextLimitToast() {
+    final reply = _quotedMessage == null ? null : widget.replyConfig;
+    AppToast.show(
+      reply?.contentTooLongMessage ?? atomicLocale.messageTextLimitExceeded,
+      pill: reply != null,
+      semanticsIdentifier:
+          reply == null ? 'tim.input.text_limit' : 'tim.reply.error',
+    );
   }
 
   /// Detect @ input and show member picker
@@ -922,7 +934,7 @@ class MessageInputState extends State<MessageInput>
     setState(() {
       _inputMode = _InputMode.text;
     });
-    // 成员选择回填不能用“非空”绕过4000字符上限。
+    // 成员选择回填不能用“非空”绕过消息字节上限。
     _onTextChanged();
     _textEditingFocusNode.requestFocus();
   }
@@ -1014,12 +1026,11 @@ class MessageInputState extends State<MessageInput>
   /// 在统一并发边界内发送文字或纯表情，保留现有发送前清理与失败消息重试策略。
   Future<void> _handleTextSendMessagePayload() async {
     await _runTextSend(() async {
-      final rawText = _textEditingController.text;
-      if (rawText.trim().isEmpty ||
-          messageTextCharacterCount(rawText) > messageTextCharacterLimit) {
+      final text = _textEditingController.text.trim();
+      if (text.isEmpty || messageTextByteCount(text) > messageTextByteLimit) {
         return false;
       }
-      final messageInfo = _createTextOrFaceMessage(rawText.trim())
+      final messageInfo = _createTextOrFaceMessage(text)
         ..atUserList = _textEditingController.mentionList
             .map((mention) => mention.userID)
             .toList();
@@ -1035,10 +1046,11 @@ class MessageInputState extends State<MessageInput>
     });
   }
 
-  /// 本地媒体允许点击发送后再上传，未配置上传能力时只接受已就绪的远端草稿。
+  /// 就绪后可发送，上传失败时只允许重试；任何超限内容都不能提交。
   bool _canSubmitRichContentDraft(RichContentDraft draft) =>
-      draft.canSubmit &&
-      (draft.canSend || widget.config.richContentAttachmentUploader != null);
+      draft.canSend ||
+      (widget.config.richContentAttachmentUploader != null &&
+          draft.canRetryUploads);
 
   /// 发送当前活动编辑区的草稿；展开编辑器继续负责校验和发送后的关闭行为。
   Future<void> _handleInputSend() async {
@@ -1058,7 +1070,7 @@ class MessageInputState extends State<MessageInput>
     );
   }
 
-  /// 本地气泡接管后只清理对应的普通草稿，新输入和新打开的编辑器继续保留。
+  /// 成功发送后只清理对应的普通草稿，新输入和新打开的编辑器继续保留。
   void _clearSentRichContentDraft(RichContentDraft sent) {
     if (!mounted ||
         _isRichContentEditorOpen ||
@@ -1098,6 +1110,8 @@ class MessageInputState extends State<MessageInput>
     // 正文接管焦点时，普通输入框的失焦回调应保留当前编辑模式。
     if (_textEditingFocusNode.hasFocus) _isSwitchingPanel = true;
     setState(() {
+      // 展开时沿用当前正文作为比较基准，首帧同步不算一次新编辑。
+      _richContentDraft = _buildInlineRichContentDraft();
       _showMorePanel = false;
       _isRichContentEditorOpen = true;
       _keepNormalInputLayout = keepNormalInputLayout;
@@ -1172,15 +1186,17 @@ class MessageInputState extends State<MessageInput>
   /// 缓存展开编辑器的最新草稿，并沿用输入区现有防抖保存策略。
   void _rememberRichContentDraft(RichContentDraft draft) {
     if (!_isRichContentEditorOpen) return;
-    if (!draft.hasSameContentAs(_richContentDraft)) {
+    final edited = !draft.hasSameContentAs(_richContentDraft);
+    if (edited) {
       _draftRevision++;
     }
     _richContentDraft = draft;
-    _updateTextLimitFeedback(draft.characterCount);
+    _updateTextLimitFeedback(draft.isOverByteLimit, edited: edited);
+    _queueRichContentUploads(draft);
     _scheduleDraftSave();
   }
 
-  /// 合并本地处理结果，收起或重开编辑器时仍保留删除操作和新增文字。
+  /// 合并本地处理和上传结果，收起或重开编辑器时仍保留用户的编辑。
   void _acceptPreparedRichContentMedia(RichContentDraftAttachmentBlock original,
       RichContentDraftAttachmentBlock result) {
     if (!mounted) return;
@@ -1202,7 +1218,81 @@ class MessageInputState extends State<MessageInput>
       _richContentDraft = _buildInlineRichContentDraft();
       _showSendButton = _canSubmitRichContentDraft(_richContentDraft);
     });
+    _updateTextLimitFeedback(_richContentDraft.isOverByteLimit);
+    _queueRichContentUploads(_richContentDraft);
     _scheduleDraftSave();
+  }
+
+  /// 附件完成本地处理后即开始上传，延到微任务以免在编辑器回调内递归更新。
+  void _queueRichContentUploads(RichContentDraft draft,
+      {bool retryFailed = false}) {
+    final uploader = widget.config.richContentAttachmentUploader;
+    if (uploader == null) return;
+    final conversation = widget.conversationID;
+    final account = LoginStore.shared.loginState.loginUserInfo?.userID;
+    for (final block
+        in draft.blocks.whereType<RichContentDraftAttachmentBlock>()) {
+      final attachment = block.attachment;
+      if ((block.status != RichContentAttachmentStatus.pending &&
+              !(retryFailed &&
+                  block.status == RichContentAttachmentStatus.failed)) ||
+          attachment.localPath.isEmpty ||
+          !attachment.hasRequiredDimensions ||
+          !_richContentUploads.add(attachment)) {
+        continue;
+      }
+      unawaited(Future<void>.microtask(
+        () => _uploadRichDraftBlock(block, uploader, conversation, account),
+      ));
+    }
+  }
+
+  /// 将封面和附件的远端地址写回当前草稿；切换账号、会话或删除附件后丢弃迟到结果。
+  Future<void> _uploadRichDraftBlock(
+    RichContentDraftAttachmentBlock block,
+    RichContentAttachmentUploader uploader,
+    String conversation,
+    String? account,
+  ) async {
+    final attachment = block.attachment;
+    bool isCurrent() =>
+        mounted &&
+        widget.conversationID == conversation &&
+        LoginStore.shared.loginState.loginUserInfo?.userID == account &&
+        _richContentDraft.blocks
+            .whereType<RichContentDraftAttachmentBlock>()
+            .any(
+              (current) =>
+                  current.id == block.id &&
+                  identical(current.attachment, attachment),
+            );
+
+    var latest = block.copyWith(status: RichContentAttachmentStatus.uploading);
+    try {
+      if (!isCurrent()) return;
+      _acceptPreparedRichContentMedia(block, latest);
+      await uploadRichContentAttachment(
+        latest,
+        uploader,
+        checkCurrent: () {
+          if (!isCurrent()) throw StateError('附件已离开当前草稿');
+        },
+        onProgress: (result) {
+          latest = result;
+          _acceptPreparedRichContentMedia(block, result);
+        },
+      );
+    } on Object catch (_) {
+      if (!mounted || !isCurrent()) return;
+      // 保留已上传的封面和本地草稿，用户可以再次点击发送重试上传。
+      _acceptPreparedRichContentMedia(
+        block,
+        latest.copyWith(status: RichContentAttachmentStatus.failed),
+      );
+      Toast.error(context, '附件上传失败，请点击发送重试');
+    } finally {
+      _richContentUploads.remove(attachment);
+    }
   }
 
   /// 收起时向普通输入交接草稿和选区，iOS 系统键盘已显示时同时交接焦点。
@@ -1245,6 +1335,7 @@ class MessageInputState extends State<MessageInput>
       _inlineRichContentEnabled = !result.sent &&
           (result.draft.hasContent || _inlineRichContentEnabled);
     });
+    _onTextChanged(fromEditorHandoff: true);
     if (systemEditable != null) {
       // 普通输入完成布局后先请求接管焦点。移除覆盖层将在下一帧生效。
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1345,25 +1436,25 @@ class MessageInputState extends State<MessageInput>
     });
   }
 
-  /// 点击发送即发布本地气泡并交出草稿，上传与 SDK 发送由气泡任务继续管理。
+  /// 仅提交已取得全部远端地址且未超限的消息；失败附件可在草稿内重试。
   Future<bool> _sendRichContentDraft(
     RichContentDraft draft, {
     List<String> atUserList = const [],
   }) =>
       _runTextSend(() async {
         if (!_canSubmitRichContentDraft(draft)) return false;
-        // 不含附件的纯表情草稿也走同一表情协议，不能把附件或混合正文误转换后丢失。
-        final text = draft.plainTextPreview.trim();
-        if (draft.blocks.every((block) => block is RichContentDraftTextBlock) &&
-            EmojiManager.isOnlyEmojis(text)) {
-          final result = await _sendMessage(
-              _createTextOrFaceMessage(text)..atUserList = atUserList);
-          if (result.isSuccess) _clearSentRichContentDraft(draft);
-          return result.isSuccess;
+        if (!draft.canSend) {
+          _queueRichContentUploads(draft, retryFailed: true);
+          return false;
         }
-        // 纯文字及已上传草稿直接交给 SDK，由其现有气泡管理发送和失败状态。
-        if (draft.toMessage() case final RichContentMessage content) {
-          final result = await _sendMessage(MessageInfo(
+        // 表情与富文本分别使用实际计数时选定的消息体。
+        final MessageInfo message;
+        if (draft.faceText case final String text) {
+          message = _createTextOrFaceMessage(text);
+        } else {
+          final content = draft.toMessage();
+          if (content == null) return false;
+          message = MessageInfo(
             messageType: MessageType.custom,
             messagePayload: CustomMessagePayload(
               customData: content.toCustomData(),
@@ -1371,34 +1462,12 @@ class MessageInputState extends State<MessageInput>
                 _trimPushDescription(content.plainTextPreview),
               ),
             ),
-            atUserList: atUserList,
-          ));
-          if (result.isSuccess) _clearSentRichContentDraft(draft);
-          return result.isSuccess;
+          );
         }
-        // 固定发送时的引用和推送选项，输入区继续编辑不能改变后台任务。
-        final preview = draft.localPreview;
-        final message = MessageInfo(
-          messageType: MessageType.custom,
-          messagePayload: CustomMessagePayload(
-            description: _richContentPushDescription(preview),
-          ),
-          atUserList: atUserList,
-        );
-        final option = _createSendOption(message);
-        PendingRichContentMessage(
-          draft: draft,
-          conversationID: widget.conversationID,
-          option: option,
-          guard: _textSendGuard,
-          store: _messageInputStore,
-          uploader: widget.config.richContentAttachmentUploader,
-          mediaSender: widget.config.mediaSender,
-        ).start();
-        // 本地气泡已接管内容和失败重试，立即释放输入区，展开编辑器由返回值关闭。
-        _clearSentRichContentDraft(draft);
-        clearQuotedMessage();
-        return true;
+        message.atUserList = atUserList;
+        final result = await _sendMessage(message);
+        if (result.isSuccess) _clearSentRichContentDraft(draft);
+        return result.isSuccess;
       });
 
   /// 合并同会话的文字发送，确保提示、状态清理和外部调用各执行一次。
@@ -1696,7 +1765,7 @@ class MessageInputState extends State<MessageInput>
         break;
       case MessageType.custom:
         final custom = message.messagePayload as CustomMessagePayload?;
-        // 待上传富文本已经携带独立摘要，不能为生成推送把本地路径写入协议。
+        // 富文本推送从已编码正文提取独立摘要，不使用媒体搜索索引。
         final richContent = RichContentMessage.tryParse(custom?.customData);
         content = BigFileMessage.tryParse(custom?.customData) != null
             ? atomicLocale.messageTypeFile
@@ -2086,8 +2155,8 @@ class MessageInputState extends State<MessageInput>
   Future<bool> _sendTextMessageFromVoice(String text) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return false;
-    if (messageTextCharacterCount(text) > messageTextCharacterLimit) {
-      Toast.error(context, atomicLocale.messageTextLimitExceeded);
+    if (messageTextByteCount(trimmed) > messageTextByteLimit) {
+      _showTextLimitToast();
       return false;
     }
     return _runTextSend(() async {

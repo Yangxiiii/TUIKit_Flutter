@@ -1,11 +1,22 @@
 /// 编辑器写入和读取格式标签时的固定优先级，也是消息展示的格式识别顺序。
 const richContentMarkdownFormatOrder = ['**', '~~', '*', '~'];
 
+/// 只在可能开启格式、链接或代码块的位置调用完整解析。
+final richContentMarkdownStartPattern = RegExp(r'[*~\[`]');
+
+/// 格式配对时还要检查转义和行尾，正文可以整段跳过。
+final _markdownFormatBoundaryPattern = RegExp(r'[*~\\`\n]');
+
+/// 光标样式识别需跳过被转义的标记。
+final _markdownCursorBoundaryPattern = RegExp(r'[*~\[\\`]');
+
 /// 按原文光标返回显式格式；正文起点不选中、末尾沿用左侧样式，嵌套叠加，忽略代码及链接地址。
 Set<String> richContentMarkdownFormatsAt(String text, int offset) {
   if (offset < 0 || offset > text.length) return const {};
   var cursor = 0;
-  while (cursor < text.length) {
+  while (cursor < offset &&
+      (cursor = text.indexOf(_markdownCursorBoundaryPattern, cursor)) >= 0 &&
+      cursor < offset) {
     // 转义和代码中的字面标记不代表编辑格式，不能点入这些内容后误选工具条。
     if (text[cursor] == '\\') {
       cursor += 2;
@@ -17,7 +28,9 @@ Set<String> richContentMarkdownFormatsAt(String text, int offset) {
       cursor = end < 0 ? text.length : end + run.length;
       continue;
     }
-    final link = richContentMarkdownPattern.matchAsPrefix(text, cursor);
+    final link = text[cursor] == '['
+        ? richContentMarkdownPattern.matchAsPrefix(text, cursor)
+        : null;
     final label = link?.group(10);
     if (link != null && label != null) {
       final labelStart = cursor + 1;
@@ -100,18 +113,24 @@ final richContentMarkdownPattern = RegExp(
 
 /// 移除富文本格式标签，只保留会话摘要需要展示的可见文字。
 String richContentMarkdownToPlainText(String text) {
+  var offset = text.indexOf(richContentMarkdownStartPattern);
+  if (offset < 0) return text;
   final output = StringBuffer();
-  var offset = 0;
-  // 按原始偏移依次消费片段，不改变编辑器计数与光标所依赖的原文。
-  while (offset < text.length) {
+  var plainStart = 0;
+  // 仅解析候选标记，连续普通正文只拷贝一次。
+  while (offset >= 0) {
     final nested = parseRichContentMarkdownFormatAt(text, offset);
-    final match = richContentMarkdownPattern.matchAsPrefix(text, offset);
+    final match = nested == null
+        ? richContentMarkdownPattern.matchAsPrefix(text, offset)
+        : null;
     if (nested != null) {
+      output.write(text.substring(plainStart, offset));
       output.write(richContentMarkdownToPlainText(
         text.substring(nested.contentStart, nested.contentEnd),
       ));
-      offset = nested.closeEnd;
+      plainStart = offset = nested.closeEnd;
     } else if (match != null) {
+      output.write(text.substring(plainStart, offset));
       output.write(
         match.group(2) ??
             match.group(4) ??
@@ -121,18 +140,22 @@ String richContentMarkdownToPlainText(String text) {
             match.group(13) ??
             '',
       );
-      offset = match.end;
+      plainStart = offset = match.end;
     } else {
-      output.writeCharCode(text.codeUnitAt(offset));
       offset++;
     }
+    offset = text.indexOf(richContentMarkdownStartPattern, offset);
   }
+  output.write(text.substring(plainStart));
   return output.toString();
 }
 
 /// 识别编辑器可生成的单层或完整嵌套格式，原文偏移同时供光标映射和消息解析使用。
 ({List<String> markers, int contentStart, int contentEnd, int closeEnd})?
     parseRichContentMarkdownFormatAt(String text, int start) {
+  if (start >= text.length || (text[start] != '*' && text[start] != '~')) {
+    return null;
+  }
   final nested = parseNestedMarkdownFormat(text, start);
   if (nested != null) return nested;
   // 匹配顺序与编辑器写入顺序一致，紧邻片段只消费第一段。
@@ -142,7 +165,9 @@ String richContentMarkdownToPlainText(String text) {
   if (marker == null) return null;
   final contentStart = start + marker.length;
   var cursor = contentStart;
-  while (cursor < text.length && text[cursor] != '\n') {
+  while (cursor < text.length &&
+      (cursor = text.indexOf(_markdownFormatBoundaryPattern, cursor)) >= 0 &&
+      text[cursor] != '\n') {
     // 转义字符和代码中的字面标记不能参与外层格式配对。
     if (text[cursor] == '\\') {
       cursor += 2;

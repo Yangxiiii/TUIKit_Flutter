@@ -134,6 +134,26 @@ void main() {
         compact: true);
     expect(compact.toPlainText(), contains('[微笑]乙[TUIEmoji_Smile]'));
   });
+
+  testWidgets('长正文后的表情保留原文偏移，未闭合的链接继续显示原文', (tester) async {
+    late BuildContext context;
+    await tester.pumpWidget(MaterialApp(home: Builder(builder: (value) {
+      context = value;
+      return const SizedBox();
+    })));
+    final prefix = '汉😀' * 4000;
+    const unfinished = '${HttpText.flag}https://example.com/[ZDEmoji_Smile]';
+    final editor = ChatSpecialTextSpanBuilder(
+      onTapUrl: (_) {},
+      colorScheme: SemanticColorScheme.of(context),
+      mapMarkdownMarkers: true,
+    ).build('$prefix[ZDEmoji_Smile]**粗体**$unfinished');
+    final image = editor.children!.whereType<ImageSpan>().single;
+    expect(image.start, prefix.length);
+    expect(image.actualText, '[ZDEmoji_Smile]');
+    expect(editor.toPlainText(includePlaceholders: false),
+        '$prefix粗体$unfinished');
+  });
 }
 
 /// 遍历嵌套格式，检查正文表情没有因Markdown样式而退回文字。

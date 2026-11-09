@@ -11,6 +11,10 @@ import 'package:flutter/material.dart';
 ///
 /// 显示样式不改变底层原始文本，确保光标位置、草稿和发送内容仍使用同一份 Markdown。
 class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
+  /// 直接定位表情和链接起始标记，避免逐字符复制此前的普通正文。
+  static final _chatTokenStartPattern = RegExp(
+      '${RegExp.escape(HttpText.flag)}|${RegExp.escape(EmojiText.flag)}');
+
   /// 点击可识别 URL 时的回调。
   final ValueChanged<String> onTapUrl;
 
@@ -30,14 +34,17 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
   /// 是否为 @ 提醒显示输入背景。
   final bool showAtBackground;
 
+  /// 子类支持额外令牌时，将对应的起始标记加入此规则。
+  RegExp get tokenStartPattern => _chatTokenStartPattern;
+
   @override
   TextSpan build(
     String data, {
     TextStyle? textStyle,
     SpecialTextGestureTapCallback? onTap,
   }) {
-    final source = super.build(data, textStyle: textStyle, onTap: onTap);
-    if (!richContentMarkdownPattern.hasMatch(data)) return source;
+    final source = _buildTokenSpans(data, textStyle, onTap);
+    if (!richContentMarkdownStartPattern.hasMatch(data)) return source;
 
     final children = <InlineSpan>[];
     var sourceOffset = 0;
@@ -64,6 +71,47 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
     return TextSpan(children: children, style: source.style ?? textStyle);
   }
 
+  /// 按起始标记扫描令牌，普通文字整段输出并保留原文偏移。
+  TextSpan _buildTokenSpans(
+    String data,
+    TextStyle? textStyle,
+    SpecialTextGestureTapCallback? onTap,
+  ) {
+    if (data.isEmpty) return TextSpan(text: '', style: textStyle);
+    final children = <InlineSpan>[];
+    var offset = 0;
+    for (final match in tokenStartPattern.allMatches(data)) {
+      // 跳过已被前一个令牌消费的范围；其中的起始标记属于该令牌正文。
+      if (match.start < offset) continue;
+      final token = createSpecialText(
+        match[0]!,
+        textStyle: textStyle,
+        onTap: onTap,
+        index: match.end - 1,
+      );
+      if (token == null) continue;
+      if (offset < match.start) {
+        children.add(TextSpan(
+          text: data.substring(offset, match.start),
+          style: textStyle,
+        ));
+      }
+      final end = data.indexOf(token.endFlag, match.end);
+      // 输入尚未闭合时保留原文，包括它后面的候选标记。
+      if (end < 0) {
+        offset = match.start;
+        break;
+      }
+      offset = end + token.endFlag.length;
+      token.appendContent(data.substring(match.end, offset));
+      children.add(token.finishText());
+    }
+    if (offset < data.length) {
+      children.add(TextSpan(text: data.substring(offset), style: textStyle));
+    }
+    return TextSpan(children: children, style: textStyle);
+  }
+
   /// 将普通文本分成原始标记和可见内容，并按输入控件选择等长或原文映射标签。
   List<InlineSpan> _buildMarkdownSpans(
     String text,
@@ -74,9 +122,12 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
     var offset = 0;
     var plainStart = 0;
     // 仅隐藏已经完整配对的共享格式片段，未闭合的输入和普通文字必须原样保留。
-    while (offset < text.length) {
+    while (
+        (offset = text.indexOf(richContentMarkdownStartPattern, offset)) >= 0) {
       final combined = _formatAt(text, offset, sourceStart, baseStyle);
-      final match = richContentMarkdownPattern.matchAsPrefix(text, offset);
+      final match = combined == null
+          ? richContentMarkdownPattern.matchAsPrefix(text, offset)
+          : null;
       if (combined == null && match == null) {
         offset++;
         continue;
