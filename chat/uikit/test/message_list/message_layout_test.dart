@@ -1719,6 +1719,64 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
+
+  // 字体方案按首次使用的平台初始化，平台切换用例放在默认字号断言之后。
+  testWidgets('iOS 聊天只在键盘收起时持续请求帧，归零、反向及超时后停止', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    TencentImSDKPlugin.v2TIMManager = _Sdk('/single');
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    addTearDown(MessageList.clearViewportSnapshots);
+    await tester.pumpWidget(ProviderScope(
+      child: MaterialApp(
+        home: ChatPage(
+          conversation: ConversationInfo(
+            conversationID: 'c2c_visual',
+            type: ConversationType.c2c,
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    Future<void> setInset(double bottom) async {
+      tester.view.viewInsets = FakeViewPadding(bottom: bottom);
+      await tester.pump();
+    }
+
+    // 模拟两次系统尺寸通知间没有新数据，收起阶段也应继续请求下一帧。
+    await setInset(320);
+    expect(tester.binding.transientCallbackCount, 0);
+    await setInset(280);
+    expect(tester.binding.transientCallbackCount, 1);
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(tester.binding.transientCallbackCount, 1);
+    await setInset(300);
+    expect(tester.binding.transientCallbackCount, 0);
+
+    // 未归零时也有时限，之后同一方向的通知不能重新开启。
+    await setInset(260);
+    await tester.pump(const Duration(milliseconds: 610));
+    expect(tester.binding.transientCallbackCount, 0);
+    await setInset(240);
+    expect(tester.binding.transientCallbackCount, 0);
+    await setInset(0);
+
+    await setInset(320);
+    await setInset(280);
+    expect(tester.binding.transientCallbackCount, 1);
+    await setInset(0);
+    expect(tester.binding.transientCallbackCount, 0);
+    await setInset(320);
+    await setInset(280);
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(tester.binding.transientCallbackCount, 0);
+    expect(tester.takeException(), isNull);
+  }, variant: const TargetPlatformVariant({TargetPlatform.iOS}));
 }
 
 final class _Sdk implements V2TIMManager {

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show FlutterView;
 import 'package:flutter/foundation.dart';
 import '../message_input/widget/message_edit_limit_dialog.dart';
 import 'package:app_ui/app_ui.dart';
@@ -10,6 +11,7 @@ import '../message_list/widgets/message_overlay_avoider.dart';
 import '../message_list/widgets/message_tooltip.dart';
 import '../message_list/widgets/message_recall_scope.dart';
 import 'package:flutter/material.dart' hide IconButton;
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
 import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
@@ -104,8 +106,24 @@ class ChatPage extends AppBaseStatefulPage {
   ConsumerState<ChatPage> createState() => _ChatPageState();
 }
 
-/// 协调会话页的消息展示和输入交互。
-class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
+/// 协调会话页的消息展示、输入交互和键盘收起期间的帧请求。
+class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  /// 覆盖实测约 400 毫秒的收起过程，遮挡未归零时也能及时释放帧请求。
+  static const _keyboardDismissFrameLimit = Duration(milliseconds: 600);
+
+  /// 仅为 iOS 创建，由页面的 TickerMode 和生命周期约束。
+  Ticker? _keyboardDismissTicker;
+
+  /// 仅跟踪当前路由所属窗口，页面被覆盖时不响应其他路由的键盘。
+  FlutterView? _keyboardView;
+
+  /// 上一次系统回报的底部遮挡，单位为物理像素，仅用于判断变化方向。
+  double _lastKeyboardInset = 0;
+
+  /// 每次连续下降最多启动一次，超时后等到归零或重新升起才允许补帧。
+  bool _keyboardDismissStarted = false;
+
   /// 快选分隔线的实测锚点，点击时使用当前位置，不缓存滚动前的边界。
   final GlobalKey _selectBelowLineKey = GlobalKey();
 
@@ -129,6 +147,10 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
 
   @override
   void dispose() {
+    if (_keyboardDismissTicker != null) {
+      WidgetsBinding.instance.removeObserver(this);
+      _keyboardDismissTicker!.dispose();
+    }
     _editRevision++;
     _overlay.dispose();
     super.dispose();
@@ -390,6 +412,48 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage> {
   @override
   void initState() {
     super.initState();
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      // 键盘高度和页面位置仍来自系统；Ticker 只让下一个 VSync 有待处理的帧请求。
+      _keyboardDismissTicker = createTicker((elapsed) {
+        if (elapsed >= _keyboardDismissFrameLimit) {
+          _keyboardDismissTicker!.stop();
+        }
+      });
+      WidgetsBinding.instance.addObserver(this);
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final ticker = _keyboardDismissTicker;
+    if (ticker == null) return;
+    final view =
+        ModalRoute.isCurrentOf(context) == false ? null : View.of(context);
+    if (identical(view, _keyboardView)) return;
+    // 切换路由或窗口后重新记录起点，旧窗口的遮挡不能触发新窗口补帧。
+    ticker.stop();
+    _keyboardView = view;
+    _lastKeyboardInset = view?.viewInsets.bottom ?? 0;
+    _keyboardDismissStarted = false;
+  }
+
+  @override
+  void didChangeMetrics() {
+    final view = _keyboardView;
+    if (view == null) return;
+    final inset = view.viewInsets.bottom;
+    final previousInset = _lastKeyboardInset;
+    if (inset == previousInset) return;
+    _lastKeyboardInset = inset;
+    if (inset == 0 || inset > previousInset) {
+      // 键盘收完或反向弹出时立即停下，后续收起允许重新启动。
+      _keyboardDismissTicker!.stop();
+      _keyboardDismissStarted = false;
+    } else if (!_keyboardDismissStarted) {
+      _keyboardDismissStarted = true;
+      _keyboardDismissTicker!.start();
+    }
   }
 
   void _onDestroyCallback() {
