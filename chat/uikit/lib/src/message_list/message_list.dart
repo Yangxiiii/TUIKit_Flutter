@@ -2745,7 +2745,9 @@ class _MessageListState extends State<MessageList>
     }
 
     // 文件完成后沿用原气泡时间，避免分隔条随着 SDK 发送时刻跳动。
-    final timestamp = _uploadMessageOrder.displayTimestamp(message) ?? 0;
+    final timestamp = _uploadMessageOrder.displayTimestamp(message);
+    // 未知时间不占用分隔条的高度。
+    if (timestamp == null || timestamp <= 0) return null;
     if (index == _messages.length - 1) {
       return _getTimeString(timestamp);
     }

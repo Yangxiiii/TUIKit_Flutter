@@ -1603,6 +1603,8 @@ void main() {
         ));
     await mount(const ChatMessageListConfig().cellSpacing);
     await tester.pumpAndSettle();
+    expect(find.text('昨天'), findsOneWidget);
+    expect(find.text('18:00'), findsOneWidget);
     final first = bubble('first');
     final second = bubble('second');
     final third = bubble('third');
