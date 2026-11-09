@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_chat_uikit/src/conversation_list/rich_content_preview.dart';
+import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_message.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/rich_content_markdown.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
+
+import '../fixtures/emoji_fixture.dart';
 
 void main() {
   test('语音会话摘要保留空格和设计秒号，历史未知秒数不伪造', () {
@@ -156,6 +159,44 @@ void main() {
       '甲 乙 丙 https://example.com/a?q=1',
     );
     expect(source, contains('\r\n'));
+  });
+
+  testWidgets('会话摘要和草稿只转换已注册表情，保留未知及旧编码', (tester) async {
+    configureEmojiFixture();
+    addTearDown(() {
+      EmojiManager.configure(assetPackage: 'feature_tim', emojis: const []);
+    });
+    const source = '[ZDEmoji_Smile]\r\n[ZDEmoji_Unknown][TUIEmoji_Smile]';
+    const expected = '[微笑] [ZDEmoji_Unknown][TUIEmoji_Smile]';
+    for (final draft in [
+      null,
+      source,
+      const RichContentDraft(blocks: [RichContentDraftTextBlock(1, source)])
+          .toPersistedString(),
+    ]) {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: ConversationItem(
+            conversation: ConversationInfo(
+              conversationID: 'c2c_emoji',
+              draft: draft,
+              lastMessage: MessageInfo(
+                messageType: MessageType.text,
+                messagePayload: TextMessagePayload(text: source),
+              ),
+            ),
+            contentBuilder: (_, subtitle) => subtitle,
+            config: const ChatConversationActionConfig(),
+          ),
+        ),
+      ));
+      final subtitle = find.descendant(
+        of: find.byType(ConversationItem),
+        matching: find.byType(RichText),
+      );
+      expect(tester.widget<RichText>(subtitle).text.toPlainText(),
+          contains(expected));
+    }
   });
 }
 

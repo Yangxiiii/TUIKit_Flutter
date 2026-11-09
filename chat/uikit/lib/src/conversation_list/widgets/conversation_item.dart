@@ -149,9 +149,7 @@ class _ConversationItemState extends State<ConversationItem> {
     );
   }
 
-  /// Build subtitle widget with draft support
-  ///
-  /// 构建带有草稿支持的副标题Widget。
+  /// 优先展示有效草稿，空草稿回退到末条消息摘要。
   Widget _buildSubtitle(BuildContext context, SemanticColorScheme colorsTheme) {
     final draft = widget.conversation.draft;
 
@@ -162,9 +160,6 @@ class _ConversationItemState extends State<ConversationItem> {
 
     // If there's a draft, show draft with red label
     if (draft != null && draft.isNotEmpty) {
-      // Convert emoji codes to localized names for preview
-      //
-      // 将表情代码转换为本地化名称以供预览。
       final richDraft = RichContentDraft.tryParsePersisted(draft);
       final hasDraft = richDraft?.hasContent ??
           (!RichContentDraft.isPersistedString(draft) &&
@@ -172,15 +167,12 @@ class _ConversationItemState extends State<ConversationItem> {
       if (!hasDraft) return _buildLastMessageSubtitle(context, colorsTheme);
       final draftPreview = richDraft?.plainTextPreview ??
           (RichContentDraft.isPersistedString(draft) ? '' : draft);
-      String localizedDraft = EmojiManager.getEmojiMap(context)
-          .keys
-          .fold(draftPreview, (previous, key) {
-        return previous.replaceAll(
-            key, EmojiManager.getEmojiMap(context)[key]!);
-      });
+      // 按摘要中实际出现的令牌查找名称，避免每个会话行遍历整份表情目录。
+      final localizedDraft = EmojiManager.createLocalizedStringFromEmojiCodes(
+          context, draftPreview);
 
       // 草稿和末条消息共用换行规则，CRLF不会产生两个空格。
-      localizedDraft = singleLineConversationPreview(localizedDraft);
+      final singleLineDraft = singleLineConversationPreview(localizedDraft);
 
       // 复用业务精确计数，草稿和@提醒仍由原有摘要解析处理。
       final unreadPrefix = _unreadPrefix();
@@ -211,7 +203,7 @@ class _ConversationItemState extends State<ConversationItem> {
               ),
             ),
             TextSpan(
-              text: ' $localizedDraft',
+              text: ' $singleLineDraft',
               style: FontScheme.caption2Regular.copyWith(
                 color: colorsTheme.textColorSecondary,
               ),
@@ -251,12 +243,11 @@ class _ConversationItemState extends State<ConversationItem> {
     );
     String replaceText = richPreview != null
         ? ''
-        : EmojiManager.getEmojiMap(context).keys.fold(
+        : EmojiManager.createLocalizedStringFromEmojiCodes(
+            context,
             MessageUtil.getMessageAbstract(
-                widget.conversation.lastMessage, context), (previous, key) {
-            return previous.replaceAll(
-                key, EmojiManager.getEmojiMap(context)[key]!);
-          });
+                widget.conversation.lastMessage, context),
+          );
 
     replaceText = singleLineConversationPreview(replaceText);
     // 在线SDK与离线还原都从同一个音频载荷取秒数；草稿和撤回摘要继续优先。
