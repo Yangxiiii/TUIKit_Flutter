@@ -18,7 +18,7 @@ import 'rich_content_video_preview.dart';
 import '../../utils/rich_content_media_viewer.dart';
 import '../chat_media_placeholder.dart';
 
-/// 按业务标识展示自定义消息，并为未知协议保留通用气泡兜底。
+/// 按业务标识展示自定义消息，并在通用气泡中显示纯文本自定义数据。
 class CustomMessageWidget extends StatelessWidget {
   /// 待展示的消息，图文协议从其自定义数据字段中解析。
   final MessageInfo message;
@@ -77,7 +77,11 @@ class CustomMessageWidget extends StatelessWidget {
           context, colors, customMessage.draft.localPreview,
           localPreview: true);
     }
-    final file = BigFileMessage.tryParse(customMessage?.customData);
+    // 自定义数据可以直接携带正文，只有 JSON 对象才进入应用的业务协议解析。
+    final data = customMessage?.customData ?? '';
+    final prefix = data.trimLeft();
+    final hasObjectPrefix = prefix.startsWith('{');
+    final file = hasObjectPrefix ? BigFileMessage.tryParse(data) : null;
     if (file != null) {
       return FileMessageWidget(
           message: message,
@@ -90,7 +94,7 @@ class CustomMessageWidget extends StatelessWidget {
     }
 
     final customContent =
-        ChatUtil.jsonData2Dictionary(customMessage?.customData);
+        hasObjectPrefix ? ChatUtil.jsonData2Dictionary(data) : null;
     if (customContent != null &&
         customContent['businessID'] == 'group_create') {
       return _buildSystemMessage(context, colors, atomicLocale, customContent);
@@ -104,10 +108,15 @@ class CustomMessageWidget extends StatelessWidget {
       }
     }
 
+    // 未知或损坏的结构化数据仍显示通用标签，纯文本原样展示。
+    final displayText =
+        prefix.isEmpty || hasObjectPrefix || prefix.startsWith('[')
+            ? atomicLocale.messageTypeCustom
+            : data;
     return GestureDetector(
       onTap: onTap,
       onLongPress: onLongPress,
-      child: _buildDefaultCustomMessagePayload(context, colors, atomicLocale),
+      child: _buildDefaultCustomMessagePayload(colors, displayText),
     );
   }
 
@@ -476,9 +485,8 @@ class CustomMessageWidget extends StatelessWidget {
   }
 
   Widget _buildDefaultCustomMessagePayload(
-    BuildContext context,
     SemanticColorScheme colorsTheme,
-    AppLocalizedText atomicLocale,
+    String displayText,
   ) {
     return Container(
       constraints: BoxConstraints(
@@ -492,7 +500,7 @@ class CustomMessageWidget extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
-        atomicLocale.messageTypeCustom,
+        displayText,
         style: FontScheme.caption2Medium.copyWith(
           color: isSelf
               ? colorsTheme.textColorAntiPrimary
