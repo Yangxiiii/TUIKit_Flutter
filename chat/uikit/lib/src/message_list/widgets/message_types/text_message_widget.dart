@@ -143,16 +143,15 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
     );
   }
 
-  /// 保留正文的链接及表情解析，仅在SDK附加数据已确认编辑后追加展示标签。
+  /// 保留正文的链接及表情解析，追加 SDK 或归档数据确认的编辑标签。
   Widget _buildTextContent(SemanticColorScheme colorsTheme, TextStyle style) {
     final text =
         (widget.message.messagePayload as TextMessagePayload?)?.text ?? '';
 
-    final edited = MessageActionsScope.maybeOf(context)
-            ?.config
-            ?.editedMessageIds
-            .contains(widget.message.msgID) ??
-        false;
+    final config = MessageActionsScope.maybeOf(context)?.config;
+    final edited =
+        (config?.editedMessageIds.contains(widget.message.msgID) ?? false) ||
+            (config?.isArchivedMessageEdited?.call(widget.message) ?? false);
     // 编辑标识仅是展示文本，复制、引用和SDK正文仍使用原messagePayload。
     final builder = ChatSpecialTextSpanBuilder(
       colorScheme: colorsTheme,

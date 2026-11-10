@@ -1,9 +1,9 @@
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/foundation.dart' show mergeSort;
 
-/// 补齐本机首屏，并保留已确认的撤回与删除事实，防止迟到窗口恢复旧正文。
+/// 补齐本机首屏和归档续页，并保留撤回与删除事实，防止迟到窗口恢复旧正文。
 class LocalMessageWindow {
-  /// 仅保留 SDK 尚未交付的本地消息，不保存退出位置或独立分页游标。
+  /// 仅保留 SDK 尚未接管的本机与归档候选，游标和退出位置由列表持有。
   final Map<String, MessageInfo> _pending = {};
 
   /// 本地读取期间可能已收到删除事件，迟到的本地结果不能重新插入这些消息。
@@ -15,7 +15,10 @@ class LocalMessageWindow {
   /// 即使源消息不在当前页，已收到的撤回事实仍用于隐藏 Web 引用摘要。
   bool isRevoked(String id) => _revoked.contains(id);
 
-  /// 安装本地首屏；已记录的删除、撤回与更新结果优先于迟到候选。
+  /// 预览可直接读取候选资源地址，SDK 接管后应恢复使用它的媒体窗口。
+  bool isPending(String id) => _pending.containsKey(id);
+
+  /// 安装本地首屏或归档续页；已确认的删除、撤回和修改优先于迟到候选。
   void seed(List<MessageInfo> messages) {
     reconcileRevocations(messages);
     for (final message in messages) {

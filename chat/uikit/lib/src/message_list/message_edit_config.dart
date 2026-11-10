@@ -9,6 +9,7 @@ class ChatMessageEditConfig {
     required this.save,
     required this.onMessageWindowChanged,
     this.editedMessageIds = const {},
+    this.isArchivedMessageEdited,
   });
 
   /// 同步决定菜单资格；提交前宿主仍须从SDK复核所有权、时限与次数。
@@ -26,4 +27,7 @@ class ChatMessageEditConfig {
 
   /// SDK已确认编辑成功的消息集合；仅控制标签，不写入正文。
   final Set<String> editedMessageIds;
+
+  /// 归档消息可能不在 SDK 缓存中，由宿主根据接口快照判定编辑标签。
+  final bool Function(MessageInfo message)? isArchivedMessageEdited;
 }

@@ -40,6 +40,87 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/video_
 import 'package:tencent_chat_uikit/src/third_party/extended_text/extended_text.dart';
 
 void main() {
+  testWidgets('SDK 历史取齐后手动加载更早消息，失败重试并按游标去重', (tester) async {
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/single');
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    addTearDown(MessageList.clearViewportSnapshots);
+    final gate = sdk.messages.historyGate =
+        Completer<V2TimValueCallback<List<V2TimMessage>>>();
+    const boundary = 1700000000;
+    final calls = <(int?, String?)>[];
+    final response = Completer<ChatOlderMessagesPage>();
+    MessageInfo archived(String id, int timestamp) => MessageInfo(
+          msgID: id,
+          timestamp: timestamp,
+          messageType: MessageType.text,
+          messagePayload: TextMessagePayload(text: id),
+          status: MessageStatus.sendSuccess,
+        );
+    final oldest = archived('归档第一条', boundary - 1);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Column(children: [
+          MessageList(
+            conversationID: 'c2c_visual',
+            historyConfig: ChatMessageHistoryConfig(
+              load: ({required beforeTimestamp, required cursor}) async {
+                calls.add((beforeTimestamp, cursor));
+                if (calls.length == 1) return response.future;
+                if (cursor == null) {
+                  return (messages: [oldest], nextCursor: 'next');
+                }
+                return (
+                  messages: [oldest, archived('归档第二条', boundary - 2)],
+                  nextCursor: null,
+                );
+              },
+              buildEntry: (context, {required status, required onLoad}) =>
+                  TextButton(
+                onPressed: status.isLoading ? null : onLoad,
+                child: Text(status.isLoading
+                    ? '加载归档中'
+                    : status.hasError
+                        ? '重试归档'
+                        : '查询更早消息'),
+              ),
+            ),
+          ),
+        ]),
+      ),
+    ));
+    await tester.pump();
+    final entry = find.text('查询更早消息');
+    expect(entry, findsNothing);
+    gate.complete(V2TimValueCallback(code: 0, desc: '', data: [
+      _Message('SDK 最早消息', timestampOverride: boundary),
+    ]));
+    await tester.pumpAndSettle();
+    expect(calls, isEmpty);
+    expect(tester.getTopLeft(entry).dy,
+        lessThan(tester.getTopLeft(find.text('SDK 最早消息')).dy));
+    await tester.tap(entry);
+    await tester.pump();
+    expect(find.text('加载归档中'), findsOneWidget);
+    response.completeError(StateError('模拟请求失败'));
+    await tester.pumpAndSettle();
+    expect(find.text('SDK 最早消息'), findsOneWidget);
+    await tester.tap(find.text('重试归档'));
+    await tester.pumpAndSettle();
+    expect(find.text('归档第一条'), findsOneWidget);
+    expect(calls, [(boundary, null), (boundary, null)]);
+    await tester.tap(entry);
+    await tester.pumpAndSettle();
+    expect(calls.last, (null, 'next'));
+    expect(find.text('归档第一条'), findsOneWidget);
+    expect(tester.getTopLeft(find.text('归档第二条')).dy,
+        lessThan(tester.getTopLeft(find.text('归档第一条')).dy));
+    expect(entry, findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   for (final sameId in [true, false]) {
     testWidgets('HTTP搜索${sameId ? '相同ID' : '不同ID'}定位挂载后高亮一次并恢复',
         (tester) async {

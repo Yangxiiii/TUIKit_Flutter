@@ -38,6 +38,9 @@ class ChatPage extends AppBaseStatefulPage {
   /// 无显式定位或内存快照时先读取本机最新消息，不改变云端分页。
   final Future<List<MessageInfo>> Function()? localMessagesLoader;
 
+  /// 宿主提供 SDK 历史加载完毕后的归档消息入口。
+  final ChatMessageHistoryConfig? messageHistoryConfig;
+
   /// 单聊按发送人与相邻时间派生头像分组，默认保持原布局。
   final bool aggregateMessages;
 
@@ -84,6 +87,7 @@ class ChatPage extends AppBaseStatefulPage {
     this.subtitle,
     this.totalUnreadCount,
     this.localMessagesLoader,
+    this.messageHistoryConfig,
     this.aggregateMessages = false,
     this.enableSuccessfulDelete = false,
     this.message,
@@ -715,6 +719,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
           children: [
             MessageList(
               localMessagesLoader: widget.localMessagesLoader,
+              historyConfig: widget.messageHistoryConfig,
               aggregateMessages: widget.aggregateMessages,
               // 多选切换保持同一列表State，避免重新加载时丢失选择与阅读位置。
               key: ValueKey(widget.conversation.conversationID),

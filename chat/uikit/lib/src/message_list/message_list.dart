@@ -13,9 +13,11 @@ import 'package:flutter/cupertino.dart';
 
 import 'package:flutter/material.dart' hide AlertDialog;
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/foundation.dart' show setEquals;
 import 'widgets/message_actions_scope.dart';
 import 'widgets/message_overlay_avoider.dart';
+import 'message_history_config.dart';
 import 'message_reply_config.dart';
 import 'widgets/message_reply_count.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
@@ -34,6 +36,7 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/forward/forward_serv
 import 'package:tencent_chat_uikit/src/third_party/scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:tencent_chat_uikit/src/third_party/visibility_detector/visibility_detector.dart';
 
+export 'message_history_config.dart';
 export 'message_list_config.dart';
 export 'widgets/message_bubble.dart';
 export 'widgets/message_item.dart';
@@ -138,10 +141,13 @@ class MessageCustomAction {
   });
 }
 
-/// 展示 SDK 会话消息，并协调分页和列表内跳转。
+/// 展示 SDK 与宿主归档的会话消息，并协调分页和列表内跳转。
 class MessageList extends StatefulWidget {
   /// 最新窗口先显示本机记录；显式定位和进程内浏览快照仍优先。
   final Future<List<MessageInfo>> Function()? localMessagesLoader;
+
+  /// 当前会话的归档历史入口；未配置时只展示 SDK 的消息窗口。
+  final ChatMessageHistoryConfig? historyConfig;
 
   /// 是否按同人、同日、相邻60秒内聚合头像，默认关闭。
   final bool aggregateMessages;
@@ -206,6 +212,7 @@ class MessageList extends StatefulWidget {
 
   const MessageList({
     this.localMessagesLoader,
+    this.historyConfig,
     this.aggregateMessages = false,
     this.overlayController,
     super.key,
@@ -452,8 +459,23 @@ class _MessageListState extends State<MessageList>
       ItemPositionsListener.create();
   List<MessageInfo> _messages = [];
 
-  /// 仅补齐 SDK 尚未接管的本机记录，不取代原 SDK 消息源。
+  /// 补齐 SDK 尚未接管的本机和归档记录，不取代原 SDK 消息源。
   final LocalMessageWindow _localWindow = LocalMessageWindow();
+
+  /// SDK 窗口成功加载后，才允许根据它的历史结束标记显示归档入口。
+  bool _hasLoadedSdkWindow = false;
+
+  /// SDK 更换定位窗口时递增，丢弃上一窗口在途的归档请求。
+  int _historyWindowRevision = 0;
+
+  /// 同一窗口只允许一个归档请求在途，失败时保留已有消息及游标。
+  AsyncValue<void> _archiveStatus = const AsyncData(null);
+
+  /// 当前窗口已有归档响应，用于区分首次查询和后续分页。
+  bool _archiveLoaded = false;
+
+  /// 服务端返回的下一页位置；成功加载后为空表示历史已取齐。
+  String? _archiveCursor;
 
   /// 当前窗口的上传占位顺序独立于 SDK 的发送完成顺序。
   final UploadMessageOrder _uploadMessageOrder = UploadMessageOrder();
@@ -616,7 +638,7 @@ class _MessageListState extends State<MessageList>
         .addListener(_messageListStateChangedListener);
     _messageEventSubscription =
         _messageListStore.messageEventStream.listen(_onMessageEvent);
-    if (widget.localMessagesLoader != null) {
+    if (widget.localMessagesLoader != null || widget.historyConfig != null) {
       _localMessageManager =
           TencentImSDKPlugin.v2TIMManager.getMessageManager();
       _localMessageListener = V2TimAdvancedMsgListener(
@@ -681,7 +703,10 @@ class _MessageListState extends State<MessageList>
                 positions: _itemPositionsListener.itemPositions.value,
               )) ??
         _currentViewportAnchor;
-    if (viewportAnchor != null && _messages.isNotEmpty) {
+    // 归档记录无法作为 SDK 的恢复锚点，混合窗口不进入退出快照。
+    if (_archiveLoaded) {
+      _viewportSnapshots.remove(_viewportAnchorKey);
+    } else if (viewportAnchor != null && _messages.isNotEmpty) {
       final snapshot = createMessageViewportSnapshot(
         messages: _messages,
         anchor: viewportAnchor,
@@ -994,11 +1019,13 @@ class _MessageListState extends State<MessageList>
   /// SDK 窗口接管本地同 ID 消息，并复用已有导航和锚点补偿处理新增项。
   void _onMessageListStateChanged() {
     _notifyEditWindow();
-    if (_navigationState is! _NavIdle) _localWindow.clear();
+    if (_navigationState is! _NavIdle && !_archiveLoaded) _localWindow.clear();
     final state = _messageListStore.state;
-    final visibleWindow = _visibleMessages(widget.localMessagesLoader == null
-        ? state.messageList.value.reversed
-        : _localWindow.merge(state.messageList.value.reversed));
+    final visibleWindow = _visibleMessages(
+      widget.localMessagesLoader == null && !_archiveLoaded
+          ? state.messageList.value.reversed
+          : _localWindow.merge(state.messageList.value.reversed),
+    );
     // 先清理失效选择，再发布新窗口；撤回和删除不能留下仍可提交的旧计数。
     if (_isMultiSelectMode) {
       final retained =
@@ -1257,7 +1284,7 @@ class _MessageListState extends State<MessageList>
       ..direction = MessageLoadDirection.older
       ..pageCount = 20;
 
-    final result = await _messageListStore.loadMessages(option: option);
+    final result = await _loadSdkWindow(option);
     // No local mirroring of has-more flags — Store resets both to false on
     // loadMessages entry and only flips hasOlderMessages back to true if
     // more older pages exist. Read sites check
@@ -1274,9 +1301,93 @@ class _MessageListState extends State<MessageList>
       ..cursor = message
       ..direction = MessageLoadDirection.both
       ..pageCount = 20;
-    final result = await _messageListStore.loadMessages(option: option);
+    final result = await _loadSdkWindow(option);
     return result.isSuccess;
   }
+
+  /// SDK 替换整个窗口时清除归档候选及游标，后续须从新的最早位置开始。
+  Future<CompletionHandler> _loadSdkWindow(MessageLoadOption option) async {
+    // 换窗立即取消旧归档状态，旧窗口的在途响应也不能补回历史端。
+    if (widget.historyConfig != null) {
+      _historyWindowRevision++;
+      if (_archiveLoaded) _localWindow.clear();
+      _hasLoadedSdkWindow = false;
+      _archiveLoaded = false;
+      _archiveStatus = const AsyncData(null);
+      _archiveCursor = null;
+    }
+    final revision = _historyWindowRevision;
+    final result = await _messageListStore.loadMessages(option: option);
+    if (mounted &&
+        widget.historyConfig != null &&
+        revision == _historyWindowRevision &&
+        result.isSuccess) {
+      setState(() => _hasLoadedSdkWindow = true);
+    }
+    return result;
+  }
+
+  /// 归档入口跟随最早消息滚动，仅在 SDK 旧页取齐后出现。
+  bool get _showOlderHistoryEntry =>
+      widget.historyConfig != null &&
+      _hasLoadedSdkWindow &&
+      !isLoading &&
+      _navigationState is _NavIdle &&
+      !_messageListStore.state.hasOlderMessages.value &&
+      (!_archiveLoaded || _archiveCursor != null);
+
+  /// 点击后向列表的历史端追加归档消息，已有消息索引不因追加发生移动。
+  Future<void> _loadArchivedMessages() async {
+    final config = widget.historyConfig;
+    if (config == null || !_showOlderHistoryEntry || _archiveStatus.isLoading) {
+      return;
+    }
+    final revision = _historyWindowRevision;
+    final cursor = _archiveCursor;
+    int? beforeTimestamp;
+    if (!_archiveLoaded) {
+      // 即使最早一条被本地隐藏，仍以 SDK 实际加载过的最早时间作为续页边界。
+      for (final message in [
+        ..._messageListStore.state.messageList.value,
+        ..._messages,
+      ]) {
+        final time = message.timestamp;
+        if (time != null &&
+            time > 0 &&
+            (beforeTimestamp == null || time < beforeTimestamp)) {
+          beforeTimestamp = time;
+        }
+      }
+    }
+    setState(() => _archiveStatus = const AsyncLoading());
+    try {
+      final page = await config.load(
+        beforeTimestamp: beforeTimestamp,
+        cursor: cursor,
+      );
+      if (!mounted || revision != _historyWindowRevision) return;
+      setState(() {
+        _archiveLoaded = true;
+        _archiveCursor = page.nextCursor;
+        _archiveStatus = const AsyncData(null);
+      });
+      // 复用本机窗口的去重、撤回和删除处理，实时消息到来时仍保留归档页。
+      _localWindow.seed(page.messages);
+      _onMessageListStateChanged();
+    } on Object catch (error, stackTrace) {
+      if (!mounted || revision != _historyWindowRevision) return;
+      debugPrint('messageList, archive load failed: $error');
+      setState(() => _archiveStatus = AsyncError(error, stackTrace));
+    }
+  }
+
+  /// 构建历史端的入口；保留宿主的加载和失败重试样式。
+  Widget _buildOlderHistoryEntry(BuildContext context) =>
+      widget.historyConfig!.buildEntry(
+        context,
+        status: _archiveStatus,
+        onLoad: () => unawaited(_loadArchivedMessages()),
+      );
 
   Future<void> _loadPreviousMessages() async {
     if (isLoading || !_messageListStore.state.hasOlderMessages.value) return;
@@ -1469,6 +1580,13 @@ class _MessageListState extends State<MessageList>
             onUserLongPress: isGroup ? widget.onUserLongPress : null,
             onCallMessageClick: widget.onCallMessageClick,
             customActions: widget.customActions,
+            // 归档媒体没有 SDK 原消息，用现有预览器直接读取归档地址。
+            mergedMediaMessages: _archiveLoaded &&
+                    _localWindow.isPending(message.msgID) &&
+                    (message.messageType == MessageType.image ||
+                        message.messageType == MessageType.video)
+                ? [message]
+                : null,
             config: widget.config,
             isMultiSelectMode: _isMultiSelectMode,
             isSelected: isMessageSelected(message),
@@ -1581,10 +1699,14 @@ class _MessageListState extends State<MessageList>
                             itemPositionsListener: _itemPositionsListener,
                             initialScrollIndex: _initialScrollIndex,
                             initialAlignment: _initialScrollAlignment,
-                            itemCount: _messages.length,
+                            // 反向列表的最后一项位于最上方，消息索引保持不变。
+                            itemCount: _messages.length +
+                                (_showOlderHistoryEntry ? 1 : 0),
                             leadingItemsInserted: _leadingItemsInserted,
                             itemBuilder: (context, index) =>
-                                _renderItem(context, index, replies),
+                                index == _messages.length
+                                    ? _buildOlderHistoryEntry(context)
+                                    : _renderItem(context, index, replies),
                             addRepaintBoundaries: true,
                             addAutomaticKeepAlives: true,
                             addSemanticIndexes: false,
@@ -1747,7 +1869,10 @@ class _MessageListState extends State<MessageList>
     int visibleUnreadCount = 0;
     final visibleUnreadSequences = <int>[];
     for (final pos in positions) {
-      if (pos.index < _initialUnreadCount &&
+      // 历史查询入口有列表索引，但不计入可见消息和已读回执。
+      if (pos.index >= 0 &&
+          pos.index < _messages.length &&
+          pos.index < _initialUnreadCount &&
           pos.itemLeadingEdge < 1.0 &&
           pos.itemTrailingEdge > 0.0) {
         visibleUnreadCount++;
@@ -1944,7 +2069,7 @@ class _MessageListState extends State<MessageList>
         ..direction = MessageLoadDirection.both
         ..pageCount = 20;
 
-      final result = await _messageListStore.loadMessages(option: option);
+      final result = await _loadSdkWindow(option);
 
       if (mounted) {
         // All state (messages, isLoading, hasMore*) and the jumpTo have
@@ -2228,7 +2353,7 @@ class _MessageListState extends State<MessageList>
       direction: MessageLoadDirection.both,
     );
 
-    final result = await _messageListStore.loadMessages(option: option);
+    final result = await _loadSdkWindow(option);
     if (searchTarget != null &&
         mounted &&
         (!result.isSuccess || _findLocatedMessageIndex(searchTarget) == -1)) {
@@ -2440,7 +2565,7 @@ class _MessageListState extends State<MessageList>
         ..direction = MessageLoadDirection.both
         ..pageCount = 20;
 
-      await _messageListStore.loadMessages(option: option);
+      await _loadSdkWindow(option);
     }
 
     // Delay exiting the nav state by TWO frames (same pattern as
