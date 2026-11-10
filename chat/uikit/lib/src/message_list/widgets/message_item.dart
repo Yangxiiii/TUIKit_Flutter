@@ -623,7 +623,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                 // Reaction bar for left-aligned layout
                 //
                 // 左对齐布局的反应条
-                if (config.isSupportReaction && message.reactionList.isNotEmpty)
+                if (_showsReactionBar)
                   _buildReactionBar(context, isLeft: true),
               ],
             ),
@@ -717,7 +717,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                 // Reaction bar for right-aligned layout
                 //
                 // 右对齐布局的反应条
-                if (config.isSupportReaction && message.reactionList.isNotEmpty)
+                if (_showsReactionBar)
                   _buildReactionBar(context, isLeft: false),
               ],
             ),
@@ -830,7 +830,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
             // Reaction bar for self messages (right aligned)
             //
             // 自己消息的反应条（右对齐）
-            if (config.isSupportReaction && message.reactionList.isNotEmpty)
+            if (_showsReactionBar)
               _buildReactionBar(context, isLeft: false),
           ],
         ),
@@ -905,7 +905,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
             // Reaction bar for other messages (left aligned)
             //
             // 对方消息的反应条（左对齐）
-            if (config.isSupportReaction && message.reactionList.isNotEmpty)
+            if (_showsReactionBar)
               _buildReactionBar(context, isLeft: true),
           ],
         ),
@@ -916,7 +916,14 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     ];
   }
 
+  /// 云回复可以存在于原生列表为空的消息，宿主自行判断是否有可见条目。
+  bool get _showsReactionBar => config.isSupportReaction &&
+      (config.reactionConfig != null || message.reactionList.isNotEmpty);
+
+  /// 宿主接管的条目必须优先，云协议即使为空也不回退到原生回应。
   Widget _buildReactionBar(BuildContext context, {required bool isLeft}) {
+    final reaction = config.reactionConfig;
+    if (reaction != null) return reaction.buildBar(context, message, isLeft);
     return MessageReactionBar(
       reactionList: message.reactionList,
       isLeft: isLeft,

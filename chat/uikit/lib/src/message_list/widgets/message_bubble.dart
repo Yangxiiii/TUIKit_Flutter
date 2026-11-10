@@ -997,8 +997,13 @@ class _MessageBubbleState extends State<MessageBubble>
     tooltip?.show(context, targetCenter: customTargetCenter);
   }
 
-  /// 提交或撤销消息回应，SDK 拒绝操作时仅记录控制台日志。
+  /// 两个表情选择入口共用同一提交路径，宿主可接管消息云字段写入。
   Future<void> _handleReactionSelected(EmojiPickerModelItem emoji) async {
+    final reaction = widget.config.reactionConfig;
+    if (reaction != null) {
+      await reaction.select(widget.message, emoji.name);
+      return;
+    }
     final messageActionStore = MessageActionStore.create(widget.message);
     // 已回应同一表情时再次点击表示撤销，否则新增回应。
     final existingReaction = widget.message.reactionList.firstWhere(

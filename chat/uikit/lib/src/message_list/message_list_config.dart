@@ -1,11 +1,30 @@
 import 'package:tuikit_atomic_x/base_component/utils/app_builder.dart';
-import 'package:flutter/painting.dart';
+import 'package:atomic_x_core/atomicxcore.dart';
+import 'package:flutter/widgets.dart';
 import '../message_input/chat_media_sender.dart';
 import 'message_forward_config.dart';
 export 'message_forward_config.dart';
 
+/// 宿主接管表情写入和条目渲染，UIKit 继续管理既有表情选择入口。
+final class ChatMessageReactionConfig {
+  const ChatMessageReactionConfig({
+    required this.select,
+    required this.buildBar,
+  });
+
+  /// 接收当前消息与跨端表情编码，提交后由宿主发布确认状态。
+  final Future<void> Function(MessageInfo message, String code) select;
+
+  /// 使用消息列的可用宽度渲染表情条，布尔值表示是否左对齐。
+  final Widget Function(BuildContext context, MessageInfo message, bool isLeft)
+      buildBar;
+}
+
 /// 约定消息列表的外观和可操作能力，具体默认值由聊天配置提供。
 abstract class MessageListConfigProtocol {
+  /// 配置为空时，表情选择和展示由 UIKit 原生回应处理。
+  ChatMessageReactionConfig? get reactionConfig;
+
   /// 宿主统一转发入口；为空时保留UIKit默认流程。
   ChatForwardHandler? get forwardHandler;
 
@@ -64,6 +83,10 @@ abstract class MessageListConfigProtocol {
 
 /// 提供消息列表默认外观，并保留宿主显式传入的单项覆盖。
 class ChatMessageListConfig implements MessageListConfigProtocol {
+  /// 单聊宿主提供的云表情回复适配，群聊和其他调用继续使用默认行为。
+  @override
+  final ChatMessageReactionConfig? reactionConfig;
+
   @override
   final ChatForwardHandler? forwardHandler;
   @override
@@ -217,6 +240,7 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
   bool get isSupportQuote => _isSupportQuote;
 
   const ChatMessageListConfig({
+    this.reactionConfig,
     this.forwardHandler,
     this.localDeleteHandler,
     this.hiddenMessageIDs = const {},
