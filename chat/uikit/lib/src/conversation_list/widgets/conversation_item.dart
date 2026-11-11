@@ -23,6 +23,9 @@ class ConversationItem extends StatefulWidget {
   /// 业务传入的精确未读前缀，仅在接收但不通知时使用；空值保留SDK默认格式。
   final String? mutedUnreadPrefix;
 
+  /// 仅在有效草稿的摘要中替换文字标记，未设置时使用默认的本地化标签。
+  final Widget? draftIndicator;
+
   final VoidCallback? onTap;
 
   final VoidCallback? onLongPress;
@@ -47,6 +50,7 @@ class ConversationItem extends StatefulWidget {
     this.backgroundColor,
     this.contentBuilder,
     this.mutedUnreadPrefix,
+    this.draftIndicator,
     this.onTap,
     this.onLongPress,
     this.onPinToggle,
@@ -158,7 +162,7 @@ class _ConversationItemState extends State<ConversationItem> {
     // 构建 @ 提及前缀。
     String atPrefix = _buildAtMentionPrefix();
 
-    // If there's a draft, show draft with red label
+    // 仅有效草稿占用摘要位置，空白文本和无内容的富文本仍显示末条消息。
     if (draft != null && draft.isNotEmpty) {
       final richDraft = RichContentDraft.tryParsePersisted(draft);
       final hasDraft = richDraft?.hasContent ??
@@ -176,6 +180,7 @@ class _ConversationItemState extends State<ConversationItem> {
 
       // 复用业务精确计数，草稿和@提醒仍由原有摘要解析处理。
       final unreadPrefix = _unreadPrefix();
+      final draftIndicator = widget.draftIndicator;
 
       return RichText(
         maxLines: 1,
@@ -196,14 +201,22 @@ class _ConversationItemState extends State<ConversationItem> {
                   color: colorsTheme.textColorSecondary,
                 ),
               ),
-            TextSpan(
-              text: atomicLocale.draft,
-              style: FontScheme.caption2Regular.copyWith(
-                color: colorsTheme.textColorError,
+            // 草稿标记和摘要共用单行省略，避免挤占免打扰图标的位置。
+            if (draftIndicator != null)
+              WidgetSpan(
+                alignment: PlaceholderAlignment.middle,
+                child: draftIndicator,
+              )
+            else
+              TextSpan(
+                text: atomicLocale.draft,
+                style: FontScheme.caption2Regular.copyWith(
+                  color: colorsTheme.textColorError,
+                ),
               ),
-            ),
             TextSpan(
-              text: ' $singleLineDraft',
+              text:
+                  draftIndicator == null ? ' $singleLineDraft' : singleLineDraft,
               style: FontScheme.caption2Regular.copyWith(
                 color: colorsTheme.textColorSecondary,
               ),
