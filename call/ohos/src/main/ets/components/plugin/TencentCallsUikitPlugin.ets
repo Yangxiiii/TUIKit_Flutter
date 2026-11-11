@@ -119,11 +119,12 @@ export default class TencentCallsUikitPlugin implements FlutterPlugin, MethodCal
     }
   }
 
+  /** 同步原生通话登录态，使 IM 上传和 Flutter 相册共用应用级缓存。 */
   private login(call: MethodCall, context: common.UIAbilityContext, result: MethodResult): void {
     const sdkAppId = call.argument('sdkAppId') as number;
     const userId = call.argument('userId') as string;
     const userSig = call.argument('userSig') as string;
-    LoginStore.shared().login(sdkAppId, userId, userSig, context)
+    LoginStore.shared().login(sdkAppId, userId, userSig, context.getApplicationContext())
       .then((): void => result.success(null))
       .catch((error: Error): void => result.error('LOGIN_FAILED', error.message, null));
   }
