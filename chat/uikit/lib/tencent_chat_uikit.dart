@@ -32,6 +32,12 @@ export 'src/message_list/utils/rich_content_message.dart'
     show RichContentMessage, RichContentBlock, RichImageBlock, RichFileBlock;
 export 'src/message_list/utils/message_utils.dart' show MessageUtil;
 export 'src/message_list/message_list.dart';
+export 'src/message_list/utils/message_viewport_anchor.dart'
+    show
+        MessageViewportSnapshot,
+        createMessageViewportSnapshot;
+export 'src/third_party/scrollable_positioned_list/scrollable_positioned_list.dart'
+    show ScrollablePositionedList;
 export 'src/message_list/widgets/merged_message_detail_page.dart'
     show MergedMessageDetailPage;
 export 'src/navigation/chat_uikit_navigation.dart';

@@ -185,7 +185,11 @@ String richContentMarkdownToPlainText(String text) {
         .where((value) => text.startsWith(value, cursor))
         .firstOrNull;
     // 不同格式可以嵌在正文中；例如斜体内部的双星号优先识别为加粗，识别失败才关闭斜体。
-    if (candidate != null && candidate != marker) {
+    // 三个同类字符也可能是短标签结束后紧接长标签，此时优先结束当前段。
+    if (candidate != null &&
+        candidate != marker &&
+        !(candidate.startsWith(marker) &&
+            text.startsWith('$marker$candidate', cursor))) {
       final inner = parseRichContentMarkdownFormatAt(text, cursor);
       if (inner != null) {
         cursor = inner.closeEnd;

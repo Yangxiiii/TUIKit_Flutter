@@ -28,7 +28,7 @@ class MergedMessageWidget extends StatefulWidget {
   final GlobalKey? bubbleKey;
 
   /// 来源消息Store，仅用于公开消息操作，不重新加载包外历史。
-  final MessageListStore messageListStore;
+  final MessageListStore? messageListStore;
 
   /// 合并详情不显示包外发送回执，媒体使用包内静态集合。
   final bool isInMergedDetailView;
@@ -65,7 +65,9 @@ class _MergedMessageWidgetState extends State<MergedMessageWidget> {
     final mergedInfo = (widget.message.messagePayload as MergedMessagePayload?);
 
     return GestureDetector(
-      onTap: () => _openMergedMessagePayloadDetail(context),
+      onTap: widget.messageListStore == null
+          ? null
+          : () => _openMergedMessagePayloadDetail(context),
       onLongPress: widget.onLongPress,
       child: Container(
         key: widget.bubbleKey,
@@ -186,7 +188,7 @@ class _MergedMessageWidgetState extends State<MergedMessageWidget> {
       backgroundColor: context.appColors.surface,
       child: MergedMessageDetailPage(
         message: widget.message,
-        messageListStore: widget.messageListStore,
+        messageListStore: widget.messageListStore!,
         config: widget.config,
       ),
     );

@@ -21,6 +21,7 @@ final class RichContentMessage {
 
   /// 编码为腾讯 IM 自定义消息的 customData；图片和视频必须提供正整数宽高。
   /// 转发已接收的旧附件时允许保留原有的缺省尺寸。
+  /// 已知的视频时长以 videoDuration 写入，单位为整数秒，与预览角标一致。
   String toCustomData({bool preserveLegacyDimensions = false}) {
     return jsonEncode({
       'businessID': businessID,
@@ -110,6 +111,7 @@ final class RichContentMessage {
         final thumbnailUrl = data['thumbnailUrl'];
         final width = data['width'];
         final height = data['height'];
+        final videoDuration = data['videoDuration'];
         if (!_isWebUrl(url) ||
             name is! String ||
             name.isEmpty ||
@@ -122,8 +124,16 @@ final class RichContentMessage {
             (height != null && (height is! int || height <= 0))) {
           return null;
         }
+        // 时长是可选的预览信息，缺失或无效时仍解析视频块。
         return RichFileBlock(url, name, size, mimeType,
-            thumbnailUrl: thumbnailUrl, width: width, height: height);
+            thumbnailUrl: thumbnailUrl,
+            width: width,
+            height: height,
+            videoDuration: mimeType.startsWith('video/') &&
+                    videoDuration is int &&
+                    videoDuration >= 0
+                ? videoDuration
+                : null);
       default:
         return null;
     }
@@ -151,6 +161,9 @@ final class RichContentMessage {
           'size': block.size,
           'mimeType': block.mimeType,
           if (block.thumbnailUrl != null) 'thumbnailUrl': block.thumbnailUrl!,
+          if (block.mimeType.startsWith('video/') &&
+              (block.videoDuration ?? -1) >= 0)
+            'videoDuration': block.videoDuration!,
           if (block.width != null ||
               !preserveLegacyDimensions && block.mimeType.startsWith('video/'))
             'width': _requirePositiveDimension(block.width),
@@ -232,6 +245,9 @@ final class RichFileBlock extends RichContentBlock {
   /// 新视频必填，历史消息及普通文件可缺省。
   final int? height;
 
+  /// 视频时长，单位为整数秒；旧消息和普通文件可缺省。
+  final int? videoDuration;
+
   const RichFileBlock(this.url, this.name, this.size, this.mimeType,
-      {this.thumbnailUrl, this.width, this.height});
+      {this.thumbnailUrl, this.width, this.height, this.videoDuration});
 }

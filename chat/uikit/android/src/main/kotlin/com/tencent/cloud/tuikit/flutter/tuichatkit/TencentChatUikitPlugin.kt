@@ -1,5 +1,11 @@
 package com.tencent.cloud.tuikit.flutter.tuichatkit
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.os.Build
+import android.os.PersistableBundle
+import io.flutter.plugin.common.MethodChannel
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -23,6 +29,9 @@ class TencentChatUikitPlugin : FlutterPlugin, ActivityAware {
     private const val TAG = "TencentChatUikitPlugin"
   }
 
+  /** 剪贴板通道随引擎注册与解除，避免分离后保留旧的回调。 */
+  private var clipboardChannel: MethodChannel? = null
+
   private var audioPlayerPlugin: AtomicAudioPlayerPlugin? = null
   private var audioRecorderPlugin: AtomicAudioRecorderPlugin? = null
   private var filePickerPlugin: AtomicFilePickerPlugin? = null
@@ -30,6 +39,43 @@ class TencentChatUikitPlugin : FlutterPlugin, ActivityAware {
   private var videoRecorderPlugin: AtomicVideoRecorderPlugin? = null
 
   override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
+    val clipboard = flutterPluginBinding.applicationContext
+      .getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboardChannel = MethodChannel(flutterPluginBinding.binaryMessenger, "tencent_chat_uikit")
+      .also { channel ->
+        channel.setMethodCallHandler { call, result ->
+          try {
+            when (call.method) {
+              "writeMessageClipboard" -> {
+                val text = call.argument<String>("text")
+                val token = call.argument<String>("token")
+                if (text == null || token == null) {
+                  result.error("INVALID_ARGUMENT", null, null)
+                } else {
+                  // 纯文本作为唯一内容；Android 24 起可在描述里附带条目身份。
+                  val clip = ClipData.newPlainText("", text)
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    clip.description.extras = PersistableBundle().apply {
+                      putString("com.tencent.cloud.tuichatkit.clip-token", token)
+                    }
+                  }
+                  clipboard.setPrimaryClip(clip)
+                  result.success(null)
+                }
+              }
+              "readMessageClipboardToken" -> result.success(
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                  clipboard.primaryClipDescription?.extras
+                    ?.getString("com.tencent.cloud.tuichatkit.clip-token")
+                } else null
+              )
+              else -> result.notImplemented()
+            }
+          } catch (error: RuntimeException) {
+            result.error("CLIPBOARD_UNAVAILABLE", null, null)
+          }
+        }
+      }
     videoRecorderPlugin = AtomicVideoRecorderPlugin(flutterPluginBinding)
     audioRecorderPlugin = AtomicAudioRecorderPlugin(flutterPluginBinding)
     audioPlayerPlugin = AtomicAudioPlayerPlugin().also {
@@ -44,6 +90,8 @@ class TencentChatUikitPlugin : FlutterPlugin, ActivityAware {
   }
 
   override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+    clipboardChannel?.setMethodCallHandler(null)
+    clipboardChannel = null
     videoRecorderPlugin?.dispose()
     videoRecorderPlugin = null
     audioRecorderPlugin?.dispose()

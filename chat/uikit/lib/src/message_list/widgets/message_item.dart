@@ -36,8 +36,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   /// 列表分配的消息可用宽度，单位为逻辑像素。
   final double maxWidth;
 
-  /// 当前会话的消息操作入口，展示组件不创建独立消息状态。
-  final MessageListStore messageListStore;
+  /// 在线会话的消息操作入口，离线时只有本地展示数据。
+  final MessageListStore? messageListStore;
 
   /// 定位命中时播放气泡高亮，不改变消息本身的发送状态。
   final bool isHighlighted;
@@ -186,7 +186,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
       }
 
       isSelf = isOutgoingCall;
-      if (!isSelf) {
+      if (!isSelf && messageListStore != null) {
         return _buildWithConversationInfo(isSelf, avatarURL, senderName);
       }
     }
@@ -273,7 +273,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   ///
   /// 构建菜单回调
   MessageMenuCallbacks? _buildMenuCallbacks(BuildContext context) {
-    if (isMultiSelectMode) {
+    final store = messageListStore;
+    if (store == null || isMultiSelectMode) {
       // Disable menu in multi-select mode
       //
       // 在多选模式下禁用菜单
@@ -281,7 +282,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     }
     return DefaultMessageMenuCallbacks(
       context: context,
-      messageListStore: messageListStore,
+      messageListStore: store,
       messageActionStore: MessageActionStore.create(message),
       onDeleted: onDeleted,
       conversationID: conversationID,
@@ -293,6 +294,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
 
   /// 现有失败图标只打开确认，确认前后均复核状态，不启用失败长按菜单。
   void _showResendConfirmDialog(BuildContext context) async {
+    if (messageListStore == null) return;
     await confirmMessageAction(
       context,
       messageId: message.msgID,
@@ -320,12 +322,14 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   ///
   /// 显示已读回执详情页（仅限群组消息）
   void _showReadReceiptDetail(BuildContext context) {
+    final store = messageListStore;
+    if (store == null) return;
     final messageActionStore = MessageActionStore.create(message);
 
     context.pushChatUIKitPage(
       MessageReadReceiptView(
         messageActionStore: messageActionStore,
-        messageListStore: messageListStore,
+        messageListStore: store,
         message: message,
       ),
     );
@@ -932,6 +936,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   }
 
   void _showReactionDetailSheet(BuildContext context) {
+    if (messageListStore == null) return;
     final messageActionStore = MessageActionStore.create(message);
     final currentUserID = LoginStore.shared.loginState.loginUserInfo?.userID;
 

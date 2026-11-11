@@ -21,7 +21,7 @@ import 'package:tuikit_atomic_x/album_picker/album_picker.dart';
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  testWidgets('编辑器图片和视频使用灰底，进度环只用于图片，两者均支持整体删除', (tester) async {
+  testWidgets('编辑器图片和视频均使用灰底进度环，并支持整体删除', (tester) async {
     for (final type in AlbumMediaType.values) {
       final key = GlobalKey<RichContentEditorSheetState>();
       await tester.pumpWidget(MaterialApp(
@@ -42,10 +42,8 @@ void main() {
       final placeholder = find.byType(ChatMediaPlaceholder);
       expect(placeholder, findsOneWidget);
       expect(tester.widget<ChatMediaPlaceholder>(placeholder).image, isNull);
-      expect(find.byType(AppImageLoadingPlaceholder),
-          type == AlbumMediaType.image ? findsOneWidget : findsNothing);
-      expect(find.byType(CircularProgressIndicator),
-          type == AlbumMediaType.image ? findsOneWidget : findsNothing);
+      expect(find.byType(AppImageLoadingPlaceholder), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
       expect(key.currentState!.canSend, isFalse);
       final rect = tester.getRect(placeholder);
       expect(rect.width, lessThanOrEqualTo(120));

@@ -12,8 +12,10 @@ import 'package:tencent_chat_uikit/tencent_chat_uikit.dart'
 import 'package:tencent_chat_uikit/src/message_input/src/chat_special_text_span_builder.dart';
 import 'package:tencent_chat_uikit/src/message_input/message_input.dart';
 import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
+import 'package:tencent_chat_uikit/src/message_input/rich_content_selection_format.dart';
 import 'package:tencent_chat_uikit/src/message_input/widget/rich_content_editor_sheet.dart';
 import 'package:tencent_chat_uikit/src/message_input/utils/image_size_reader.dart';
+import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_markdown_format.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/rich_content_video_preview.dart';
 import 'package:tencent_chat_uikit/src/third_party/extended_text_field/extended_text_field.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart'
@@ -296,7 +298,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('视频处理期间显示可整体删除的灰底占位，删除后迟到结果不回填', (tester) async {
+  testWidgets('视频处理期间显示可整体删除的加载占位，删除后迟到结果不回填', (tester) async {
     final key = GlobalKey<RichContentEditorSheetState>();
     RichContentDraft? current;
     await tester.pumpWidget(_testApp(const RichContentDraft(),
@@ -311,7 +313,7 @@ void main() {
     final loading = find
         .bySemanticsIdentifier('tim.rich_content.media_loading.${original.id}');
     expect(loading, findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
     final rect = tester.getRect(loading);
     expect(rect.width, lessThanOrEqualTo(120));
     expect(rect.height, lessThanOrEqualTo(160));
@@ -319,8 +321,8 @@ void main() {
         find.descendant(of: loading, matching: find.byType(Container)));
     final decoration = box.decoration! as BoxDecoration;
     expect(decoration.borderRadius, BorderRadius.circular(4));
-    final fill = find.descendant(
-        of: loading, matching: find.byType(ColoredBox));
+    final fill =
+        find.descendant(of: loading, matching: find.byType(ColoredBox));
     expect(tester.widget<ColoredBox>(fill).color, const Color(0xFF8E8E99));
     expect(tester.getRect(fill), rect);
     expect(current!.canSubmit, isFalse);
@@ -334,9 +336,8 @@ void main() {
             mediaPath: '/tmp/video.mp4',
             videoThumbnailPath: '/tmp/cover.png'),
         readSize: (_) => dimensions.future);
-    final controller = tester
-        .widget<ExtendedTextField>(_richBodyFields())
-        .controller!;
+    final controller =
+        tester.widget<ExtendedTextField>(_richBodyFields()).controller!;
     final token =
         richContentAttachmentTokenPattern.firstMatch(controller.text)!;
     controller.selection = TextSelection.collapsed(offset: token.end);
@@ -347,6 +348,7 @@ void main() {
         selection: TextSelection.collapsed(offset: token.end - 1)));
     await tester.pump();
     expect(loading, findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
     dimensions.complete(const ImageSize(1920, 1080));
     await tester.pump();
     await preparing;
@@ -367,9 +369,8 @@ void main() {
         onDraftChanged: (draft) => current = draft,
         onSend: (_) async => false));
     await tester.pump();
-    final controller = tester
-        .widget<ExtendedTextField>(_richBodyFields())
-        .controller!;
+    final controller =
+        tester.widget<ExtendedTextField>(_richBodyFields()).controller!;
     controller.selection = const TextSelection.collapsed(offset: 1);
     final first = key.currentState!.beginMediaPreparation(
         AlbumMedia(id: 1, mediaType: AlbumMediaType.video))!;
@@ -896,9 +897,8 @@ void main() {
             videoThumbnailPath: thumbnailPath),
         readSize: (_) async => const ImageSize(540, 960));
     await tester.pump();
-    final text = tester
-        .widget<ExtendedTextField>(_richBodyFields())
-        .controller!;
+    final text =
+        tester.widget<ExtendedTextField>(_richBodyFields()).controller!;
     text.value = TextEditingValue(
         text: '${text.text}\n',
         selection: TextSelection.collapsed(offset: text.text.length + 1));
@@ -1130,9 +1130,8 @@ void main() {
             .status,
         RichContentAttachmentStatus.pending);
     expect(editorKey.currentState!.canSend, isFalse);
-    final controller = tester
-        .widget<ExtendedTextField>(_richBodyFields())
-        .controller!;
+    final controller =
+        tester.widget<ExtendedTextField>(_richBodyFields()).controller!;
     Future<void> backspaceVideo() async {
       final token =
           richContentAttachmentTokenPattern.firstMatch(controller.text)!;
@@ -1399,8 +1398,8 @@ void main() {
     expect(normal.controller!.text, '普通输入');
     await tester.tap(find.byKey(const Key('open_rich_content_editor')));
     await tester.pumpAndSettle();
-    expect(tester.widget<ExtendedTextField>(titleFinder).controller!.text,
-        '保留标题');
+    expect(
+        tester.widget<ExtendedTextField>(titleFinder).controller!.text, '保留标题');
   }, variant: const TargetPlatformVariant({TargetPlatform.iOS}));
 
   testWidgets('未弹键盘时直接展开，工具栏跟随键盘高度变化及收起且保留格式状态', (tester) async {
@@ -1465,6 +1464,18 @@ void main() {
         find.descendant(of: overlayToolbar, matching: find.byTooltip('粗体')));
     await tester.pumpAndSettle();
     expect(editorState.activeFormats, contains('**'));
+    field.controller!.value = const TextEditingValue(
+      text: '选中文字',
+      selection: TextSelection(baseOffset: 0, extentOffset: 4),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+        find.descendant(of: overlayToolbar, matching: find.byTooltip('删除线')));
+    await tester.pumpAndSettle();
+    expect(field.controller!.text, '~~选中文字~~');
+    expect(
+        field.controller!.selection.textInside(field.controller!.text), '选中文字');
+    expect(field.focusNode!.hasFocus, isTrue);
     expect(tester.getRect(overlayToolbar), tester.getRect(normalToolbar));
     await tester.tap(find.byTooltip('收起富文本编辑器'));
     await tester.pumpAndSettle();
@@ -2236,7 +2247,7 @@ void main() {
     expect(input.controller!.text, '正文\n\uFFF92\uFFFA');
   });
 
-  testWidgets('格式按钮切换选中态并在输入时应用 Markdown', (tester) async {
+  testWidgets('格式按钮立即修改反向选区并保留选区供叠加和取消', (tester) async {
     await tester.pumpWidget(
       _testApp(const RichContentDraft(), onSend: (_) async => false),
     );
@@ -2246,16 +2257,17 @@ void main() {
     await _enterExtendedText(
       tester,
       find.byKey(const Key('rich_content_text_1')),
-      '已有文字',
+      '前已有文字后',
     );
     final input = tester.widget<ExtendedTextField>(
       find.byKey(const Key('rich_content_text_1')),
     );
     input.controller!.selection = const TextSelection(
-      baseOffset: 0,
-      extentOffset: 4,
+      baseOffset: 5,
+      extentOffset: 1,
     );
-    await tester.tap(find.byTooltip('粗体'));
+    await tester.tap(find.byTooltip('粗体'), kind: ui.PointerDeviceKind.mouse);
+    expect(input.controller!.text, '前**已有文字**后');
     await tester.tap(find.byTooltip('斜体'));
     await tester.pump();
 
@@ -2273,16 +2285,61 @@ void main() {
     );
     expect(boldButton.isSelected, isTrue);
     expect(italicButton.isSelected, isTrue);
-    expect(input.controller!.text, '已有文字');
+    expect(input.controller!.text, '前***已有文字***后');
     expect(
       input.controller!.selection,
-      const TextSelection(baseOffset: 0, extentOffset: 4),
+      const TextSelection(baseOffset: 8, extentOffset: 4),
     );
-
-    // 保持当前选区直接输入；重新点击正文属于移动光标，应重新按该处文字同步格式。
-    tester.testTextInput.enterText('正文');
+    await tester.tap(find.byTooltip('粗体'));
     await tester.pump();
-    expect(input.controller!.text, '***正文***');
+    expect(input.controller!.text, '前*已有文字*后');
+    expect(
+        input.controller!.selection.textInside(input.controller!.text), '已有文字');
+  });
+
+  test('局部取消与多行添加保留选区外格式、链接地址和附件令牌', () {
+    const source = '**前选后**\n[链接](https://example.test)\n\uFFF92\uFFFA\n正文';
+    final partial = toggleSelectedMarkdownFormat(
+      const TextEditingValue(
+        text: source,
+        selection: TextSelection(baseOffset: 3, extentOffset: 4),
+      ),
+      '**',
+    ).value;
+    expect(
+        partial.text, '**前**选**后**${source.substring(source.indexOf('\n'))}');
+    expect(partial.selection.textInside(partial.text), '选');
+    final mixed = toggleSelectedMarkdownFormat(
+      partial.copyWith(
+          selection: TextSelection(
+        baseOffset: partial.text.indexOf('链'),
+        extentOffset: partial.text.length,
+      )),
+      '~',
+    ).value;
+    expect(mixed.text,
+        '**前**选**后**\n[~链接~](https://example.test)\n\uFFF92\uFFFA\n~正文~');
+    expect(richContentSelectionFormats(mixed), {'~'});
+  });
+
+  test('局部叠加不会把相邻样式合并或移动提及中的文字', () {
+    const source = '**甲乙***丙*@同事 丁';
+    final mentionStart = source.indexOf('@');
+    final result = toggleSelectedMarkdownFormat(
+      const TextEditingValue(
+        text: source,
+        selection: TextSelection(baseOffset: 2, extentOffset: 3),
+      ),
+      '*',
+      mentionEnds: {mentionStart: mentionStart + '@同事 '.length},
+    );
+    final text = result.value.text;
+    expect(richContentMarkdownToPlainText(text), '甲乙丙@同事 丁');
+    expect(
+        richContentMarkdownFormatsAt(text, text.indexOf('甲') + 1), {'**', '*'});
+    expect(richContentMarkdownFormatsAt(text, text.indexOf('乙') + 1), {'**'});
+    expect(richContentMarkdownFormatsAt(text, text.indexOf('丙') + 1), {'*'});
+    expect(result.mentionOffsets[mentionStart], text.indexOf('@'));
   });
 
   test('格式选中态换行时结束当前段并在下一次输入恢复格式', () {

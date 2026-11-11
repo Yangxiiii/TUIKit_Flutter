@@ -19,6 +19,9 @@ class ImageMessageWidget extends StatefulWidget {
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final MessageListStore? messageListStore;
+
+  /// 离线时只展示及预览本机文件。
+  final bool localOnly;
   final GlobalKey? bubbleKey;
   final MessageListConfigProtocol config;
   final bool isInMergedDetailView;
@@ -44,6 +47,7 @@ class ImageMessageWidget extends StatefulWidget {
     this.onTap,
     this.onLongPress,
     this.messageListStore,
+    this.localOnly = false,
     this.bubbleKey,
     this.isInMergedDetailView = false,
     this.mergedMediaMessages,
@@ -65,6 +69,7 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget>
   }
 
   void _initializeImageViewerManager() {
+    if (widget.localOnly) return;
     // 转发已有静态媒体集合时，可直接预览载荷中的本地文件或有效URL。
     if (widget.message.rawMessage == null && widget.mergedMediaMessages == null) {
       return;
@@ -99,6 +104,7 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget>
     );
 
     return GestureDetector(
+      behavior: widget.localOnly ? HitTestBehavior.opaque : null,
       onTap: _handleTap,
       onLongPress: widget.onLongPress,
       child: Container(
@@ -135,6 +141,10 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget>
 
   void _handleTap() {
     widget.onTap?.call();
+    if (widget.localOnly) {
+      ImageViewer.viewLocalMessage(context, widget.message);
+      return;
+    }
     _showImageViewer();
   }
 
@@ -152,9 +162,12 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget>
     //
     // 远程 URL 回退。在合并转发的详情视图中，每次打开都会重新下载 bundle，本地缩略图文件是临时的／第二次可能已经不存在，所以我们必须能够直接从服务器 URL
     // 渲染，而不是卡在加载动画上（bug#161210776）。本地路径存在时总是优先。
-    String? thumbImageURL = imagePayload?.thumbImageURL;
-    String? largeImageURL = imagePayload?.largeImageURL;
-    String? originalImageURL = imagePayload?.originalImageURL;
+    final thumbImageURL =
+        widget.localOnly ? null : imagePayload?.thumbImageURL;
+    final largeImageURL =
+        widget.localOnly ? null : imagePayload?.largeImageURL;
+    final originalImageURL =
+        widget.localOnly ? null : imagePayload?.originalImageURL;
 
     final bool hasLocalPath =
         (originalImagePath != null && originalImagePath.isNotEmpty) ||

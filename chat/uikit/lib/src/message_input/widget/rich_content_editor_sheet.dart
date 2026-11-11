@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -5,15 +6,17 @@ import 'package:flutter/material.dart';
 import '../../emoji_picker/emoji_manager.dart';
 import '../../emoji_picker/emoji_picker.dart';
 import '../message_text.dart';
+import '../message_clipboard.dart';
+import 'message_clipboard_menu.dart';
 import '../input_keyboard_panel.dart';
 import '../../message_list/widgets/chat_media_placeholder.dart';
 import 'package:app_ui/app_ui.dart' show AppIcons, AppColorBuildContext;
 import 'package:tencent_chat_uikit/src/file_picker/file_picker.dart';
 import 'package:tencent_chat_uikit/src/message_input/message_input_config.dart';
 import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
+import 'package:tencent_chat_uikit/src/message_input/rich_content_selection_format.dart';
 import 'package:tencent_chat_uikit/src/message_input/src/chat_special_text_span_builder.dart';
 import 'package:tencent_chat_uikit/src/message_input/utils/image_size_reader.dart';
-import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_markdown_format.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/rich_content_video_preview.dart';
 import 'package:tencent_chat_uikit/src/third_party/extended_text_field/extended_text_field.dart';
 import 'package:tuikit_atomic_x/album_picker/album_picker.dart';
@@ -28,21 +31,6 @@ const _editorImageVerticalMargin = 8.0;
 
 /// 在显示物理像素上保留清晰度余量，不改变媒体的逻辑展示尺寸。
 const _editorMediaDecodeScale = 1.5;
-
-/// 附件令牌的起始字符。
-const richContentAttachmentTokenStart = '\uFFF9';
-
-/// 附件令牌的结束字符。
-const richContentAttachmentTokenEnd = '\uFFFA';
-
-/// 匹配附件稳定 ID 的编辑态令牌。
-final richContentAttachmentTokenPattern = RegExp(
-  '$richContentAttachmentTokenStart(\\d+)$richContentAttachmentTokenEnd',
-);
-
-/// 返回编辑态附件的可逆令牌，普通输入框和展开编辑器共用。
-String richContentAttachmentToken(int id) =>
-    '$richContentAttachmentTokenStart$id$richContentAttachmentTokenEnd';
 
 /// 按当前行内最高图片或视频封面计算光标高度，普通文字行返回 null。
 double? richContentAttachmentCursorHeight({
@@ -281,7 +269,8 @@ final class RichContentInputToolbar extends StatelessWidget {
               child: _iconButton(AppIcons.flile, _fileTooltip, _onFile, colors),
             ),
           ),
-          _iconButton(AppIcons.format, '文字格式', _onShowFormatting, colors),
+          _formatButton(
+              AppIcons.format, '文字格式', 'show', _onShowFormatting, colors),
         ],
         _buildSendButton(colors, _sendTooltip),
       );
@@ -289,18 +278,38 @@ final class RichContentInputToolbar extends StatelessWidget {
   /// 格式切换只改变工具条内容，发送仍使用同一个字形和可用状态。
   Widget _buildFormattingToolbar(SemanticColorScheme colors) => _buildActionRow(
         [
-          _iconButton(AppIcons.expand, '关闭文字格式', _onCloseFormatting, colors),
+          _formatButton(
+              AppIcons.expand, '关闭文字格式', 'close', _onCloseFormatting, colors),
           for (final format in [
-            (AppIcons.bold, '粗体', '**'),
-            (AppIcons.strikethrough, '删除线', '~~'),
-            (AppIcons.tilt, '斜体', '*'),
-            (AppIcons.underline, '下划线', '~'),
+            (AppIcons.bold, '粗体', '**', 'bold'),
+            (AppIcons.strikethrough, '删除线', '~~', 'strikethrough'),
+            (AppIcons.tilt, '斜体', '*', 'italic'),
+            (AppIcons.underline, '下划线', '~', 'underline'),
           ])
-            _iconButton(
-                format.$1, format.$2, () => _onToggleFormat(format.$3), colors,
+            _formatButton(format.$1, format.$2, format.$4,
+                () => _onToggleFormat(format.$3), colors,
                 selected: _activeFormats.contains(format.$3)),
         ],
         _buildSendButton(colors, '发送富文本消息'),
+      );
+
+  /// 格式操作属于输入区，鼠标按下时也要保留正文焦点和选区。
+  Widget _formatButton(
+    IconData icon,
+    String tooltip,
+    String action,
+    VoidCallback onPressed,
+    SemanticColorScheme colors, {
+    bool selected = false,
+  }) =>
+      TextFieldTapRegion(
+        child: MergeSemantics(
+          child: Semantics(
+            identifier: 'tim.$_keyPrefix.format.$action',
+            child: _iconButton(icon, tooltip, onPressed, colors,
+                selected: selected),
+          ),
+        ),
       );
 
   /// 对照390宽设计：44高触控区，前六项等距，发送前留34的独立间隔。
@@ -652,10 +661,10 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     super.dispose();
   }
 
-  /// 同步当前正文块的光标样式并清理已删除附件，再刷新编辑器及外部工具栏。
+  /// 同步当前正文块的选区样式并清理已删除附件，再刷新编辑器及外部工具栏。
   void _refresh() {
     if (!mounted) return;
-    // 只在实际移动光标或切换正文块时派生格式；文字提交不能覆盖用户刚选择的输入样式。
+    // 只在选区变化或切换正文块时派生格式；文字提交不能覆盖用户刚选择的输入样式。
     for (final block in _blocks.whereType<_TextEditorBlock>()) {
       final value = block.controller.value;
       final previous = block.lastValue;
@@ -665,14 +674,11 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
           value.selection != previous.selection;
       final activated =
           block.focusNode.hasFocus && block.id != _activeTextBlockId;
-      if ((moved || activated) &&
-          value.selection.isValid &&
-          value.selection.isCollapsed) {
+      if ((moved || activated) && value.selection.isValid) {
         _activeTextBlockId = block.id;
         _activeFormats
           ..clear()
-          ..addAll(richContentMarkdownFormatsAt(
-              value.text, value.selection.extentOffset));
+          ..addAll(richContentSelectionFormats(value));
       }
     }
     final source = _blocks
@@ -873,6 +879,45 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
         : deleteMessageCharacterBefore(value);
   }
 
+  /// 正文可从菜单或系统键盘恢复格式和媒体，标题继续使用纯文本粘贴。
+  Future<void> _restoreCopiedMessage(
+    _TextEditorBlock block, {
+    ExtendedEditableTextState? editor,
+    TextSelection? preview,
+  }) async {
+    final original = block.controller.value;
+    final copied = await MessageClipboard.read('');
+    // 编辑器可能已经关闭或焦点已经切换，旧选区不能覆盖后续输入。
+    if (!mounted ||
+        (editor != null && !editor.mounted) ||
+        _isClosing ||
+        !block.focusNode.hasFocus ||
+        block.controller.value != original) {
+      return;
+    }
+    if (copied == null) {
+      await editor?.pasteText(SelectionChangedCause.toolbar);
+      return;
+    }
+    final selection = preview ?? original.selection;
+    if (!selection.isValid) return;
+    final message = copied.message;
+    final draft = message.richDraft;
+    final insertion = draft != null
+        ? richContentClipboardFragment(
+            draft, () => _nextBlockId++, _inlineMedia)
+        : message.text.isEmpty
+            ? message.preview
+            : message.text;
+    // 直接更新目标正文块，保留附件令牌和显式格式，不套用当前工具条样式。
+    block.controller.value = original.replaced(selection, insertion).copyWith(
+          selection: TextSelection.collapsed(
+              offset: selection.start + insertion.length),
+          composing: TextRange.empty,
+        );
+    editor?.hideToolbar();
+  }
+
   /// 在当前正文光标处插入提及符号。
   void insertMention() => _insertText('@');
 
@@ -907,7 +952,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     return null;
   }
 
-  /// 点击正文时同步当前块的光标格式；空正文保留已手动选择、尚待输入的样式。
+  /// 点击正文时同步当前块的选区格式；空正文保留已手动选择、尚待输入的样式。
   void _activateTextBlock(_TextEditorBlock block) {
     if (_activeTextBlockId == block.id && !_showEmojiPanel) return;
     final returnToKeyboard = _showEmojiPanel;
@@ -915,33 +960,35 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
       _showEmojiPanel = false;
       _activeTextBlockId = block.id;
       final value = block.controller.value;
-      if (value.text.isNotEmpty &&
-          value.selection.isValid &&
-          value.selection.isCollapsed) {
+      if (value.text.isNotEmpty && value.selection.isValid) {
         _activeFormats
           ..clear()
-          ..addAll(richContentMarkdownFormatsAt(
-              value.text, value.selection.extentOffset));
+          ..addAll(richContentSelectionFormats(value));
       }
     });
     if (returnToKeyboard) _keyboardPanel!.showSystem(block.focusNode);
   }
 
-  /// 切换外部共享工具条指定的 Markdown 格式。
+  /// 对正文选区立即应用格式；只有光标时切换后续输入的格式。
   void toggleFormat(String marker) {
     final block =
         _activeTextBlock ?? _blocks.whereType<_TextEditorBlock>().last;
-    if (block.controller.selection.isCollapsed) {
-      final value = exitActiveMarkdownFormats(
-        block.controller.value,
-        _activeFormats,
-      );
-      block.lastValue = value;
-      block.controller.value = value;
-    }
-    if (!_activeFormats.remove(marker)) {
+    final current = block.controller.value;
+    final hasSelection =
+        current.selection.isValid && !current.selection.isCollapsed;
+    final value = hasSelection
+        ? toggleSelectedMarkdownFormat(current, marker).value
+        : exitActiveMarkdownFormats(current, _activeFormats);
+    if (hasSelection) {
+      _activeFormats
+        ..clear()
+        ..addAll(richContentSelectionFormats(value));
+    } else if (!_activeFormats.remove(marker)) {
       _activeFormats.add(marker);
     }
+    // 先记录改写后的选区，控制器监听器才能区分程序更新与用户拖动。
+    block.lastValue = value;
+    block.controller.value = value;
     _setEditorState(() {});
     block.focusNode.requestFocus();
   }
@@ -1418,6 +1465,20 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
                   child: ExtendedTextField(
                     key: Key('rich_content_text_${block.id}'),
                     controller: block.controller,
+                    extendedContextMenuBuilder: (context, editor) =>
+                        buildMessageClipboardMenu(
+                      context,
+                      editor,
+                      () => _restoreCopiedMessage(block, editor: editor),
+                    ),
+                    onPlatformTextChanged: (before, submitted, applied) {
+                      final preview = MessageClipboard.richPreviewSelection(
+                          before, submitted, applied);
+                      if (preview != null) {
+                        unawaited(
+                            _restoreCopiedMessage(block, preview: preview));
+                      }
+                    },
                     focusNode: block.focusNode,
                     keyboardMode: _showEmojiPanel
                         ? ExtendedKeyboardMode.custom
@@ -1782,8 +1843,7 @@ final class _EditorAttachmentText extends SpecialText {
                           ? ClipRRect(
                               borderRadius: BorderRadius.circular(4),
                               child: ChatMediaPlaceholder(
-                                  image: loadingPlaceholder,
-                                  showLoading: !attachment.isVideo))
+                                  image: loadingPlaceholder, showLoading: true))
                           : Icon(Icons.broken_image_outlined,
                               color: context.appColors.onScrim, size: 20),
                     )),

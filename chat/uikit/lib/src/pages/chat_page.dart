@@ -38,6 +38,21 @@ class ChatPage extends AppBaseStatefulPage {
   /// 无显式定位或内存快照时先读取本机最新消息，不改变云端分页。
   final Future<List<MessageInfo>> Function()? localMessagesLoader;
 
+  /// 离线窗口最后可见的消息与位置，恢复时围绕该位置请求云端历史。
+  final MessageViewportSnapshot? offlineViewport;
+
+  /// 离线时使用同一套聊天布局，消息由宿主本机缓存提供。
+  final List<MessageInfo>? offlineMessages;
+
+  /// 返回当前可见位置，联网后继续围绕此位置补拉。
+  final ValueChanged<MessageViewportSnapshot?>? onOfflineViewportChanged;
+
+  /// 本机消息加载或重试提示，显示在只读输入栏上方。
+  final Widget? offlineFooter;
+
+  /// 已登录时保留原聊天窗口和输入状态，连接恢复后补拉当前附近的消息。
+  final bool connectionUnavailable;
+
   /// 宿主提供 SDK 历史加载完毕后的归档消息入口。
   final ChatMessageHistoryConfig? messageHistoryConfig;
 
@@ -55,6 +70,9 @@ class ChatPage extends AppBaseStatefulPage {
 
   /// 首次窗口请求结束后通知宿主；空会话也触发，只用于记录打开等辅助动作。
   final VoidCallback? onInitialLoadFinished;
+
+  /// 向宿主报告当前已展示的消息，用于会话窗口的本机保存。
+  final ValueChanged<List<MessageInfo>>? onMessageWindowChanged;
 
   /// 当前宿主允许的输入能力与操作守卫。
   final ChatMessageInputConfig messageInputConfig;
@@ -87,12 +105,18 @@ class ChatPage extends AppBaseStatefulPage {
     this.subtitle,
     this.totalUnreadCount,
     this.localMessagesLoader,
+    this.offlineViewport,
+    this.offlineMessages,
+    this.onOfflineViewportChanged,
+    this.offlineFooter,
+    this.connectionUnavailable = false,
     this.messageHistoryConfig,
     this.aggregateMessages = false,
     this.enableSuccessfulDelete = false,
     this.message,
     this.onInitialMessagesLoaded,
     this.onInitialLoadFinished,
+    this.onMessageWindowChanged,
     this.messageInputConfig = const ChatMessageInputConfig(
       isShowAudioCall: true,
       isShowVideoCall: true,
@@ -148,6 +172,21 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
 
   /// 取消或重新打开编辑时递增，旧保存结果不能关闭新的编辑会话。
   int _editRevision = 0;
+
+  @override
+  void didUpdateWidget(covariant ChatPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 切入离线后，旧列表的多选和编辑回调已失效。
+    if (oldWidget.offlineMessages == null && widget.offlineMessages != null) {
+      _multiSelectState = null;
+      _editingMessage = null;
+      _editingBubble = null;
+      _editingText = '';
+      _locateMessage = null;
+      _editRevision++;
+      _overlay.clear();
+    }
+  }
 
   @override
   void dispose() {
@@ -690,7 +729,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
 
   @override
   List<Widget>? actionsOf(BuildContext context, Locale locale) =>
-      widget.isShowAppBarActions
+      widget.isShowAppBarActions && widget.offlineMessages == null
           ? [
               Semantics(
                 identifier: 'tim.chat.settings',
@@ -719,30 +758,41 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
           children: [
             MessageList(
               localMessagesLoader: widget.localMessagesLoader,
+              offlineViewport: widget.offlineViewport,
+              offlineMessages: widget.offlineMessages,
+              connectionUnavailable: widget.connectionUnavailable,
+              onOfflineViewportChanged: widget.onOfflineViewportChanged,
               historyConfig: widget.messageHistoryConfig,
               aggregateMessages: widget.aggregateMessages,
               // 多选切换保持同一列表State，避免重新加载时丢失选择与阅读位置。
-              key: ValueKey(widget.conversation.conversationID),
+              key: ValueKey((widget.conversation.conversationID,
+                  widget.offlineMessages != null)),
               overlayController: _overlay,
               conversationID: widget.conversation.conversationID,
               config: widget.messageListConfig,
               replyConfig: widget.messageReplyConfig,
               locateMessage: _locateMessage ?? widget.message,
-              onMessagesChanged: widget.messageStickyConfig?.onMessagesChanged,
+              onMessagesChanged: (messages) {
+                widget.messageStickyConfig?.onMessagesChanged(messages);
+                widget.onMessageWindowChanged?.call(messages);
+              },
               onMessagesDeleted: widget.messageStickyConfig?.onMessagesDeleted,
               onInitialMessagesLoaded: widget.onInitialMessagesLoaded,
               onInitialLoadFinished: () {
                 widget.onInitialLoadFinished?.call();
                 widget.messageStickyConfig?.onInitialLoadFinished?.call();
               },
-              onUserClick: (String userID) => _onUserClick(userID),
-              onUserLongPress: (String userID, String displayName) {
-                _messageInputKey.currentState?.insertMention(
-                  userID: userID,
-                  displayName: displayName,
-                );
-              },
-              onCallMessageClick: _onCallMessageClick,
+              onUserClick: widget.offlineMessages == null ? _onUserClick : null,
+              onUserLongPress: widget.offlineMessages != null
+                  ? null
+                  : (String userID, String displayName) {
+                      _messageInputKey.currentState?.insertMention(
+                        userID: userID,
+                        displayName: displayName,
+                      );
+                    },
+              onCallMessageClick:
+                  widget.offlineMessages == null ? _onCallMessageClick : null,
               onQuoteMessage: (MessageInfo message) {
                 _messageInputKey.currentState?.setQuotedMessage(message);
               },
@@ -770,6 +820,11 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
                 onSeparateForward: () =>
                     _multiSelectState!.onSeparateForward?.call(context),
               ),
+            if (widget.offlineMessages != null && widget.offlineFooter != null)
+              SizedBox(
+                width: double.infinity,
+                child: widget.offlineFooter,
+              ),
             Visibility(
               key: const ValueKey('normal-chat-input'),
               visible: _multiSelectState?.isActive != true &&
@@ -779,7 +834,10 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
               maintainSize: _multiSelectState?.isActive != true,
               child: MessageInput(
                 conversationDisplayName: widget.displayName,
-                key: _messageInputKey,
+                // 在线输入状态持有草稿和 SDK 订阅，切换时独立挂载只读布局。
+                key: widget.offlineMessages == null ? _messageInputKey : null,
+                readOnly: widget.offlineMessages != null,
+                connectionUnavailable: widget.connectionUnavailable,
                 conversationID: widget.conversation.conversationID,
                 config: widget.messageInputConfig,
                 replyConfig: widget.messageReplyConfig,

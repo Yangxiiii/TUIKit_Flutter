@@ -36,10 +36,11 @@ void main() {
     expect(restored.attachment.durationMs, isNull);
   });
 
-  test('视频封面协议往返和草稿回填，旧消息可缺省且拒绝非法封面地址', () {
+  test('视频封面和时长可随消息和草稿往返，旧消息允许缺省', () {
     const video = RichFileBlock(
         'https://example.com/video.mp4', '视频.mp4', 12, 'video/mp4',
         thumbnailUrl: 'https://example.com/cover.jpg',
+        videoDuration: 232,
         width: 1080,
         height: 1920);
     const message = RichContentMessage([video]);
@@ -49,10 +50,14 @@ void main() {
     final parsedVideo = parsed.blocks.single as RichFileBlock;
     expect(parsedVideo.width, 1080);
     expect(parsedVideo.height, 1920);
+    expect(parsedVideo.videoDuration, 232);
     final draft = RichContentDraft.fromMessage(parsed);
     final restored =
         RichContentDraft.tryParsePersisted(draft.toPersistedString())!;
     expect(restored.canSend, isTrue);
+    final restoredVideo =
+        restored.blocks.single as RichContentDraftAttachmentBlock;
+    expect(restoredVideo.attachment.durationMs, 232000);
     expect(restored.toMessage()!.toCustomData(), message.toCustomData());
     final base = <String, Object?>{
       'type': 'file',
@@ -68,11 +73,16 @@ void main() {
             'blocks': [block]
           }
         });
-    expect(RichContentMessage.tryParse(encode(base)), isNotNull);
-    final legacyDraft = RichContentDraft.fromMessage(
-        RichContentMessage.tryParse(encode(base))!);
-    expect(legacyDraft.canSubmit, isFalse);
-    expect(legacyDraft.canSend, isFalse);
+    final legacy = RichContentMessage.tryParse(encode(base))!;
+    expect((legacy.blocks.single as RichFileBlock).videoDuration, isNull);
+    final legacyDraft = RichContentDraft.fromMessage(legacy);
+    expect(legacyDraft.canSubmit, isTrue);
+    expect(legacyDraft.canSend, isTrue);
+    for (final value in [-1, '232000', 1.5]) {
+      final parsed = RichContentMessage.tryParse(
+          encode({...base, 'videoDuration': value}))!;
+      expect((parsed.blocks.single as RichFileBlock).videoDuration, isNull);
+    }
     for (final dimensions in <Map<String, Object?>>[
       {'width': 0, 'height': 1920},
       {'width': 1080, 'height': -1},

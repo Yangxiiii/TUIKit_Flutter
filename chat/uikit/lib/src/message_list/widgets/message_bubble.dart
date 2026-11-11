@@ -5,7 +5,6 @@ import '../utils/voice_message_media.dart';
 import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart' hide AlertDialog;
-import 'package:flutter/services.dart';
 import 'super_tooltip.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_resender.dart';
@@ -20,6 +19,7 @@ import 'package:tencent_chat_uikit/src/message_list/listen/listen_from_here_cont
 import 'package:tencent_chat_uikit/src/message_list/widgets/forward/forward_service.dart';
 
 import 'message_tooltip.dart';
+import '../../message_input/message_clipboard.dart';
 import '../utils/sticky_message_event.dart';
 import 'message_actions_scope.dart';
 import 'message_confirmation.dart';
@@ -72,10 +72,22 @@ class DefaultMessageMenuCallbacks implements MessageMenuCallbacks {
     this.onDeleted,
   });
 
+  /// 系统剪贴板写入纯文本；原格式由聊天输入框按剪贴板条目恢复。
   @override
-  void onCopyMessage(MessageInfo message) {
-    Clipboard.setData(ClipboardData(
-        text: (message.messagePayload as TextMessagePayload?)?.text ?? ""));
+  void onCopyMessage(MessageInfo message) =>
+      unawaited(copyLocally(context, conversationID, message));
+
+  /// 复制来自当前气泡的正文和附件快照，离线也可使用系统剪贴板。
+  static Future<void> copyLocally(
+      BuildContext context, String conversationID, MessageInfo message) async {
+    if (message.status == MessageStatus.violation) return;
+    final copied = CopiedChatMessage.fromMessage(message);
+    if (copied == null) return;
+    try {
+      await MessageClipboard.copy(copied, conversationID);
+    } on Exception {
+      if (context.mounted) Toast.error(context, '复制失败，请稍后重试');
+    }
   }
 
   /// 保护操作提示；宿主开启成功态删除时先确认，SDK 成功后才清理关联置顶。
@@ -180,8 +192,8 @@ class MessageBubble extends StatefulWidget {
   /// 外层消息项分配的可用宽度，单位为逻辑像素。
   final double maxWidth;
 
-  /// 当前会话的消息操作入口，不由气泡创建第二份消息状态。
-  final MessageListStore messageListStore;
+  /// 在线会话的消息操作入口，离线气泡只消费已缓存的消息。
+  final MessageListStore? messageListStore;
 
   /// 宿主可替换菜单操作；为空时使用默认消息菜单。
   final MessageMenuCallbacks? menuCallbacks;
@@ -278,12 +290,12 @@ class _MessageBubbleState extends State<MessageBubble>
       : null;
 
   /// 当前消息及列表模式的菜单回调，保留气泡状态时仍随Widget更新替换。
-  late MessageMenuCallbacks _menuCallbacks;
+  MessageMenuCallbacks? _menuCallbacks;
   final _voiceFallbackGuard = ActionGuard();
   ActionGuard get _voiceGuard =>
       MessageActionsScope.maybeOf(context)?.actionGuard ?? _voiceFallbackGuard;
   Object get _voiceRequestScope =>
-      widget.asrDisplayManager ?? widget.messageListStore;
+      widget.asrDisplayManager ?? widget.messageListStore ?? this;
   bool get _isVoiceDesign => widget.conversationID.startsWith('c2c_');
 
   final GlobalKey _messageKey = GlobalKey();
@@ -335,15 +347,18 @@ class _MessageBubbleState extends State<MessageBubble>
   }
 
   /// 菜单回调随消息或列表模式更新；未由宿主提供时沿用SDK默认操作。
-  MessageMenuCallbacks _resolveMenuCallbacks() =>
-      widget.menuCallbacks ??
-      DefaultMessageMenuCallbacks(
-        context: context,
-        messageListStore: widget.messageListStore,
-        messageActionStore: MessageActionStore.create(widget.message),
-        conversationID: widget.conversationID,
-        config: widget.config,
-      );
+  MessageMenuCallbacks? _resolveMenuCallbacks() {
+    final store = widget.messageListStore;
+    if (store == null) return null;
+    return widget.menuCallbacks ??
+        DefaultMessageMenuCallbacks(
+          context: context,
+          messageListStore: store,
+          messageActionStore: MessageActionStore.create(widget.message),
+          conversationID: widget.conversationID,
+          config: widget.config,
+        );
+  }
 
   @override
   void dispose() {
@@ -356,6 +371,7 @@ class _MessageBubbleState extends State<MessageBubble>
 
   /// 气泡内失败入口与外侧失败图标共用同一确认及防重流程。
   void _showResendConfirmDialog() async {
+    if (widget.messageListStore == null) return;
     await confirmMessageAction(
       context,
       messageId: widget.message.msgID,
@@ -466,6 +482,7 @@ class _MessageBubbleState extends State<MessageBubble>
             messageListStore: widget.messageListStore,
             isInMergedDetailView: widget.isInMergedDetailView,
             mergedMediaMessages: widget.mergedMediaMessages,
+            localOnly: widget.messageListStore == null,
             bubbleKey: _messageKey,
           ),
           colorsTheme,
@@ -484,6 +501,7 @@ class _MessageBubbleState extends State<MessageBubble>
             messageListStore: widget.messageListStore,
             isInMergedDetailView: widget.isInMergedDetailView,
             mergedMediaMessages: widget.mergedMediaMessages,
+            localOnly: widget.messageListStore == null,
             bubbleKey: _messageKey,
           ),
           colorsTheme,
@@ -643,6 +661,13 @@ class _MessageBubbleState extends State<MessageBubble>
         messageWidget = _buildUnsupportedMessage(context);
     }
 
+    // 离线媒体可查看本机文件；其他依赖 SDK 的卡片操作在联网后恢复。
+    if (widget.messageListStore == null &&
+        const {MessageType.file, MessageType.audio, MessageType.custom}
+            .contains(widget.message.messageType)) {
+      messageWidget = IgnorePointer(child: messageWidget);
+    }
+
     // 引用与正文共享气泡背景，Web 回复使用单行快照，定位仍交给原列表。
     final quoteInfo = _quoteInfo;
     if (quoteInfo != null) {
@@ -740,7 +765,16 @@ class _MessageBubbleState extends State<MessageBubble>
 
   /// 合并详情始终只读，即使来源配置带有转发能力也不能响应长按。
   VoidCallback? get _longPressCallback =>
-      widget.isInMergedDetailView ? null : _handleLongPress;
+      widget.isInMergedDetailView ||
+              (widget.messageListStore == null && !_canCopy)
+          ? null
+          : _handleLongPress;
+
+  /// 消息复制只读取当前气泡，离线可沿用同一菜单动作。
+  bool get _canCopy =>
+      widget.config.isSupportCopy &&
+      widget.message.status != MessageStatus.violation &&
+      CopiedChatMessage.supports(widget.message.messagePayload);
 
   /// Compute animated bubble color for highlight effect (used by audio/file widgets)
   ///
@@ -830,16 +864,16 @@ class _MessageBubbleState extends State<MessageBubble>
   void _onOpenToolTip() {
     // 操作提示不可删除、撤回或再次置顶，不能进入普通消息菜单。
     if (StickyMessageEvent.fromMessage(widget.message) != null) return;
+    final canReact = widget.messageListStore != null &&
+        widget.config.isSupportReaction &&
+        widget.message.status != MessageStatus.violation;
     final scope = MessageActionsScope.maybeOf(context);
     if (scope != null) {
       scope.showActions(
           widget.message,
           _messageKey,
           _buildMenuItems(),
-          widget.config.isSupportReaction &&
-                  widget.message.status != MessageStatus.violation
-              ? _handleReactionSelected
-              : null);
+          canReact ? _handleReactionSelected : null);
       return;
     }
     if (tooltip != null && tooltip!.isOpen) {
@@ -985,12 +1019,8 @@ class _MessageBubbleState extends State<MessageBubble>
         // Violation messages should not show reaction picker
         //
         // 违规消息不应该显示表情选择器
-        showReactionPicker: widget.config.isSupportReaction &&
-            widget.message.status != MessageStatus.violation,
-        onReactionSelected: widget.config.isSupportReaction &&
-                widget.message.status != MessageStatus.violation
-            ? _handleReactionSelected
-            : null,
+        showReactionPicker: canReact,
+        onReactionSelected: canReact ? _handleReactionSelected : null,
       ),
     );
 
@@ -1036,12 +1066,30 @@ class _MessageBubbleState extends State<MessageBubble>
   }
 
   List<MessageMenuItem> _buildMenuItems() {
+    // 离线保留复制入口，其余菜单由在线会话提供。
+    if (widget.messageListStore == null) {
+      return [
+        if (_canCopy)
+          _buildCopyMenuItem(() => DefaultMessageMenuCallbacks.copyLocally(
+              context, widget.conversationID, widget.message)),
+      ];
+    }
     final items = <MessageMenuItem>[];
 
     items.addAll(_buildMenuItemsForMessageType(widget.message.messageType));
 
     return items;
   }
+
+  /// 同一复制菜单适用于在线和离线气泡。
+  MessageMenuItem _buildCopyMenuItem(VoidCallback onTap) => MessageMenuItem(
+        title: atomicLocal.copy,
+        id: 'copy',
+        assetName: 'chat_assets/icon/copy.svg',
+        package: 'tencent_chat_uikit',
+        icon: Icons.copy,
+        onTap: onTap,
+      );
 
   List<MessageMenuItem> _buildMenuItemsForMessageType(MessageType messageType) {
     final items = <MessageMenuItem>[];
@@ -1088,7 +1136,7 @@ class _MessageBubbleState extends State<MessageBubble>
       ));
     }
 
-    items.addAll(_buildCommonMenuItems(includeCopy: true));
+    items.addAll(_buildCommonMenuItems());
 
     return items;
   }
@@ -1386,7 +1434,7 @@ class _MessageBubbleState extends State<MessageBubble>
               LoginStore.shared.loginState.loginUserInfo?.userID != userId) {
             return;
           }
-          final updated = widget.messageListStore.state.messageList.value
+          final updated = widget.messageListStore!.state.messageList.value
                   .where((message) => message.msgID == id)
                   .firstOrNull ??
               widget.message;
@@ -1444,7 +1492,7 @@ class _MessageBubbleState extends State<MessageBubble>
     return items;
   }
 
-  List<MessageMenuItem> _buildCommonMenuItems({bool includeCopy = false}) {
+  List<MessageMenuItem> _buildCommonMenuItems() {
     final items = <MessageMenuItem>[];
 
     // Multi-select button
@@ -1457,7 +1505,7 @@ class _MessageBubbleState extends State<MessageBubble>
         assetName: 'chat_assets/icon/multi_select.svg',
         package: 'tencent_chat_uikit',
         icon: Icons.checklist,
-        onTap: () => _menuCallbacks.onMultiSelectMessage(widget.message),
+        onTap: () => _menuCallbacks?.onMultiSelectMessage(widget.message),
       ));
     }
 
@@ -1477,7 +1525,7 @@ class _MessageBubbleState extends State<MessageBubble>
           assetName: 'chat_assets/icon/forward.svg',
           package: 'tencent_chat_uikit',
           icon: Icons.shortcut,
-          onTap: () => _menuCallbacks.onForwardMessage(widget.message),
+          onTap: () => _menuCallbacks?.onForwardMessage(widget.message),
         ));
       }
     }
@@ -1495,26 +1543,15 @@ class _MessageBubbleState extends State<MessageBubble>
           assetName: 'chat_assets/icon/quote.svg',
           package: 'tencent_chat_uikit',
           icon: Icons.format_quote,
-          onTap: () => _menuCallbacks.onQuoteMessage(widget.message),
+          onTap: () => _menuCallbacks?.onQuoteMessage(widget.message),
         ));
       }
     }
 
-    // Copy button (only for text messages)
-    // Violation messages cannot be copied
-    //
-    // 复制按钮（仅限文本消息）违规消息不能复制
-    if (includeCopy &&
-        widget.config.isSupportCopy &&
-        widget.message.status != MessageStatus.violation) {
-      items.add(MessageMenuItem(
-        title: atomicLocal.copy,
-        id: 'copy',
-        assetName: 'chat_assets/icon/copy.svg',
-        package: 'tencent_chat_uikit',
-        icon: Icons.copy,
-        onTap: () => _menuCallbacks.onCopyMessage(widget.message),
-      ));
+    // 纯文本和可还原的媒体共享复制入口，违规消息仍不可复制。
+    if (_canCopy) {
+      items.add(_buildCopyMenuItem(
+          () => _menuCallbacks?.onCopyMessage(widget.message)));
     }
 
     // Recall button
@@ -1541,7 +1578,7 @@ class _MessageBubbleState extends State<MessageBubble>
           assetName: 'chat_assets/icon/revoke.svg',
           package: 'tencent_chat_uikit',
           icon: Icons.undo,
-          onTap: () => _menuCallbacks.onRecallMessage(widget.message),
+          onTap: () => _menuCallbacks?.onRecallMessage(widget.message),
         ));
       }
     }
@@ -1560,7 +1597,7 @@ class _MessageBubbleState extends State<MessageBubble>
         package: 'tencent_chat_uikit',
         icon: Icons.delete_outline,
         isDestructive: true,
-        onTap: () => _menuCallbacks.onDeleteMessage(widget.message),
+        onTap: () => _menuCallbacks?.onDeleteMessage(widget.message),
       ));
     }
 
@@ -1574,7 +1611,7 @@ class _MessageBubbleState extends State<MessageBubble>
       icon: Icons.headset_outlined,
       onTap: () {
         ListenFromHereController.instance.start(
-          messages: widget.messageListStore.state.messageList.value,
+          messages: widget.messageListStore!.state.messageList.value,
           fromMessageId: widget.message.msgID,
           l: AppLocalization.of(context),
         );

@@ -17,9 +17,14 @@ class ExtendedEditableText extends _EditableText {
   /// 当前实例如何处理系统键盘请求与平台输入连接关闭事件。
   final ExtendedKeyboardMode keyboardMode;
 
+  /// 平台提交正文后同时报告原始提交与格式化结果，选区移动不触发。
+  final void Function(TextEditingValue before, TextEditingValue submitted,
+      TextEditingValue applied)? onPlatformTextChanged;
+
   ExtendedEditableText({
     super.key,
     this.keyboardMode = ExtendedKeyboardMode.system,
+    this.onPlatformTextChanged,
     required super.controller,
     required super.focusNode,
     super.readOnly = false,
@@ -829,7 +834,12 @@ class ExtendedEditableTextState extends _EditableTextState {
           revealObscuredInput ? _kObscureShowLatestCharCursorTicks : 0;
       _obscureLatestCharIndex =
           revealObscuredInput ? _value.selection.baseOffset : null;
+      final before = _value;
       _formatAndSetValue(value, SelectionChangedCause.keyboard);
+      // 保留平台提交值供粘贴识别，写回时则以格式化后的实际选区为准。
+      if (before.text != _value.text && _hasInputConnection) {
+        extendedEditableText.onPlatformTextChanged?.call(before, value, _value);
+      }
     }
 
     // Wherever the value is changed by the user, schedule a showCaretOnScreen

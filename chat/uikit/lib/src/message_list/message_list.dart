@@ -146,6 +146,18 @@ class MessageList extends StatefulWidget {
   /// 最新窗口先显示本机记录；显式定位和进程内浏览快照仍优先。
   final Future<List<MessageInfo>> Function()? localMessagesLoader;
 
+  /// 宿主离线窗口的浏览位置，优先于本列表离开时保存的位置。
+  final MessageViewportSnapshot? offlineViewport;
+
+  /// 非空时直接渲染宿主缓存，列表无需创建 SDK 会话。
+  final List<MessageInfo>? offlineMessages;
+
+  /// 已挂载的列表在断网时继续显示当前消息，恢复后按可见位置补拉。
+  final bool connectionUnavailable;
+
+  /// 离线滚动后上报阅读位置，供重连请求前后两页。
+  final ValueChanged<MessageViewportSnapshot?>? onOfflineViewportChanged;
+
   /// 当前会话的归档历史入口；未配置时只展示 SDK 的消息窗口。
   final ChatMessageHistoryConfig? historyConfig;
 
@@ -212,6 +224,10 @@ class MessageList extends StatefulWidget {
 
   const MessageList({
     this.localMessagesLoader,
+    this.offlineViewport,
+    this.offlineMessages,
+    this.connectionUnavailable = false,
+    this.onOfflineViewportChanged,
     this.historyConfig,
     this.aggregateMessages = false,
     this.overlayController,
@@ -367,6 +383,14 @@ class _MessageListState extends State<MessageList>
   @override
   void didUpdateWidget(covariant MessageList oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.offlineMessages case final cached?) {
+      // 本地缓存更新时沿用当前列表，隐藏记录仍由宿主删除状态过滤。
+      _messages = _visibleMessages(cached);
+      return;
+    }
+    if (oldWidget.connectionUnavailable && !widget.connectionUnavailable) {
+      _reconnectRefreshPending = true;
+    }
     if (!setEquals(
         widget.config.hiddenMessageIDs, oldWidget.config.hiddenMessageIDs)) {
       // 本地删除事实优先于SDK内存窗口，清理快照后返回页面也不会恢复旧行。
@@ -387,7 +411,9 @@ class _MessageListState extends State<MessageList>
   List<MessageInfo> _visibleMessages(Iterable<MessageInfo> messages) {
     final visible = messages
         .where((message) =>
-            !widget.config.hiddenMessageIDs.contains(message.msgID))
+            !widget.config.hiddenMessageIDs.contains(message.msgID) &&
+            (widget.offlineMessages == null ||
+                message.status != MessageStatus.deleted))
         .toList();
     _localWindow.reconcileRevocations(visible);
     return _uploadMessageOrder.apply(visible);
@@ -436,6 +462,12 @@ class _MessageListState extends State<MessageList>
 
   /// SDK 刷新快照期间需要保持不动的锚点，刷新完成后立即清空。
   MessageViewportAnchor? _refreshViewportAnchor;
+
+  /// 有首屏、分页或定位请求在途时，延后重连刷新，避免两个请求替换同一窗口。
+  bool _reconnectRefreshPending = false;
+
+  /// 重连补拉期间保留原列表，等回包后用同一锚点应用结果。
+  bool _refreshingAfterReconnect = false;
 
   /// 滚动过程中最近一次有效锚点，退出页面采样失败时作为兜底。
   MessageViewportAnchor? _currentViewportAnchor;
@@ -603,6 +635,17 @@ class _MessageListState extends State<MessageList>
   @override
   void initState() {
     super.initState();
+    _asrDisplayManager = AsrDisplayManager();
+    _translationDisplayManager = TranslationDisplayManager();
+    _scrollListenerCallback = _scrollListener;
+    if (widget.offlineMessages case final cached?) {
+      // 复用在线列表的渲染和滚动，冷启动时无需触碰尚未登录的 SDK。
+      widget.onOfflineViewportChanged?.call(null);
+      _messages = _visibleMessages(cached);
+      _isInitialViewportReady = true;
+      _itemPositionsListener.itemPositions.addListener(_scrollListenerCallback);
+      return;
+    }
 
     final currentUserID =
         LoginStore.shared.loginState.loginUserInfo?.userID ?? '';
@@ -610,7 +653,8 @@ class _MessageListState extends State<MessageList>
 
     // 外部指定消息用于搜索、@ 或引用跳转，优先级高于普通浏览位置恢复。
     if (widget.locateMessage == null) {
-      final snapshot = _viewportSnapshots[_viewportAnchorKey];
+      final snapshot =
+          widget.offlineViewport ?? _viewportSnapshots[_viewportAnchorKey];
       if (snapshot != null) {
         // initState 内同步注入消息窗口，让缓存会话在页面转场的第一帧就有内容。
         _restoreViewportSnapshot = snapshot;
@@ -622,14 +666,10 @@ class _MessageListState extends State<MessageList>
       }
     }
 
-    _asrDisplayManager = AsrDisplayManager();
-    _translationDisplayManager = TranslationDisplayManager();
-
     // Initialize listener references
     //
     // 初始化监听器引用
     _messageListStateChangedListener = _onMessageListStateChanged;
-    _scrollListenerCallback = _scrollListener;
     _joinedGroupListChangedListener = _onJoinedGroupListChanged;
 
     _messageListStore =
@@ -695,6 +735,13 @@ class _MessageListState extends State<MessageList>
 
   @override
   void dispose() {
+    _itemPositionsListener.itemPositions.removeListener(_scrollListenerCallback);
+    _asrDisplayManager.dispose();
+    _translationDisplayManager.dispose();
+    if (widget.offlineMessages != null) {
+      super.dispose();
+      return;
+    }
     // 插入尚未布局时，不能拿上一帧的可见索引去读取新的消息窗口。
     final viewportAnchor = (_awaitingInsertionLayout
             ? null
@@ -728,21 +775,32 @@ class _MessageListState extends State<MessageList>
     if (localListener != null) {
       _localMessageManager?.removeAdvancedMsgListener(listener: localListener);
     }
-    _itemPositionsListener.itemPositions
-        .removeListener(_scrollListenerCallback);
     if (widget.conversationID.startsWith(groupConversationIDPrefix)) {
       GroupStore.shared.state.joinedGroupList
           .removeListener(_joinedGroupListChangedListener);
     }
     _receiptTimer?.cancel();
-    _asrDisplayManager.dispose();
-    _translationDisplayManager.dispose();
     super.dispose();
   }
 
   void _scrollListener() {
     _awaitingInsertionLayout = false;
     final positions = _itemPositionsListener.itemPositions.value;
+    if (widget.offlineMessages != null) {
+      final anchor = selectMessageViewportAnchor(
+        messages: _messages,
+        positions: positions,
+      );
+      // 数据源切换可能暂时没有布局，保留最后一次可见位置供重连使用。
+      if (anchor != null) {
+        widget.onOfflineViewportChanged?.call(createMessageViewportSnapshot(
+          messages: _messages,
+          anchor: anchor,
+          messagesPerSide: _snapshotMessagesPerSide,
+        ));
+      }
+      return;
+    }
     if (positions.isEmpty) return;
 
     int minIndex = positions.first.index;
@@ -771,6 +829,7 @@ class _MessageListState extends State<MessageList>
     }
 
     // 历史分页可以在接近当前窗口底部时提前触发，实时新消息跟随则要求实际贴底。
+    if (widget.connectionUnavailable || _refreshingAfterReconnect) return;
     if (!_isLoadingNewer &&
         isNavIdle &&
         _messageListStore.state.hasNewerMessages.value) {
@@ -928,6 +987,8 @@ class _MessageListState extends State<MessageList>
                   .merge(_messageListStore.state.messageList.value.reversed));
               _isInitialViewportReady = true;
             });
+            // 云端刷新可能失败，已显示的本机首屏也要交给宿主保存。
+            _notifyEditWindow();
             // 本地先提交一帧，再启动云端；这一帧不触发新增的清未读或回执。
             await WidgetsBinding.instance.endOfFrame;
           } on Object catch (error) {
@@ -1053,6 +1114,8 @@ class _MessageListState extends State<MessageList>
       final targetIndex = refreshedMessages.indexWhere(
         (message) => message.msgID == refreshAnchor.message.msgID,
       );
+      // 重连时如果 SDK 找不到旧锚点，继续显示原窗口，避免跳到其他位置。
+      if (_refreshingAfterReconnect && targetIndex == -1) return;
       if (targetIndex != -1) {
         _initialScrollIndex = targetIndex;
         _initialScrollAlignment = refreshAnchor.alignment;
@@ -1338,6 +1401,7 @@ class _MessageListState extends State<MessageList>
 
   /// 点击后向列表的历史端追加归档消息，已有消息索引不因追加发生移动。
   Future<void> _loadArchivedMessages() async {
+    if (widget.connectionUnavailable || _refreshingAfterReconnect) return;
     final config = widget.historyConfig;
     if (config == null || !_showOlderHistoryEntry || _archiveStatus.isLoading) {
       return;
@@ -1567,7 +1631,8 @@ class _MessageListState extends State<MessageList>
             conversationID: widget.conversationID,
             isGroup: isGroup,
             maxWidth: MediaQuery.sizeOf(context).width - 32,
-            messageListStore: _messageListStore,
+            messageListStore:
+                widget.offlineMessages == null ? _messageListStore : null,
             isHighlighted: _highlightedMessageId == message.msgID,
             onHighlightComplete: () {
               debugPrint(
@@ -1665,6 +1730,12 @@ class _MessageListState extends State<MessageList>
     //
     // 必须调用super.build；需要AutomaticKeepAliveClientMixin。
     super.build(context);
+    if (_canRefreshAfterReconnect) {
+      // 请求在布局结束后开始，既能读取当前锚点，也能等待上一轮分页结束。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_refreshAfterReconnect());
+      });
+    }
     final colorsTheme = SemanticColorScheme.of(context);
     // 每个窗口只合并一次回复索引，滚动复用同一份派生数据。
     final replies =
@@ -1770,6 +1841,42 @@ class _MessageListState extends State<MessageList>
         ),
       ),
     );
+  }
+
+  /// 只在当前列表空闲且连接可用时接管本次恢复事件。
+  bool get _canRefreshAfterReconnect =>
+      _reconnectRefreshPending &&
+      !widget.connectionUnavailable &&
+      !_refreshingAfterReconnect &&
+      !isLoading &&
+      !_isLoadingNewer &&
+      _navigationState is _NavIdle;
+
+  /// 重连补拉复用已有列表和锚点，失败时继续显示断网前的消息。
+  Future<void> _refreshAfterReconnect() async {
+    if (!mounted || !_canRefreshAfterReconnect) return;
+    _reconnectRefreshPending = false;
+    _refreshingAfterReconnect = true;
+    final anchor = selectMessageViewportAnchor(
+          messages: _messages,
+          positions: _itemPositionsListener.itemPositions.value,
+        ) ??
+        _currentViewportAnchor;
+    _refreshViewportAnchor = anchor;
+    try {
+      if (anchor == null) {
+        await _loadLatestMessages();
+      } else {
+        await _loadMessagesAround(anchor.message);
+      }
+    } on Object catch (error) {
+      debugPrint('messageList, reconnect refresh failed: $error');
+    } finally {
+      _refreshViewportAnchor = null;
+      _refreshingAfterReconnect = false;
+      // 补拉期间若再次重连，安排下一轮尝试。
+      if (mounted && _reconnectRefreshPending) setState(() {});
+    }
   }
 
   void _clearUnreadCount() {
@@ -1990,7 +2097,7 @@ class _MessageListState extends State<MessageList>
 
   /// 保证依赖变化或重复构建期间只触发一次首屏加载。
   void _startInitialLoad() {
-    if (_initialLoadStarted) return;
+    if (_initialLoadStarted || widget.offlineMessages != null) return;
     _initialLoadStarted = true;
     _loadInitialMessages();
   }

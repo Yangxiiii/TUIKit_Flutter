@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart' hide IconButton;
 import 'package:tencent_chat_uikit/src/third_party/extended_text_field/extended_text_field.dart';
 import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
+import 'package:tencent_chat_uikit/src/message_input/message_clipboard.dart';
 import 'package:tencent_chat_uikit/src/message_input/widget/rich_content_editor_sheet.dart';
 import 'package:tencent_chat_uikit/src/message_input/utils/image_size_reader.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_message.dart';
@@ -97,6 +98,127 @@ void main() {
             matching: find.byIcon(AppIcons.send1)),
         matching: find.byType(IconButton),
       ));
+
+  for (final route in [
+    '输入框菜单',
+    '系统键盘剪贴板',
+    '系统键盘图片',
+    '系统键盘纯富文本',
+    '外部同名剪贴板',
+  ]) {
+    testWidgets('$route 在原选区恢复已验证的消息内容', (tester) async {
+      const channel = MethodChannel('tencent_chat_uikit');
+      final messenger = tester.binding.defaultBinaryMessenger;
+      final isImage = route == '系统键盘图片';
+      final isRichTextOnly = route == '系统键盘纯富文本';
+      String? token;
+      var reads = 0;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'writeMessageClipboard') {
+          final preview = isImage
+              ? '[图片]'
+              : isRichTextOnly
+                  ? '加粗、斜体'
+                  : '加粗\n[视频]';
+          expect(call.arguments['text'], preview);
+          token = call.arguments['token'] as String;
+          return null;
+        }
+        reads++;
+        return token;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+      await mount(tester);
+      sdk.conversations.completeDraft('');
+      await tester.pump();
+      await enter(tester, '前删后');
+      final field = tester.widget<ExtendedTextField>(
+          find.byKey(const Key('message_input_text_field')));
+      field.focusNode!.requestFocus();
+      field.controller!.selection =
+          const TextSelection(baseOffset: 1, extentOffset: 2);
+      await tester.pump();
+      final copied = CopiedChatMessage.fromMessage(MessageInfo(
+        messagePayload: isImage
+            ? ImageMessagePayload(
+                originalImagePath: await createPreview(tester),
+                originalImageWidth: 120,
+                originalImageHeight: 60,
+              )
+            : CustomMessagePayload(
+                customData: RichContentMessage([
+                  if (isRichTextOnly)
+                    const RichTextBlock('**加粗**、*斜体*')
+                  else ...const [
+                    RichTextBlock('**加粗**'),
+                    RichFileBlock(
+                        'https://example.com/a.mp4', 'a.mp4', 10, 'video/mp4',
+                        width: 120, height: 60, videoDuration: 232),
+                  ],
+                ]).toCustomData(),
+              ),
+      ))!;
+      await MessageClipboard.copy(copied, 'c2c_test');
+      final previewText = '前${copied.preview}后';
+      if (route == '输入框菜单') {
+        final editable = tester.state<ExtendedEditableTextState>(
+            find.byType(ExtendedEditableText));
+        editable.clipboardStatus.value = ClipboardStatus.pasteable;
+        expect(editable.showToolbar(), isTrue);
+        await tester.pumpAndSettle();
+        expect(find.bySemanticsIdentifier('tim.input.clipboard.paste'),
+            findsOneWidget);
+        await tester.tap(find.text('Paste'));
+      } else {
+        if (route == '外部同名剪贴板') token = null;
+        // 系统键盘不调用输入框菜单，而是一次提交替换后的正文和光标。
+        tester.testTextInput.updateEditingValue(TextEditingValue(
+          text: previewText,
+          selection: TextSelection.collapsed(offset: previewText.length - 1),
+        ));
+      }
+      if (isImage) {
+        // 文件解码等待实际 I/O，只测输入框已挂载图片，避免占位动画无限等待。
+        await tester.pump();
+        await tester.pump();
+      } else {
+        await tester.pumpAndSettle();
+      }
+      expect(reads, 1);
+      if (route == '外部同名剪贴板') {
+        expect(field.controller!.text, previewText);
+        expect(find.byIcon(AppIcons.cameraOn), findsNothing);
+      } else if (isRichTextOnly) {
+        expect(field.controller!.text, '前**加粗**、*斜体*后');
+        final fieldContext =
+            tester.element(find.byKey(const Key('message_input_text_field')));
+        final span = field.specialTextSpanBuilder!.build(
+          field.controller!.text,
+          textStyle: DefaultTextStyle.of(fieldContext).style,
+        );
+        final styles = <String, TextStyle?>{};
+        span.visitChildren((child) {
+          if (child is TextSpan && child.text != null) {
+            styles[child.text!] = child.style;
+          }
+          return true;
+        });
+        expect(styles['加粗']?.fontWeight, FontWeight.bold);
+        expect(styles['斜体']?.fontStyle, FontStyle.italic);
+      } else if (isImage) {
+        expect(field.controller!.text, '前${richContentAttachmentToken(1)}后');
+        expect(find.byKey(const Key('rich_content_inline_image_1')),
+            findsOneWidget);
+      } else {
+        expect(
+            field.controller!.text, '前**加粗**${richContentAttachmentToken(1)}后');
+        expect(find.byIcon(AppIcons.cameraOn), findsOneWidget);
+        expect(find.text('3:52'), findsOneWidget);
+      }
+      if (!isImage) expect(sendButton(tester).onPressed, isNotNull);
+    });
+  }
 
   testWidgets('单个及多个纯表情调用SDK表情消息，混合正文仍调用文本消息', (tester) async {
     EmojiManager.configure(assetPackage: 'tuikit_atomic_x', emojis: const [
@@ -417,7 +539,8 @@ void main() {
             id: 2,
             mediaType: AlbumMediaType.video,
             mediaPath: '/tmp/video.mp4',
-            videoThumbnailPath: path),
+            videoThumbnailPath: path,
+            duration: 232999),
         readSize: (_) async => const ImageSize(120, 60));
     await tester.pump();
     await tester
@@ -458,13 +581,19 @@ void main() {
     expect(sdk.messages.customDescriptions.single, 'oarichimage oarichvideo');
     expect(sdk.messages.pushDescriptions.single, isNotEmpty);
     expect(sdk.messages.pushDescriptions.single, isNot(contains('oarich')));
-    final message =
-        RichContentMessage.tryParse(sdk.messages.customData.single)!;
+    final customData = sdk.messages.customData.single;
+    final blocks = jsonDecode(customData)['payload']['blocks'] as List;
+    final videoData = blocks.singleWhere(
+        (block) => block['url'] == 'https://example.com/video.mp4');
+    expect(videoData['videoDuration'], 232);
+    expect(videoData.containsKey('durationMs'), isFalse);
+    final message = RichContentMessage.tryParse(customData)!;
     final image = message.blocks.whereType<RichImageBlock>().single;
     final video = message.blocks.whereType<RichFileBlock>().single;
     expect(image.url, imageUrl);
     expect(video.url, 'https://example.com/video.mp4');
     expect(video.thumbnailUrl, 'https://example.com/cover.png');
+    expect(video.videoDuration, 232);
     expect((image.width, image.height), (120, 60));
     expect((video.width, video.height), (120, 60));
     sdk.messages.completeSend();
@@ -741,6 +870,15 @@ void main() {
     await tester.tap(find.byTooltip('粗体'));
     await tester.pump();
     expect(selected('粗体'), isFalse);
+    final start = controller.text.indexOf('普通');
+    controller.selection =
+        TextSelection(baseOffset: start, extentOffset: start + 2);
+    await tester.pump();
+    await tester.tap(find.byTooltip('下划线'));
+    await tester.pump();
+    expect(controller.text, source.replaceFirst('普通', '~普通~'));
+    expect(controller.selection.textInside(controller.text), '普通');
+    expect(selected('下划线'), isTrue);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });

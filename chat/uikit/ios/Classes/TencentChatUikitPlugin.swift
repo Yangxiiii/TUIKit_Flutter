@@ -35,6 +35,21 @@ public class TencentChatUikitPlugin: NSObject, FlutterPlugin {
     switch call.method {
     case "getPlatformVersion":
       result("iOS " + UIDevice.current.systemVersion)
+    case "writeMessageClipboard":
+      guard let args = call.arguments as? [String: String],
+            let text = args["text"], let token = args["token"] else {
+        result(FlutterError(code: "INVALID_ARGUMENT", message: nil, details: nil))
+        return
+      }
+      // 同一个条目提供公开文字和随机身份，其他应用读取到的文字不会包含格式。
+      UIPasteboard.general.items = [[
+        "public.utf8-plain-text": text,
+        "com.tencent.cloud.tuichatkit.clip-token": Data(token.utf8),
+      ]]
+      result(nil)
+    case "readMessageClipboardToken":
+      let data = UIPasteboard.general.data(forPasteboardType: "com.tencent.cloud.tuichatkit.clip-token")
+      result(data.flatMap { String(data: $0, encoding: .utf8) })
     default:
       result(FlutterMethodNotImplemented)
     }

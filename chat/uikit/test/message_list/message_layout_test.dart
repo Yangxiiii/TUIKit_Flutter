@@ -3,6 +3,8 @@ import 'package:atomic_x_core/impl/message/message_action_store_impl.dart';
 import 'package:atomic_x_core/impl/message/message_input_store_impl.dart';
 import 'package:atomic_x_core/impl/message/message_list_store_impl.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_bubble.dart';
+import 'package:tencent_chat_uikit/src/message_list/utils/message_viewport_anchor.dart'
+    show MessageViewportAnchor;
 import 'package:app_core/app_core.dart';
 import 'package:flutter/foundation.dart';
 
@@ -38,6 +40,8 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/text_m
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/file_message_widget.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/video_message_widget.dart';
 import 'package:tencent_chat_uikit/src/third_party/extended_text/extended_text.dart';
+import 'package:tencent_chat_uikit/src/third_party/extended_text_field/extended_text_field.dart'
+    show ExtendedEditableText;
 
 void main() {
   testWidgets('SDK 历史取齐后手动加载更早消息，失败重试并按游标去重', (tester) async {
@@ -1347,6 +1351,99 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('断网保持原聊天列表和输入栏，重连从可见消息补拉', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/single');
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    addTearDown(MessageList.clearViewportSnapshots);
+    sdk.messages.chronologicalHistory = [_Message('first'), _Message('second')];
+    final conversation = ConversationInfo(
+        conversationID: 'c2c_visual', type: ConversationType.c2c);
+    Future<void> show(bool connectionUnavailable) async {
+      await tester.pumpWidget(MaterialApp(
+        home: ProviderScope(
+          child: ChatPage(
+            conversation: conversation,
+            connectionUnavailable: connectionUnavailable,
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    await show(false);
+    final input = find.byType(MessageInput);
+    final list = find.byType(MessageList);
+    final editable = find.byType(ExtendedEditableText);
+    expect(tester.widget<ExtendedEditableText>(editable).controller.text,
+        '你好，很高兴认识你');
+    final inputState = tester.state(input);
+    final listState = tester.state(list);
+    final inputBounds = tester.getRect(input);
+    final anchorBounds = tester.getRect(find.text('second'));
+    sdk.messages.historyCursors.clear();
+
+    await show(true);
+    expect(tester.state(input), same(inputState));
+    expect(tester.state(list), same(listState));
+    expect(tester.widget<ExtendedEditableText>(editable).controller.text,
+        '你好，很高兴认识你');
+    expect(tester.getRect(input), inputBounds);
+    expect(tester.getRect(find.text('second')), anchorBounds);
+    expect(sdk.messages.historyCursors, isEmpty);
+
+    sdk.messages.chronologicalHistory!.add(_Message('third'));
+    await show(false);
+    expect(tester.state(input), same(inputState));
+    expect(tester.state(list), same(listState));
+    expect(sdk.messages.historyCursors, hasLength(2));
+    expect(sdk.messages.historyCursors.first, isNotNull);
+    expect(sdk.messages.historyCursors.last, sdk.messages.historyCursors.first);
+    expect(find.text('third'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('重连时以离线可见消息为游标，向云端补拉两侧消息', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/layout');
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    addTearDown(MessageList.clearViewportSnapshots);
+    final anchorMessage = ChatUtil.convertToUIMessage(_Message('second'));
+    sdk.messages.chronologicalHistory = [
+      _Message('first'),
+      _Message('second'),
+      _Message('third'),
+    ];
+    final offlineViewport = createMessageViewportSnapshot(
+      messages: [anchorMessage],
+      anchor: MessageViewportAnchor(message: anchorMessage, alignment: 0.2),
+      messagesPerSide: 20,
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Column(children: [
+          MessageList(
+            conversationID: 'c2c_visual',
+            offlineViewport: offlineViewport,
+          ),
+        ]),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(sdk.messages.historyCursors, ['second', 'second']);
+    expect(find.text('second').hitTestable(), findsOneWidget);
+    expect(find.text('third').hitTestable(), findsOneWidget);
+    expect(find.text('first').hitTestable(), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('退出短会话后收到新消息，再进入时消息仍连续排列', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
@@ -1929,6 +2026,9 @@ final class _Messages implements V2TIMMessageManager {
   final String scene;
   Completer<V2TimValueCallback<List<V2TimMessage>>>? historyGate;
   int historyCalls = 0;
+
+  /// 保留 SDK 请求游标，用于确认恢复时查询的是当前锚点两侧。
+  final historyCursors = <String?>[];
   List<V2TimMessage>? mergedContents;
   int deleteCalls = 0;
 
@@ -1938,10 +2038,11 @@ final class _Messages implements V2TIMMessageManager {
   /// 可变历史按 SDK 游标分页，其他场景继续使用原有挂起或固定响应。
   Future<V2TimValueCallback<List<V2TimMessage>>> _loadHistory(Invocation call) {
     historyCalls++;
+    final cursor = (call.namedArguments[#lastMsg] as V2TimMessage?)?.msgID;
+    historyCursors.add(cursor);
     final history = chronologicalHistory;
     if (history != null) {
       // SDK 旧消息页倒序、新消息页正序，且两页均不重复返回游标自身。
-      final cursor = (call.namedArguments[#lastMsg] as V2TimMessage?)?.msgID;
       final index = history.indexWhere((message) => message.msgID == cursor);
       assert(cursor == null || index >= 0);
       final newer = call.namedArguments[#getType] ==

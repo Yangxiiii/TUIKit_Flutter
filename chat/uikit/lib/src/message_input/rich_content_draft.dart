@@ -11,6 +11,21 @@ import 'package:flutter/services.dart';
 const _markdownFormatOrder = richContentMarkdownFormatOrder;
 const _richContentDraftPrefix = 'oa-rich-content-draft-v1:';
 
+/// 附件令牌的起始字符。
+const richContentAttachmentTokenStart = '\uFFF9';
+
+/// 附件令牌的结束字符。
+const richContentAttachmentTokenEnd = '\uFFFA';
+
+/// 匹配附件稳定 ID 的编辑态令牌。
+final richContentAttachmentTokenPattern = RegExp(
+  '$richContentAttachmentTokenStart(\\d+)$richContentAttachmentTokenEnd',
+);
+
+/// 返回编辑态附件的可逆令牌，普通输入框和展开编辑器共用。
+String richContentAttachmentToken(int id) =>
+    '$richContentAttachmentTokenStart$id$richContentAttachmentTokenEnd';
+
 /// 富文本附件在编辑和上传过程中的状态。
 enum RichContentAttachmentStatus {
   pending,
@@ -81,6 +96,33 @@ final class RichContentDraftAttachmentBlock extends RichContentDraftBlock {
   }
 }
 
+/// 将复制的有序块转换为输入原文，给媒体分配目标编辑器内的新身份。
+String richContentClipboardFragment(
+  RichContentDraft draft,
+  int Function() nextId,
+  Map<int, RichContentDraftAttachmentBlock> attachments,
+) {
+  final text = StringBuffer();
+  // 先登记每个令牌对应的附件，输入监听看到新文本时即可按顺序还原。
+  for (final block in draft.blocks) {
+    switch (block) {
+      case RichContentDraftTextBlock():
+        text.write(block.text);
+      case RichContentDraftAttachmentBlock():
+        final id = nextId();
+        attachments[id] = RichContentDraftAttachmentBlock(
+          id,
+          attachment: block.attachment,
+          remoteUrl: block.remoteUrl,
+          thumbnailUrl: block.thumbnailUrl,
+          status: block.status,
+        );
+        text.write(richContentAttachmentToken(id));
+    }
+  }
+  return text.toString();
+}
+
 /// 保存编辑器标题与有序正文块，并在发送前生成自定义消息协议。
 final class RichContentDraft {
   /// 标题按纯文本处理，发送时编码为加粗 Markdown 首段。
@@ -91,7 +133,7 @@ final class RichContentDraft {
 
   const RichContentDraft({this.title = '', this.blocks = const []});
 
-  /// 撤回后恢复已发送的完整图文；远端附件保持已上传状态，避免重复上传。
+  /// 复制和撤回复用已发送图文的附件及预览信息，远端附件无需重复上传。
   factory RichContentDraft.fromMessage(RichContentMessage message) {
     final blocks = <RichContentDraftBlock>[];
     // 按已发送消息的顺序恢复文字和远端附件，块ID仅在当前草稿内重新编号。
@@ -104,6 +146,10 @@ final class RichContentDraft {
       final image = block is RichImageBlock ? block : null;
       final file = block is RichFileBlock ? block : null;
       final url = image?.url ?? file!.url;
+      // 消息用秒传输，草稿保留毫秒供编辑器和预览共用。
+      final seconds = file?.videoDuration;
+      final milliseconds =
+          seconds == null ? null : seconds * Duration.millisecondsPerSecond;
       blocks.add(
         RichContentDraftAttachmentBlock(
           i,
@@ -117,6 +163,10 @@ final class RichContentDraft {
             mimeType: file?.mimeType ?? 'image/*',
             width: image?.width ?? file?.width,
             height: image?.height ?? file?.height,
+            durationMs: milliseconds != null &&
+                    milliseconds ~/ Duration.millisecondsPerSecond == seconds
+                ? milliseconds
+                : null,
           ),
           remoteUrl: url,
           thumbnailUrl: file?.thumbnailUrl,
@@ -244,8 +294,9 @@ final class RichContentDraft {
       blocks.whereType<RichContentDraftAttachmentBlock>().every((block) =>
           block.status != RichContentAttachmentStatus.preparing &&
           block.status != RichContentAttachmentStatus.preparationFailed &&
-          block.attachment.hasRequiredDimensions &&
-          (block.isReadyToSend || block.attachment.localPath.isNotEmpty));
+          (block.isReadyToSend ||
+              (block.attachment.hasRequiredDimensions &&
+                  block.attachment.localPath.isNotEmpty)));
 
   /// 上传失败时允许用户重试；未完成的附件仍禁止实际发送。
   bool get canRetryUploads {
@@ -318,6 +369,7 @@ final class RichContentDraft {
               RichImageBlock(url, width, height),
             );
           } else {
+            final durationMs = attachment.durationMs;
             messageBlocks.add(
               RichFileBlock(
                 url,
@@ -326,6 +378,9 @@ final class RichContentDraft {
                 attachment.mimeType,
                 width: width,
                 height: height,
+                videoDuration: durationMs == null
+                    ? null
+                    : durationMs ~/ Duration.millisecondsPerSecond,
                 thumbnailUrl: localPreview && attachment.thumbnailPath != null
                     ? Uri.file(attachment.thumbnailPath!).toString()
                     : block.thumbnailUrl,
@@ -456,7 +511,7 @@ RichContentDraftBlock? _draftBlockFromJson(Map<String, dynamic> json) {
   );
 }
 
-/// 附件须已上传且元数据有效，图片和视频发送前必须具有正整数宽高。
+/// 已有远端附件兼容缺省尺寸，新上传图片和视频仍要求有效宽高。
 bool _isReadyAttachment(RichContentDraftAttachmentBlock block) {
   if (block.status != RichContentAttachmentStatus.uploaded ||
       !isValidRichContentUrl(block.remoteUrl)) {
@@ -472,7 +527,7 @@ bool _isReadyAttachment(RichContentDraftAttachmentBlock block) {
   if (attachment.fileName.isEmpty ||
       attachment.fileSize < 0 ||
       attachment.mimeType.isEmpty ||
-      !attachment.hasRequiredDimensions) {
+      (attachment.localPath.isNotEmpty && !attachment.hasRequiredDimensions)) {
     return false;
   }
   return true;
@@ -511,7 +566,7 @@ TextEditingValue exitActiveMarkdownFormats(
   Iterable<String> markers,
 ) {
   final selection = value.selection;
-  if (!selection.isValid) return value;
+  if (!selection.isValid || !selection.isCollapsed) return value;
   var target = selection.end;
   var foundRange = false;
   for (final marker in markers) {

@@ -43,9 +43,14 @@ class ExtendedTextField extends _TextField {
   /// 未指定时沿用标准输入行为，聊天面板仅对自己的输入框切换此模式。
   final ExtendedKeyboardMode keyboardMode;
 
+  /// 报告平台提交前、提交时和格式化后的正文，应用内程序化修改不触发。
+  final void Function(TextEditingValue before, TextEditingValue submitted,
+      TextEditingValue applied)? onPlatformTextChanged;
+
   const ExtendedTextField({
     super.key,
     this.keyboardMode = ExtendedKeyboardMode.system,
+    this.onPlatformTextChanged,
     super.groupId = EditableText,
     super.controller,
     super.focusNode,
@@ -568,6 +573,7 @@ class ExtendedTextFieldState extends _TextFieldState {
           extendedContextMenuBuilder:
               extenedTextField.extendedContextMenuBuilder,
           extendedSpellCheckConfiguration: spellCheckConfiguration,
+          onPlatformTextChanged: extenedTextField.onPlatformTextChanged,
           magnifierConfiguration: widget.magnifierConfiguration ??
               TextMagnifier.adaptiveMagnifierConfiguration,
           // zmtzawqlp

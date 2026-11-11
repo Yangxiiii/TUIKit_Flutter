@@ -21,6 +21,9 @@ class VideoMessageWidget extends StatefulWidget {
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final MessageListStore? messageListStore;
+
+  /// 离线时只展示及预览本机文件。
+  final bool localOnly;
   final GlobalKey? bubbleKey;
   final MessageListConfigProtocol config;
   final bool isInMergedDetailView;
@@ -42,6 +45,7 @@ class VideoMessageWidget extends StatefulWidget {
     this.onTap,
     this.onLongPress,
     this.messageListStore,
+    this.localOnly = false,
     this.bubbleKey,
     this.isInMergedDetailView = false,
     this.mergedMediaMessages,
@@ -141,6 +145,7 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
   }
 
   void _initializeImageViewerManager() {
+    if (widget.localOnly) return;
     _imageViewerManager = ImageViewerManager(
       conversationID: widget.conversationID,
       currentMessage: widget.message,
@@ -201,6 +206,7 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
     );
 
     return GestureDetector(
+      behavior: widget.localOnly ? HitTestBehavior.opaque : null,
       onTap: _handleTap,
       onLongPress: widget.onLongPress,
       child: Container(
@@ -237,6 +243,10 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
 
   void _handleTap() {
     widget.onTap?.call();
+    if (widget.localOnly) {
+      ImageViewer.viewLocalMessage(context, widget.message);
+      return;
+    }
     _showImageViewer();
   }
 
@@ -315,19 +325,21 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
             ),
           ),
         ),
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: colorsTheme.bgColorDefault,
-            shape: BoxShape.circle,
+        // 离线仅有封面时保留封面，播放入口等本机视频文件可用后出现。
+        if (!widget.localOnly || payload?.videoPath?.isNotEmpty == true)
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: colorsTheme.bgColorDefault,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.play_arrow,
+              color: colorsTheme.textColorAntiPrimary,
+              size: 24,
+            ),
           ),
-          child: Icon(
-            Icons.play_arrow,
-            color: colorsTheme.textColorAntiPrimary,
-            size: 24,
-          ),
-        ),
       ],
     );
   }
@@ -350,8 +362,10 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
   Widget _buildImageWithFallback(BuildContext context, String? imagePath,
       double width, double height, Widget fallback) {
     final colorsTheme = SemanticColorScheme.of(context);
-    final remoteURL = (widget.message.messagePayload as VideoMessagePayload?)
-        ?.videoSnapshotURL;
+    final remoteURL = widget.localOnly
+        ? null
+        : (widget.message.messagePayload as VideoMessagePayload?)
+            ?.videoSnapshotURL;
 
     // No local path yet: render directly from the CDN URL while the
     // Store-side download is in flight. Without this, the cover stays
