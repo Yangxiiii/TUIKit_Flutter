@@ -36,7 +36,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   /// 列表分配的消息可用宽度，单位为逻辑像素。
   final double maxWidth;
 
-  /// 在线会话的消息操作入口，离线时只有本地展示数据。
+  /// 在线会话的媒体加载和消息操作入口，离线时只读取本地展示数据。
   final MessageListStore? messageListStore;
 
   /// 定位命中时播放气泡高亮，不改变消息本身的发送状态。
@@ -66,6 +66,9 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
 
   /// 当前列表是否处于多选，仅改变复选框和点击行为，不重建消息气泡。
   final bool isMultiSelectMode;
+
+  /// 建群草稿中仅由整行响应勾选，气泡仍可加载在线媒体。
+  final bool selectionOnly;
 
   /// 当前消息是否被显式选中，不由长按自动设置。
   final bool isSelected;
@@ -143,6 +146,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     this.customActions = const [],
     required this.config,
     this.isMultiSelectMode = false,
+    this.selectionOnly = false,
     this.isSelected = false,
     this.onToggleSelection,
     this.onEnterMultiSelectMode,
@@ -179,14 +183,14 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     final provider = CallingMessageDataProvider(message, context);
     final isOutgoingCall = provider.isOutgoingC2c;
 
-    // 通话方向跟随发起人，来电头像使用会话对端资料。
+    // 通话方向跟随发起人，建群草稿沿用消息头像以保留整行勾选。
     if (isOutgoingCall != null) {
       if (provider.content.isEmpty) {
         return Container();
       }
 
       isSelf = isOutgoingCall;
-      if (!isSelf && messageListStore != null) {
+      if (!isSelf && messageListStore != null && !selectionOnly) {
         return _buildWithConversationInfo(isSelf, avatarURL, senderName);
       }
     }
@@ -222,7 +226,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
       if (!config.isShowSystemMessage) {
         return const SizedBox.shrink();
       }
-      return messageBubble;
+      return IgnorePointer(ignoring: selectionOnly, child: messageBubble);
     }
 
     Widget messageRow;
@@ -262,7 +266,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
           ],
           Expanded(
             key: const ValueKey('messageContent'),
-            child: messageRow,
+            // 勾选由整行处理，内层仍渲染媒体但不能打开预览、菜单或重发。
+            child: IgnorePointer(ignoring: selectionOnly, child: messageRow),
           ),
         ],
       ),

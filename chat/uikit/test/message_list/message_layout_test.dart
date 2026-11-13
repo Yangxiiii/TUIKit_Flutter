@@ -44,86 +44,140 @@ import 'package:tencent_chat_uikit/src/third_party/extended_text_field/extended_
     show ExtendedEditableText;
 
 void main() {
-  testWidgets('SDK 历史取齐后手动加载更早消息，失败重试并按游标去重', (tester) async {
+  testWidgets('建群勾选可加载无本地文件的在线图片，点击图片切换选择', (tester) async {
     final original = TencentImSDKPlugin.v2TIMManager;
     final sdk = _Sdk('/single');
     TencentImSDKPlugin.v2TIMManager = sdk;
     addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
     MessageList.clearViewportSnapshots();
     addTearDown(MessageList.clearViewportSnapshots);
-    final gate = sdk.messages.historyGate =
-        Completer<V2TimValueCallback<List<V2TimMessage>>>();
-    const boundary = 1700000000;
-    final calls = <(int?, String?)>[];
-    final response = Completer<ChatOlderMessagesPage>();
-    MessageInfo archived(String id, int timestamp) => MessageInfo(
-          msgID: id,
-          timestamp: timestamp,
-          messageType: MessageType.text,
-          messagePayload: TextMessagePayload(text: id),
-          status: MessageStatus.sendSuccess,
-        );
-    final oldest = archived('归档第一条', boundary - 1);
+    const thumbnail = 'https://example.invalid/chat-thumbnail.png';
+    MultiSelectState? selection;
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
         body: Column(children: [
           MessageList(
             conversationID: 'c2c_visual',
-            historyConfig: ChatMessageHistoryConfig(
-              load: ({required beforeTimestamp, required cursor}) async {
-                calls.add((beforeTimestamp, cursor));
-                if (calls.length == 1) return response.future;
-                if (cursor == null) {
-                  return (messages: [oldest], nextCursor: 'next');
-                }
-                return (
-                  messages: [oldest, archived('归档第二条', boundary - 2)],
-                  nextCursor: null,
-                );
-              },
-              buildEntry: (context, {required status, required onLoad}) =>
-                  TextButton(
-                onPressed: status.isLoading ? null : onLoad,
-                child: Text(status.isLoading
-                    ? '加载归档中'
-                    : status.hasError
-                        ? '重试归档'
-                        : '查询更早消息'),
+            initialSelection: const [],
+            onMultiSelectStateChanged: (state) => selection = state,
+            localMessagesLoader: () async => [
+              MessageInfo(
+                msgID: 'remoteImage',
+                timestamp: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+                status: MessageStatus.sendSuccess,
+                messageType: MessageType.image,
+                messagePayload: ImageMessagePayload(thumbImageURL: thumbnail),
               ),
-            ),
+            ],
           ),
         ]),
       ),
     ));
-    await tester.pump();
-    final entry = find.text('查询更早消息');
-    expect(entry, findsNothing);
-    gate.complete(V2TimValueCallback(code: 0, desc: '', data: [
-      _Message('SDK 最早消息', timestampOverride: boundary),
-    ]));
     await tester.pumpAndSettle();
-    expect(calls, isEmpty);
-    expect(tester.getTopLeft(entry).dy,
-        lessThan(tester.getTopLeft(find.text('SDK 最早消息')).dy));
-    await tester.tap(entry);
-    await tester.pump();
-    expect(find.text('加载归档中'), findsOneWidget);
-    response.completeError(StateError('模拟请求失败'));
+    final image = find.byWidgetPredicate((widget) =>
+        widget is Image && widget.image == const NetworkImage(thumbnail));
+    expect(image, findsOneWidget);
+    await tester.tapAt(tester.getCenter(image));
     await tester.pumpAndSettle();
-    expect(find.text('SDK 最早消息'), findsOneWidget);
-    await tester.tap(find.text('重试归档'));
-    await tester.pumpAndSettle();
-    expect(find.text('归档第一条'), findsOneWidget);
-    expect(calls, [(boundary, null), (boundary, null)]);
-    await tester.tap(entry);
-    await tester.pumpAndSettle();
-    expect(calls.last, (null, 'next'));
-    expect(find.text('归档第一条'), findsOneWidget);
-    expect(tester.getTopLeft(find.text('归档第二条')).dy,
-        lessThan(tester.getTopLeft(find.text('归档第一条')).dy));
-    expect(entry, findsNothing);
-    await tester.pumpWidget(const SizedBox.shrink());
+    expect(selection?.selectedMessages?.call().single.msgID, 'remoteImage');
   });
+
+  for (final selecting in [false, true]) {
+    testWidgets('${selecting ? '建群选择' : '普通聊天'}共用 SDK 和归档历史分页，失败后按游标重试',
+        (tester) async {
+      final original = TencentImSDKPlugin.v2TIMManager;
+      final sdk = _Sdk('/single');
+      TencentImSDKPlugin.v2TIMManager = sdk;
+      addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+      MessageList.clearViewportSnapshots();
+      addTearDown(MessageList.clearViewportSnapshots);
+      final gate = sdk.messages.historyGate =
+          Completer<V2TimValueCallback<List<V2TimMessage>>>();
+      const boundary = 1700000000;
+      final calls = <(int?, String?)>[];
+      final response = Completer<ChatOlderMessagesPage>();
+      MessageInfo archived(String id, int timestamp) => MessageInfo(
+            msgID: id,
+            timestamp: timestamp,
+            messageType: MessageType.text,
+            messagePayload: TextMessagePayload(text: id),
+            status: MessageStatus.sendSuccess,
+          );
+      final oldest = archived('归档第一条', boundary - 1);
+      MultiSelectState? selection;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Column(children: [
+            MessageList(
+              conversationID: 'c2c_visual',
+              initialSelection: selecting ? const [] : null,
+              onMultiSelectStateChanged: (state) => selection = state,
+              historyConfig: ChatMessageHistoryConfig(
+                load: ({required beforeTimestamp, required cursor}) async {
+                  calls.add((beforeTimestamp, cursor));
+                  if (calls.length == 1) return response.future;
+                  if (cursor == null) {
+                    return (messages: [oldest], nextCursor: 'next');
+                  }
+                  return (
+                    messages: [oldest, archived('归档第二条', boundary - 2)],
+                    nextCursor: null,
+                  );
+                },
+                buildEntry: (context, {required status, required onLoad}) =>
+                    TextButton(
+                  onPressed: status.isLoading ? null : onLoad,
+                  child: Text(status.isLoading
+                      ? '加载归档中'
+                      : status.hasError
+                          ? '重试归档'
+                          : '查询更早消息'),
+                ),
+              ),
+            ),
+          ]),
+        ),
+      ));
+      await tester.pump();
+      final entry = find.text('查询更早消息');
+      expect(entry, findsNothing);
+      gate.complete(V2TimValueCallback(code: 0, desc: '', data: [
+        _Message('SDK 最早消息', timestampOverride: boundary),
+      ]));
+      await tester.pumpAndSettle();
+      expect(calls, isEmpty);
+      expect(tester.getTopLeft(entry).dy,
+          lessThan(tester.getTopLeft(find.text('SDK 最早消息')).dy));
+      if (selecting) {
+        final row = find.byWidgetPredicate((widget) =>
+            widget is MessageItem && widget.message.msgID == 'SDK 最早消息');
+        tester.widget<MessageItem>(row).onToggleSelection!.call();
+        await tester.pumpAndSettle();
+        expect(selection?.selectedCount, 1);
+      }
+      await tester.tap(entry);
+      await tester.pump();
+      expect(find.text('加载归档中'), findsOneWidget);
+      response.completeError(StateError('模拟请求失败'));
+      await tester.pumpAndSettle();
+      expect(find.text('SDK 最早消息'), findsOneWidget);
+      await tester.tap(find.text('重试归档'));
+      await tester.pumpAndSettle();
+      expect(find.text('归档第一条'), findsOneWidget);
+      expect(calls, [(boundary, null), (boundary, null)]);
+      await tester.tap(entry);
+      await tester.pumpAndSettle();
+      expect(calls.last, (null, 'next'));
+      expect(find.text('归档第一条'), findsOneWidget);
+      expect(tester.getTopLeft(find.text('归档第二条')).dy,
+          lessThan(tester.getTopLeft(find.text('归档第一条')).dy));
+      expect(entry, findsNothing);
+      if (selecting) {
+        expect(selection?.selectedMessages?.call().single.msgID, 'SDK 最早消息');
+      }
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
 
   for (final sameId in [true, false]) {
     testWidgets('HTTP搜索${sameId ? '相同ID' : '不同ID'}定位挂载后高亮一次并恢复',

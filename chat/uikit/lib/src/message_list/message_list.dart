@@ -1,5 +1,6 @@
 import 'package:app_ui/app_ui.dart';
 import 'dart:async';
+import 'utils/conversation_notice.dart';
 import 'utils/sticky_message_event.dart';
 import 'utils/local_message_window.dart';
 import 'utils/upload_message_order.dart';
@@ -98,6 +99,9 @@ class MultiSelectState {
   /// 以传入的屏幕纵坐标为分隔线，补选起点位于线下的消息及其后续记录。
   final ValueChanged<double>? onSelectBelow;
 
+  /// 返回按聊天顺序排列的当前有效选择，供确认时读取。
+  final List<MessageInfo> Function()? selectedMessages;
+
   const MultiSelectState({
     required this.isActive,
     required this.selectedCount,
@@ -107,6 +111,7 @@ class MultiSelectState {
     this.onMergedForward,
     this.onSeparateForward,
     this.onSelectBelow,
+    this.selectedMessages,
   });
 }
 
@@ -222,7 +227,11 @@ class MessageList extends StatefulWidget {
   /// 浮层仅改变列表绘制位置，逻辑分页和离开会话时的锚点保持原值。
   final MessageOverlayController? overlayController;
 
+  /// 传入草稿时直接进入多选，空列表表示首次选择。
+  final List<MessageInfo>? initialSelection;
+
   const MessageList({
+    this.initialSelection,
     this.localMessagesLoader,
     this.offlineViewport,
     this.offlineMessages,
@@ -386,6 +395,9 @@ class _MessageListState extends State<MessageList>
     if (widget.offlineMessages case final cached?) {
       // 本地缓存更新时沿用当前列表，隐藏记录仍由宿主删除状态过滤。
       _messages = _visibleMessages(cached);
+      if (widget.initialSelection != null && _retainSelection(_messages)) {
+        _notifySelectionAfterLayout();
+      }
       return;
     }
     if (oldWidget.connectionUnavailable && !widget.connectionUnavailable) {
@@ -396,18 +408,18 @@ class _MessageListState extends State<MessageList>
       // 本地删除事实优先于SDK内存窗口，清理快照后返回页面也不会恢复旧行。
       _localWindow.delete(widget.config.hiddenMessageIDs);
       _messages = _visibleMessages(_messages);
-      _selectedMessageIDs.removeAll(widget.config.hiddenMessageIDs);
-      _viewportSnapshots.remove(_viewportAnchorKey);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _notifyMultiSelectModeChanged();
-      });
+      _retainSelection(_messages);
+      if (widget.initialSelection == null) {
+        _viewportSnapshots.remove(_viewportAnchorKey);
+      }
+      _notifySelectionAfterLayout();
     }
     if (!identical(widget.locateMessage, oldWidget.locateMessage)) {
       unawaited(_updateStickyWindow(widget.locateMessage));
     }
   }
 
-  /// 先应用删除和撤回，再按上传占位顺序展示仍可见的消息。
+  /// 先应用删除和撤回，再按上传占位顺序展示并合并重复通知。
   List<MessageInfo> _visibleMessages(Iterable<MessageInfo> messages) {
     final visible = messages
         .where((message) =>
@@ -416,7 +428,7 @@ class _MessageListState extends State<MessageList>
                 message.status != MessageStatus.deleted))
         .toList();
     _localWindow.reconcileRevocations(visible);
-    return _uploadMessageOrder.apply(visible);
+    return ConversationNotice.visibleMessages(_uploadMessageOrder.apply(visible));
   }
 
   /// SDK异常不能成为未处理Future；定位或刷新失败保留列表并给出可重试反馈。
@@ -568,6 +580,9 @@ class _MessageListState extends State<MessageList>
   /// 本次由用户逐条勾选的消息标识，每次进入或退出多选都清空。
   final Set<String> _selectedMessageIDs = {};
 
+  /// 草稿中已确认的消息可能在当前窗口之外，翻到原文前保留上次选择。
+  final _selectionDraft = <String, MessageInfo>{};
+
   // Tongue (小舌头) state
   TongueType _tongueType = TongueType.none;
   int _newMessageCount = 0;
@@ -620,12 +635,51 @@ class _MessageListState extends State<MessageList>
   /// 是否处于多选模式
   bool get isMultiSelectMode => _isMultiSelectMode;
 
-  /// List of selected messages
-  ///
-  /// 选中消息列表
-  List<MessageInfo> get selectedMessages => _messages
-      .where((m) => m.msgID != null && _selectedMessageIDs.contains(m.msgID))
-      .toList();
+  /// 当前窗口正文覆盖草稿缓存，确认顺序与普通转发一致。
+  List<MessageInfo> _selectedInChatOrder() {
+    if (_selectionDraft.isEmpty) {
+      return _messages.reversed
+          .where((message) => _selectedMessageIDs.contains(message.msgID))
+          .toList();
+    }
+    final available = {
+      ..._selectionDraft,
+      for (final message in _messages.reversed) message.msgID: message,
+    };
+    return available.values
+        .where((message) => _selectedMessageIDs.contains(message.msgID))
+        .toList()
+      ..sort((a, b) => (a.timestamp ?? 0).compareTo(b.timestamp ?? 0));
+  }
+
+  /// 草稿回显等构建期间的状态变化在布局后发布，避免同步刷新父导航栏。
+  void _notifySelectionAfterLayout() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _notifyMultiSelectModeChanged();
+    });
+  }
+
+  /// 当前原文以及明确的撤回和删除事件优先于草稿缓存。
+  bool _retainSelection(List<MessageInfo> visibleWindow) {
+    final hidden = widget.config.hiddenMessageIDs;
+    _selectionDraft.removeWhere((id, _) => hidden.contains(id));
+    for (final message in visibleWindow) {
+      if (_selectionDraft.containsKey(message.msgID)) {
+        if (canSelectChatMessage(message)) {
+          _selectionDraft[message.msgID] = message;
+        } else {
+          _selectionDraft.remove(message.msgID);
+        }
+      }
+    }
+    final retained = retainSelectableChatMessages(
+        _selectedMessageIDs, [...visibleWindow, ..._selectionDraft.values]);
+    if (retained.length == _selectedMessageIDs.length) return false;
+    _selectedMessageIDs
+      ..clear()
+      ..addAll(retained);
+    return true;
+  }
 
   /// Number of selected messages
   ///
@@ -638,10 +692,23 @@ class _MessageListState extends State<MessageList>
     _asrDisplayManager = AsrDisplayManager();
     _translationDisplayManager = TranslationDisplayManager();
     _scrollListenerCallback = _scrollListener;
+    if (widget.initialSelection case final draft?) {
+      _isMultiSelectMode = true;
+      final restored = selectChatMessagesBelow(
+          const {},
+          draft.where((message) =>
+              !widget.config.hiddenMessageIDs.contains(message.msgID)));
+      _selectedMessageIDs.addAll(restored.ids);
+      _selectionDraft.addEntries(draft
+          .where((message) => restored.ids.contains(message.msgID))
+          .map((message) => MapEntry(message.msgID, message)));
+      _notifySelectionAfterLayout();
+    }
     if (widget.offlineMessages case final cached?) {
       // 复用在线列表的渲染和滚动，冷启动时无需触碰尚未登录的 SDK。
       widget.onOfflineViewportChanged?.call(null);
       _messages = _visibleMessages(cached);
+      if (_isMultiSelectMode) _retainSelection(_messages);
       _isInitialViewportReady = true;
       _itemPositionsListener.itemPositions.addListener(_scrollListenerCallback);
       return;
@@ -683,10 +750,12 @@ class _MessageListState extends State<MessageList>
           TencentImSDKPlugin.v2TIMManager.getMessageManager();
       _localMessageListener = V2TimAdvancedMsgListener(
         onRecvMessageRevoked: (id) {
+          _selectionDraft.remove(id);
           _localWindow.revoke(id);
           if (mounted) _onMessageListStateChanged();
         },
         onRecvMessageRevokedWithInfo: (id, user, reason) {
+          _selectionDraft.remove(id);
           _localWindow.revoke(id);
           if (mounted) _onMessageListStateChanged();
         },
@@ -735,37 +804,41 @@ class _MessageListState extends State<MessageList>
 
   @override
   void dispose() {
-    _itemPositionsListener.itemPositions.removeListener(_scrollListenerCallback);
+    _itemPositionsListener.itemPositions
+        .removeListener(_scrollListenerCallback);
     _asrDisplayManager.dispose();
     _translationDisplayManager.dispose();
     if (widget.offlineMessages != null) {
       super.dispose();
       return;
     }
-    // 插入尚未布局时，不能拿上一帧的可见索引去读取新的消息窗口。
-    final viewportAnchor = (_awaitingInsertionLayout
-            ? null
-            : selectMessageViewportAnchor(
-                messages: _messages,
-                positions: _itemPositionsListener.itemPositions.value,
-              )) ??
-        _currentViewportAnchor;
-    // 归档记录无法作为 SDK 的恢复锚点，混合窗口不进入退出快照。
-    if (_archiveLoaded) {
-      _viewportSnapshots.remove(_viewportAnchorKey);
-    } else if (viewportAnchor != null && _messages.isNotEmpty) {
-      final snapshot = createMessageViewportSnapshot(
-        messages: _messages,
-        anchor: viewportAnchor,
-        messagesPerSide: _snapshotMessagesPerSide,
-        unreadAboveCount: _unreadTongueCount,
-        unreadBelowCount: _newMessageCount,
-        oldestUnreadSequence: _oldestUnreadMessageSeq,
-        viewedUnreadMinSequence: _viewedUnreadMinSequence,
-        viewedUnreadMaxSequence: _viewedUnreadMaxSequence,
-      );
-      if (snapshot != null) {
-        _viewportSnapshots[_viewportAnchorKey] = snapshot;
+    // 草稿选择期间的滚动不覆盖普通聊天的浏览位置。
+    if (widget.initialSelection == null) {
+      // 插入尚未布局时，不能拿上一帧的可见索引去读取新的消息窗口。
+      final viewportAnchor = (_awaitingInsertionLayout
+              ? null
+              : selectMessageViewportAnchor(
+                  messages: _messages,
+                  positions: _itemPositionsListener.itemPositions.value,
+                )) ??
+          _currentViewportAnchor;
+      // 归档记录无法作为 SDK 的恢复锚点，混合窗口不进入退出快照。
+      if (_archiveLoaded) {
+        _viewportSnapshots.remove(_viewportAnchorKey);
+      } else if (viewportAnchor != null && _messages.isNotEmpty) {
+        final snapshot = createMessageViewportSnapshot(
+          messages: _messages,
+          anchor: viewportAnchor,
+          messagesPerSide: _snapshotMessagesPerSide,
+          unreadAboveCount: _unreadTongueCount,
+          unreadBelowCount: _newMessageCount,
+          oldestUnreadSequence: _oldestUnreadMessageSeq,
+          viewedUnreadMinSequence: _viewedUnreadMinSequence,
+          viewedUnreadMaxSequence: _viewedUnreadMaxSequence,
+        );
+        if (snapshot != null) {
+          _viewportSnapshots[_viewportAnchorKey] = snapshot;
+        }
       }
     }
     _messageListStore.state.messageList
@@ -971,7 +1044,9 @@ class _MessageListState extends State<MessageList>
               alignment: restoredAnchor.alignment,
             )) {
           // SDK 已无法返回原锚点时丢弃失效快照，并降级展示最新消息。
-          _viewportSnapshots.remove(_viewportAnchorKey);
+          if (widget.initialSelection == null) {
+            _viewportSnapshots.remove(_viewportAnchorKey);
+          }
           loadSucceeded = await _loadLatestMessages();
         }
       } else {
@@ -1088,15 +1163,8 @@ class _MessageListState extends State<MessageList>
           : _localWindow.merge(state.messageList.value.reversed),
     );
     // 先清理失效选择，再发布新窗口；撤回和删除不能留下仍可提交的旧计数。
-    if (_isMultiSelectMode) {
-      final retained =
-          retainSelectableChatMessages(_selectedMessageIDs, visibleWindow);
-      if (retained.length != _selectedMessageIDs.length) {
-        _selectedMessageIDs
-          ..clear()
-          ..addAll(retained);
-        _notifyMultiSelectModeChanged();
-      }
+    if (_isMultiSelectMode && _retainSelection(visibleWindow)) {
+      _notifyMultiSelectModeChanged();
     }
 
     debugPrint('messageList, _onMessageListStateChanged, '
@@ -1281,10 +1349,23 @@ class _MessageListState extends State<MessageList>
   void _onMessageEvent(MessageEvent event) {
     switch (event) {
       case OnReceiveNewMessage(:final message):
-        // 静默失效包只驱动宿主查询，不增加历史提示、未读舌标或反应请求。
-        if (StickyMessageEvent.fromMessage(message)?.isControl == true) return;
+        // 后端已接管的原生提示与静默失效包均不触发聊天列表的实时反馈。
+        if (ConversationNotice.hidesNativeMessage(message) ||
+            StickyMessageEvent.fromMessage(message)?.isControl == true) {
+          return;
+        }
         debugPrint('messageList, onReceiveNewMessage: ${message.msgID}');
-        if (StickyMessageEvent.fromMessage(message) == null) {
+        final notice = ConversationNotice.fromMessage(message);
+        // 通知按投递策略计数，不通过提示消息清空会话未读。
+        if (notice != null &&
+            (notice.usesOriginalMessage ||
+                _messages.any((item) =>
+                    item.msgID != message.msgID &&
+                    ConversationNotice.fromMessage(item)?.eventId ==
+                        notice.eventId))) {
+          return;
+        }
+        if (notice == null && StickyMessageEvent.fromMessage(message) == null) {
           _clearUnreadCount();
         }
         final isAtBottom = _isUserAtBottom();
@@ -1631,6 +1712,7 @@ class _MessageListState extends State<MessageList>
             conversationID: widget.conversationID,
             isGroup: isGroup,
             maxWidth: MediaQuery.sizeOf(context).width - 32,
+            // 建群勾选沿用在线媒体加载，仅实际离线时使用本地文件。
             messageListStore:
                 widget.offlineMessages == null ? _messageListStore : null,
             isHighlighted: _highlightedMessageId == message.msgID,
@@ -1654,6 +1736,7 @@ class _MessageListState extends State<MessageList>
                 : null,
             config: widget.config,
             isMultiSelectMode: _isMultiSelectMode,
+            selectionOnly: widget.initialSelection != null,
             isSelected: isMessageSelected(message),
             onToggleSelection: () => toggleMessageSelection(message),
             onEnterMultiSelectMode: enterMultiSelectMode,
@@ -1705,14 +1788,17 @@ class _MessageListState extends State<MessageList>
   }
 
   bool _shouldTrackVisibility(MessageInfo message) {
-    // 首屏消息完成提交后再启用已读检测，避免加载期间误报可见状态。
-    if (!_isInitialRenderComplete) return false;
+    // 草稿浏览不发送已读回执，普通聊天在首屏提交后才检测可见性。
+    if (!_isInitialRenderComplete || widget.initialSelection != null) {
+      return false;
+    }
 
     if (message.isSentBySelf) return false;
 
     if (!message.needReadReceipt) return false;
 
-    if (message.messageType == MessageType.tips) return false;
+    if (message.messageType == MessageType.tips ||
+        ConversationNotice.fromMessage(message) != null) return false;
 
     if (message.status == MessageStatus.revoked) return false;
 
@@ -2809,6 +2895,7 @@ class _MessageListState extends State<MessageList>
         onSeparateForward: (context) =>
             forwardSelectedMessages(context, forwardType: ForwardType.separate),
         onSelectBelow: selectMessagesBelow,
+        selectedMessages: _selectedInChatOrder,
       ));
     } else {
       widget.onMultiSelectStateChanged?.call(null);
@@ -2830,7 +2917,8 @@ class _MessageListState extends State<MessageList>
           type: TextColorPreset.red,
           onClick: () async {
             // 即使旧选择集合保留了操作提示，也不能把它提交给SDK删除。
-            final messagesToDelete = selectedMessages
+            final messagesToDelete = _messages
+                .where((message) => _selectedMessageIDs.contains(message.msgID))
                 .where((message) =>
                     StickyMessageEvent.fromMessage(message) == null)
                 .toList();
@@ -2872,9 +2960,7 @@ class _MessageListState extends State<MessageList>
     if (_selectedMessageIDs.isEmpty) return;
 
     // 列表内部最新在前，提交前反转为原始时间顺序，不采用用户点击勾选的顺序。
-    final messages = _messages.reversed
-        .where((message) => _selectedMessageIDs.contains(message.msgID))
-        .toList();
+    final messages = _selectedInChatOrder();
 
     if (widget.config.forwardHandler != null) {
       final type =

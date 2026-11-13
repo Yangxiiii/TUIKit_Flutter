@@ -13,7 +13,7 @@ import '../message_list/widgets/message_recall_scope.dart';
 import 'package:flutter/material.dart' hide IconButton;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
+import 'package:tencent_chat_uikit/tencent_chat_uikit.dart' hide FilledButton;
 import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
 import 'package:tuikit_atomic_x/base_component/utils/tui_event_bus.dart';
 import 'package:tencent_chat_uikit/src/contact_list/pages/add_friend.dart';
@@ -98,7 +98,11 @@ class ChatPage extends AppBaseStatefulPage {
   /// 宿主自定义设置入口；返回命中消息时在原聊天窗口定位，未传时沿用UIKit设置。
   final Future<MessageInfo?> Function()? onOpenSettings;
 
+  /// 建群确认前的消息草稿，传入后直接显示共享列表的多选模式。
+  final List<MessageInfo>? historySelection;
+
   const ChatPage({
+    this.historySelection,
     super.key,
     required this.conversation,
     this.displayName,
@@ -170,12 +174,22 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
   /// 原列表持有的目标气泡锚点，用于键盘或面板尺寸变化后的实测避让。
   GlobalKey? _editingBubble;
 
+  /// SDK 冷启动从本机窗口切换时，保留此次页面内已勾选的消息。
+  List<MessageInfo>? _selectionAtWindowChange;
+
   /// 取消或重新打开编辑时递增，旧保存结果不能关闭新的编辑会话。
   int _editRevision = 0;
 
   @override
   void didUpdateWidget(covariant ChatPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.historySelection != null &&
+        (oldWidget.offlineMessages != null) !=
+            (widget.offlineMessages != null)) {
+      _selectionAtWindowChange = _multiSelectState?.selectedMessages?.call() ??
+          _selectionAtWindowChange;
+      _multiSelectState = null;
+    }
     // 切入离线后，旧列表的多选和编辑回调已失效。
     if (oldWidget.offlineMessages == null && widget.offlineMessages != null) {
       _multiSelectState = null;
@@ -605,13 +619,13 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
   double get navigationBarHeight => 48;
 
   @override
-  bool get showAppBarBottomDivider => true;
+  bool get showAppBarBottomDivider => widget.historySelection == null;
 
   @override
   bool get safeAreaTop => false;
 
   @override
-  bool get safeAreaBottom => false;
+  bool get safeAreaBottom => widget.historySelection != null;
 
   @override
   bool get dismissKeyboardOnTap => false;
@@ -628,6 +642,14 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
 
   @override
   Widget titleWidgetOf(BuildContext context, Locale locale) {
+    if (widget.historySelection case final draft?) {
+      final count = _multiSelectState?.selectedCount ??
+          (_selectionAtWindowChange ?? draft).length;
+      return Text('已选择$count条聊天记录',
+          style: FontScheme.caption1Medium,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis);
+    }
     final title = Text(
       widget.displayName ??
           widget.conversation.title ??
@@ -658,10 +680,25 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
   }
 
   @override
-  double? get leadingWidth => widget.totalUnreadCount == null ? null : 84;
+  double? get leadingWidth => widget.historySelection != null
+      ? 64
+      : widget.totalUnreadCount == null
+          ? null
+          : 84;
 
   @override
   Widget leadingOf(BuildContext context, Locale locale) {
+    if (widget.historySelection != null) {
+      return Semantics(
+        identifier: 'tim.groupHistory.cancel',
+        child: TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          style: TextButton.styleFrom(
+              foregroundColor: context.appColors.textPrimary),
+          child: const Text('取消'),
+        ),
+      );
+    }
     final back = Semantics(
       identifier: 'tim.chat.back',
       // 首次返回遵守PopScope，只退出编辑或多选，再次返回才离开会话。
@@ -728,24 +765,53 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
   }
 
   @override
-  List<Widget>? actionsOf(BuildContext context, Locale locale) =>
-      widget.isShowAppBarActions && widget.offlineMessages == null
-          ? [
-              Semantics(
-                identifier: 'tim.chat.settings',
-                label: '设置',
-                button: true,
-                child: IconButton.buttonContent(
-                  content: IconOnlyContent(
-                    Icon(AppIcons.more, color: context.appColors.textPrimary),
-                  ),
-                  type: ButtonType.noBorder,
-                  size: ButtonSize.l,
-                  onClick: _onChatSettingsTap,
-                ),
+  List<Widget>? actionsOf(BuildContext context, Locale locale) {
+    if (widget.historySelection != null) {
+      // 已确认过的草稿可以清空，首次进入时仍需选择至少一条消息。
+      final selection = _multiSelectState;
+      final canConfirm = (selection?.selectedCount ?? 0) > 0 ||
+          widget.historySelection!.isNotEmpty;
+      return [
+        Padding(
+          padding: const EdgeInsets.only(right: 16),
+          child: Semantics(
+            identifier: 'tim.groupHistory.done',
+            child: FilledButton(
+              onPressed: selection != null && canConfirm
+                  ? () => Navigator.of(context)
+                      .pop(selection.selectedMessages?.call())
+                  : null,
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(56, 36),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+                textStyle: const TextStyle(fontSize: 14),
               ),
-            ]
-          : null;
+              child: const Text('完成'),
+            ),
+          ),
+        ),
+      ];
+    }
+    return widget.isShowAppBarActions && widget.offlineMessages == null
+        ? [
+            Semantics(
+              identifier: 'tim.chat.settings',
+              label: '设置',
+              button: true,
+              child: IconButton.buttonContent(
+                content: IconOnlyContent(
+                  Icon(AppIcons.more, color: context.appColors.textPrimary),
+                ),
+                type: ButtonType.noBorder,
+                size: ButtonSize.l,
+                onClick: _onChatSettingsTap,
+              ),
+            ),
+          ]
+        : null;
+  }
 
   /// 原列表与普通输入始终保持挂载，临时编辑区不替换草稿控制器。
   Widget _buildConversation() => GestureDetector(
@@ -757,6 +823,8 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
         child: Column(
           children: [
             MessageList(
+              initialSelection:
+                  _selectionAtWindowChange ?? widget.historySelection,
               localMessagesLoader: widget.localMessagesLoader,
               offlineViewport: widget.offlineViewport,
               offlineMessages: widget.offlineMessages,
@@ -765,8 +833,10 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
               historyConfig: widget.messageHistoryConfig,
               aggregateMessages: widget.aggregateMessages,
               // 多选切换保持同一列表State，避免重新加载时丢失选择与阅读位置。
-              key: ValueKey((widget.conversation.conversationID,
-                  widget.offlineMessages != null)),
+              key: ValueKey((
+                widget.conversation.conversationID,
+                widget.offlineMessages != null
+              )),
               overlayController: _overlay,
               conversationID: widget.conversation.conversationID,
               config: widget.messageListConfig,
@@ -809,7 +879,8 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
               groupAtInfoList: widget.conversation.groupAtInfoList,
               initialUnreadCount: widget.conversation.unreadCount,
             ),
-            if (_multiSelectState != null && _multiSelectState!.isActive)
+            if (widget.historySelection == null &&
+                _multiSelectState?.isActive == true)
               MultiSelectBottomBar(
                 selectedCount: _multiSelectState!.selectedCount,
                 onCancel: _multiSelectState!.onCancel,
@@ -825,26 +896,27 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
                 width: double.infinity,
                 child: widget.offlineFooter,
               ),
-            Visibility(
-              key: const ValueKey('normal-chat-input'),
-              visible: _multiSelectState?.isActive != true &&
-                  _editingMessage == null,
-              maintainState: true,
-              maintainAnimation: true,
-              maintainSize: _multiSelectState?.isActive != true,
-              child: MessageInput(
-                conversationDisplayName: widget.displayName,
-                // 在线输入状态持有草稿和 SDK 订阅，切换时独立挂载只读布局。
-                key: widget.offlineMessages == null ? _messageInputKey : null,
-                readOnly: widget.offlineMessages != null,
-                connectionUnavailable: widget.connectionUnavailable,
-                conversationID: widget.conversation.conversationID,
-                config: widget.messageInputConfig,
-                replyConfig: widget.messageReplyConfig,
-                onLocalMessageSent:
-                    widget.messageRecallConfig?.onLocalMessageSent,
+            if (widget.historySelection == null)
+              Visibility(
+                key: const ValueKey('normal-chat-input'),
+                visible: _multiSelectState?.isActive != true &&
+                    _editingMessage == null,
+                maintainState: true,
+                maintainAnimation: true,
+                maintainSize: _multiSelectState?.isActive != true,
+                child: MessageInput(
+                  conversationDisplayName: widget.displayName,
+                  // 在线输入状态持有草稿和 SDK 订阅，切换时独立挂载只读布局。
+                  key: widget.offlineMessages == null ? _messageInputKey : null,
+                  readOnly: widget.offlineMessages != null,
+                  connectionUnavailable: widget.connectionUnavailable,
+                  conversationID: widget.conversation.conversationID,
+                  config: widget.messageInputConfig,
+                  replyConfig: widget.messageReplyConfig,
+                  onLocalMessageSent:
+                      widget.messageRecallConfig?.onLocalMessageSent,
+                ),
               ),
-            ),
           ],
         ),
       );
@@ -932,7 +1004,8 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
       ],
     );
     final guardedPage = PopScope(
-      canPop: _editingMessage == null && _multiSelectState?.isActive != true,
+      canPop: widget.historySelection != null ||
+          (_editingMessage == null && _multiSelectState?.isActive != true),
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop && _editingMessage != null) {
           _cancelEditing();
