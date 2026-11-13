@@ -3,8 +3,12 @@ import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_utils.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 
+/// 将原生事件和已解析的系统文案居中展示，较长的提示按行居中。
 class SystemMessageWidget extends StatelessWidget {
+  /// 原生提示或处于撤回状态的原消息。
   final MessageInfo? message;
+
+  /// 后端业务协议解析后生成的纯文本。
   final String? customContent;
 
   const SystemMessageWidget({
@@ -40,6 +44,7 @@ class SystemMessageWidget extends StatelessWidget {
           ),
           child: Text(
             systemContent,
+            textAlign: TextAlign.center,
             style: FontScheme.caption3Regular.copyWith(
               color: colorsTheme.textColorTertiary,
             ),

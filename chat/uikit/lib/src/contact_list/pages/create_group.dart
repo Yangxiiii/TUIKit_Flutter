@@ -9,8 +9,12 @@ import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
 import '../../chat_setting/widgets/avatar_selector.dart';
 import '../widgets/group_type_selector.dart';
 
+/// 创建群并返回 SDK 分配的群 ID，创建提示由后端投递。
 class CreateGroup extends StatefulWidget {
+  /// 已在上一页选中的初始群成员。
   final List<ContactInfo> selectedMembers;
+
+  /// 建群成功后交给调用方打开新群。
   final Function(String groupID, String groupName, String? avatar)?
       onGroupCreated;
 
@@ -25,6 +29,7 @@ class CreateGroup extends StatefulWidget {
 }
 
 /// 维护建群选择和已选成员展示，头像加载不改变成员选择事实。
+/// 管理建群表单与提交状态，成功后返回新群资料。
 class _CreateGroupState extends State<CreateGroup> {
   final TextEditingController _groupNameController = TextEditingController();
   final TextEditingController _groupIdController = TextEditingController();
@@ -323,30 +328,7 @@ class _CreateGroupState extends State<CreateGroup> {
       memberList: widget.selectedMembers.map((c) => c.userID).toList(),
     ));
     if (result.isSuccess) {
-      await Future.delayed(const Duration(milliseconds: 200));
-
-      String loginUserID =
-          LoginStore.shared.loginState.loginUserInfo?.userID ?? '';
-      int cmdValue = _selectedGroupType == GroupType.community ? 1 : 0;
-      Map<String, dynamic> customMessageJson = {
-        'version': 4,
-        'cmd': cmdValue,
-        'businessID': 'group_create',
-        'opUser': loginUserID,
-        'content': atomicLocale.createGroupTips,
-      };
-
-      String customData = ChatUtil.dictionary2JsonData(customMessageJson);
-
-      MessageInputStore messageInputStore =
-          MessageInputStore.create(conversationID: 'group_${result.groupID}');
-      final sendMessageResult = await messageInputStore.sendMessage(
-        payload: CustomSendMessagePayload(customData: customData),
-      );
-      if (!sendMessageResult.isSuccess) {
-        debugPrint(
-            "send create group custom message, errorCode:${sendMessageResult.errorCode}, errorMessage:${sendMessageResult.errorMessage}");
-      }
+      // 创建提示由后端投递，客户端只返回创建结果。
       if (widget.onGroupCreated != null) {
         widget.onGroupCreated!(result.groupID, groupName, _selectedAvatarURL);
       }

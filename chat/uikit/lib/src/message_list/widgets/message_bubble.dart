@@ -3,6 +3,7 @@ import 'package:app_core/app_core.dart';
 import '../../audio_player/audio_player_platform.dart';
 import '../utils/voice_message_media.dart';
 import 'package:app_ui/app_ui.dart';
+import '../utils/conversation_notice.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart' hide AlertDialog;
 import 'super_tooltip.dart';
@@ -93,7 +94,10 @@ class DefaultMessageMenuCallbacks implements MessageMenuCallbacks {
   /// 保护操作提示；宿主开启成功态删除时先确认，SDK 成功后才清理关联置顶。
   @override
   void onDeleteMessage(MessageInfo message) async {
-    if (StickyMessageEvent.fromMessage(message) != null) return;
+    if (StickyMessageEvent.fromMessage(message) != null ||
+        ConversationNotice.fromMessage(message) != null) {
+      return;
+    }
     final scope = MessageActionsScope.maybeOf(context);
     if (scope?.enableSuccessfulDelete == true) {
       await confirmMessageAction(
@@ -763,9 +767,10 @@ class _MessageBubbleState extends State<MessageBubble>
     _onOpenToolTip();
   }
 
-  /// 合并详情始终只读，即使来源配置带有转发能力也不能响应长按。
+  /// 合并详情和后端系统提示只读，不能通过长按打开操作菜单。
   VoidCallback? get _longPressCallback =>
       widget.isInMergedDetailView ||
+              ConversationNotice.fromMessage(widget.message) != null ||
               (widget.messageListStore == null && !_canCopy)
           ? null
           : _handleLongPress;
@@ -863,7 +868,10 @@ class _MessageBubbleState extends State<MessageBubble>
   /// 宿主启用编辑后使用底部操作面板，其余场景继续使用既有菜单。
   void _onOpenToolTip() {
     // 操作提示不可删除、撤回或再次置顶，不能进入普通消息菜单。
-    if (StickyMessageEvent.fromMessage(widget.message) != null) return;
+    if (StickyMessageEvent.fromMessage(widget.message) != null ||
+        ConversationNotice.fromMessage(widget.message) != null) {
+      return;
+    }
     final canReact = widget.messageListStore != null &&
         widget.config.isSupportReaction &&
         widget.message.status != MessageStatus.violation;

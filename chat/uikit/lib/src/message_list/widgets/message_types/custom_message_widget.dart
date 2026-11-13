@@ -1,4 +1,6 @@
 import '../../utils/sticky_message_event.dart';
+import '../../utils/conversation_notice.dart';
+import '../../utils/message_utils.dart';
 import 'dart:io';
 import '../../../message_input/pending_rich_content_message.dart';
 import 'package:app_ui/app_ui.dart' as app;
@@ -17,6 +19,7 @@ import 'file_message_widget.dart';
 import 'rich_content_video_preview.dart';
 import '../../utils/rich_content_media_viewer.dart';
 import '../chat_media_placeholder.dart';
+import 'system_message_widget.dart';
 
 /// 按业务标识展示自定义消息，并在通用气泡中显示纯文本自定义数据。
 class CustomMessageWidget extends StatelessWidget {
@@ -50,6 +53,12 @@ class CustomMessageWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final notice = ConversationNotice.fromMessage(message);
+    if (notice != null) {
+      final text = MessageUtil.conversationNoticeText(notice);
+      if (text.isEmpty) return const SizedBox.shrink();
+      return SystemMessageWidget(customContent: text);
+    }
     final event = StickyMessageEvent.fromMessage(message);
     if (event != null) {
       if (event.isControl) return const SizedBox.shrink();

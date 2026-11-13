@@ -1,6 +1,7 @@
 import 'package:atomic_x_core/atomicxcore.dart';
 
 import 'sticky_message_event.dart';
+import 'conversation_notice.dart';
 
 /// 产品多选消息上限；合并与逐条共享同一选择集合，不采用SDK默认转发30条限制。
 const chatMessageSelectionLimit = 100;
@@ -11,7 +12,8 @@ bool canSelectChatMessage(MessageInfo message) =>
     message.status != MessageStatus.revoked &&
     message.status != MessageStatus.deleted &&
     message.messageType != MessageType.tips &&
-    StickyMessageEvent.fromMessage(message) == null;
+    StickyMessageEvent.fromMessage(message) == null &&
+    ConversationNotice.fromMessage(message) == null;
 
 /// 切换单条选择；超限不改变原集合，反选不受数量上限限制。
 ({Set<String> ids, bool limited}) toggleChatMessageSelection(

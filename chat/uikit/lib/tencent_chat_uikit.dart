@@ -55,8 +55,13 @@ export 'src/message_list/message_reply_config.dart';
 export 'src/message_list/widgets/message_reply_count.dart';
 export 'src/message_list/message_sticky_config.dart';
 export 'src/message_list/utils/sticky_message_event.dart';
+export 'src/message_list/utils/conversation_notice.dart' show ConversationNotice;
 export 'src/message_list/widgets/message_types/image_message_widget.dart';
 
 export 'src/message_input/src/chat_special_text_span_builder.dart'
     show ChatSpecialTextSpanBuilder;
 export 'src/third_party/extended_text/extended_text.dart' show ExtendedText;
+
+// 群设置由宿主定制，邀请入口仍复用 UIKit。
+export 'src/chat_setting/pages/group_add_member.dart' show GroupAddMember;
+export 'src/third_party/lpinyin/lpinyin.dart' show PinyinHelper;

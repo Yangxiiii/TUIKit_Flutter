@@ -1,3 +1,4 @@
+import 'conversation_notice.dart';
 import 'sticky_message_event.dart';
 import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
@@ -35,7 +36,8 @@ class MessageUtil {
       if (message.status == MessageStatus.revoked ||
           message.status == MessageStatus.deleted ||
           message.messageType == MessageType.tips ||
-          StickyMessageEvent.fromMessage(message) != null) {
+          StickyMessageEvent.fromMessage(message) != null ||
+          ConversationNotice.fromMessage(message) != null) {
         return false;
       }
     }
@@ -85,13 +87,9 @@ class MessageUtil {
 
   static String getSingleSystemInfoDisplayString(
       GroupTipsInfo groupTipsInfo, BuildContext context) {
+    // 混合消息中的改名、公告等原生事件仍需显示。
+    if (ConversationNotice.isBackendOwnedTip(groupTipsInfo)) return '';
     return switch (groupTipsInfo) {
-      Unknown() => AppLocalization.of(context).unknown,
-      JoinGroup() => getJoinGroupDisplayString(groupTipsInfo, context),
-      InviteToGroup() => getInviteToGroupDisplayString(groupTipsInfo, context),
-      QuitGroup() => getQuitGroupDisplayString(groupTipsInfo, context),
-      KickedFromGroup() =>
-        getKickedFromGroupDisplayString(groupTipsInfo, context),
       SetGroupAdmin() => getSetGroupAdminDisplayString(groupTipsInfo, context),
       CancelGroupAdmin() =>
         getCancelGroupAdminDisplayString(groupTipsInfo, context),
@@ -101,8 +99,6 @@ class MessageUtil {
         getChangeGroupAvatarDisplayString(groupTipsInfo, context),
       ChangeGroupNotification() =>
         getChangeGroupNotificationDisplayString(groupTipsInfo, context),
-      ChangeGroupIntroduction() =>
-        getChangeGroupIntroductionDisplayString(groupTipsInfo, context),
       ChangeGroupOwner() =>
         getChangeGroupOwnerDisplayString(groupTipsInfo, context),
       ChangeGroupMuteAll() =>
@@ -113,10 +109,7 @@ class MessageUtil {
         getChangeInviteToGroupApprovalDisplayString(groupTipsInfo, context),
       MuteGroupMember() =>
         getMuteGroupMemberDisplayString(groupTipsInfo, context),
-      PinGroupMessage() =>
-        getPinGroupMessageDisplayString(groupTipsInfo, context),
-      UnpinGroupMessage() =>
-        getUnpinGroupMessageDisplayString(groupTipsInfo, context),
+      _ => AppLocalization.of(context).unknown,
     };
   }
 
@@ -182,40 +175,6 @@ class MessageUtil {
     return content;
   }
 
-  static String getJoinGroupDisplayString(
-      JoinGroup systemMessage, BuildContext context) {
-    AppLocalizedText localizations = AppLocalization.of(context);
-    return localizations.groupMemberJoined(
-        UIKitUtil.memberDisplayName(systemMessage.joinMember));
-  }
-
-  static String getInviteToGroupDisplayString(
-      InviteToGroup systemMessage, BuildContext context) {
-    AppLocalizedText localizations = AppLocalization.of(context);
-    final inviteesShowName = systemMessage.invitees
-        .map((m) => UIKitUtil.memberDisplayName(m))
-        .join('、');
-    return localizations.groupMemberInvited(
-        UIKitUtil.memberDisplayName(systemMessage.inviter), inviteesShowName);
-  }
-
-  static String getQuitGroupDisplayString(
-      QuitGroup systemMessage, BuildContext context) {
-    AppLocalizedText localizations = AppLocalization.of(context);
-    return localizations
-        .groupMemberQuit(UIKitUtil.memberDisplayName(systemMessage.quitMember));
-  }
-
-  static String getKickedFromGroupDisplayString(
-      KickedFromGroup systemMessage, BuildContext context) {
-    AppLocalizedText localizations = AppLocalization.of(context);
-    final kickedShowName = systemMessage.kickedMembers
-        .map((m) => UIKitUtil.memberDisplayName(m))
-        .join('、');
-    return localizations.groupMemberKicked(
-        UIKitUtil.memberDisplayName(systemMessage.opUser), kickedShowName);
-  }
-
   static String getSetGroupAdminDisplayString(
       SetGroupAdmin systemMessage, BuildContext context) {
     AppLocalizedText localizations = AppLocalization.of(context);
@@ -254,20 +213,6 @@ class MessageUtil {
     }
   }
 
-  static String getPinGroupMessageDisplayString(
-      PinGroupMessage systemMessage, BuildContext context) {
-    AppLocalizedText localizations = AppLocalization.of(context);
-    return localizations
-        .groupMessagePinned(UIKitUtil.memberDisplayName(systemMessage.opUser));
-  }
-
-  static String getUnpinGroupMessageDisplayString(
-      UnpinGroupMessage systemMessage, BuildContext context) {
-    AppLocalizedText localizations = AppLocalization.of(context);
-    return localizations.groupMessageUnpinned(
-        UIKitUtil.memberDisplayName(systemMessage.opUser));
-  }
-
   static String getChangeGroupNameDisplayString(
       ChangeGroupName systemMessage, BuildContext context) {
     AppLocalizedText localizations = AppLocalization.of(context);
@@ -289,18 +234,6 @@ class MessageUtil {
       return '$operator ${localizations.groupNoticeChangedTo} $groupNotice';
     } else {
       return '$operator ${localizations.groupNoticeDeleted}';
-    }
-  }
-
-  static String getChangeGroupIntroductionDisplayString(
-      ChangeGroupIntroduction systemMessage, BuildContext context) {
-    AppLocalizedText localizations = AppLocalization.of(context);
-    String operator = UIKitUtil.memberDisplayName(systemMessage.opUser);
-    String groupIntroduction = systemMessage.groupIntroduction;
-    if (groupIntroduction.isNotEmpty) {
-      return '$operator ${localizations.groupIntroChangedTo} $groupIntroduction';
-    } else {
-      return '$operator ${localizations.groupIntroDeleted}';
     }
   }
 
@@ -401,6 +334,8 @@ class MessageUtil {
         if (customPayload == null) {
           return localizations.messageTypeCustom;
         }
+        final notice = ConversationNotice.fromMessage(messageInfo);
+        if (notice != null) return conversationNoticeText(notice);
 
         CallingMessageDataProvider provider =
             CallingMessageDataProvider(messageInfo, context);
@@ -519,7 +454,10 @@ class MessageUtil {
   /// 系统业务事件采用独立提示行，避免附加普通消息头像与气泡。
   static bool isSystemStyleCustomMessagePayload(
       MessageInfo message, BuildContext context) {
-    if (StickyMessageEvent.fromMessage(message) != null) return true;
+    if (StickyMessageEvent.fromMessage(message) != null ||
+        ConversationNotice.fromMessage(message) != null) {
+      return true;
+    }
     if (message.messageType == MessageType.custom) {
       try {
         final customPayloadData =
@@ -543,4 +481,10 @@ class MessageUtil {
 
     return false;
   }
+
+  /// 撤回由原消息状态展示，其他后端事件用同一文本生成正文和摘要。
+  static String conversationNoticeText(ConversationNotice notice) =>
+      notice.usesOriginalMessage
+          ? ''
+          : notice.textFor(LoginStore.shared.loginState.loginUserInfo?.userID);
 }
