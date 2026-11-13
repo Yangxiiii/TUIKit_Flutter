@@ -506,7 +506,7 @@ class _MessageListState extends State<MessageList>
   /// 补齐 SDK 尚未接管的本机和归档记录，不取代原 SDK 消息源。
   final LocalMessageWindow _localWindow = LocalMessageWindow();
 
-  /// SDK 窗口成功加载后，才允许根据它的历史结束标记显示归档入口。
+  /// SDK 窗口成功加载后，才允许根据它的历史结束标记请求归档。
   bool _hasLoadedSdkWindow = false;
 
   /// SDK 更换定位窗口时递增，丢弃上一窗口在途的归档请求。
@@ -877,11 +877,9 @@ class _MessageListState extends State<MessageList>
     if (positions.isEmpty) return;
 
     int minIndex = positions.first.index;
-    int maxIndex = minIndex;
     for (final pos in positions) {
       final idx = pos.index;
       if (idx < minIndex) minIndex = idx;
-      if (idx > maxIndex) maxIndex = idx;
     }
 
     // Don't kick off auto-loads while any user-initiated navigation is in
@@ -903,7 +901,9 @@ class _MessageListState extends State<MessageList>
 
     // 历史分页可以在接近当前窗口底部时提前触发，实时新消息跟随则要求实际贴底。
     if (widget.connectionUnavailable || _refreshingAfterReconnect) return;
-    if (!_isLoadingNewer &&
+    // SDK 两个方向共用分页选项，串行请求以免在途查询被改写。
+    if (!isLoading &&
+        !_isLoadingNewer &&
         isNavIdle &&
         _messageListStore.state.hasNewerMessages.value) {
       if (_highlightedMessageId == null && minIndex <= 1) {
@@ -911,14 +911,7 @@ class _MessageListState extends State<MessageList>
       }
     }
 
-    // Auto-load older messages when scrolled near the oldest message (reverse list: largest index = oldest)
-    if (!isLoading &&
-        isNavIdle &&
-        _messageListStore.state.hasOlderMessages.value) {
-      if (maxIndex >= _messages.length - _loadOlderMessagesThreshold) {
-        _loadPreviousMessages();
-      }
-    }
+    _maybeLoadOlderMessages(positions);
 
     // Tongue visibility logic
     //
@@ -1103,6 +1096,7 @@ class _MessageListState extends State<MessageList>
       final index = _findLocatedMessageIndex(target);
       if (index != -1) _scrollToMessageAndHighlight(_messages[index].msgID);
     }
+    if (loadSucceeded) _scheduleOlderMessageCheck();
 
     // 先提交首屏显示，再启动置顶等辅助查询；清未读仍只接受后面的非空成功信号。
     widget.onInitialLoadFinished?.call();
@@ -1471,8 +1465,8 @@ class _MessageListState extends State<MessageList>
     return result;
   }
 
-  /// 归档入口跟随最早消息滚动，仅在 SDK 旧页取齐后出现。
-  bool get _showOlderHistoryEntry =>
+  /// SDK 成功建立窗口并取齐旧页后，才允许从当前窗口的边界续查归档。
+  bool get _canLoadArchive =>
       widget.historyConfig != null &&
       _hasLoadedSdkWindow &&
       !isLoading &&
@@ -1480,11 +1474,49 @@ class _MessageListState extends State<MessageList>
       !_messageListStore.state.hasOlderMessages.value &&
       (!_archiveLoaded || _archiveCursor != null);
 
-  /// 点击后向列表的历史端追加归档消息，已有消息索引不因追加发生移动。
+  /// 聊天窗口仅在归档请求中或失败时展示历史端状态。
+  bool get _showOlderHistoryEntry =>
+      _canLoadArchive && (_archiveStatus.isLoading || _archiveStatus.hasError);
+
+  /// SDK 与归档共用反向列表的旧端阈值；SDK 空窗口也允许开始归档查询。
+  void _maybeLoadOlderMessages(Iterable<ItemPosition> positions) {
+    if (_isInitialLoad ||
+        !_isInitialViewportReady ||
+        widget.offlineMessages != null ||
+        widget.connectionUnavailable ||
+        _refreshingAfterReconnect ||
+        isLoading ||
+        _isLoadingNewer ||
+        _navigationState is! _NavIdle) {
+      return;
+    }
+    final nearOldest = _messages.isEmpty ||
+        positions.any((position) =>
+            position.index >= _messages.length - _loadOlderMessagesThreshold);
+    if (!nearOldest) return;
+    if (_messageListStore.state.hasOlderMessages.value) {
+      unawaited(_loadPreviousMessages());
+    } else if (_canLoadArchive && !_archiveStatus.hasError) {
+      unawaited(_loadArchivedMessages());
+    }
+  }
+
+  /// 空页或全部去重后可见索引可能不变，布局后仍需检查下一页。
+  void _scheduleOlderMessageCheck() {
+    if (widget.historyConfig == null) return;
+    final binding = WidgetsBinding.instance;
+    binding.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _maybeLoadOlderMessages(_itemPositionsListener.itemPositions.value);
+    });
+    binding.ensureVisualUpdate();
+  }
+
+  /// 向历史端追加归档消息，保留已有消息的索引和当前阅读位置。
   Future<void> _loadArchivedMessages() async {
     if (widget.connectionUnavailable || _refreshingAfterReconnect) return;
     final config = widget.historyConfig;
-    if (config == null || !_showOlderHistoryEntry || _archiveStatus.isLoading) {
+    if (config == null || !_canLoadArchive || _archiveStatus.isLoading) {
       return;
     }
     final revision = _historyWindowRevision;
@@ -1519,6 +1551,7 @@ class _MessageListState extends State<MessageList>
       // 复用本机窗口的去重、撤回和删除处理，实时消息到来时仍保留归档页。
       _localWindow.seed(page.messages);
       _onMessageListStateChanged();
+      _scheduleOlderMessageCheck();
     } on Object catch (error, stackTrace) {
       if (!mounted || revision != _historyWindowRevision) return;
       debugPrint('messageList, archive load failed: $error');
@@ -1526,7 +1559,7 @@ class _MessageListState extends State<MessageList>
     }
   }
 
-  /// 构建历史端的入口；保留宿主的加载和失败重试样式。
+  /// 用宿主样式显示归档加载状态，并在失败时重试原游标。
   Widget _buildOlderHistoryEntry(BuildContext context) =>
       widget.historyConfig!.buildEntry(
         context,
@@ -1534,6 +1567,7 @@ class _MessageListState extends State<MessageList>
         onLoad: () => unawaited(_loadArchivedMessages()),
       );
 
+  /// 只有 SDK 旧页成功返回才重新检查分页，避免把请求失败当成耗尽。
   Future<void> _loadPreviousMessages() async {
     if (isLoading || !_messageListStore.state.hasOlderMessages.value) return;
 
@@ -1543,34 +1577,50 @@ class _MessageListState extends State<MessageList>
       isLoading = true;
     });
 
-    await _messageListStore.loadOlderMessages();
-    if (mounted) {
-      setState(() {
-        isLoading = false;
-      });
+    final revision = _historyWindowRevision;
+    try {
+      final result = await _messageListStore.loadOlderMessages();
+      if (mounted &&
+          revision == _historyWindowRevision &&
+          result.isSuccess &&
+          (_messages.isEmpty ||
+              !_messageListStore.state.hasOlderMessages.value)) {
+        _scheduleOlderMessageCheck();
+      }
+    } on Object catch (error) {
+      debugPrint('messageList, SDK older load failed: $error');
+    } finally {
+      if (mounted) {
+        setState(() => isLoading = false);
+      }
     }
   }
 
+  /// SDK 新页结束后恢复旧端分页检查，查询失败也要释放加载状态。
   Future<void> _loadNewerMessages() async {
-    if (_isLoadingNewer || !_messageListStore.state.hasNewerMessages.value)
+    if (_isLoadingNewer || !_messageListStore.state.hasNewerMessages.value) {
       return;
+    }
 
     setState(() {
       _isLoadingNewer = true;
     });
 
     final oldListLength = _messages.length;
-    await _messageListStore.loadNewerMessages();
-    final newListLength = _messages.length;
-    if (mounted && newListLength > oldListLength) {
-      final newIndex = newListLength - oldListLength;
-      _itemScrollController.jumpTo(index: newIndex);
-    }
-
-    if (mounted) {
-      setState(() {
-        _isLoadingNewer = false;
-      });
+    try {
+      await _messageListStore.loadNewerMessages();
+      final newListLength = _messages.length;
+      if (mounted && newListLength > oldListLength) {
+        final newIndex = newListLength - oldListLength;
+        _itemScrollController.jumpTo(index: newIndex);
+      }
+    } on Object catch (error) {
+      debugPrint('messageList, SDK newer load failed: $error');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingNewer = false);
+        _scheduleOlderMessageCheck();
+      }
     }
   }
 
@@ -1960,8 +2010,11 @@ class _MessageListState extends State<MessageList>
     } finally {
       _refreshViewportAnchor = null;
       _refreshingAfterReconnect = false;
-      // 补拉期间若再次重连，安排下一轮尝试。
-      if (mounted && _reconnectRefreshPending) setState(() {});
+      if (mounted) {
+        // 补拉期间若再次重连，安排下一轮尝试。
+        if (_reconnectRefreshPending) setState(() {});
+        _scheduleOlderMessageCheck();
+      }
     }
   }
 

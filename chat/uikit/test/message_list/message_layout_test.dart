@@ -83,7 +83,7 @@ void main() {
   });
 
   for (final selecting in [false, true]) {
-    testWidgets('${selecting ? '建群选择' : '普通聊天'}共用 SDK 和归档历史分页，失败后按游标重试',
+    testWidgets('${selecting ? '建群选择' : '普通聊天'}滚动取齐 SDK 历史后自动续查归档，失败可按游标重试',
         (tester) async {
       final original = TencentImSDKPlugin.v2TIMManager;
       final sdk = _Sdk('/single');
@@ -91,9 +91,14 @@ void main() {
       addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
       MessageList.clearViewportSnapshots();
       addTearDown(MessageList.clearViewportSnapshots);
-      final gate = sdk.messages.historyGate =
+      final olderSdkPage = sdk.messages.olderHistoryGate =
           Completer<V2TimValueCallback<List<V2TimMessage>>>();
       const boundary = 1700000000;
+      sdk.messages.chronologicalHistory = List.generate(
+        20,
+        (index) => _Message('SDK 消息 ${index + 1}',
+            timestampOverride: boundary + index + 1),
+      );
       final calls = <(int?, String?)>[];
       final response = Completer<ChatOlderMessagesPage>();
       MessageInfo archived(String id, int timestamp) => MessageInfo(
@@ -138,16 +143,25 @@ void main() {
           ]),
         ),
       ));
-      await tester.pump();
+      await tester.pumpAndSettle();
       final entry = find.text('查询更早消息');
+      expect(sdk.messages.historyCalls, 1);
+      expect(calls, isEmpty);
       expect(entry, findsNothing);
-      gate.complete(V2TimValueCallback(code: 0, desc: '', data: [
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, 2400));
+      await tester.pumpAndSettle();
+      expect(sdk.messages.historyCalls, 2);
+      expect(calls, isEmpty);
+
+      olderSdkPage.complete(V2TimValueCallback(code: 0, desc: '', data: [
         _Message('SDK 最早消息', timestampOverride: boundary),
       ]));
       await tester.pumpAndSettle();
-      expect(calls, isEmpty);
-      expect(tester.getTopLeft(entry).dy,
-          lessThan(tester.getTopLeft(find.text('SDK 最早消息')).dy));
+      expect(calls, [(boundary, null)]);
+      expect(entry, findsNothing);
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, 400));
+      await tester.pumpAndSettle();
+      expect(find.text('加载归档中'), findsOneWidget);
       if (selecting) {
         final row = find.byWidgetPredicate((widget) =>
             widget is MessageItem && widget.message.msgID == 'SDK 最早消息');
@@ -155,26 +169,64 @@ void main() {
         await tester.pumpAndSettle();
         expect(selection?.selectedCount, 1);
       }
-      await tester.tap(entry);
-      await tester.pump();
-      expect(find.text('加载归档中'), findsOneWidget);
       response.completeError(StateError('模拟请求失败'));
       await tester.pumpAndSettle();
+      expect(calls, [(boundary, null)]);
       expect(find.text('SDK 最早消息'), findsOneWidget);
       await tester.tap(find.text('重试归档'));
       await tester.pumpAndSettle();
-      expect(find.text('归档第一条'), findsOneWidget);
-      expect(calls, [(boundary, null), (boundary, null)]);
-      await tester.tap(entry);
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, 400));
       await tester.pumpAndSettle();
-      expect(calls.last, (null, 'next'));
       expect(find.text('归档第一条'), findsOneWidget);
+      expect(calls, [(boundary, null), (boundary, null), (null, 'next')]);
       expect(tester.getTopLeft(find.text('归档第二条')).dy,
           lessThan(tester.getTopLeft(find.text('归档第一条')).dy));
       expect(entry, findsNothing);
       if (selecting) {
         expect(selection?.selectedMessages?.call().single.msgID, 'SDK 最早消息');
       }
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
+  for (final sdkSucceeded in [true, false]) {
+    testWidgets('SDK 首屏${sdkSucceeded ? '为空时续查归档' : '失败时等待 SDK 恢复'}',
+        (tester) async {
+      final original = TencentImSDKPlugin.v2TIMManager;
+      final sdk = _Sdk('/single');
+      TencentImSDKPlugin.v2TIMManager = sdk;
+      addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+      MessageList.clearViewportSnapshots();
+      addTearDown(MessageList.clearViewportSnapshots);
+      sdk.messages.historyGate = Completer()
+        ..complete(V2TimValueCallback<List<V2TimMessage>>(
+          code: sdkSucceeded ? 0 : -1,
+          desc: '',
+          data: [],
+        ));
+      final calls = <(int?, String?)>[];
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Column(children: [
+            MessageList(
+              conversationID: 'c2c_visual',
+              historyConfig: ChatMessageHistoryConfig(
+                load: ({required beforeTimestamp, required cursor}) async {
+                  calls.add((beforeTimestamp, cursor));
+                  return (
+                    messages: <MessageInfo>[],
+                    nextCursor: cursor == null ? 'next' : null
+                  );
+                },
+                buildEntry: (context, {required status, required onLoad}) =>
+                    const SizedBox.shrink(),
+              ),
+            ),
+          ]),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(calls, sdkSucceeded ? [(null, null), (null, 'next')] : isEmpty);
       await tester.pumpWidget(const SizedBox.shrink());
     });
   }
@@ -2079,6 +2131,9 @@ final class _Messages implements V2TIMMessageManager {
   _Messages(this.scene);
   final String scene;
   Completer<V2TimValueCallback<List<V2TimMessage>>>? historyGate;
+
+  /// 单独控制 SDK 旧页的返回时机，验证归档等待 SDK 取齐。
+  Completer<V2TimValueCallback<List<V2TimMessage>>>? olderHistoryGate;
   int historyCalls = 0;
 
   /// 保留 SDK 请求游标，用于确认恢复时查询的是当前锚点两侧。
@@ -2094,6 +2149,8 @@ final class _Messages implements V2TIMMessageManager {
     historyCalls++;
     final cursor = (call.namedArguments[#lastMsg] as V2TimMessage?)?.msgID;
     historyCursors.add(cursor);
+    final olderGate = olderHistoryGate;
+    if (cursor != null && olderGate != null) return olderGate.future;
     final history = chronologicalHistory;
     if (history != null) {
       // SDK 旧消息页倒序、新消息页正序，且两页均不重复返回游标自身。
