@@ -3,6 +3,8 @@ import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/widgets.dart';
 import '../message_input/chat_media_sender.dart';
 import 'message_forward_config.dart';
+import 'utils/group_announcement_message.dart';
+import 'utils/conversation_notice.dart';
 export 'message_forward_config.dart';
 
 /// 宿主接管表情写入和条目渲染，UIKit 继续管理既有表情选择入口。
@@ -15,21 +17,42 @@ final class ChatMessageReactionConfig {
   /// 接收当前消息与跨端表情编码，提交后由宿主发布确认状态。
   final Future<void> Function(MessageInfo message, String code) select;
 
-  /// 使用消息列的可用宽度渲染表情条，布尔值表示是否左对齐。
-  final Widget Function(BuildContext context, MessageInfo message, bool isLeft)
-      buildBar;
+  /// 使用消息列的可用宽度渲染表情条，旧群聊回应可沿用原生明细入口。
+  final Widget Function(BuildContext context, MessageInfo message, bool isLeft,
+      {VoidCallback? showNativeDetails}) buildBar;
 }
 
 /// 约定消息列表的外观和可操作能力，具体默认值由聊天配置提供。
 abstract class MessageListConfigProtocol {
-  /// 配置为空时，表情选择和展示由 UIKit 原生回应处理。
+  /// 宿主接管云端表情提交和对应展示，缺省时继续使用原生回应。
   ChatMessageReactionConfig? get reactionConfig;
+
+  /// 建群与群资料变更通知中的个人名片由宿主打开。
+  void Function(BuildContext, String)? get onGroupInfoOperatorTap;
+
+  /// 宿主当前群角色是否允许显示退群与移出通知。
+  bool get showGroupDepartureNotices;
+
+  /// 成员进退群及管理员变更通知共用宿主的姓名样式和名片入口。
+  Widget Function(BuildContext, ConversationNotice)?
+      get groupMemberNoticeBuilder;
 
   /// 宿主统一转发入口；为空时保留UIKit默认流程。
   ChatForwardHandler? get forwardHandler;
 
   /// 宿主只删除当前用户本地记录，不借用会删除云端漫游的SDK批量接口。
   ChatLocalDeleteHandler? get localDeleteHandler;
+
+  /// 由宿主复核群权限后按提及 ID 打开名片。
+  void Function(BuildContext context, String userId)? get onMentionTap;
+
+  /// 宿主为消息中的单个提及成员提供行内回执指示。
+  Widget? Function(MessageInfo message, String userId)?
+      get mentionReceiptBuilder;
+
+  /// 点击已校验当前群的公告卡片时，交给宿主打开详情。
+  void Function(BuildContext, GroupAnnouncementMessage)?
+      get onGroupAnnouncementTap;
 
   /// 本账号已确认的本机删除标识，阻止SDK窗口与进程快照重新呈现旧记录。
   Set<String> get hiddenMessageIDs;
@@ -73,6 +96,13 @@ abstract class MessageListConfigProtocol {
   bool get isSupportDelete;
   bool get isSupportRecall;
   bool get enableReadReceipt;
+
+  /// 由群聊宿主提供气泡标题；空回调时使用 UIKit 的发送者名称。
+  String Function(MessageInfo)? get groupSenderName;
+
+  /// 宿主可替换群回执的展示与导航，默认沿用 UIKit。
+  Widget? Function(BuildContext, MessageInfo, MessageListStore)?
+      get groupReadReceiptBuilder;
   bool get isSupportForward;
   bool get isSupportMultiSelect;
   bool get isSupportReaction;
@@ -83,14 +113,50 @@ abstract class MessageListConfigProtocol {
 
 /// 提供消息列表默认外观，并保留宿主显式传入的单项覆盖。
 class ChatMessageListConfig implements MessageListConfigProtocol {
-  /// 单聊宿主提供的云表情回复适配，群聊和其他调用继续使用默认行为。
+  /// 群聊宿主按已确认的群角色设置，独立 UIKit 实例沿用已有显示方式。
+  @override
+  final bool showGroupDepartureNotices;
+
+  /// 宿主负责成员变动通知的姓名格式和名片动作，UIKit 继续处理事件受众。
+  @override
+  final Widget Function(BuildContext, ConversationNotice)?
+      groupMemberNoticeBuilder;
+
+  /// 按当前群的名称策略生成发送者标题。
+  @override
+  final String Function(MessageInfo)? groupSenderName;
+
+  /// 仅在消息满足群回执条件且有实时列表时调用。
+  @override
+  final Widget? Function(BuildContext, MessageInfo, MessageListStore)?
+      groupReadReceiptBuilder;
+
+  /// 宿主提供的云表情回复写入及展示适配。
   @override
   final ChatMessageReactionConfig? reactionConfig;
+
+  /// 按建群或群资料变更通知中的用户 ID 打开名片。
+  @override
+  final void Function(BuildContext, String)? onGroupInfoOperatorTap;
 
   @override
   final ChatForwardHandler? forwardHandler;
   @override
   final ChatLocalDeleteHandler? localDeleteHandler;
+
+  /// 只在提及位置合法且绑定个人身份时交给宿主处理。
+  @override
+  final void Function(BuildContext context, String userId)? onMentionTap;
+
+  /// 缺省时正文只展示提及文字，不占用行内回执空间。
+  @override
+  final Widget? Function(MessageInfo message, String userId)?
+      mentionReceiptBuilder;
+
+  /// 空回调时卡片仅提供摘要展示。
+  @override
+  final void Function(BuildContext, GroupAnnouncementMessage)?
+      onGroupAnnouncementTap;
   @override
   final Set<String> hiddenMessageIDs;
   @override
@@ -240,9 +306,17 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
   bool get isSupportQuote => _isSupportQuote;
 
   const ChatMessageListConfig({
+    this.showGroupDepartureNotices = true,
+    this.groupMemberNoticeBuilder,
+    this.groupSenderName,
+    this.groupReadReceiptBuilder,
     this.reactionConfig,
+    this.onGroupInfoOperatorTap,
     this.forwardHandler,
     this.localDeleteHandler,
+    this.onMentionTap,
+    this.mentionReceiptBuilder,
+    this.onGroupAnnouncementTap,
     this.hiddenMessageIDs = const {},
     this.videoPlayIcon,
     this.imageLoadingPlaceholder,

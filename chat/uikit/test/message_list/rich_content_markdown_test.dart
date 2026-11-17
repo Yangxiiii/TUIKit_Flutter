@@ -1,16 +1,105 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:app_ui/app_ui.dart' show AppNormalColorScheme;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_chat_uikit/src/conversation_list/rich_content_preview.dart';
 import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
-import 'package:tencent_chat_uikit/src/message_input/src/chat_special_text_span_builder.dart';
+import 'package:tencent_chat_uikit/src/message_input/mention/message_mentions.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_markdown_parser.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_message.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/rich_content_markdown.dart';
+import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/text_message_widget.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
+import 'package:tencent_cloud_chat_sdk/models/v2_tim_message.dart';
 
 void main() {
+  for (final rich in [false, true]) {
+    testWidgets('${rich ? '图文' : '普通'}消息仅给个人提及附加行内回执',
+        (tester) async {
+      const text = '@甲 @乙 @所有人';
+      final mentions = [
+        MentionInfo(userID: 'a', displayName: '甲', startIndex: 0),
+        MentionInfo(userID: 'b', displayName: '乙', startIndex: 3),
+        MentionInfo(
+            userID: MentionInfo.atAllUserID, displayName: '所有人', startIndex: 6),
+      ];
+      Widget indicator(String id) =>
+          SizedBox(key: ValueKey(id), width: 6, height: 6);
+      final message = MessageInfo(
+        messageType: MessageType.text,
+        messagePayload: TextMessagePayload(text: text),
+        conversationType: ConversationType.group,
+        rawMessage: V2TimMessage.fromJson({
+          'message_risk_type_identified': 0,
+          'message_cloud_custom_str': jsonEncode({
+            MessageMentions.key: {
+              'version': 1,
+              'items': MessageMentions.encode(text, mentions, 0),
+            },
+          }),
+        }),
+      );
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: rich
+              ? RichContentMarkdown(
+                  data: text,
+                  textStyle: const TextStyle(fontSize: 16),
+                  mentions: mentions,
+                  buildMentionReceipt: indicator,
+                )
+              : TextMessageWidget(
+                  message: message,
+                  isSelf: true,
+                  maxWidth: 320,
+                  config: ChatMessageListConfig(
+                    mentionReceiptBuilder: (_, id) => indicator(id),
+                  ),
+                ),
+        ),
+      ));
+      final a = find.byKey(const ValueKey('a'));
+      final b = find.byKey(const ValueKey('b'));
+      expect(a, findsOneWidget);
+      expect(b, findsOneWidget);
+      expect(tester.getTopLeft(a).dx, lessThan(tester.getTopLeft(b).dx));
+      expect(find.byKey(ValueKey(MentionInfo.atAllUserID)), findsNothing);
+    });
+  }
+
+  testWidgets('富文本用原始位置标亮同名提及，保留格式并点击正确身份', (tester) async {
+    const source = '普通@同名 与 **@同名**';
+    final clicked = <String>[];
+    await tester.pumpWidget(MaterialApp(
+      home: RichContentMarkdown(
+        data: source,
+        textStyle: const TextStyle(fontSize: 16),
+        mentions: [
+          MentionInfo(
+              userID: 'selected',
+              displayName: '同名',
+              startIndex: source.lastIndexOf('@')),
+        ],
+        onMentionTap: (_, id) => clicked.add(id),
+      ),
+    ));
+    final found = <TextSpan>[];
+    for (final rich in tester.widgetList<RichText>(find.byType(RichText))) {
+      rich.text.visitChildren((span) {
+        if (span is TextSpan && span.text == '@同名') found.add(span);
+        return true;
+      });
+    }
+    expect(found, hasLength(1));
+    expect(found.single.style?.color, const AppNormalColorScheme().primary);
+    (found.single.recognizer! as TapGestureRecognizer).onTap!();
+    expect(clicked, ['selected']);
+    expect(find.textContaining('普通@同名', findRichText: true), findsOneWidget);
+  });
+
   testWidgets('富文本只跟随系统无障碍缩放，普通文字仍接受应用字号', (tester) async {
     tester.platformDispatcher.textScaleFactorTestValue = 1.2;
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);

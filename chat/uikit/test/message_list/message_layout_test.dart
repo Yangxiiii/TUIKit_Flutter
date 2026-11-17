@@ -31,6 +31,7 @@ import 'package:tencent_cloud_chat_sdk/models/v2_tim_merger_elem.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/merged_message_widget.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/merged_message_detail_page.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_message_reaction_result.dart';
+import 'package:tencent_cloud_chat_sdk/models/v2_tim_message_reaction.dart';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -44,6 +45,68 @@ import 'package:tencent_chat_uikit/src/third_party/extended_text_field/extended_
     show ExtendedEditableText;
 
 void main() {
+  testWidgets('退出再进后，双向历史窗口超过20条仍能恢复表情回复', (tester) async {
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/layout');
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    addTearDown(MessageList.clearViewportSnapshots);
+    final history = List<V2TimMessage>.generate(
+      41,
+      (index) =>
+          _Message('reaction-$index', timestampOverride: 1700000000 + index),
+    );
+    sdk.messages.chronologicalHistory = history.skip(21).toList();
+    final batchSizes = <int>[];
+    sdk.messages.reactionLoader = (batch) async {
+      batchSizes.add(batch.length);
+      if (batch.length > 20) {
+        return V2TimValueCallback(code: 1, desc: '超出批量读取上限');
+      }
+      return V2TimValueCallback(
+        code: 0,
+        desc: '',
+        data: [
+          for (final raw in batch)
+            V2TimMessageReactionResult(
+              resultCode: 0,
+              messageID: raw.msgID!,
+              reactionList: [
+                V2TimMessageReaction(
+                  reactionID: '[ZDEmoji_Like]',
+                  totalUserCount: 1,
+                  partialUserList: [],
+                  reactedByMyself: false,
+                ),
+              ],
+            ),
+        ],
+      );
+    };
+
+    Future<void> open() async {
+      await tester.pumpWidget(const MaterialApp(
+        home: Scaffold(
+          body: Column(children: [MessageList(conversationID: 'c2c_visual')]),
+        ),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    await open();
+    expect(batchSizes, [20]);
+    expect(find.byType(MessageReactionBar), findsWidgets);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+
+    sdk.messages.chronologicalHistory = history;
+    batchSizes.clear();
+    await open();
+    expect(batchSizes, [41, 20, 20, 1]);
+    expect(find.byType(MessageReactionBar), findsWidgets);
+  });
+
   testWidgets('建群勾选可加载无本地文件的在线图片，点击图片切换选择', (tester) async {
     final original = TencentImSDKPlugin.v2TIMManager;
     final sdk = _Sdk('/single');
@@ -1862,6 +1925,14 @@ void main() {
     final visibleText = tester.getRect(find.byType(ExtendedText));
     final time = tester.getRect(find.byType(Text).last);
     expect(time.left - visibleText.right, closeTo(8, .01));
+
+    message.conversationType = ConversationType.group;
+    await mount(false);
+    final groupText = tester.getRect(find.byType(ExtendedText));
+    final groupBubble = tester.getRect(find.byType(TextMessageWidget));
+    expect(groupText.height, closeTo(20, .01));
+    expect(groupText.top - groupBubble.top, closeTo(10, .01));
+    expect(groupBubble.bottom - groupText.bottom, closeTo(10, .01));
     expect(tester.takeException(), isNull);
   });
 
@@ -2144,6 +2215,10 @@ final class _Messages implements V2TIMMessageManager {
   /// 按时间正序排列的可变历史，用于模拟页面关闭期间收到新消息。
   List<V2TimMessage>? chronologicalHistory;
 
+  /// 测试可注入批量表情回包，默认继续返回空的表情列表。
+  Future<V2TimValueCallback<List<V2TimMessageReactionResult>>> Function(
+      List<V2TimMessage>)? reactionLoader;
+
   /// 可变历史按 SDK 游标分页，其他场景继续使用原有挂起或固定响应。
   Future<V2TimValueCallback<List<V2TimMessage>>> _loadHistory(Invocation call) {
     historyCalls++;
@@ -2206,13 +2281,16 @@ final class _Messages implements V2TIMMessageManager {
         #removeAdvancedMsgListener => Future<void>.sync(() {
             listeners.remove(call.namedArguments[#listener]);
           }),
-        #getMessageReactions => Future.value(
-            V2TimValueCallback<List<V2TimMessageReactionResult>>(
-              code: 0,
-              desc: '',
-              data: [],
+        #getMessageReactions => reactionLoader?.call(
+              call.namedArguments[#messageList] as List<V2TimMessage>,
+            ) ??
+            Future.value(
+              V2TimValueCallback<List<V2TimMessageReactionResult>>(
+                code: 0,
+                desc: '',
+                data: [],
+              ),
             ),
-          ),
         #markC2CMessageAsRead ||
         #markGroupMessageAsRead =>
           Future.value(V2TimCallback(code: 0, desc: '')),

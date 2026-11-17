@@ -4,7 +4,6 @@ import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
-import 'package:tencent_chat_uikit/src/message_list/utils/message_utils.dart';
 
 void main() {
   test('操作事件往返与未知版本、损坏字段和其他业务隔离', () {
@@ -33,6 +32,25 @@ void main() {
     expect(StickyMessageEvent.canPin(message), isFalse);
     message.messageType = MessageType.text;
     message.status = MessageStatus.revoked;
+    expect(StickyMessageEvent.canPin(message), isFalse);
+  });
+
+  test('群公告可以置顶并复用摘要，跨群卡片不能操作', () {
+    final message = MessageInfo(
+      msgID: 'im',
+      to: 'team',
+      status: MessageStatus.sendSuccess,
+      conversationType: ConversationType.group,
+      messageType: MessageType.custom,
+      messagePayload: CustomMessagePayload(
+        customData: '{"businessID":"oa_group_announcement","version":1,'
+            '"payload":{"announcementId":"9007199254740993",'
+            '"groupId":"team","summary":"公告摘要"}}',
+      ),
+    );
+    expect(StickyMessageEvent.canPin(message), isTrue);
+    expect(ChatStickyPreview.fromMessage(message).text, '[群公告]公告摘要');
+    message.to = 'other';
     expect(StickyMessageEvent.canPin(message), isFalse);
   });
 

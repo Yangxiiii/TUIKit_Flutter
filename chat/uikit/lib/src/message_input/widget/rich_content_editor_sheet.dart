@@ -1,3 +1,4 @@
+import '../mention/mention_text_editing_controller.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -248,7 +249,11 @@ final class RichContentInputToolbar extends StatelessWidget {
         [
           _iconButton(_showKeyboard ? AppIcons.inputKeyboard : AppIcons.emoji,
               _emojiTooltip, _onEmoji, colors),
-          _iconButton(AppIcons.a, '提及成员', _onMention, colors),
+          if (_onMention != null)
+            Semantics(
+              identifier: 'tim.$_keyPrefix.mention',
+              child: _iconButton(AppIcons.a, '提及成员', _onMention, colors),
+            ),
           MergeSemantics(
             child: Semantics(
               identifier: 'tim.$_keyPrefix.call',
@@ -410,6 +415,9 @@ final class RichContentEditorSheet extends StatefulWidget {
   /// 把草稿交给 MessageInput 创建本地发送气泡，接管成功返回 true。
   final Future<bool> Function(RichContentDraft draft) onSend;
 
+  /// 群聊宿主选择真实成员；未提供时按普通字符插入 @。
+  final ChatMentionPicker? mentionPicker;
+
   /// 关闭时把最新草稿和发送结果交回输入区。
   final ValueChanged<RichContentEditorResult>? onClose;
 
@@ -455,6 +463,7 @@ final class RichContentEditorSheet extends StatefulWidget {
     required this.conversationName,
     required this.initialDraft,
     required this.onSend,
+    this.mentionPicker,
     this.canUploadAttachments = false,
     this.videoPlayIcon,
     this.imageLoadingPlaceholder,
@@ -721,7 +730,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
   _TextEditorBlock _newTextBlock([String text = '']) {
     return _TextEditorBlock(
       _nextBlockId++,
-      TextEditingController(text: text),
+      MentionTextEditingController()..text = text,
       FocusNode(),
     );
   }
@@ -737,11 +746,17 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
         case RichContentDraftTextBlock block:
           currentText ??= _TextEditorBlock(
             block.id,
-            TextEditingController(),
+            MentionTextEditingController(),
             FocusNode(),
           );
           if (!_blocks.contains(currentText)) _blocks.add(currentText);
-          currentText.controller.text += block.text;
+          final controller = currentText.controller;
+          final start = controller.text.length;
+          controller.text += block.text;
+          for (final mention in block.mentions) {
+            controller.addMention(
+                mention.copyWith(startIndex: start + mention.startIndex));
+          }
         case RichContentDraftAttachmentBlock block
             when block.attachment.isInlineMedia:
           currentText ??= _newTextBlock();
@@ -772,7 +787,8 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
       )) {
         final text = textBlock.controller.text.substring(offset, match.start);
         if (text.isNotEmpty) {
-          draftBlocks.add(RichContentDraftTextBlock(nextDraftId++, text));
+          draftBlocks.add(RichContentDraftTextBlock(nextDraftId++, text,
+              mentions: textBlock.controller.mentionsIn(offset, match.start)));
         }
         final image = _inlineMedia[int.parse(match.group(1)!)];
         if (image != null) draftBlocks.add(image);
@@ -780,7 +796,9 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
       }
       final trailing = textBlock.controller.text.substring(offset);
       if (trailing.isNotEmpty) {
-        draftBlocks.add(RichContentDraftTextBlock(nextDraftId++, trailing));
+        draftBlocks.add(RichContentDraftTextBlock(nextDraftId++, trailing,
+            mentions: textBlock.controller
+                .mentionsIn(offset, textBlock.controller.text.length)));
       }
     }
     return RichContentDraft(
@@ -817,6 +835,9 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
 
   /// 提交当前快照；发送成功后关闭未继续编辑的草稿，提交失败时释放忙碌态。
   Future<void> send() async {
+    final composing = _activeTextBlock?.controller.value.composing;
+    if (composing != null && composing.isValid && !composing.isCollapsed)
+      return;
     final draft = _buildDraft();
     if (!canSend) return;
     _setEditorState(() => _isSending = true);
@@ -918,8 +939,31 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     editor?.hideToolbar();
   }
 
-  /// 在当前正文光标处插入提及符号。
-  void insertMention() => _insertText('@');
+  /// 富文本与普通输入共用群选人页，按打开时的选区回填。
+  Future<void> insertMention() async {
+    final picker = widget.mentionPicker;
+    if (picker == null) {
+      _insertText('@');
+      return;
+    }
+    final block =
+        _activeTextBlock ?? _blocks.whereType<_TextEditorBlock>().last;
+    final before = block.controller.value;
+    if (before.composing.isValid && !before.composing.isCollapsed) return;
+    final members = await picker(context);
+    // 选择期间用户可能关闭面板或更换文字块，失效结果不得写入草稿。
+    if (!mounted ||
+        !_blocks.contains(block) ||
+        _isClosing ||
+        block.controller.text != before.text) return;
+    if (members != null && members.isNotEmpty) {
+      final selection = before.selection.isValid
+          ? before.selection
+          : TextSelection.collapsed(offset: before.text.length);
+      block.controller.insertMentions(selection, members);
+    }
+    block.focusNode.requestFocus();
+  }
 
   /// 按原文选区替换正文；面板选择只更新内容和光标，其他插入入口保持焦点行为。
   void _insertText(String value, {bool requestFocus = true}) {
@@ -976,9 +1020,12 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     final current = block.controller.value;
     final hasSelection =
         current.selection.isValid && !current.selection.isCollapsed;
-    final value = hasSelection
-        ? toggleSelectedMarkdownFormat(current, marker).value
-        : exitActiveMarkdownFormats(current, _activeFormats);
+    final formatted = hasSelection
+        ? toggleSelectedMarkdownFormat(current, marker,
+            mentionEnds: block.controller.mentionEnds)
+        : null;
+    final value =
+        formatted?.value ?? exitActiveMarkdownFormats(current, _activeFormats);
     if (hasSelection) {
       _activeFormats
         ..clear()
@@ -988,7 +1035,11 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     }
     // 先记录改写后的选区，控制器监听器才能区分程序更新与用户拖动。
     block.lastValue = value;
-    block.controller.value = value;
+    if (formatted == null) {
+      block.controller.value = value;
+    } else {
+      block.controller.applySelectionFormat(value, formatted.mentionOffsets);
+    }
     _setEditorState(() {});
     block.focusNode.requestFocus();
   }
@@ -1516,6 +1567,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
                       imageLoadingPlaceholder: widget.imageLoadingPlaceholder,
                       videoLoadingPlaceholder: widget.videoLoadingPlaceholder,
                       attachments: _inlineMedia,
+                      mentionRanges: block.controller.mentionEnds,
                       maxImageWidth: maxImageWidth,
                       devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
                       onTapUrl: (_) {},
@@ -1603,7 +1655,7 @@ sealed class _EditorBlock {
 /// 保存正文块的输入与光标状态，由编辑器统一注册监听并释放资源。
 final class _TextEditorBlock extends _EditorBlock {
   /// 当前块的原文及选区，偏移包含隐藏的格式标签。
-  final TextEditingController controller;
+  final MentionTextEditingController controller;
 
   /// 当前块的输入焦点，用于切换共享工具条所对应的正文。
   final FocusNode focusNode;
@@ -1656,6 +1708,7 @@ final class RichContentAttachmentSpanBuilder
     required super.onTapUrl,
     required super.colorScheme,
     required super.mapMarkdownMarkers,
+    super.mentionRanges,
   }) : assert(devicePixelRatio > 0);
 
   @override

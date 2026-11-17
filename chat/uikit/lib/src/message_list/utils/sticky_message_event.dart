@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:atomic_x_core/atomicxcore.dart';
 
 import 'big_file_message.dart';
+import 'group_announcement_message.dart';
 import 'rich_content_message.dart';
 
 /// 识别置顶操作记录；动态多业务协议在入口校验，未知版本交还普通自定义消息。
@@ -86,11 +87,9 @@ final class StickyMessageEvent {
                   (message.messagePayload as CustomMessagePayload).customData)
               : null;
 
-  /// 仅成功消息可置顶；自定义类型必须是已知内容协议，操作提示和语音不得再次置顶。
+  /// 成功发送的常规消息和已识别的内容可置顶，群公告还需匹配消息所属群。
   static bool canPin(MessageInfo message) {
-    if (message.msgID.isEmpty ||
-        message.status != MessageStatus.sendSuccess ||
-        message.conversationType == ConversationType.group) {
+    if (message.msgID.isEmpty || message.status != MessageStatus.sendSuccess) {
       return false;
     }
     return switch (message.messageType) {
@@ -108,7 +107,11 @@ final class StickyMessageEvent {
               RichContentMessage.tryParse(
                       (message.messagePayload as CustomMessagePayload)
                           .customData) !=
-                  null),
+                  null ||
+              (message.conversationType == ConversationType.group &&
+                  GroupAnnouncementMessage.fromConversation(
+                          message, 'group_${message.to}') !=
+                      null)),
       _ => false,
     };
   }

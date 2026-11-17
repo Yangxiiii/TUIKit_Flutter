@@ -53,6 +53,9 @@ class ChatPage extends AppBaseStatefulPage {
   /// 已登录时保留原聊天窗口和输入状态，连接恢复后补拉当前附近的消息。
   final bool connectionUnavailable;
 
+  /// 当前账号在群内被禁言时，关闭底部输入操作并保留草稿。
+  final bool sendMuted;
+
   /// 宿主提供 SDK 历史加载完毕后的归档消息入口。
   final ChatMessageHistoryConfig? messageHistoryConfig;
 
@@ -114,6 +117,7 @@ class ChatPage extends AppBaseStatefulPage {
     this.onOfflineViewportChanged,
     this.offlineFooter,
     this.connectionUnavailable = false,
+    this.sendMuted = false,
     this.messageHistoryConfig,
     this.aggregateMessages = false,
     this.enableSuccessfulDelete = false,
@@ -910,6 +914,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
                   key: widget.offlineMessages == null ? _messageInputKey : null,
                   readOnly: widget.offlineMessages != null,
                   connectionUnavailable: widget.connectionUnavailable,
+                  sendMuted: widget.sendMuted,
                   conversationID: widget.conversation.conversationID,
                   config: widget.messageInputConfig,
                   replyConfig: widget.messageReplyConfig,

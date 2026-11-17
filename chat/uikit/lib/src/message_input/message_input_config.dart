@@ -1,7 +1,20 @@
+import 'package:flutter/widgets.dart' show BuildContext;
+import 'package:atomic_x_core/atomicxcore.dart';
+import 'mention/mention_info.dart';
 import 'package:app_core/app_core.dart';
 import 'package:flutter/painting.dart';
 import 'package:tuikit_atomic_x/base_component/utils/app_builder.dart';
 import 'chat_media_sender.dart';
+
+/// 群成员选择由宿主按当前群权限和分页数据展示。
+typedef ChatMentionPicker = Future<List<MentionInfo>?> Function(
+    BuildContext context);
+
+/// 业务代发返回 SDK 中实际存在的消息，供原会话列表按消息 ID 合并。
+typedef ChatRichMentionSender = Future<MessageInfo> Function(
+    CustomMessagePayload payload,
+    List<Map<String, Object>> mentions,
+    MessageInfo? quotedMessage);
 
 /// 富文本编辑器支持插入的本地附件类型。
 enum RichContentAttachmentType { image, file }
@@ -87,6 +100,12 @@ abstract class MessageInputConfigProtocol {
   bool get isShowMore;
   bool get enableReadReceipt;
   bool get enableMention;
+
+  /// 群聊可用的宿主选人入口，未提供时保留 UIKit 选择器。
+  ChatMentionPicker? get mentionPicker;
+
+  /// 组合 @ 的业务发送入口，未提供时不使用业务代发。
+  ChatRichMentionSender? get richMentionSender;
   bool get enableVoiceToTextOnRecord;
 
   /// 单聊先识别预览再确认发送，并支持在同一音频末尾继续录音；默认保留旧流程。
@@ -126,6 +145,14 @@ class ChatMessageInputConfig implements MessageInputConfigProtocol {
   /// 仅由宿主对本次语音预览范围开启，避免改变其他会话的发送行为。
   @override
   final bool previewVoiceBeforeSend;
+
+  /// 宿主选择成员后只向打开选人页的输入区回填。
+  @override
+  final ChatMentionPicker? mentionPicker;
+
+  /// 组合正文的业务发送适配，成功时返回真实 SDK 消息。
+  @override
+  final ChatRichMentionSender? richMentionSender;
 
   final bool? _userIsShowAudioRecorder;
   final bool? _userIsShowMore;
@@ -191,6 +218,8 @@ class ChatMessageInputConfig implements MessageInputConfigProtocol {
     this.fileSelector,
     this.actionGuard,
     this.previewVoiceBeforeSend = false,
+    this.mentionPicker,
+    this.richMentionSender,
     bool? isShowAudioRecorder,
     bool? isShowMore,
     bool? enableReadReceipt,

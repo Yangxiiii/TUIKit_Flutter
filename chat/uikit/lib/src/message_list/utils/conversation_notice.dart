@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:atomic_x_core/atomicxcore.dart';
 
-/// 校验后端系统提示，聊天正文和会话摘要按当前用户生成同一份纯文本。
+/// 统一系统通知，为聊天正文和会话摘要保留事件身份与姓名。
 final class ConversationNotice {
   const ConversationNotice._(
       this.eventId, this.type, this.occurredAt, this._data);
@@ -12,6 +12,105 @@ final class ConversationNotice {
 
   /// 已验证的事件类型，用于选择后端通知文案。
   final String type;
+
+  /// 由建群事件生成行内姓名与文案，正文保留全名，摘要可按当前账号称呼本人。
+  List<({String text, String? userId})> groupCreationParts({
+    String? viewerId,
+  }) {
+    if (type != 'group.created') return const [];
+    ({String text, String? userId}) person(Map user) {
+      final id = user['userId'] as String;
+      return (
+        text: id == viewerId ? '你' : user['nameSnapshot'] as String,
+        userId: id,
+      );
+    }
+
+    final operator = person(_data['operator'] as Map);
+    // 同一人只展示一次，建群发起人不计入邀请名单。
+    final seen = {operator.userId};
+    final invited = (_data['initialMembers'] as List)
+        .cast<Map>()
+        .where((member) => seen.add(member['userId'] as String))
+        .map(person)
+        .toList();
+    if (invited.isEmpty) {
+      return [operator, (text: ' 创建了群聊', userId: null)];
+    }
+    return [
+      operator,
+      (text: ' 发起群聊，并邀请 ', userId: null),
+      for (final (index, member) in invited.indexed) ...[
+        if (index > 0) (text: '、', userId: null),
+        member,
+      ],
+      (text: ' 加入此群', userId: null),
+    ];
+  }
+
+  /// 成员退群与移出消息共享群内通知的受众策略。
+  bool get isGroupDeparture =>
+      type == 'group.member_left' || type == 'group.members_removed';
+
+  /// 邀请通知沿用成员变动样式，受众仍由该消息的投递范围决定。
+  bool get isGroupInvitation => type == 'group.members_invited';
+
+  /// 管理员身份变更面向全群，不受退群通知的展示开关限制。
+  bool get isGroupAdminChange => type == _adminAdded || type == _adminRemoved;
+
+  /// 设置群管理员的自定义通知类型。
+  static const _adminAdded = 'group.add_manager';
+
+  /// 撤销群管理员的自定义通知类型。
+  static const _adminRemoved = 'group.remove_manager';
+
+  /// 返回成员变动行内片段，摘要可将当前账号称为「你」。
+  List<({String text, String? userId})> groupMemberParts({String? viewerId}) {
+    ({String text, String? userId}) person(Map user) => (
+          text:
+              user['userId'] == viewerId ? '你' : user['nameSnapshot'] as String,
+          userId: user['userId'] as String
+        );
+    if (type == 'group.member_left') {
+      return [
+        person(_data['member'] as Map),
+        (text: ' 退出了群组', userId: null),
+      ];
+    }
+    final ending = switch (type) {
+      'group.members_invited' => ' 加入了群组',
+      'group.members_removed' => ' 移出了群组',
+      _adminAdded => ' 添加为群管理员',
+      _adminRemoved => ' 从群管理员中移除',
+      _ => null,
+    };
+    if (ending == null) return const [];
+    // 操作人已在句首展示，避免同一用户在行内出现重复名片入口。
+    final seen = <Object?>{(_data['operator'] as Map)['userId']};
+    final people = (_data['members'] as List)
+        .cast<Map>()
+        .where((member) => seen.add(member['userId']))
+        .toList();
+    return [
+      person(_data['operator'] as Map),
+      (text: isGroupInvitation ? ' 邀请 ' : ' 将 ', userId: null),
+      for (var index = 0; index < people.length; index++) ...[
+        if (index > 0) (text: '、', userId: null),
+        person(people[index]),
+      ],
+      (text: ending, userId: null),
+    ];
+  }
+
+  /// 群描述和群名变更统一展示操作人姓名，该身份也用于打开名片。
+  ({String id, String name})? descriptionOperator() {
+    if (type != 'group.description_changed') return null;
+    final operator = _data['operator'] as Map;
+    return (
+      id: operator['userId'] as String,
+      name: operator['nameSnapshot'] as String,
+    );
+  }
 
   /// 后端给出的可信事件时间，保留精度以免按接收时间误合并。
   final DateTime occurredAt;
@@ -25,34 +124,108 @@ final class ConversationNotice {
   /// 自定义元素中标识 OA 系统提示的业务字段值。
   static const businessId = 'oa_system_notice';
 
+  /// 已由 OA 建群通知替代的旧格式，聊天正文和会话摘要均不再展示。
+  static const legacyGroupCreationBusinessId = 'group_create';
+
+  /// 聊天历史、实时反馈和会话摘要共用隐藏规则，旧提示不会占据末条消息。
+  static bool hidesMessage(
+    MessageInfo message, {
+    bool inChatWindow = false,
+  }) {
+    final payload = message.messagePayload;
+    if (payload is CustomMessagePayload &&
+        payload.customData.trimLeft().startsWith('{')) {
+      return ChatUtil.jsonData2Dictionary(payload.customData)?['businessID'] ==
+          legacyGroupCreationBusinessId;
+    }
+    return hidesNativeMessage(message, inChatWindow: inChatWindow);
+  }
+
   /// 这些原生提示已有后端通知，混合消息仍保留未迁移的部分。
   static bool isBackendOwnedTip(GroupTipsInfo tip) =>
       tip is InviteToGroup ||
       tip is JoinGroup ||
       tip is QuitGroup ||
       tip is KickedFromGroup ||
-      tip is ChangeGroupIntroduction ||
+      tip is SetGroupAdmin ||
+      tip is CancelGroupAdmin ||
       tip is PinGroupMessage ||
       tip is UnpinGroupMessage;
 
-  /// 只含已迁移提示的消息不占聊天行或覆盖会话摘要。
-  static bool hidesNativeMessage(MessageInfo message) {
+  /// 聊天窗口额外隐藏头像变更，会话摘要仍只过滤由后端接管的提示。
+  static bool isHiddenInChatWindowTip(GroupTipsInfo tip) =>
+      tip is ChangeGroupAvatar || isBackendOwnedTip(tip);
+
+  /// 混合提示中只要还有可见事件，就保留该消息供对应界面展示。
+  static bool hidesNativeMessage(
+    MessageInfo message, {
+    bool inChatWindow = false,
+  }) {
     if (message.status == MessageStatus.revoked) return false;
     final payload = message.messagePayload;
     if (payload is! TipsMessagePayload) return false;
     final tips = payload.groupTips;
-    return tips != null && tips.isNotEmpty && tips.every(isBackendOwnedTip);
+    return tips != null &&
+        tips.isNotEmpty &&
+        tips.every(inChatWindow ? isHiddenInChatWindowTip : isBackendOwnedTip);
   }
 
-  /// 保留同一事件最早收到的后端通知，撤回继续显示在原消息位置。
+  /// 两种来源的描述通知只有在操作人、正文和事件时间一致时才合并。
+  ({String operatorId, String description, int second})?
+      get _descriptionChange {
+    if (type != 'group.description_changed') return null;
+    return (
+      operatorId: (_data['operator'] as Map)['userId'] as String,
+      description: _data['newDescription'] as String,
+      second: occurredAt.millisecondsSinceEpoch ~/ 1000,
+    );
+  }
+
+  /// 仅用有效的原生消息匹配同一群里的后端描述通知。
+  static Iterable<({String operatorId, String description, int second})>
+      _nativeDescriptionChanges(MessageInfo message) sync* {
+    final second = message.timestamp;
+    final payload = message.messagePayload;
+    if (message.status == MessageStatus.revoked ||
+        message.status == MessageStatus.deleted ||
+        second == null ||
+        second <= 0 ||
+        payload is! TipsMessagePayload) {
+      return;
+    }
+    for (final tip in payload.groupTips ?? const <GroupTipsInfo>[]) {
+      if (tip is ChangeGroupIntroduction) {
+        yield (
+          operatorId: tip.opUser.userID,
+          description: tip.groupIntroduction,
+          second: second,
+        );
+      }
+    }
+  }
+
+  /// 原生变更已经展示时，迟到的后端副本不再触发实时新消息反馈。
+  bool matchesNativeDescriptionIn(Iterable<MessageInfo> messages) {
+    final change = _descriptionChange;
+    return change != null &&
+        messages.expand(_nativeDescriptionChanges).contains(change);
+  }
+
+  /// 过滤隐藏提示，描述变更优先展示同一事件的 IM 原生提示。
+  /// 后端重试仍保留最早收到的版本，撤回留在原位置。
   static List<MessageInfo> visibleMessages(List<MessageInfo> messages) {
+    // 提前收集原生事件，避免 SDK 与后端副本的到达顺序影响结果。
+    final nativeDescriptions =
+        messages.expand(_nativeDescriptionChanges).toSet();
     final seen = <String>{};
     final visible = <MessageInfo>[];
     for (final message in messages.reversed) {
-      if (hidesNativeMessage(message)) continue;
+      if (hidesMessage(message, inChatWindow: true)) continue;
       final notice = fromMessage(message);
       if (notice == null ||
-          (!notice.usesOriginalMessage && seen.add(notice.eventId))) {
+          (!notice.usesOriginalMessage &&
+              !nativeDescriptions.contains(notice._descriptionChange) &&
+              seen.add(notice.eventId))) {
         visible.add(message);
       }
     }
@@ -111,7 +284,9 @@ final class ConversationNotice {
           _named(data['group'], 'groupId') &&
           _members(data['initialMembers'], allowEmpty: true),
       'group.members_invited' ||
-      'group.members_removed' =>
+      'group.members_removed' ||
+      _adminAdded ||
+      _adminRemoved =>
         _person(data['operator']) && _members(data['members']),
       'group.members_joined' => _members(data['members']),
       'group.member_left' => _person(data['member']),
@@ -139,7 +314,13 @@ final class ConversationNotice {
   static bool _members(Object? value, {bool allowEmpty = false}) =>
       value is List && (allowEmpty || value.isNotEmpty) && value.every(_person);
 
-  /// 只有 ID 匹配才替换为“你”；成员重复时保留首次出现的姓名和顺序。
+  /// 腾讯 IM 原生提示与后端通知共用描述更新和清空文案。
+  static String groupDescriptionText(String operator, String description) =>
+      description.isEmpty
+          ? '$operator 清空了群描述'
+          : '$operator 更新了群描述：$description';
+
+  /// 成员类提示按账号称呼本人，群资料变更沿用操作人的姓名快照。
   String textFor(String? viewerId) {
     String name(Map user) =>
         user['userId'] == viewerId ? '你' : user['nameSnapshot'] as String;
@@ -158,19 +339,22 @@ final class ConversationNotice {
       'message.pinned' => '${person('operator')}置顶了内容',
       'message.unpinned' => '${person('operator')}移除了置顶内容',
       'member.phone_viewed' => '${person('viewer')}查看了${person('target')}的手机号',
-      'group.created' => (_data['initialMembers'] as List).isEmpty
-          ? '${person('operator')} 创建了群聊'
-          : '${person('operator')} 发起群聊，并邀请 ${people('initialMembers')} 加入此群',
+      'group.created' =>
+        groupCreationParts(viewerId: viewerId).map((part) => part.text).join(),
       'group.members_invited' =>
         '${person('operator')} 邀请 ${people('members')} 加入了群组',
       'group.members_joined' => '${people('members')} 加入了群组',
       'group.member_left' => '${person('member')} 退出了群组',
       'group.members_removed' =>
         '${person('operator')} 将 ${people('members')} 移出了群组',
+      _adminAdded ||
+      _adminRemoved =>
+        groupMemberParts(viewerId: viewerId).map((part) => part.text).join(),
       'group.welcome' => '欢迎加入 ${(_data['group'] as Map)['nameSnapshot']} 群组',
-      'group.description_changed' => _data['newDescription'] == ''
-          ? '${person('operator')} 清空了群描述'
-          : '${person('operator')} 更新了群描述：${_data['newDescription']}',
+      'group.description_changed' => groupDescriptionText(
+          descriptionOperator()!.name,
+          _data['newDescription'] as String,
+        ),
       _ => '',
     };
   }

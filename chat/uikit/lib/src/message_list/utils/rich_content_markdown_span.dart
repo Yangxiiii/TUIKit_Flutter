@@ -30,8 +30,14 @@ TextSpan richContentMarkdownSpan(
   bool compact = false,
   GestureRecognizer? Function(String? href)? linkRecognizer,
   GestureRecognizer? inheritedRecognizer,
+  TextSpan? Function(
+          String text, TextStyle style, GestureRecognizer? inherited)?
+      mentionSpan,
 }) {
   if (node is! md.Element) {
+    final mentioned =
+        mentionSpan?.call(node.textContent, style, inheritedRecognizer);
+    if (mentioned != null) return mentioned;
     final text = compact
         ? EmojiManager.createLocalizedStringFromEmojiCodes(
             context, singleLineConversationPreview(node.textContent))
@@ -100,7 +106,8 @@ TextSpan richContentMarkdownSpan(
       richContentMarkdownSpan(context, child, nodeStyle,
           compact: compact,
           linkRecognizer: linkRecognizer,
-          inheritedRecognizer: recognizer),
+          inheritedRecognizer: recognizer,
+          mentionSpan: mentionSpan),
     ],
   ]);
 }

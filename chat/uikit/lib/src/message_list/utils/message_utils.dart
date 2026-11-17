@@ -90,13 +90,11 @@ class MessageUtil {
     // 混合消息中的改名、公告等原生事件仍需显示。
     if (ConversationNotice.isBackendOwnedTip(groupTipsInfo)) return '';
     return switch (groupTipsInfo) {
-      SetGroupAdmin() => getSetGroupAdminDisplayString(groupTipsInfo, context),
-      CancelGroupAdmin() =>
-        getCancelGroupAdminDisplayString(groupTipsInfo, context),
       ChangeGroupName() =>
         getChangeGroupNameDisplayString(groupTipsInfo, context),
       ChangeGroupAvatar() =>
         getChangeGroupAvatarDisplayString(groupTipsInfo, context),
+      ChangeGroupIntroduction() => groupDescriptionChangeText(groupTipsInfo),
       ChangeGroupNotification() =>
         getChangeGroupNotificationDisplayString(groupTipsInfo, context),
       ChangeGroupOwner() =>
@@ -175,24 +173,6 @@ class MessageUtil {
     return content;
   }
 
-  static String getSetGroupAdminDisplayString(
-      SetGroupAdmin systemMessage, BuildContext context) {
-    AppLocalizedText localizations = AppLocalization.of(context);
-    final showName = systemMessage.setAdminMembers
-        .map((m) => UIKitUtil.memberDisplayName(m))
-        .join('、');
-    return localizations.groupAdminSet(showName);
-  }
-
-  static String getCancelGroupAdminDisplayString(
-      CancelGroupAdmin systemMessage, BuildContext context) {
-    AppLocalizedText localizations = AppLocalization.of(context);
-    final showName = systemMessage.cancelAdminMembers
-        .map((m) => UIKitUtil.memberDisplayName(m))
-        .join('、');
-    return localizations.groupAdminCancelled(showName);
-  }
-
   static String getMuteGroupMemberDisplayString(
       MuteGroupMember systemMessage, BuildContext context) {
     AppLocalizedText localizations = AppLocalization.of(context);
@@ -216,7 +196,7 @@ class MessageUtil {
   static String getChangeGroupNameDisplayString(
       ChangeGroupName systemMessage, BuildContext context) {
     AppLocalizedText localizations = AppLocalization.of(context);
-    return '${UIKitUtil.memberDisplayName(systemMessage.opUser)} ${localizations.groupNameChangedTo} ${systemMessage.groupName}';
+    return '${UIKitUtil.memberDisplayName(systemMessage.opUser)} ${localizations.groupNameChangedTo} “${systemMessage.groupName}”';
   }
 
   static String getChangeGroupAvatarDisplayString(
@@ -224,6 +204,13 @@ class MessageUtil {
     AppLocalizedText localizations = AppLocalization.of(context);
     return '${UIKitUtil.memberDisplayName(systemMessage.opUser)} ${localizations.groupAvatarChanged}';
   }
+
+  /// 沿用群名变更的操作人显示规则，由群聊和缓存摘要共用。
+  static String groupDescriptionChangeText(ChangeGroupIntroduction tip) =>
+      ConversationNotice.groupDescriptionText(
+        UIKitUtil.memberDisplayName(tip.opUser),
+        tip.groupIntroduction,
+      );
 
   static String getChangeGroupNotificationDisplayString(
       ChangeGroupNotification systemMessage, BuildContext context) {
@@ -381,14 +368,9 @@ class MessageUtil {
             }
           }
         }
-        if (customInfo != null && customInfo['businessID'] == 'group_create') {
-          final sender = customInfo['opUser'] ?? '';
-          final cmd = customInfo['cmd'] is int ? customInfo['cmd'] : 0;
-          if (cmd == 1) {
-            return '$sender ${localizations.createCommunity}';
-          } else {
-            return '$sender ${localizations.createGroupTips}';
-          }
+        if (customInfo?['businessID'] ==
+            ConversationNotice.legacyGroupCreationBusinessId) {
+          return '';
         }
 
         return localizations.messageTypeCustom;
@@ -464,7 +446,8 @@ class MessageUtil {
             (message.messagePayload as CustomMessagePayload?)?.customData;
         final customInfo = ChatUtil.jsonData2Dictionary(customPayloadData);
         if (customInfo != null) {
-          if (customInfo['businessID'] == 'group_create') {
+          if (customInfo['businessID'] ==
+              ConversationNotice.legacyGroupCreationBusinessId) {
             return true;
           }
 

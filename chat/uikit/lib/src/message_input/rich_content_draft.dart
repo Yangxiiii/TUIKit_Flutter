@@ -1,3 +1,5 @@
+import 'mention/mention_info.dart';
+import 'mention/message_mentions.dart';
 import 'dart:convert';
 
 import '../emoji_picker/emoji_manager.dart';
@@ -5,6 +7,8 @@ import 'message_input_config.dart';
 import 'message_text.dart';
 import '../message_list/utils/rich_content_message.dart';
 import '../message_list/utils/rich_content_markdown_format.dart';
+import '../message_list/utils/rich_content_markdown_parser.dart';
+import 'package:markdown/markdown.dart' as md;
 import 'package:flutter/services.dart';
 
 /// 与消息展示共用标记优先级，避免输入状态与渲染边界不一致。
@@ -53,7 +57,11 @@ final class RichContentDraftTextBlock extends RichContentDraftBlock {
   /// 当前文字块内容。
   final String text;
 
-  const RichContentDraftTextBlock(super.id, this.text);
+  /// 已选提及，相对当前正文块，随草稿保存。
+  final List<MentionInfo> mentions;
+
+  const RichContentDraftTextBlock(super.id, this.text,
+      {this.mentions = const []});
 }
 
 /// 包含本地文件和上传结果的草稿附件块。
@@ -321,7 +329,11 @@ final class RichContentDraft {
     for (var i = 0; i < blocks.length; i++) {
       switch ((blocks[i], other.blocks[i])) {
         case (RichContentDraftTextBlock a, RichContentDraftTextBlock b):
-          if (a.text != b.text) return false;
+          if (a.text != b.text ||
+              jsonEncode(MessageMentions.encode(a.text, a.mentions, 0)) !=
+                  jsonEncode(MessageMentions.encode(b.text, b.mentions, 0))) {
+            return false;
+          }
         case (
             RichContentDraftAttachmentBlock a,
             RichContentDraftAttachmentBlock b
@@ -334,6 +346,49 @@ final class RichContentDraft {
       }
     }
     return true;
+  }
+
+  /// 以最终正文块为准生成定位；标题合并会移动首段正文或插入独立块。
+  List<Map<String, Object>> get messageMentions {
+    final encoded = <Map<String, Object>>[];
+    final heading = title.trim();
+    final prefix = heading.isEmpty ? '' : '**${escapeMarkdown(heading)}**\n\n';
+    var index = 0;
+    for (final block in blocks) {
+      if (block is RichContentDraftTextBlock) {
+        if (block.text.isEmpty) continue;
+        final offset = index == 0 ? prefix.length : 0;
+        encoded.addAll(MessageMentions.encode(
+          index == 0 ? '$prefix${block.text}' : block.text,
+          block.mentions
+              .map((m) => m.copyWith(startIndex: m.startIndex + offset)),
+          index,
+        ));
+      } else if (index == 0 && prefix.isNotEmpty) {
+        index++;
+      }
+      index++;
+    }
+    return encoded;
+  }
+
+  /// 单一无格式文本的提及可以走 SDK 原生文本发送。
+  String? get nativeMentionText {
+    final block = blocks.singleOrNull;
+    if (title.trim().isNotEmpty || block is! RichContentDraftTextBlock)
+      return null;
+    final text = block.text;
+    // 块级列表、引用和代码也要走业务通道，行内格式比较无法覆盖这些语法。
+    final nodes = parseRichContentMarkdown(text);
+    return nodes.every((node) =>
+                node is md.Element &&
+                node.tag == 'p' &&
+                (node.children ?? const <md.Node>[]).every(
+                  (child) => child is md.Text,
+                )) &&
+            richContentMarkdownToPlainText(text) == text
+        ? text
+        : null;
   }
 
   /// 把可发送草稿转换成现有 oa_rich_content v1 消息。
@@ -394,9 +449,10 @@ final class RichContentDraft {
     if (heading.isNotEmpty) {
       final encodedHeading = '**${escapeMarkdown(heading)}**';
       if (messageBlocks.firstOrNull case final RichTextBlock first) {
-        messageBlocks[0] = RichTextBlock('$encodedHeading\n\n${first.text}');
+        messageBlocks[0] =
+            RichTextBlock('$encodedHeading\n\n${first.text}', title: true);
       } else {
-        messageBlocks.insert(0, RichTextBlock(encodedHeading));
+        messageBlocks.insert(0, RichTextBlock(encodedHeading, title: true));
       }
     }
     return RichContentMessage(List.unmodifiable(messageBlocks));
@@ -410,6 +466,8 @@ Map<String, Object?> _draftBlockToJson(RichContentDraftBlock block) {
         'type': 'text',
         'id': block.id,
         'text': block.text,
+        if (block.mentions.isNotEmpty)
+          'mentions': MessageMentions.encode(block.text, block.mentions, 0),
       },
     RichContentDraftAttachmentBlock block => {
         'type': block.attachment.type.name,
@@ -436,7 +494,10 @@ RichContentDraftBlock? _draftBlockFromJson(Map<String, dynamic> json) {
   if (id is! int || id < 0 || type is! String) return null;
   if (type == 'text') {
     final text = json['text'];
-    return text is String ? RichContentDraftTextBlock(id, text) : null;
+    return text is String
+        ? RichContentDraftTextBlock(id, text,
+            mentions: MessageMentions.decodeItems(json['mentions'], text, 0))
+        : null;
   }
   final attachmentType = RichContentAttachmentType.values
       .where((candidate) => candidate.name == type)

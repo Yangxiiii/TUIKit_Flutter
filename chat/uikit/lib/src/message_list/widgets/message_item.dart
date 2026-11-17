@@ -1,4 +1,3 @@
-import 'package:app_ui/app_ui.dart';
 import 'message_confirmation.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart' hide AlertDialog;
@@ -169,17 +168,21 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     final senderAvatarURL = message.from.avatarURL;
     String? avatarURL = senderAvatarURL?.isNotEmpty == true
         ? senderAvatarURL
+        // 旧消息的发送者可能没有复制头像，从原始 SDK 消息补齐。
+        // ignore: invalid_use_of_internal_member
         : message.rawMessage?.faceUrl;
-    // 默认文字头像也依赖名称，上传占位没有原始消息，须沿用同一份发送者资料。
-    String senderName = [
-      message.from.nameCard,
-      message.from.friendRemark,
-      message.from.nickname,
-      ChatUtil.getMessageSenderName(message),
-      message.from.userID,
-    ]
-        .whereType<String>()
-        .firstWhere((name) => name.isNotEmpty, orElse: () => '');
+    // 群聊宿主可以按群策略显示名称，标题与文字头像沿用同一份结果。
+    final groupName = isGroup ? config.groupSenderName?.call(message) : null;
+    final senderName = groupName ??
+        [
+          message.from.nameCard,
+          message.from.friendRemark,
+          message.from.nickname,
+          ChatUtil.getMessageSenderName(message),
+          message.from.userID,
+        ]
+            .whereType<String>()
+            .firstWhere((name) => name.isNotEmpty, orElse: () => '');
     final provider = CallingMessageDataProvider(message, context);
     final isOutgoingCall = provider.isOutgoingC2c;
 
@@ -337,6 +340,35 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         messageListStore: store,
         message: message,
       ),
+    );
+  }
+
+  /// 宿主回执与原生回执共用发送状态判断，多选时禁止打开详情。
+  Widget? _buildReadReceipt(BuildContext context, SemanticColorScheme colors,
+      AppLocalizedText locale) {
+    final builder = config.groupReadReceiptBuilder;
+    final store = messageListStore;
+    if (isGroup && builder != null) {
+      // 历史选择和合并转发没有可以打开的实时回执入口。
+      if (store == null ||
+          isMultiSelectMode ||
+          selectionOnly ||
+          !MessageStatusMixin.shouldShowReadReceipt(
+            message: message,
+            enableReadReceipt: config.enableReadReceipt,
+            isInMergedDetailView: isInMergedDetailView,
+          )) {
+        return null;
+      }
+      return builder(context, message, store);
+    }
+    return buildOutsideReadReceiptIndicator(
+      message: message,
+      colorsTheme: colors,
+      locale: locale,
+      enableReadReceipt: config.enableReadReceipt,
+      isInMergedDetailView: isInMergedDetailView,
+      onTap: () => _showReadReceiptDetail(context),
     );
   }
 
@@ -526,17 +558,9 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
           )
         : null;
 
-    // 仅为己方消息展示阅读回执，单聊使用图标，群聊保留人数。
-    final readReceiptIndicator = isSelf
-        ? buildOutsideReadReceiptIndicator(
-            message: message,
-            colorsTheme: colors,
-            locale: locale,
-            enableReadReceipt: config.enableReadReceipt,
-            isInMergedDetailView: isInMergedDetailView,
-            onTap: () => _showReadReceiptDetail(context),
-          )
-        : null;
+    // 己方气泡才有回执，发送提示仍占用独立的位置。
+    final readReceiptIndicator =
+        isSelf ? _buildReadReceipt(context, colors, locale) : null;
 
     final attachment = _buildAttachmentIfAny(isSelf);
     final mediaStatus = _mediaStatusLane(
@@ -632,8 +656,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                 // Reaction bar for left-aligned layout
                 //
                 // 左对齐布局的反应条
-                if (_showsReactionBar)
-                  _buildReactionBar(context, isLeft: true),
+                if (_showsReactionBar) _buildReactionBar(context, isLeft: true),
               ],
             ),
           ),
@@ -662,17 +685,9 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
           )
         : null;
 
-    // 仅为己方消息展示阅读回执，单聊使用图标，群聊保留人数。
-    final readReceiptIndicator = isSelf
-        ? buildOutsideReadReceiptIndicator(
-            message: message,
-            colorsTheme: colors,
-            locale: locale,
-            enableReadReceipt: config.enableReadReceipt,
-            isInMergedDetailView: isInMergedDetailView,
-            onTap: () => _showReadReceiptDetail(context),
-          )
-        : null;
+    // 己方气泡才有回执，发送提示仍占用独立的位置。
+    final readReceiptIndicator =
+        isSelf ? _buildReadReceipt(context, colors, locale) : null;
 
     final attachment = _buildAttachmentIfAny(isSelf);
     final mediaStatus = _mediaStatusLane(
@@ -777,14 +792,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
           );
 
     // 阅读回执显示在己方气泡左侧，与发送进度和失败提示分别处理。
-    final readReceiptIndicator = buildOutsideReadReceiptIndicator(
-      message: message,
-      colorsTheme: colors,
-      locale: locale,
-      enableReadReceipt: config.enableReadReceipt,
-      isInMergedDetailView: isInMergedDetailView,
-      onTap: () => _showReadReceiptDetail(context),
-    );
+    final readReceiptIndicator = _buildReadReceipt(context, colors, locale);
 
     final attachment = _buildAttachmentIfAny(true);
     final mediaStatus = _mediaStatusLane(
@@ -804,13 +812,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             if (config.isShowRightNickname && displaySenderName.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(right: 2, top: 8, bottom: 4),
-                child: Text(
-                  '$displaySenderName:',
-                  style: FontScheme.caption3Regular,
-                ),
-              ),
+              _buildSenderLabel(context, displaySenderName, isSelf: true),
             // 己方气泡左侧依次承载阅读回执和发送提示。
             Row(
               mainAxisSize: MainAxisSize.min,
@@ -839,8 +841,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
             // Reaction bar for self messages (right aligned)
             //
             // 自己消息的反应条（右对齐）
-            if (_showsReactionBar)
-              _buildReactionBar(context, isLeft: false),
+            if (_showsReactionBar) _buildReactionBar(context, isLeft: false),
           ],
         ),
       ),
@@ -897,13 +898,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (config.isShowLeftNickname && displaySenderName.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(left: 2, top: 8, bottom: 4),
-                child: Text(
-                  '$displaySenderName:',
-                  style: FontScheme.caption3Regular,
-                ),
-              ),
+              _buildSenderLabel(context, displaySenderName, isSelf: false),
             messageBubble,
             if (replyIndicator != null) replyIndicator!,
             if (attachment != null) attachment,
@@ -914,8 +909,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
             // Reaction bar for other messages (left aligned)
             //
             // 对方消息的反应条（左对齐）
-            if (_showsReactionBar)
-              _buildReactionBar(context, isLeft: true),
+            if (_showsReactionBar) _buildReactionBar(context, isLeft: true),
           ],
         ),
       ),
@@ -925,14 +919,44 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     ];
   }
 
+  /// 群聊名称与头像顶部对齐，超出气泡可用宽度时单行省略。
+  Widget _buildSenderLabel(BuildContext context, String name,
+      {required bool isSelf}) {
+    final useGroupNameStyle = isGroup && config.groupSenderName != null;
+    return Padding(
+      padding: isGroup
+          ? EdgeInsets.only(bottom: useGroupNameStyle ? 4 : 6)
+          : EdgeInsets.only(
+              left: isSelf ? 0 : 2, right: isSelf ? 2 : 0, top: 8, bottom: 4),
+      child: Text(
+        isGroup ? name : '$name:',
+        style: isGroup
+            ? FontScheme.caption3Regular.copyWith(
+                color: SemanticColorScheme.of(context).textColorSecondary,
+                fontSize: useGroupNameStyle ? 12 : null,
+                height: useGroupNameStyle ? 20 / 12 : null,
+              )
+            : FontScheme.caption3Regular,
+        maxLines: isGroup ? 1 : null,
+        overflow: isGroup ? TextOverflow.ellipsis : null,
+      ),
+    );
+  }
+
   /// 云回复可以存在于原生列表为空的消息，宿主自行判断是否有可见条目。
-  bool get _showsReactionBar => config.isSupportReaction &&
+  bool get _showsReactionBar =>
+      config.isSupportReaction &&
       (config.reactionConfig != null || message.reactionList.isNotEmpty);
 
-  /// 宿主接管的条目必须优先，云协议即使为空也不回退到原生回应。
+  /// 宿主优先渲染云协议，旧群聊回应仍可打开 UIKit 明细。
   Widget _buildReactionBar(BuildContext context, {required bool isLeft}) {
     final reaction = config.reactionConfig;
-    if (reaction != null) return reaction.buildBar(context, message, isLeft);
+    if (reaction != null) {
+      return reaction.buildBar(context, message, isLeft,
+          showNativeDetails: isGroup && messageListStore != null
+              ? () => _showReactionDetailSheet(context)
+              : null);
+    }
     return MessageReactionBar(
       reactionList: message.reactionList,
       isLeft: isLeft,
@@ -959,10 +983,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         messageActionStore.removeReaction(reactionID: reactionID);
         Navigator.of(context).pop();
       },
-      // Disable remove reaction in merged message detail view
-      //
-      // 合并消息详情视图中禁用移除反应
-      allowRemove: !isInMergedDetailView,
+      // 接管云回复后由胶囊负责撤销，旧群聊明细只用于查看成员。
+      allowRemove: !isInMergedDetailView && config.reactionConfig == null,
     );
   }
 

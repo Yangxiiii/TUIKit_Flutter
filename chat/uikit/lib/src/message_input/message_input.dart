@@ -1,3 +1,6 @@
+import 'package:tencent_cloud_chat_sdk/tencent_im_sdk_plugin.dart';
+import 'mention/message_mentions.dart';
+import 'mention/mention_text_editing_controller.dart';
 import 'chat_media_sender.dart';
 import 'rich_content_attachment_upload.dart';
 import 'widget/call_selection_sheet.dart';
@@ -86,6 +89,9 @@ class MessageInput extends StatefulWidget {
   /// 连接断开时保留已挂载的输入和草稿，暂停触摸操作和发送。
   final bool connectionUnavailable;
 
+  /// 宿主确认当前成员被禁言，期间保留输入草稿并关闭全部底部发送入口。
+  final bool sendMuted;
+
   /// 单聊发送失败使用宿主回复提示；其他会话继续使用 SDK 通用提示。
   final ChatMessageReplyConfig? replyConfig;
 
@@ -99,6 +105,7 @@ class MessageInput extends StatefulWidget {
     this.config = const ChatMessageInputConfig(),
     this.readOnly = false,
     this.connectionUnavailable = false,
+    this.sendMuted = false,
     this.onLocalMessageSent,
     this.replyConfig,
   });
@@ -117,7 +124,7 @@ class MessageInputState extends State<MessageInput>
 
   late MessageInputStore _messageInputStore;
   late ConversationListStore _conversationListStore;
-  late _MentionTextEditingController _textEditingController;
+  late MentionTextEditingController _textEditingController;
   final FocusNode _textEditingFocusNode = FocusNode();
   Widget stickerWidget = Container();
 
@@ -236,8 +243,14 @@ class MessageInputState extends State<MessageInput>
   /// 保留普通输入区中的工具条几何位置，供顶层工具条视图精确覆盖。
   final GlobalKey _sharedToolbarAnchorKey = GlobalKey();
 
-  /// 同时承载编辑器和顶层工具条视图，子节点顺序保证工具条不被动画遮挡。
-  OverlayEntry? _richContentEditorOverlay;
+  /// 编辑器覆盖当前聊天路由，让新打开的选人等模态仍可绘制在上方。
+  final _richContentEditorPortal = OverlayPortalController();
+
+  /// 保留单次展开时的选区、键盘和草稿初始值，收起时丢弃。
+  WidgetBuilder? _richContentEditorBuilder;
+
+  /// 工具条完成布局后单独重建覆盖层，避免让输入区重复触发布局。
+  final _richContentEditorLayout = ValueNotifier(0);
   bool _isRichContentEditorOpen = false;
 
   /// 从已聚焦的系统键盘进入时，原输入行继续占位，聊天列表沿用展开前的布局。
@@ -263,7 +276,7 @@ class MessageInputState extends State<MessageInput>
   @override
   void initState() {
     super.initState();
-    _textEditingController = _MentionTextEditingController();
+    _textEditingController = MentionTextEditingController();
     // 只读布局无需注册 SDK 事件、加载草稿或恢复上传占位。
     if (widget.readOnly) return;
     WidgetsBinding.instance.addObserver(this);
@@ -328,7 +341,9 @@ class MessageInputState extends State<MessageInput>
 
     // 等待群资料期间用户可能继续输入或换会话，校验两次以免覆盖新草稿。
     final message = copied.message;
-    final names = copied.sameConversation && widget.config.enableMention
+    final names = copied.sameConversation &&
+            widget.config.enableMention &&
+            widget.config.mentionPicker == null
         ? await _resolveClipboardMentionNames(message)
         : const <String, Set<String>>{};
     if (!_canApplyClipboardPaste(editor, original, conversation)) return;
@@ -486,8 +501,30 @@ class MessageInputState extends State<MessageInput>
     }
     if (oldWidget.conversationDisplayName != widget.conversationDisplayName) {
       // 资料异步返回时，已展开的富文本浮层也要使用与导航相同的名称。
-      _richContentEditorOverlay?.markNeedsBuild();
+      _refreshRichContentEditorLayout();
     }
+    if (widget.sendMuted && !oldWidget.sendMuted && !widget.readOnly) {
+      // 面板可能位于顶层覆盖层，等本帧重建后统一收起并保留草稿。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && widget.sendMuted) _closeMutedInputPanels();
+      });
+    }
+  }
+
+  /// 禁言生效时结束录音并将展开编辑器的草稿交回普通输入区。
+  void _closeMutedInputPanels() {
+    _recordingStarter?.cancel();
+    _recordPointerHeld = false;
+    _isWaitingToStartRecord = false;
+    _voicePreviewKey.currentState?.cancel();
+    _recordOverlayKey.currentState?.cancelRecord();
+    _removeRecordOverlay();
+    if (_isRichContentEditorOpen) {
+      _closeRichContentEditor(
+        RichContentEditorResult(draft: _richContentDraft, sent: false),
+      );
+    }
+    collapseAllPanels();
   }
 
   @override
@@ -576,7 +613,7 @@ class MessageInputState extends State<MessageInput>
   ///
   /// 从外部源在输入框中插入提及（例如，长按头像）。当用户在消息列表中长按其他成员的头像时会调用这个功能。
   void insertMention({required String userID, required String displayName}) {
-    if (!_isGroupChat) return;
+    if (!_isGroupChat || widget.sendMuted) return;
 
     // Don't allow mentioning self
     //
@@ -609,7 +646,7 @@ class MessageInputState extends State<MessageInput>
     // Update mention positions for existing mentions after insert position
     //
     // 在插入位置后更新现有提及的位置
-    for (final m in _textEditingController._mentions) {
+    for (final m in _textEditingController.mentionList) {
       if (m.startIndex >= insertPos) {
         m.startIndex += mentionText.length;
       }
@@ -624,12 +661,12 @@ class MessageInputState extends State<MessageInput>
     //
     // 更新文本字段
     _textEditingController.removeListener(_onTextChanged);
-    _textEditingController._isInternalUpdate = true;
+    _textEditingController.isInternalUpdate = true;
     _textEditingController.value = TextEditingValue(
       text: newText,
       selection: TextSelection.collapsed(offset: newCursorPos),
     );
-    _textEditingController._isInternalUpdate = false;
+    _textEditingController.isInternalUpdate = false;
     _previousTextLength = newText.length;
     _textEditingController.addListener(_onTextChanged);
 
@@ -654,6 +691,7 @@ class MessageInputState extends State<MessageInput>
   ///
   /// 设置要引用的消息。显示引用预览栏并弹出键盘。
   void setQuotedMessage(MessageInfo message) {
+    if (widget.sendMuted) return;
     setState(() {
       _quotedMessage = message;
       _inputMode = _InputMode.text;
@@ -693,15 +731,16 @@ class MessageInputState extends State<MessageInput>
   /// 键盘或窗口尺寸变化后重测覆盖层锚点，不能依赖已被Scaffold消费的底部Insets。
   @override
   void didChangeMetrics() {
-    if (_richContentEditorOverlay == null) return;
+    if (_richContentEditorBuilder == null) return;
     // 系统先通知尺寸变化，等Scaffold完成本帧避让后才能读取工具条的新坐标。
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _richContentEditorOverlay?.markNeedsBuild();
+      if (mounted) _refreshRichContentEditorLayout();
     });
   }
 
   @override
   void dispose() {
+    _richContentEditorLayout.dispose();
     if (widget.readOnly) {
       _textEditingController.dispose();
       _textEditingFocusNode.dispose();
@@ -714,7 +753,6 @@ class MessageInputState extends State<MessageInput>
     _isWaitingToStartRecord = false;
     _keyboardPanel?.dispose();
     unawaited(_localSendSubscription?.cancel());
-    _removeRichContentEditorOverlay();
     _removeRecordOverlay();
     _textEditingController.removeListener(_onTextChanged);
     _textEditingFocusNode.removeListener(_onFocusChanged);
@@ -796,6 +834,7 @@ class MessageInputState extends State<MessageInput>
         ? _richContentDraft
         : _buildInlineRichContentDraft();
     final hasRichContent = _inlineRichContentEnabled ||
+        richDraft.messageMentions.isNotEmpty ||
         richDraft.title.isNotEmpty ||
         richDraft.blocks
             .whereType<RichContentDraftAttachmentBlock>()
@@ -912,6 +951,8 @@ class MessageInputState extends State<MessageInput>
   void _handleMentionDetection() {
     if (!widget.config.enableMention) return;
     if (_isMentionPickerShowing) return;
+    final composing = _textEditingController.value.composing;
+    if (composing.isValid && !composing.isCollapsed) return;
 
     final text = _textEditingController.text;
     final currentLength = text.length;
@@ -921,7 +962,7 @@ class MessageInputState extends State<MessageInput>
     // 仅在添加单个 '@' 或 '＠' 字符时触发
     if (currentLength == _previousTextLength + 1 && _isGroupChat) {
       final cursorPos = _textEditingController.selection.baseOffset;
-      if (cursorPos > 0) {
+      if (cursorPos > 0 && cursorPos <= text.length) {
         final lastChar = text[cursorPos - 1];
         // Support both half-width '@' and full-width '＠'
         //
@@ -939,7 +980,12 @@ class MessageInputState extends State<MessageInput>
   ///
   /// 显示提及成员选择器
   void _showMentionPicker() {
-    if (_groupID == null) return;
+    if (_groupID == null || _isMentionPickerShowing) return;
+    final picker = widget.config.mentionPicker;
+    if (picker != null) {
+      unawaited(_pickInlineMentions(picker, replaceTrigger: true));
+      return;
+    }
     _isMentionPickerShowing = true;
 
     context
@@ -974,6 +1020,39 @@ class MessageInputState extends State<MessageInput>
         _textEditingFocusNode.requestFocus();
       }
     });
+  }
+
+  /// 仅回填打开选择器时的输入版本，取消后保持原有草稿。
+  Future<void> _pickInlineMentions(ChatMentionPicker picker,
+      {bool replaceTrigger = false}) async {
+    if (_isMentionPickerShowing) return;
+    final before = _textEditingController.value;
+    if (before.composing.isValid && !before.composing.isCollapsed) return;
+    final end =
+        before.selection.isValid ? before.selection.end : before.text.length;
+    final start = replaceTrigger
+        ? end - 1
+        : before.selection.isValid
+            ? before.selection.start
+            : end;
+    if (start < 0) return;
+    final conversation = widget.conversationID;
+    _isMentionPickerShowing = true;
+    try {
+      final members = await picker(context);
+      // 选择页打开期间的会话切换或新草稿会使原输入范围失效。
+      if (!mounted ||
+          conversation != widget.conversationID ||
+          _textEditingController.text != before.text) return;
+      if (members != null && members.isNotEmpty) {
+        _textEditingController.insertMentions(
+            TextSelection(baseOffset: start, extentOffset: end), members);
+        setState(() => _inputMode = _InputMode.text);
+      }
+      if (_inputMode == _InputMode.text) _textEditingFocusNode.requestFocus();
+    } finally {
+      _isMentionPickerShowing = false;
+    }
   }
 
   /// Handle selected members from picker
@@ -1045,12 +1124,12 @@ class MessageInputState extends State<MessageInput>
     //
     // 临时禁用监听器并标记为内部更新，以防值设置器错误调整提及位置
     _textEditingController.removeListener(_onTextChanged);
-    _textEditingController._isInternalUpdate = true;
+    _textEditingController.isInternalUpdate = true;
     _textEditingController.value = TextEditingValue(
       text: newText,
       selection: TextSelection.collapsed(offset: currentPos),
     );
-    _textEditingController._isInternalUpdate = false;
+    _textEditingController.isInternalUpdate = false;
     _previousTextLength = newText.length;
     _textEditingController.addListener(_onTextChanged);
 
@@ -1110,16 +1189,16 @@ class MessageInputState extends State<MessageInput>
       // Delete the entire mention
       //
       // 删除整个提及
-      _textEditingController._isInternalUpdate = true;
+      _textEditingController.isInternalUpdate = true;
       final newText = text.substring(0, mentionToDelete.startIndex) +
           text.substring(mentionToDelete.endIndex);
-      _textEditingController._mentions.remove(mentionToDelete);
+      _textEditingController.mentionList.remove(mentionToDelete);
 
       // Update positions of mentions after the removed one
       //
       // 更新被删除提及之后的提及位置
       final removedLength = mentionToDelete.length;
-      for (final m in _textEditingController._mentions) {
+      for (final m in _textEditingController.mentionList) {
         if (m.startIndex > mentionToDelete.startIndex) {
           m.startIndex -= removedLength;
         }
@@ -1129,7 +1208,7 @@ class MessageInputState extends State<MessageInput>
         text: newText,
         selection: TextSelection.collapsed(offset: mentionToDelete.startIndex),
       );
-      _textEditingController._isInternalUpdate = false;
+      _textEditingController.isInternalUpdate = false;
       return;
     }
 
@@ -1154,20 +1233,31 @@ class MessageInputState extends State<MessageInput>
   /// 在统一并发边界内发送文字或纯表情，保留现有发送前清理与失败消息重试策略。
   Future<void> _handleTextSendMessagePayload() async {
     await _runTextSend(() async {
-      final text = _textEditingController.text.trim();
+      final value = _textEditingController.value;
+      if (value.composing.isValid && !value.composing.isCollapsed) return false;
+      final original = value.text;
+      final leading = original.length - original.trimLeft().length;
+      final text = original.trim();
+      final mentions = MessageMentions.encode(text,
+          _textEditingController.mentionsIn(leading, leading + text.length), 0);
       if (text.isEmpty || messageTextByteCount(text) > messageTextByteLimit) {
         return false;
       }
       final messageInfo = _createTextOrFaceMessage(text)
-        ..atUserList = _textEditingController.mentionList
-            .map((mention) => mention.userID)
-            .toList();
+        ..atUserList = MessageMentions.targets(mentions);
+      final draft = mentions.isEmpty ? null : _buildInlineRichContentDraft();
 
-      // 提及先于正文清理，避免控制器误判提及编辑；清理只由首个受保护任务执行。
+      // 提及创建失败时保留原始输入及身份，普通消息沿用既有发送前清理。
+      if (mentions.isNotEmpty) {
+        final result = await _sendMessage(messageInfo, mentions: mentions);
+        if (result.isSuccess && draft != null)
+          _clearSentRichContentDraft(draft);
+        return result.isSuccess;
+      }
       _textEditingController.clearMentions();
-      _textEditingController._isInternalUpdate = true;
+      _textEditingController.isInternalUpdate = true;
       _textEditingController.clear();
-      _textEditingController._isInternalUpdate = false;
+      _textEditingController.isInternalUpdate = false;
       _clearDraft();
       final result = await _sendMessage(messageInfo);
       return result.isSuccess;
@@ -1182,7 +1272,9 @@ class MessageInputState extends State<MessageInput>
 
   /// 发送当前活动编辑区的草稿；展开编辑器继续负责校验和发送后的关闭行为。
   Future<void> _handleInputSend() async {
-    if (widget.readOnly || widget.connectionUnavailable) return;
+    if (widget.readOnly || widget.connectionUnavailable || widget.sendMuted) {
+      return;
+    }
     if (_isRichContentEditorOpen) {
       await _richContentEditorKey.currentState?.send();
       return;
@@ -1191,12 +1283,9 @@ class MessageInputState extends State<MessageInput>
       await _handleTextSendMessagePayload();
       return;
     }
-    await _sendRichContentDraft(
-      _buildInlineRichContentDraft(),
-      atUserList: _textEditingController.mentionList
-          .map((mention) => mention.userID)
-          .toList(),
-    );
+    final composing = _textEditingController.value.composing;
+    if (composing.isValid && !composing.isCollapsed) return;
+    await _sendRichContentDraft(_buildInlineRichContentDraft());
   }
 
   /// 成功发送后只清理对应的普通草稿，新输入和新打开的编辑器继续保留。
@@ -1210,9 +1299,9 @@ class MessageInputState extends State<MessageInput>
     _textEditingController.clearMentions();
     _inlineRichContentAttachments.clear();
     _richContentDraft = const RichContentDraft();
-    _textEditingController._isInternalUpdate = true;
+    _textEditingController.isInternalUpdate = true;
     _textEditingController.clear();
-    _textEditingController._isInternalUpdate = false;
+    _textEditingController.isInternalUpdate = false;
     _clearDraft();
     setState(() {
       _inlineRichContentEnabled = false;
@@ -1223,7 +1312,7 @@ class MessageInputState extends State<MessageInput>
 
   /// 在共享工具条上方展开富文本编辑器，保留已有选区和键盘状态。
   void _openRichContentEditor() {
-    if (_richContentEditorOverlay != null) return;
+    if (_isRichContentEditorOpen || _richContentEditorBuilder != null) return;
     // 捕获展开前的选区和面板状态；只有 iOS 系统键盘已显示时才交接原生输入连接。
     final keepEmoji = _showEmojiPanel;
     final keyboardHeight = _keyboardPanel?.height;
@@ -1250,64 +1339,62 @@ class MessageInputState extends State<MessageInput>
       final overlay = Overlay.of(context);
       // 首次构建时才读取草稿，纳入等待挂载期间完成的媒体处理结果。
       RichContentDraft? initialDraft;
-      final entry = OverlayEntry(
-        builder: (overlayContext) {
-          final overlayBox = overlay.context.findRenderObject() as RenderBox?;
-          final toolbarBox = _sharedToolbarAnchorKey.currentContext
-              ?.findRenderObject() as RenderBox?;
-          final overlayHeight = MediaQuery.sizeOf(overlayContext).height;
-          final toolbarOffset = overlayBox == null || toolbarBox == null
-              ? Offset(0, overlayHeight - 38)
-              : toolbarBox.localToGlobal(Offset.zero, ancestor: overlayBox);
-          final toolbarSize =
-              toolbarBox?.size ?? Size(overlayBox?.size.width ?? 0, 38);
-          final toolbarRect = toolbarOffset & toolbarSize;
-          final toolbarTop = toolbarRect.top;
-          final editorBottom = toolbarTop.clamp(58.0, overlayHeight).toDouble();
-          // 编辑器先绘制、共享工具条后绘制，确保动画层级不会压住工具条。
-          return RichContentEditorOverlayLayout(
-            editorBottom: editorBottom,
-            toolbarRect: toolbarRect,
-            editor: RichContentEditorSheet(
-              key: _richContentEditorKey,
-              conversationName: widget.conversationDisplayName ??
-                  _conversationInfo?.title ??
-                  widget.conversationID,
-              initialDraft: initialDraft ??= _buildInlineRichContentDraft(),
-              canUploadAttachments:
-                  widget.config.richContentAttachmentUploader != null,
-              videoPlayIcon: widget.config.videoPlayIcon,
-              imageLoadingPlaceholder: widget.config.imageLoadingPlaceholder,
-              videoLoadingPlaceholder: widget.config.videoLoadingPlaceholder,
-              onSend: _sendRichContentDraft,
-              onClose: _closeRichContentEditor,
-              onToolbarChanged: _refreshSharedToolbar,
-              onDraftChanged: _rememberRichContentDraft,
-              onMediaPrepared: _acceptPreparedRichContentMedia,
-              showToolbar: false,
-              initialShowFormatting: _showTextFormattingToolbar,
-              initialActiveFormats: _activeInlineFormats,
-              initialShowEmojiPanel: keepEmoji,
-              initialKeyboardHeight: keyboardHeight,
-              initialSelection: selection,
-              initialFocusSource: initialFocusSource,
-              focusAfterEntrance: isIOS && !keepEmoji && !hasSystemKeyboard,
-              animateClose: keepNormalInputLayout,
-            ),
-            toolbar: AbsorbPointer(
-              absorbing: _richContentEditorKey.currentState?.isClosing == true,
-              child: Material(
-                type: MaterialType.transparency,
-                child: _buildSharedToolbar(
-                  key: const Key('rich_content_overlay_toolbar'),
-                ),
+      _richContentEditorBuilder = (overlayContext) {
+        final overlayBox = overlay.context.findRenderObject() as RenderBox?;
+        final toolbarBox = _sharedToolbarAnchorKey.currentContext
+            ?.findRenderObject() as RenderBox?;
+        final overlayHeight = MediaQuery.sizeOf(overlayContext).height;
+        final toolbarOffset = overlayBox == null || toolbarBox == null
+            ? Offset(0, overlayHeight - 38)
+            : toolbarBox.localToGlobal(Offset.zero, ancestor: overlayBox);
+        final toolbarSize =
+            toolbarBox?.size ?? Size(overlayBox?.size.width ?? 0, 38);
+        final toolbarRect = toolbarOffset & toolbarSize;
+        final toolbarTop = toolbarRect.top;
+        final editorBottom = toolbarTop.clamp(58.0, overlayHeight).toDouble();
+        // 编辑器先绘制、共享工具条后绘制，确保动画层级不会压住工具条。
+        return RichContentEditorOverlayLayout(
+          editorBottom: editorBottom,
+          toolbarRect: toolbarRect,
+          editor: RichContentEditorSheet(
+            key: _richContentEditorKey,
+            conversationName: widget.conversationDisplayName ??
+                _conversationInfo?.title ??
+                widget.conversationID,
+            initialDraft: initialDraft ??= _buildInlineRichContentDraft(),
+            canUploadAttachments:
+                widget.config.richContentAttachmentUploader != null,
+            videoPlayIcon: widget.config.videoPlayIcon,
+            imageLoadingPlaceholder: widget.config.imageLoadingPlaceholder,
+            videoLoadingPlaceholder: widget.config.videoLoadingPlaceholder,
+            onSend: _sendRichContentDraft,
+            mentionPicker: widget.config.mentionPicker,
+            onClose: _closeRichContentEditor,
+            onToolbarChanged: _refreshSharedToolbar,
+            onDraftChanged: _rememberRichContentDraft,
+            onMediaPrepared: _acceptPreparedRichContentMedia,
+            showToolbar: false,
+            initialShowFormatting: _showTextFormattingToolbar,
+            initialActiveFormats: _activeInlineFormats,
+            initialShowEmojiPanel: keepEmoji,
+            initialKeyboardHeight: keyboardHeight,
+            initialSelection: selection,
+            initialFocusSource: initialFocusSource,
+            focusAfterEntrance: isIOS && !keepEmoji && !hasSystemKeyboard,
+            animateClose: keepNormalInputLayout,
+          ),
+          toolbar: AbsorbPointer(
+            absorbing: _richContentEditorKey.currentState?.isClosing == true,
+            child: Material(
+              type: MaterialType.transparency,
+              child: _buildSharedToolbar(
+                key: const Key('rich_content_overlay_toolbar'),
               ),
             ),
-          );
-        },
-      );
-      _richContentEditorOverlay = entry;
-      overlay.insert(entry);
+          ),
+        );
+      };
+      _richContentEditorPortal.show();
     });
   }
 
@@ -1428,7 +1515,8 @@ class MessageInputState extends State<MessageInput>
     if (!mounted || !_isRichContentEditorOpen) return;
     // 只交接当前编辑器内仍在使用的系统输入连接，避免收起时主动唤起键盘。
     final editor = _richContentEditorKey.currentState;
-    final keepEmoji = !result.sent && (editor?.showEmojiPanel ?? false);
+    final keepEmoji =
+        !widget.sendMuted && !result.sent && (editor?.showEmojiPanel ?? false);
     final keyboardHeight = editor?.keyboardPanel?.height;
     final selection = result.sent ? null : editor?.inlineSelection;
     final focusedField = FocusManager.instance.primaryFocus;
@@ -1436,7 +1524,8 @@ class MessageInputState extends State<MessageInput>
     final editorOwnsFocus = editor != null &&
         focusContext?.findAncestorStateOfType<RichContentEditorSheetState>() ==
             editor;
-    final systemEditable = !result.sent &&
+    final systemEditable = !widget.sendMuted &&
+            !result.sent &&
             !keepEmoji &&
             defaultTargetPlatform == TargetPlatform.iOS &&
             View.of(context).viewInsets.bottom > 0 &&
@@ -1483,10 +1572,15 @@ class MessageInputState extends State<MessageInput>
     }
   }
 
-  /// 释放编辑器及共享工具条的覆盖层，页面销毁时也走同一清理入口。
+  /// 收起编辑器时释放覆盖层；退出聊天时由所属路由销毁。
   void _removeRichContentEditorOverlay() {
-    _richContentEditorOverlay?.remove();
-    _richContentEditorOverlay = null;
+    if (_richContentEditorPortal.isShowing) _richContentEditorPortal.hide();
+    _richContentEditorBuilder = null;
+  }
+
+  /// 工具条坐标变动后只重建编辑器及共享工具条视图。
+  void _refreshRichContentEditorLayout() {
+    if (_richContentEditorBuilder != null) _richContentEditorLayout.value++;
   }
 
   /// 把普通输入框的文字与附件令牌还原为有序富文本草稿。
@@ -1503,7 +1597,8 @@ class MessageInputState extends State<MessageInput>
     for (final match in richContentAttachmentTokenPattern.allMatches(text)) {
       final leading = text.substring(offset, match.start);
       if (leading.isNotEmpty) {
-        blocks.add(RichContentDraftTextBlock(nextId++, leading));
+        blocks.add(RichContentDraftTextBlock(nextId++, leading,
+            mentions: _textEditingController.mentionsIn(offset, match.start)));
       }
       final attachment =
           _inlineRichContentAttachments[int.parse(match.group(1)!)];
@@ -1512,7 +1607,8 @@ class MessageInputState extends State<MessageInput>
     }
     final trailing = text.substring(offset);
     if (trailing.isNotEmpty) {
-      blocks.add(RichContentDraftTextBlock(nextId, trailing));
+      blocks.add(RichContentDraftTextBlock(nextId, trailing,
+          mentions: _textEditingController.mentionsIn(offset, text.length)));
     }
     return RichContentDraft(title: _richContentDraft.title, blocks: blocks);
   }
@@ -1523,10 +1619,15 @@ class MessageInputState extends State<MessageInput>
     _richContentDraft = draft;
     _inlineRichContentAttachments.clear();
     final text = StringBuffer();
+    _textEditingController.clearMentions();
     // 文字原样写入，附件改写为可逆令牌，不另外维护一份排序。
     for (final block in draft.blocks) {
       switch (block) {
         case RichContentDraftTextBlock block:
+          for (final mention in block.mentions) {
+            _textEditingController.addMention(
+                mention.copyWith(startIndex: mention.startIndex + text.length));
+          }
           text.write(block.text);
         case RichContentDraftAttachmentBlock block:
           _inlineRichContentAttachments[block.id] = block;
@@ -1535,6 +1636,7 @@ class MessageInputState extends State<MessageInput>
     }
     // 一次替换控制器值，避免中间态让草稿监听器丢失附件。
     final value = text.toString();
+    _textEditingController.isInternalUpdate = true;
     _textEditingController.value = TextEditingValue(
       text: value,
       // 草稿转换后校验选区边界，保留反向选区和光标位置，未提供时沿用末尾回填。
@@ -1544,6 +1646,7 @@ class MessageInputState extends State<MessageInput>
               extentOffset: selection.extentOffset.clamp(0, value.length))
           : TextSelection.collapsed(offset: value.length),
     );
+    _textEditingController.isInternalUpdate = false;
   }
 
   /// 把编辑器中的工具条模式同步回共享状态，避免展开和收起时回落默认值。
@@ -1560,25 +1663,26 @@ class MessageInputState extends State<MessageInput>
     // 父级工具条完成本帧布局后再重建覆盖层，避免读取切换前的顶部坐标。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _richContentEditorOverlay?.markNeedsBuild();
+      _refreshRichContentEditorLayout();
     });
   }
 
   /// 仅提交已取得全部远端地址且未超限的消息；失败附件可在草稿内重试。
-  Future<bool> _sendRichContentDraft(
-    RichContentDraft draft, {
-    List<String> atUserList = const [],
-  }) =>
+  Future<bool> _sendRichContentDraft(RichContentDraft draft) =>
       _runTextSend(() async {
-        if (widget.connectionUnavailable) return false;
+        if (widget.connectionUnavailable || widget.sendMuted) return false;
         if (!_canSubmitRichContentDraft(draft)) return false;
         if (!draft.canSend) {
           _queueRichContentUploads(draft, retryFailed: true);
           return false;
         }
         // 表情与富文本分别使用实际计数时选定的消息体。
+        final mentions = draft.messageMentions;
         final MessageInfo message;
-        if (draft.faceText case final String text) {
+        final nativeText = mentions.isNotEmpty ? draft.nativeMentionText : null;
+        if (nativeText != null) {
+          message = _createTextOrFaceMessage(nativeText);
+        } else if (draft.faceText case final String text) {
           message = _createTextOrFaceMessage(text);
         } else {
           final content = draft.toMessage();
@@ -1594,8 +1698,8 @@ class MessageInputState extends State<MessageInput>
             ),
           );
         }
-        message.atUserList = atUserList;
-        final result = await _sendMessage(message);
+        message.atUserList = MessageMentions.targets(mentions);
+        final result = await _sendMessage(message, mentions: mentions);
         if (result.isSuccess) _clearSentRichContentDraft(draft);
         return result.isSuccess;
       });
@@ -1674,12 +1778,16 @@ class MessageInputState extends State<MessageInput>
 
   /// 所有独立消息在此组合引用与推送选项，再交给宿主统一分流媒体。
   Future<CompletionHandler> _sendMessage(MessageInfo messageInfo,
-      {MessageInfo? albumUploadPlaceholder}) async {
-    // 断网前已经打开的录音或相册仍可能回调，提交前复核连接状态。
-    if (widget.connectionUnavailable) {
+      {MessageInfo? albumUploadPlaceholder,
+      List<Map<String, Object>> mentions = const []}) async {
+    // 录音和相册可能在断网或禁言后才返回，提交前重新校验发送状态。
+    if (widget.connectionUnavailable || widget.sendMuted) {
+      if (widget.sendMuted && albumUploadPlaceholder != null) {
+        _removePlaceholderMessage(albumUploadPlaceholder);
+      }
       return CompletionHandler()
         ..errorCode = -1
-        ..errorMessage = '网络未连接';
+        ..errorMessage = widget.sendMuted ? '当前成员被禁言' : '网络未连接';
     }
     final payload = _convertToSendPayload(messageInfo.messagePayload);
     if (payload == null) {
@@ -1702,19 +1810,28 @@ class MessageInputState extends State<MessageInput>
     }
 
     final option = _createSendOption(messageInfo);
+    Future<CompletionHandler> sendMention() =>
+        _sendMentionMessage(messageInfo, option, mentions);
 
-    final result = await sendChatMedia(
-      message: messageInfo,
-      conversationID: widget.conversationID,
-      sender: widget.config.mediaSender,
-      albumUploadPlaceholder: albumUploadPlaceholder,
-      onRetryFailure: () {
-        if (mounted) Toast.error(context, atomicLocale.sendMessageFail);
-      },
-      store: _messageInputStore,
-      payload: payload,
-      option: option,
-    );
+    // @ 发送绕过媒体入口，需要在此保留本次回复目标和失败反馈。
+    final result = mentions.isNotEmpty && _isGroupChat
+        ? await (quotedMsg == null
+            ? sendMention()
+            : widget.replyConfig?.sendMentionReply
+                    ?.call(quotedMsg.msgID, sendMention) ??
+                sendMention())
+        : await sendChatMedia(
+            message: messageInfo,
+            conversationID: widget.conversationID,
+            sender: widget.config.mediaSender,
+            albumUploadPlaceholder: albumUploadPlaceholder,
+            onRetryFailure: () {
+              if (mounted) Toast.error(context, atomicLocale.sendMessageFail);
+            },
+            store: _messageInputStore,
+            payload: payload,
+            option: option,
+          );
     if (!result.isSuccess) {
       if (mounted) {
         final failure = quotedMsg == null
@@ -1739,6 +1856,82 @@ class MessageInputState extends State<MessageInput>
     }
 
     return result;
+  }
+
+  /// 以已校验定位选择发送通道，业务代发永远不回落到 SDK 再发一次。
+  Future<CompletionHandler> _sendMentionMessage(MessageInfo message,
+      SendMessageOption option, List<Map<String, Object>> mentions) async {
+    final payload = message.messagePayload;
+    if (payload is CustomMessagePayload) {
+      final sender = widget.config.richMentionSender;
+      if (sender != null) {
+        final conversation = widget.conversationID;
+        final sent = await sender(payload, mentions, option.quotedMessage);
+        if (mounted && widget.conversationID == conversation) {
+          // 真实消息 ID 由 SDK 提供，同一 ID 已实时回流时列表会去重。
+          notificationCenter.post(
+            MessageSendNotifyKey.messageSendBegin,
+            MessageSendEventData(conversationID: conversation, message: sent),
+          );
+          widget.onLocalMessageSent?.call(sent);
+        }
+        return CompletionHandler();
+      }
+      return CompletionHandler()..errorCode = -1;
+    }
+    if (payload is! TextMessagePayload || message.atUserList.length > 30) {
+      return CompletionHandler()..errorCode = -1;
+    }
+    final conversation = widget.conversationID;
+    final account = LoginStore.shared.loginState.loginUserInfo?.userID;
+    final sdk = TencentImSDKPlugin.v2TIMManager.getMessageManager();
+    final created = await sdk.createTextAtMessage(
+        text: payload.text, atUserList: message.atUserList);
+    var raw = created.data?.messageInfo;
+    if (created.code != 0 || raw == null) {
+      return CompletionHandler()
+        ..errorCode = created.code == 0 ? -1 : created.code;
+    }
+    // AtomicX 仅通过内部 SDK 对象保留原生引用字段。
+    // ignore: invalid_use_of_internal_member
+    final quoted = option.quotedMessage?.rawMessage;
+    if (quoted != null) {
+      final result =
+          await sdk.createQuoteMessage(message: raw, quotedMessage: quoted);
+      if (result.code != 0 || result.data == null) {
+        return CompletionHandler()
+          ..errorCode = result.code == 0 ? -1 : result.code;
+      }
+      raw = result.data!;
+    }
+    // 沿用 UIKit 原发送通知、引用、推送和回执，不创建第二个消息实体。
+    if (!mounted ||
+        widget.conversationID != conversation ||
+        account == null ||
+        LoginStore.shared.loginState.loginUserInfo?.userID != account) {
+      return CompletionHandler()..errorCode = -1;
+    }
+    Map<String, dynamic> cloud = {};
+    final existing = raw.cloudCustomData;
+    if (existing != null && existing.isNotEmpty) {
+      final decoded = jsonDecode(existing);
+      if (decoded is! Map<String, dynamic>) {
+        return CompletionHandler()..errorCode = -1;
+      }
+      cloud = decoded;
+    }
+    raw.cloudCustomData = jsonEncode({
+      ...cloud,
+      MessageMentions.key: {'version': 1, 'items': mentions},
+    });
+    // AtomicX 公开输入 API 无法传入已创建的原生消息与云端扩展。
+    // ignore: invalid_use_of_internal_member
+    message.rawMessage = raw;
+    message.needReadReceipt = option.needReadReceipt;
+    message.offlinePushInfo = option.offlinePushInfo;
+    final input = _messageInputStore as MessageInputStoreImpl;
+    // ignore: invalid_use_of_internal_member
+    return input.sendMessageInternal(message, quotedRawMessage: quoted);
   }
 
   /// 固定点击发送时的提及、引用、回执和推送，后台上传不能读取输入框后续状态。
@@ -2724,7 +2917,31 @@ class MessageInputState extends State<MessageInput>
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => Stack(
+    fit: StackFit.passthrough,
+    children: [
+      _buildInput(context),
+      // 路由内的覆盖层锚点与输入区并列，输入区保留自身的交互和语义布局。
+      Positioned.fill(
+        child: OverlayPortal(
+          controller: _richContentEditorPortal,
+          overlayChildBuilder: (context) => MediaQuery(
+            // 使用覆盖层的原始键盘 Insets，避免聊天 Scaffold 已消费底部缩进。
+            data: MediaQuery.of(Overlay.of(context).context),
+            child: ValueListenableBuilder<int>(
+              valueListenable: _richContentEditorLayout,
+              builder: (context, _, __) =>
+                  _richContentEditorBuilder?.call(context) ?? const SizedBox(),
+            ),
+          ),
+          child: const IgnorePointer(child: SizedBox.expand()),
+        ),
+      ),
+    ],
+  );
+
+  /// 保留普通输入和键盘占位，富文本与工具条由覆盖层绘制。
+  Widget _buildInput(BuildContext context) {
     _bottomPadding = MediaQuery.paddingOf(context).bottom;
     atomicLocale = AppLocalization.of(context);
     if (widget.readOnly) {
@@ -2747,10 +2964,10 @@ class MessageInputState extends State<MessageInput>
     final panelHeight = _getBottomContainerHeight();
     final showEmoji = _isEmojiPanelVisible ||
         (_activeKeyboardPanel?.returningToSystem ?? false);
-    if (_richContentEditorOverlay != null) {
+    if (_richContentEditorBuilder != null) {
       // 键盘 Insets 改变后等待工具条完成布局，再校正编辑器底部锚点。
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _richContentEditorOverlay?.markNeedsBuild();
+        if (mounted) _refreshRichContentEditorLayout();
       });
     }
     final input = LayoutBuilder(
@@ -2798,6 +3015,31 @@ class MessageInputState extends State<MessageInput>
         );
       },
     );
+    if (widget.sendMuted) {
+      // 整条输入栏共用禁用态，包括没有独立禁用色的附件和语音入口。
+      return Semantics(
+        identifier: 'tim.input.muted',
+        enabled: false,
+        label: atomicLocale.muted,
+        child: ExcludeFocus(
+          child: AbsorbPointer(
+            child: Opacity(
+              opacity: 0.55,
+              child: ColorFiltered(
+                colorFilter: const ColorFilter.matrix(<double>[
+                  // 三个颜色通道均取亮度，透明度仍沿用原子树。
+                  0.2126, 0.7152, 0.0722, 0, 0,
+                  0.2126, 0.7152, 0.0722, 0, 0,
+                  0.2126, 0.7152, 0.0722, 0, 0,
+                  0, 0, 0, 1, 0
+                ]),
+                child: input,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     // 暂停触摸操作，同时保留当前键盘、草稿和输入栏的布局。
     return IgnorePointer(ignoring: widget.connectionUnavailable, child: input);
   }
@@ -2873,16 +3115,19 @@ class MessageInputState extends State<MessageInput>
             SizedBox(
               width: 36,
               height: 44,
-              child: material.IconButton(
-                tooltip: _inputMode == _InputMode.voice ? '切换文字输入' : '切换语音输入',
-                onPressed: _toggleVoiceMode,
-                padding: EdgeInsets.zero,
-                icon: Icon(
-                  _inputMode == _InputMode.voice
-                      ? AppIcons.inputKeyboard
-                      : AppIcons.speak,
-                  size: 24,
-                  color: colorsTheme.textColorPrimary,
+              child: Semantics(
+                identifier: 'tim.input.voice_mode',
+                child: material.IconButton(
+                  tooltip: _inputMode == _InputMode.voice ? '切换文字输入' : '切换语音输入',
+                  onPressed: widget.sendMuted ? null : _toggleVoiceMode,
+                  padding: EdgeInsets.zero,
+                  icon: Icon(
+                    _inputMode == _InputMode.voice
+                        ? AppIcons.inputKeyboard
+                        : AppIcons.speak,
+                    size: 24,
+                    color: colorsTheme.textColorPrimary,
+                  ),
                 ),
               ),
             ),
@@ -2912,7 +3157,8 @@ class MessageInputState extends State<MessageInput>
       activeFormats: _isRichContentEditorOpen
           ? richEditor?.activeFormats ?? _activeInlineFormats
           : _activeInlineFormats,
-      canSend: !_isSendingText &&
+      canSend: !widget.sendMuted &&
+          !_isSendingText &&
           (_isRichContentEditorOpen
               ? richEditor?.canSend ?? _showSendButton
               : _inlineRichContentEnabled
@@ -2926,9 +3172,14 @@ class MessageInputState extends State<MessageInput>
       onEmoji: _isRichContentEditorOpen
           ? () => _richContentEditorKey.currentState?.toggleEmojiPanel()
           : _toggleEmojiPanel,
-      onMention: _isRichContentEditorOpen
-          ? () => _richContentEditorKey.currentState?.insertMention()
-          : () => _insertPlainText('@'),
+      onMention: !_isGroupChat || !widget.config.enableMention
+          ? null
+          : _isRichContentEditorOpen
+              ? () => _richContentEditorKey.currentState?.insertMention()
+              : widget.config.mentionPicker == null
+                  ? () => _insertPlainText('@')
+                  : () => unawaited(
+                      _pickInlineMentions(widget.config.mentionPicker!)),
       onVideo: _isRichContentEditorOpen
           ? null
           : widget.config.isShowVideoCall
@@ -3240,229 +3491,10 @@ class MessageInputState extends State<MessageInput>
   }
 }
 
-/// Custom TextEditingController that manages mention ranges
-///
-/// 管理提及范围的自定义 TextEditingController
-class _MentionTextEditingController extends TextEditingController {
-  final List<MentionInfo> _mentions = [];
-  bool _isInternalUpdate = false;
-
-  List<MentionInfo> get mentionList => List.unmodifiable(_mentions);
-
-  /// 提及的原文起止偏移，用于格式改写时保持成员名为完整范围。
-  Map<int, int> get mentionEnds => {
-        for (final mention in _mentions) mention.startIndex: mention.endIndex,
-      };
-
-  /// 格式改写只移动提及位置，保留已选成员，跳过普通增删逻辑。
-  void applySelectionFormat(TextEditingValue value, Map<int, int> offsets) {
-    for (final mention in _mentions) {
-      mention.startIndex = offsets[mention.startIndex] ?? mention.startIndex;
-    }
-    super.value = value;
-  }
-
-  void addMention(MentionInfo mention) {
-    _mentions.add(mention);
-    _mentions.sort((a, b) => a.startIndex.compareTo(b.startIndex));
-  }
-
-  void removeMention(MentionInfo mention) {
-    _mentions.remove(mention);
-    // Update positions of mentions after the removed one
-    //
-    // 移除某个提及后更新其他提及的位置
-    final removedLength = mention.length;
-    for (final m in _mentions) {
-      if (m.startIndex > mention.startIndex) {
-        m.startIndex -= removedLength;
-      }
-    }
-  }
-
-  void clearMentions() {
-    _mentions.clear();
-  }
-
-  /// 用同一次替换更新提及坐标，覆盖选区中的旧提及不随新正文发送。
-  void insertClipboardText(
-      TextSelection selection, String insertion, List<MentionInfo> mentions) {
-    final delta = insertion.length - (selection.end - selection.start);
-    _mentions.removeWhere((mention) =>
-        mention.startIndex < selection.end &&
-        mention.endIndex > selection.start);
-    for (final mention in _mentions) {
-      if (mention.startIndex >= selection.end) mention.startIndex += delta;
-    }
-    for (final mention in mentions) {
-      addMention(
-          mention.copyWith(startIndex: selection.start + mention.startIndex));
-    }
-    // 直接提交已校正的值，避免原有单字符监听再次移动提及坐标。
-    super.value = TextEditingValue(
-      text: text.replaceRange(selection.start, selection.end, insertion),
-      selection:
-          TextSelection.collapsed(offset: selection.start + insertion.length),
-    );
-  }
-
-  /// Get mention that ends at the given position
-  ///
-  /// 获取在指定位置结束的提及
-  MentionInfo? getMentionEndingAt(int position) {
-    for (final mention in _mentions) {
-      if (mention.endIndex == position) {
-        return mention;
-      }
-    }
-    return null;
-  }
-
-  /// Get mention that contains the given position (exclusive of boundaries)
-  ///
-  /// 获取包含给定位置的提及（不包括边界）
-  MentionInfo? getMentionContaining(int position) {
-    for (final mention in _mentions) {
-      if (position > mention.startIndex && position < mention.endIndex) {
-        return mention;
-      }
-    }
-    return null;
-  }
-
-  /// Get mention that the position is at or inside (for deletion detection)
-  ///
-  /// 获取位置处于或包含在内的提及（用于删除检测）
-  MentionInfo? getMentionAt(int position) {
-    for (final mention in _mentions) {
-      if (position > mention.startIndex && position <= mention.endIndex) {
-        return mention;
-      }
-    }
-    return null;
-  }
-
-  /// Get the anchor position for a mention (jump to nearest boundary)
-  ///
-  /// 获取提及的锚点位置（跳到最近的边界）
-  int getAnchorPosition(MentionInfo mention, int position) {
-    final distanceToStart = position - mention.startIndex;
-    final distanceToEnd = mention.endIndex - position;
-    return distanceToStart <= distanceToEnd
-        ? mention.startIndex
-        : mention.endIndex;
-  }
-
-  @override
-  set value(TextEditingValue newValue) {
-    if (_isInternalUpdate) {
-      super.value = newValue;
-      return;
-    }
-
-    final oldText = text;
-    final newText = newValue.text;
-
-    // Skip if no text change
-    //
-    // 如果文本没有变化则跳过
-    if (oldText == newText) {
-      super.value = newValue;
-      return;
-    }
-
-    final delta = newText.length - oldText.length;
-
-    // Handle deletion
-    //
-    // 处理删除
-    if (delta < 0) {
-      final cursorPos = newValue.selection.baseOffset;
-      // The deletion happened at cursorPos, and deleted (-delta) characters
-      //
-      // 删除发生在 cursorPos，删除了 (-delta) 个字符
-      final deleteStart = cursorPos;
-      final deleteEnd = cursorPos - delta; // This is the position in old text
-
-      // Check if the deletion affects any mention
-      // We need to find if any mention overlaps with [deleteStart, deleteEnd) in old text
-      //
-      // 检查删除是否影响任何提及 我们需要找出是否有任何提及与旧文本中的 [deleteStart, deleteEnd) 重叠
-      MentionInfo? affectedMention;
-      for (final mention in _mentions) {
-        // Check if the deletion overlaps with this mention
-        //
-        // 检查删除是否与该提及重叠
-        if (deleteStart < mention.endIndex && deleteEnd > mention.startIndex) {
-          affectedMention = mention;
-          break;
-        }
-      }
-
-      if (affectedMention != null) {
-        // Delete the entire mention
-        //
-        // 删除整条提及
-        _isInternalUpdate = true;
-
-        final beforeMention = oldText.substring(0, affectedMention.startIndex);
-        final afterMention = oldText.substring(affectedMention.endIndex);
-        final updatedText = '$beforeMention$afterMention';
-
-        // Remove the mention from list
-        //
-        // 从列表中移除提及
-        _mentions.remove(affectedMention);
-
-        // Update positions of mentions after the removed one
-        //
-        // 更新被移除提及之后的提及位置
-        final removedLength = affectedMention.length;
-        for (final m in _mentions) {
-          if (m.startIndex > affectedMention.startIndex) {
-            m.startIndex -= removedLength;
-          }
-        }
-
-        super.value = TextEditingValue(
-          text: updatedText,
-          selection: TextSelection.collapsed(
-            offset: affectedMention.startIndex,
-          ),
-        );
-
-        _isInternalUpdate = false;
-        return;
-      }
-
-      // No mention affected, update mention positions normally
-      //
-      // 没有提及受影响，正常更新提及位置
-      for (final mention in _mentions) {
-        if (mention.startIndex >= deleteEnd) {
-          mention.startIndex += delta;
-        }
-      }
-    } else if (delta > 0) {
-      // Handle insertion - update mention positions
-      //
-      // 处理插入 - 更新提及位置
-      final insertPos = newValue.selection.baseOffset - delta;
-      for (final mention in _mentions) {
-        if (mention.startIndex >= insertPos) {
-          mention.startIndex += delta;
-        }
-      }
-    }
-
-    super.value = newValue;
-  }
-}
-
 /// 展示当前输入正文及展开入口，复用父输入区持有的控制器和焦点。
 class _MentionTextField extends StatefulWidget {
   /// 父输入区持有的正文与提及范围，子组件只监听并修正选区。
-  final _MentionTextEditingController controller;
+  final MentionTextEditingController controller;
 
   /// 由父输入区释放，切换编辑模式时保持同一焦点身份。
   final FocusNode focusNode;
@@ -3729,6 +3761,7 @@ class _MentionTextFieldState extends State<_MentionTextField> {
                               videoLoadingPlaceholder:
                                   widget.videoLoadingPlaceholder,
                               attachments: widget.inlineAttachments,
+                              mentionRanges: widget.controller.mentionEnds,
                               maxImageWidth: maxImageWidth,
                               devicePixelRatio:
                                   MediaQuery.devicePixelRatioOf(context),

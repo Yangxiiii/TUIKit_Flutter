@@ -421,14 +421,21 @@ class _MessageListState extends State<MessageList>
 
   /// 先应用删除和撤回，再按上传占位顺序展示并合并重复通知。
   List<MessageInfo> _visibleMessages(Iterable<MessageInfo> messages) {
-    final visible = messages
-        .where((message) =>
-            !widget.config.hiddenMessageIDs.contains(message.msgID) &&
-            (widget.offlineMessages == null ||
-                message.status != MessageStatus.deleted))
-        .toList();
+    final visible = <MessageInfo>[];
+    final seen = <String>{};
+    for (final message in messages) {
+      if (widget.config.hiddenMessageIDs.contains(message.msgID) ||
+          (widget.offlineMessages != null &&
+              message.status == MessageStatus.deleted)) {
+        continue;
+      }
+      // 群服务代发回查和实时 SDK 推送可能以任意顺序提交同一个真实消息 ID。
+      if (message.msgID.isEmpty || seen.add(message.msgID))
+        visible.add(message);
+    }
     _localWindow.reconcileRevocations(visible);
-    return ConversationNotice.visibleMessages(_uploadMessageOrder.apply(visible));
+    return ConversationNotice.visibleMessages(
+        _uploadMessageOrder.apply(visible));
   }
 
   /// SDK异常不能成为未处理Future；定位或刷新失败保留列表并给出可重试反馈。
@@ -751,11 +758,13 @@ class _MessageListState extends State<MessageList>
       _localMessageListener = V2TimAdvancedMsgListener(
         onRecvMessageRevoked: (id) {
           _selectionDraft.remove(id);
+          _removeRevokedMention(id);
           _localWindow.revoke(id);
           if (mounted) _onMessageListStateChanged();
         },
         onRecvMessageRevokedWithInfo: (id, user, reason) {
           _selectionDraft.remove(id);
+          _removeRevokedMention(id);
           _localWindow.revoke(id);
           if (mounted) _onMessageListStateChanged();
         },
@@ -1096,6 +1105,17 @@ class _MessageListState extends State<MessageList>
       final index = _findLocatedMessageIndex(target);
       if (index != -1) _scrollToMessageAndHighlight(_messages[index].msgID);
     }
+    if (loadSucceeded &&
+        target == null &&
+        _remainingAtInfoList.isNotEmpty &&
+        widget.config.isSupportTongue) {
+      // 先让首屏完成布局，避免在列表尚未连接时跳转到未读提及。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _itemScrollController.isAttached) {
+          unawaited(_onAtMentionTongueTap());
+        }
+      });
+    }
     if (loadSucceeded) _scheduleOlderMessageCheck();
 
     // 先提交首屏显示，再启动置顶等辅助查询；清未读仍只接受后面的非空成功信号。
@@ -1343,8 +1363,8 @@ class _MessageListState extends State<MessageList>
   void _onMessageEvent(MessageEvent event) {
     switch (event) {
       case OnReceiveNewMessage(:final message):
-        // 后端已接管的原生提示与静默失效包均不触发聊天列表的实时反馈。
-        if (ConversationNotice.hidesNativeMessage(message) ||
+        // 聊天窗口隐藏的提示及静默失效包不触发滚动或新消息提示。
+        if (ConversationNotice.hidesMessage(message, inChatWindow: true) ||
             StickyMessageEvent.fromMessage(message)?.isControl == true) {
           return;
         }
@@ -1352,7 +1372,9 @@ class _MessageListState extends State<MessageList>
         final notice = ConversationNotice.fromMessage(message);
         // 通知按投递策略计数，不通过提示消息清空会话未读。
         if (notice != null &&
-            (notice.usesOriginalMessage ||
+            ((notice.isGroupDeparture && !widget.config.showGroupDepartureNotices) ||
+                notice.usesOriginalMessage ||
+                notice.matchesNativeDescriptionIn(_messages) ||
                 _messages.any((item) =>
                     item.msgID != message.msgID &&
                     ConversationNotice.fromMessage(item)?.eventId ==
@@ -1457,12 +1479,77 @@ class _MessageListState extends State<MessageList>
     final revision = _historyWindowRevision;
     final result = await _messageListStore.loadMessages(option: option);
     if (mounted &&
+        result.isSuccess &&
+        widget.config.isSupportReaction &&
+        option.direction == MessageLoadDirection.both) {
+      unawaited(_loadLargeWindowReactions());
+    }
+    if (mounted &&
         widget.historyConfig != null &&
         revision == _historyWindowRevision &&
         result.isSuccess) {
       setState(() => _hasLoadedSdkWindow = true);
     }
     return result;
+  }
+
+  /// 双向窗口保留完整历史范围，超过 SDK 20 条上限时单独分批补齐表情。
+  Future<void> _loadLargeWindowReactions() async {
+    const batchSize = 20;
+    final store = _messageListStore;
+    final window = [
+      for (final message in store.state.messageList.value)
+        if (message.rawMessage != null) message,
+    ];
+    if (window.length <= batchSize) return;
+
+    final manager = TencentImSDKPlugin.v2TIMManager.getMessageManager();
+    for (var offset = 0; offset < window.length; offset += batchSize) {
+      if (!mounted || store != _messageListStore) return;
+      final current = store.state.messageList.value.toSet();
+      // 已切出窗口的消息不用继续查询；保留发起请求时的状态以识别实时推送。
+      final batch = {
+        for (final message in window.skip(offset).take(batchSize))
+          if (current.contains(message) &&
+              message.msgID.isNotEmpty &&
+              message.status == MessageStatus.sendSuccess &&
+              !widget.config.hiddenMessageIDs.contains(message.msgID))
+            message.msgID: message,
+      };
+      if (batch.isEmpty) continue;
+      final previous =
+          batch.map((id, message) => MapEntry(id, message.reactionList));
+      try {
+        final response = await manager.getMessageReactions(
+          messageList: [for (final message in batch.values) message.rawMessage!],
+          maxUserCountPerReaction: 10,
+        );
+        if (!mounted || store != _messageListStore) return;
+        final replies = response.data;
+        if (response.code != 0 || replies == null) continue;
+
+        // 旧窗口的回包和在途请求前的状态均不能覆盖实时更新。
+        final latest = store.state.messageList.value.toSet();
+        var changed = false;
+        for (final reply in replies) {
+          final message = batch[reply.messageID];
+          if (reply.resultCode != 0 ||
+              message == null ||
+              !latest.contains(message) ||
+              message.status != MessageStatus.sendSuccess ||
+              !identical(message.reactionList, previous[reply.messageID])) {
+            continue;
+          }
+          message.reactionList =
+              ChatUtil.convertToMessageReactions(reply.reactionList);
+          changed = true;
+        }
+        if (changed) _onMessageListStateChanged();
+      } on Object catch (error) {
+        // 单个批次失败不阻断其他批次或已经显示的聊天正文。
+        debugPrint('聊天表情回复补查失败：${error.runtimeType}');
+      }
+    }
   }
 
   /// SDK 成功建立窗口并取齐旧页后，才允许从当前窗口的边界续查归档。
@@ -1675,6 +1762,8 @@ class _MessageListState extends State<MessageList>
     final message = _messages[index];
 
     if (StickyMessageEvent.fromMessage(message)?.isControl == true ||
+        (!widget.config.showGroupDepartureNotices &&
+            ConversationNotice.fromMessage(message)?.isGroupDeparture == true) ||
         (!widget.config.isShowSystemMessage && _isSystemMessage(message))) {
       return const SizedBox.shrink();
     }
@@ -1960,7 +2049,9 @@ class _MessageListState extends State<MessageList>
                     tongueState: TongueState(
                       type: _tongueType,
                       newMessageCount: _newMessageCount,
-                      atMentionText: _atMentionText,
+                      atMentionText: _remainingAtInfoList.isEmpty
+                          ? _atMentionText
+                          : '有${_remainingAtInfoList.length}条@你',
                       atMessageSeq: _atMessageSeq,
                       isLoading: _navigationState is _NavToAtMention ||
                           _navigationState is _NavReloadingLatest,
@@ -2027,6 +2118,17 @@ class _MessageListState extends State<MessageList>
 
   // ==================== Tongue (小舌头) ====================
 
+  /// 撤回只移除仍未消费的提及，避免与 SDK 回调重复扣减。
+  void _removeRevokedMention(String id) {
+    final sequence =
+        _messages.where((item) => item.msgID == id).firstOrNull?.sequence;
+    if (!mounted ||
+        sequence == null ||
+        !_remainingAtInfoList.any((item) => item.msgSeq == sequence)) return;
+    _remainingAtInfoList.removeWhere((item) => item.msgSeq == sequence);
+    _activateAtMentionTongueIfNeeded();
+  }
+
   void _initAtMentionTongue() {
     final atInfoList = widget.groupAtInfoList;
     if (atInfoList == null || atInfoList.isEmpty) return;
@@ -2034,8 +2136,12 @@ class _MessageListState extends State<MessageList>
     // Sort by msgSeq ascending (oldest first) for sequential navigation
     //
     // 按 msgSeq 升序排序（最旧的在前）以便顺序浏览
-    _remainingAtInfoList = List.from(atInfoList)
+    _remainingAtInfoList = {
+      for (final item in atInfoList)
+        if (item.msgSeq > 0) item.msgSeq: item,
+    }.values.toList()
       ..sort((a, b) => a.msgSeq.compareTo(b.msgSeq));
+    if (_remainingAtInfoList.isEmpty) return;
 
     // Don't show @mention tongue immediately; it will be shown
     // after the unread tongue is consumed or if there's no unread tongue
@@ -2754,7 +2860,7 @@ class _MessageListState extends State<MessageList>
   }
 
   Future<void> _onAtMentionTongueTap() async {
-    if (_atMessageSeq == null) return;
+    if (_atMessageSeq == null || _remainingAtInfoList.isEmpty) return;
 
     final targetSeq = _atMessageSeq!;
     debugPrint(
@@ -2811,7 +2917,23 @@ class _MessageListState extends State<MessageList>
         ..direction = MessageLoadDirection.both
         ..pageCount = 20;
 
-      await _loadSdkWindow(option);
+      try {
+        final loaded = await _loadSdkWindow(option);
+        if (!loaded.isSuccess && mounted) {
+          setState(() {
+            isLoading = false;
+            _navigationState = const _NavIdle();
+          });
+        }
+      } on Object {
+        // 回查失败保留未读提及，允许用户再次点击同一条。
+        if (mounted) {
+          setState(() {
+            isLoading = false;
+            _navigationState = const _NavIdle();
+          });
+        }
+      }
     }
 
     // Delay exiting the nav state by TWO frames (same pattern as

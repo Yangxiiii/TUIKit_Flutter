@@ -1,3 +1,6 @@
+import 'package:app_ui/app_ui.dart';
+import '../../../emoji_picker/emoji_manager.dart';
+import '../../../message_input/mention/mention_info.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -15,8 +18,23 @@ class RichContentMarkdown extends StatelessWidget {
   /// 继承当前气泡的字号与前景色。
   final TextStyle textStyle;
 
-  const RichContentMarkdown(
-      {super.key, required this.data, required this.textStyle});
+  /// 已按当前块原文验证的提及定位。
+  final List<MentionInfo> mentions;
+
+  /// 成员点击交还宿主复核权限。
+  final void Function(BuildContext, String)? onMentionTap;
+
+  /// 按已校验的提及成员 ID 生成行内回执，普通 Markdown 无需提供。
+  final Widget? Function(String)? buildMentionReceipt;
+
+  const RichContentMarkdown({
+    super.key,
+    required this.data,
+    required this.textStyle,
+    this.mentions = const [],
+    this.onMentionTap,
+    this.buildMentionReceipt,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -29,21 +47,43 @@ class RichContentMarkdown extends StatelessWidget {
       a: textStyle.copyWith(decoration: TextDecoration.underline),
       blockSpacing: 4,
     );
-    final inlineBuilder = _InlineFormatBuilder(textStyle);
+    // 仅在 Markdown 的展示副本置入无语法标记的令牌；原文与消息位置始终保留。
+    var prefix = '\uE510';
+    while (data.contains(prefix)) {
+      prefix += '\uE512';
+    }
+    final mentionsByToken = <String, MentionInfo>{};
+    var display = data;
+    for (final (index, mention) in mentions.indexed.toList().reversed) {
+      final token = '$prefix$index\uE511';
+      mentionsByToken[token] = mention;
+      display =
+          display.replaceRange(mention.startIndex, mention.endIndex - 1, token);
+    }
+    final inlineBuilder = _InlineFormatBuilder(
+      textStyle,
+      mentionsByToken,
+      onMentionTap,
+      buildMentionReceipt,
+    );
     // 富文本保留消息原始字号，仅跟随平台无障碍缩放，不叠加宿主的普通文字档位。
     return MediaQuery(
       data: MediaQuery.of(context).copyWith(
         textScaler: MediaQueryData.fromView(View.of(context)).textScaler,
       ),
       child: MarkdownBody(
-        data: data,
+        data: display,
         styleSheet: style,
         softLineBreak: true,
         extensionSet: richContentMarkdownExtensionSet,
+        inlineSyntaxes: [
+          if (mentionsByToken.isNotEmpty) _MentionSyntax(prefix),
+        ],
         // 与会话列表共用行内样式转换，块级排版继续使用 MarkdownBody。
         builders: {
-          for (final tag in ['strong', 'em', 'u', 'del', 'a'])
-            tag: inlineBuilder,
+          for (final tag in ['strong', 'em', 'u', 'del', 'a', 'code'])
+            if (tag != 'code' || mentionsByToken.isNotEmpty) tag: inlineBuilder,
+          if (mentionsByToken.isNotEmpty) 'zd-mention': inlineBuilder,
         },
         // 消息文字中的 Markdown 图片不是附件块，不允许借此读取本地资源。
         imageBuilder: (uri, title, alt) => Text(alt ?? '', style: textStyle),
@@ -52,9 +92,30 @@ class RichContentMarkdown extends StatelessWidget {
   }
 }
 
+/// 仅识别当前展示副本注入的令牌，避免手打姓名成为链接。
+final class _MentionSyntax extends md.InlineSyntax {
+  _MentionSyntax(String prefix) : super('${RegExp.escape(prefix)}[0-9]+\uE511');
+
+  @override
+  bool onMatch(md.InlineParser parser, Match match) {
+    parser.addNode(md.Element.text('zd-mention', match[0]!));
+    return true;
+  }
+}
+
 /// 将聊天窗口的行内节点交给共用样式转换，保留 MarkdownBody 提供的段落上下文。
 class _InlineFormatBuilder extends MarkdownElementBuilder {
-  _InlineFormatBuilder(this.baseStyle);
+  _InlineFormatBuilder(
+      this.baseStyle, this.mentions, this.onMentionTap, this.buildMentionReceipt);
+
+  /// 当前文字块从展示令牌到已校验身份的映射。
+  final Map<String, MentionInfo> mentions;
+
+  /// 仅用户提及会触发宿主名片入口。
+  final void Function(BuildContext, String)? onMentionTap;
+
+  /// 提及正文和回执共享同一份令牌定位。
+  final Widget? Function(String)? buildMentionReceipt;
 
   /// 段落未提供父级样式时沿用聊天正文样式。
   final TextStyle baseStyle;
@@ -62,12 +123,33 @@ class _InlineFormatBuilder extends MarkdownElementBuilder {
   @override
   Widget? visitElementAfterWithContext(BuildContext context, md.Element element,
           TextStyle? preferredStyle, TextStyle? parentStyle) =>
-      _InlineFormattedText(element: element, style: parentStyle ?? baseStyle);
+      _InlineFormattedText(
+        element: element,
+        style: parentStyle ?? baseStyle,
+        mentions: mentions,
+        onMentionTap: onMentionTap,
+        buildMentionReceipt: buildMentionReceipt,
+      );
 }
 
 /// 渲染共享的行内样式，并负责聊天链接识别器的创建与释放。
 class _InlineFormattedText extends StatefulWidget {
-  const _InlineFormattedText({required this.element, required this.style});
+  const _InlineFormattedText({
+    required this.element,
+    required this.style,
+    required this.mentions,
+    required this.onMentionTap,
+    required this.buildMentionReceipt,
+  });
+
+  /// 当前消息块中的定位令牌及成员 ID。
+  final Map<String, MentionInfo> mentions;
+
+  /// 宿主按真实成员 ID 处理点击。
+  final void Function(BuildContext, String)? onMentionTap;
+
+  /// 为个人提及附加回执，不参与 Markdown 源文本解析。
+  final Widget? Function(String)? buildMentionReceipt;
 
   /// MarkdownBody 已解析的完整子树，包含全部嵌套格式及链接地址。
   final md.Element element;
@@ -93,8 +175,61 @@ class _InlineFormattedTextState extends State<_InlineFormattedText> {
       widget.element,
       widget.style,
       linkRecognizer: _newLinkRecognizer,
+      mentionSpan: widget.mentions.isEmpty ? null : _mentionSpan,
     ));
   }
+
+  /// 将当前节点内的令牌恢复成原名；提及点击优先于父链接。
+  TextSpan? _mentionSpan(
+      String text, TextStyle style, GestureRecognizer? inherited) {
+    final pattern = RegExp(widget.mentions.keys.map(RegExp.escape).join('|'));
+    if (!pattern.hasMatch(text)) return null;
+    final spans = <InlineSpan>[];
+    var offset = 0;
+    for (final match in pattern.allMatches(text)) {
+      if (offset < match.start) {
+        spans.add(_ordinarySpan(
+            text.substring(offset, match.start), style, inherited));
+      }
+      final mention = widget.mentions[match[0]!]!;
+      final open = widget.onMentionTap;
+      final tap = !mention.isAtAll && open != null
+          ? (TapGestureRecognizer()
+            ..onTap = () => open(context, mention.userID))
+          : null;
+      if (tap != null) _linkRecognizers.add(tap);
+      spans.add(TextSpan(
+        text: '@${mention.displayName}',
+        style: TextStyle(color: context.appColors.primary),
+        recognizer: tap,
+      ));
+      // 无论提及处于何种嵌套格式，全体提及都没有个人回执。
+      final receipt = mention.isAtAll
+          ? null
+          : widget.buildMentionReceipt?.call(mention.userID);
+      if (receipt != null) {
+        spans.add(WidgetSpan(
+          alignment: PlaceholderAlignment.top,
+          child: receipt,
+        ));
+      }
+      offset = match.end;
+    }
+    if (offset < text.length) {
+      spans.add(_ordinarySpan(text.substring(offset), style, inherited));
+    }
+    return TextSpan(style: style, children: spans);
+  }
+
+  /// 与其余富文本节点使用相同的业务表情资源和父链接。
+  TextSpan _ordinarySpan(
+          String text, TextStyle style, GestureRecognizer? tap) =>
+      EmojiManager.tokenPattern.hasMatch(text)
+          ? TextSpan(
+              children: EmojiManager.buildInlineSpans(text,
+                  size: style.fontSize ?? 16),
+              recognizer: tap)
+          : TextSpan(text: text, recognizer: tap);
 
   /// 只为无账号信息的 HTTP(S) 地址创建聊天点击行为。
   GestureRecognizer? _newLinkRecognizer(String? href) {

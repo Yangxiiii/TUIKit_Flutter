@@ -4,6 +4,8 @@ import '../../audio_player/audio_player_platform.dart';
 import '../utils/voice_message_media.dart';
 import 'package:app_ui/app_ui.dart';
 import '../utils/conversation_notice.dart';
+import '../utils/group_announcement_message.dart';
+import 'message_types/group_announcement_message_card.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart' hide AlertDialog;
 import 'super_tooltip.dart';
@@ -450,6 +452,7 @@ class _MessageBubbleState extends State<MessageBubble>
       );
     }
 
+    final announcement = _groupAnnouncement;
     Widget messageWidget;
 
     switch (widget.message.messageType) {
@@ -585,10 +588,23 @@ class _MessageBubbleState extends State<MessageBubble>
       case MessageType.tips:
         messageWidget = SystemMessageWidget(
           message: widget.message,
+          onOperatorTap: widget.config.onGroupInfoOperatorTap,
         );
         break;
 
       case MessageType.custom:
+        if (announcement != null) {
+          // 群归属已校验，点击只传公告引用，详情正文交给宿主读取。
+          final onOpen = widget.config.onGroupAnnouncementTap;
+          messageWidget = GroupAnnouncementMessageCard(
+            key: _quoteInfo != null ? null : _messageKey,
+            summary: announcement.summary,
+            maxWidth: widget.maxWidth,
+            onOpen: onOpen == null ? null : () => onOpen(context, announcement),
+            onLongPress: _longPressCallback,
+          );
+          break;
+        }
         CallingMessageDataProvider provider =
             CallingMessageDataProvider(widget.message, context);
         if (provider.isCallingSignal) {
@@ -665,8 +681,9 @@ class _MessageBubbleState extends State<MessageBubble>
         messageWidget = _buildUnsupportedMessage(context);
     }
 
-    // 离线媒体可查看本机文件；其他依赖 SDK 的卡片操作在联网后恢复。
+    // 公告详情走业务接口，缓存卡片也可打开；其他依赖 SDK 的卡片操作在联网后恢复。
     if (widget.messageListStore == null &&
+        announcement == null &&
         const {MessageType.file, MessageType.audio, MessageType.custom}
             .contains(widget.message.messageType)) {
       messageWidget = IgnorePointer(child: messageWidget);
@@ -768,16 +785,21 @@ class _MessageBubbleState extends State<MessageBubble>
   }
 
   /// 合并详情和后端系统提示只读，不能通过长按打开操作菜单。
-  VoidCallback? get _longPressCallback =>
-      widget.isInMergedDetailView ||
-              ConversationNotice.fromMessage(widget.message) != null ||
-              (widget.messageListStore == null && !_canCopy)
-          ? null
-          : _handleLongPress;
+  VoidCallback? get _longPressCallback => widget.isInMergedDetailView ||
+          ConversationNotice.fromMessage(widget.message) != null ||
+          (widget.messageListStore == null && !_canCopy)
+      ? null
+      : _handleLongPress;
+
+  /// 判定公告专用展示和操作权限时使用当前消息行的会话标识。
+  GroupAnnouncementMessage? get _groupAnnouncement =>
+      GroupAnnouncementMessage.fromConversation(
+          widget.message, widget.conversationID);
 
   /// 消息复制只读取当前气泡，离线可沿用同一菜单动作。
   bool get _canCopy =>
       widget.config.isSupportCopy &&
+      _groupAnnouncement == null &&
       widget.message.status != MessageStatus.violation &&
       CopiedChatMessage.supports(widget.message.messagePayload);
 
@@ -877,10 +899,7 @@ class _MessageBubbleState extends State<MessageBubble>
         widget.message.status != MessageStatus.violation;
     final scope = MessageActionsScope.maybeOf(context);
     if (scope != null) {
-      scope.showActions(
-          widget.message,
-          _messageKey,
-          _buildMenuItems(),
+      scope.showActions(widget.message, _messageKey, _buildMenuItems(),
           canReact ? _handleReactionSelected : null);
       return;
     }
@@ -1520,7 +1539,8 @@ class _MessageBubbleState extends State<MessageBubble>
     // Forward button
     //
     // 转发按钮
-    if (widget.config.isSupportForward) {
+    // 群公告卡片的发布与撤回由公告服务处理，不开放普通消息转发。
+    if (widget.config.isSupportForward && _groupAnnouncement == null) {
       final isSentSuccess = widget.message.status == MessageStatus.sendSuccess;
       // Violation messages cannot be forwarded
       //
@@ -1565,7 +1585,9 @@ class _MessageBubbleState extends State<MessageBubble>
     // Recall button
     //
     // 撤回按钮
-    if (widget.config.isSupportRecall && widget.isSelf) {
+    if (widget.config.isSupportRecall &&
+        widget.isSelf &&
+        _groupAnnouncement == null) {
       final now = DateTime.now().millisecondsSinceEpoch / 1000;
       final age = now - (widget.message.timestamp ?? 0);
       final isWithin2Minutes = age >= 0 && age < 2 * 60;

@@ -1,3 +1,6 @@
+import 'package:app_ui/app_ui.dart' show AppColorBuildContext;
+import 'package:flutter/gestures.dart';
+import '../../../message_input/mention/message_mentions.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_input/src/chat_special_text_span_builder.dart';
 import 'package:tencent_chat_uikit/src/message_list/message_list_config.dart';
@@ -81,6 +84,23 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
   // 放置）在翻译扩展时漂到列的底部，见 Bug-956459。现在翻译气泡是由 `MessageAttachmentBuilder` 构建，并由 `MessageItem` 渲染在放置回执的行的*外面*
   // —— 参见 `lib/src/message_list/widgets/message_attachments.dart`。
 
+  /// 每次构建更新按成员身份绑定的点击处理，销毁时统一释放。
+  final _mentionTaps = <TapGestureRecognizer>[];
+
+  /// 回收上一棵正文使用的识别器，避免复用旧消息的资料卡目标。
+  void _clearMentionTaps() {
+    for (final recognizer in _mentionTaps) {
+      recognizer.dispose();
+    }
+    _mentionTaps.clear();
+  }
+
+  @override
+  void dispose() {
+    _clearMentionTaps();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = SemanticColorScheme.of(context);
@@ -90,7 +110,12 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
       constraints: BoxConstraints(
         maxWidth: widget.maxWidth * 0.9,
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      // 群聊正文按 20 高的文字行排版，气泡上下各保留 10。
+      padding: EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: widget.message.conversationType == ConversationType.group
+              ? 10
+              : 8),
       child: _buildTextWithStatusAndTime(colors),
     );
 
@@ -113,7 +138,9 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
   /// 只有实际显示内部时间或状态时才预留间隔，普通正文不保留空白尾槽。
   Widget _buildTextWithStatusAndTime(SemanticColorScheme colors) {
     final style = FontScheme.caption1Regular.copyWith(
-      height: 1.5,
+      height: widget.message.conversationType == ConversationType.group
+          ? 20 / 16
+          : 1.5,
       color:
           widget.isSelf ? colors.textColorAntiPrimary : colors.textColorPrimary,
     );
@@ -158,6 +185,58 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
       onTapUrl: _launchUrl,
       showAtBackground: true,
     );
+    _clearMentionTaps();
+    final mentions = widget.isInMergedDetailView
+        ? const []
+        : MessageMentions.read(widget.message, text, 0);
+    if (mentions.isNotEmpty) {
+      final children = <InlineSpan>[];
+      var offset = 0;
+      final open = widget.config.onMentionTap;
+      // 仅有效定位改变正文样式，提及以外的链接及表情继续使用现有解析。
+      for (final mention in mentions) {
+        if (offset < mention.startIndex) {
+          children.add(builder.build(
+              _getContentSpan(
+                  text.substring(offset, mention.startIndex), colorsTheme),
+              textStyle: style));
+        }
+        offset = mention.endIndex - 1;
+        final tap = !mention.isAtAll && open != null
+            ? (TapGestureRecognizer()
+              ..onTap = () => open(context, mention.userID))
+            : null;
+        if (tap != null) _mentionTaps.add(tap);
+        children.add(TextSpan(
+          text: text.substring(mention.startIndex, offset),
+          style: TextStyle(color: context.appColors.chatMention),
+          recognizer: tap,
+        ));
+        // 回执紧跟个人提及，全体提及不占回执空间。
+        final receipt = mention.isAtAll
+            ? null
+            : widget.config.mentionReceiptBuilder
+                ?.call(widget.message, mention.userID);
+        if (receipt != null) {
+          children.add(WidgetSpan(
+            alignment: PlaceholderAlignment.top,
+            child: receipt,
+          ));
+        }
+      }
+      if (offset < text.length) {
+        children.add(builder.build(
+            _getContentSpan(text.substring(offset), colorsTheme),
+            textStyle: style));
+      }
+      if (edited) {
+        children.add(TextSpan(
+            text: ' (已编辑)',
+            style: TextStyle(
+                fontSize: 12, color: colorsTheme.textColorSecondary)));
+      }
+      return ExtendedText.rich(TextSpan(children: children), style: style);
+    }
     final content = _getContentSpan(text, colorsTheme);
     if (!edited) {
       return ExtendedText(content,

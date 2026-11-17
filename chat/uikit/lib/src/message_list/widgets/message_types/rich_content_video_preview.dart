@@ -21,6 +21,9 @@ final class RichContentVideoPreview extends StatelessWidget {
   /// 编辑态使用 4px 圆角及右下角时长，不创建播放交互。
   final bool isEditing;
 
+  /// 独立正文使用左下角时长和视频标记，封面点击由正文接管。
+  final bool showInlineDuration;
+
   /// 视频时长，单位为毫秒；旧草稿缺少时以未知时长展示。
   final int? durationMs;
 
@@ -31,6 +34,7 @@ final class RichContentVideoPreview extends StatelessWidget {
       required this.size,
       this.playIcon,
       this.isEditing = false,
+      this.showInlineDuration = false,
       this.durationMs});
 
   @override
@@ -40,12 +44,12 @@ final class RichContentVideoPreview extends StatelessWidget {
       child: SizedBox.fromSize(
         size: size,
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(isEditing ? 4 : 8),
+          borderRadius:
+              BorderRadius.circular(isEditing || showInlineDuration ? 4 : 8),
           child: Stack(fit: StackFit.expand, children: [
             // 编辑尺寸已按原比例计算，完整显示封面；消息气泡沿用原展示方式。
             ColoredBox(color: colors.bgColorInput),
-            if (image == null)
-              ChatMediaPlaceholder(image: loadingPlaceholder),
+            if (image == null) ChatMediaPlaceholder(image: loadingPlaceholder),
             if (image != null)
               Image(
                   image: image!,
@@ -57,7 +61,7 @@ final class RichContentVideoPreview extends StatelessWidget {
                   errorBuilder: (_, __, ___) => Icon(
                       Icons.broken_image_outlined,
                       color: colors.textColorTertiary)),
-            if (isEditing)
+            if (isEditing || showInlineDuration)
               _buildDurationBadge(context, colors)
             else
               Center(
@@ -76,7 +80,7 @@ final class RichContentVideoPreview extends StatelessWidget {
     );
   }
 
-  /// 角标与封面右下边缘各留 4px，使用设计稿的实心图标和完整圆角。
+  /// 编辑器的时长放在右下角，独立正文按公告设计放在左下角。
   Widget _buildDurationBadge(BuildContext context, SemanticColorScheme colors) {
     // 使用深色遮罩上的白色前景，避免浅色主题的反色正文把角标染成黑色。
     final foreground = context.appColors.onScrim;
@@ -85,7 +89,8 @@ final class RichContentVideoPreview extends StatelessWidget {
         ? '--:--'
         : '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
     return Positioned(
-      right: 4,
+      left: showInlineDuration ? 6 : null,
+      right: showInlineDuration ? null : 4,
       bottom: 4,
       child: Container(
         height: 18,

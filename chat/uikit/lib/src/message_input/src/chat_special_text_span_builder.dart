@@ -24,7 +24,11 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
   /// 是否为 ExtendedTextField 输出带原文映射的隐藏标签。
   final bool mapMarkdownMarkers;
 
+  /// 编辑区已选提及的 UTF-16 起止范围，用于叠加蓝色而不改写原文。
+  final Map<int, int> mentionRanges;
+
   ChatSpecialTextSpanBuilder({
+    this.mentionRanges = const {},
     this.showAtBackground = false,
     this.mapMarkdownMarkers = false,
     required this.onTapUrl,
@@ -44,7 +48,10 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
     SpecialTextGestureTapCallback? onTap,
   }) {
     final source = _buildTokenSpans(data, textStyle, onTap);
-    if (!richContentMarkdownStartPattern.hasMatch(data)) return source;
+    if (mentionRanges.isEmpty &&
+        !richContentMarkdownStartPattern.hasMatch(data)) {
+      return source;
+    }
 
     final children = <InlineSpan>[];
     var sourceOffset = 0;
@@ -53,13 +60,14 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
           span is! SpecialInlineSpanBase &&
           span.children == null &&
           span.text != null) {
-        children.addAll(
-          _buildMarkdownSpans(
-            span.text!,
-            span.style ?? textStyle,
-            sourceOffset,
-          ),
-        );
+        var offset = sourceOffset;
+        for (final part in _buildMarkdownSpans(
+            span.text!, span.style ?? textStyle, offset)) {
+          children.addAll(_highlightMentions(part, offset));
+          offset += part is SpecialInlineSpanBase
+              ? (part as SpecialInlineSpanBase).actualText.length
+              : part.toPlainText().length;
+        }
       } else {
         children.add(span);
       }
@@ -69,6 +77,57 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
           specialSpan?.actualText.length ?? span.toPlainText().length;
     }
     return TextSpan(children: children, style: source.style ?? textStyle);
+  }
+
+  /// 对普通文字片段叠加提及色，保留表情、附件和隐藏格式标记的原始偏移。
+  List<InlineSpan> _highlightMentions(InlineSpan part, int offset) {
+    if (mentionRanges.isEmpty ||
+        part is! TextSpan ||
+        part is SpecialInlineSpanBase) {
+      return [part];
+    }
+    final nested = part.children;
+    if (nested != null) {
+      var childOffset = offset + (part.text?.length ?? 0);
+      final children = <InlineSpan>[];
+      for (final child in nested) {
+        children.addAll(_highlightMentions(child, childOffset));
+        childOffset += child is SpecialInlineSpanBase
+            ? (child as SpecialInlineSpanBase).actualText.length
+            : child.toPlainText().length;
+      }
+      return [
+        TextSpan(
+            text: part.text,
+            style: part.style,
+            children: children,
+            recognizer: part.recognizer)
+      ];
+    }
+    final text = part.text;
+    if (text == null || text.isEmpty || part.children != null) return [part];
+    final result = <InlineSpan>[];
+    var cursor = 0;
+    for (final range in mentionRanges.entries) {
+      final start = (range.key - offset).clamp(0, text.length);
+      final end = (range.value - offset).clamp(0, text.length);
+      if (start < cursor || start >= end) continue;
+      if (cursor < start) {
+        result.add(
+            TextSpan(text: text.substring(cursor, start), style: part.style));
+      }
+      result.add(TextSpan(
+        text: text.substring(start, end),
+        style: (part.style ?? const TextStyle())
+            .copyWith(color: colorScheme.textColorLink),
+      ));
+      cursor = end;
+    }
+    if (cursor == 0) return [part];
+    if (cursor < text.length) {
+      result.add(TextSpan(text: text.substring(cursor), style: part.style));
+    }
+    return result;
   }
 
   /// 按起始标记扫描令牌，普通文字整段输出并保留原文偏移。

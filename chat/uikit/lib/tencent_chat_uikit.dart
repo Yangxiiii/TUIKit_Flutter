@@ -28,8 +28,11 @@ export 'src/message_input/message_text.dart'
     show messageTextByteCount, messageTextByteLimit;
 export 'src/message_input/chat_media_sender.dart';
 export 'src/message_list/utils/big_file_message.dart';
+export 'src/message_list/utils/group_announcement_message.dart';
 export 'src/message_list/utils/rich_content_message.dart'
     show RichContentMessage, RichContentBlock, RichImageBlock, RichFileBlock;
+export 'src/message_list/widgets/message_types/custom_message_widget.dart'
+    show RichContentBody;
 export 'src/message_list/utils/message_utils.dart' show MessageUtil;
 export 'src/message_list/message_list.dart';
 export 'src/message_list/utils/message_viewport_anchor.dart'

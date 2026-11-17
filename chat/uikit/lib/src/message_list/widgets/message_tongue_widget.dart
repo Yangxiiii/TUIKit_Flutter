@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart' show AppColorBuildContext;
 import 'package:app_ui/app_ui.dart' show AppIcons;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -109,46 +110,58 @@ class MessageTongueWidget extends StatelessWidget {
 
     final colorsTheme = SemanticColorScheme.of(context);
     final text = _getDisplayText();
+    final isMention = tongueState.type == TongueType.atMention;
+    final foreground = isMention
+        ? context.appColors.onPrimary
+        : colorsTheme.buttonColorPrimaryDefault;
 
-    return GestureDetector(
-      onTap: tongueState.isLoading ? null : onTap,
-      child: Container(
-        // 数量提示沿用132宽设计基线，长文案仍可随可用空间扩展。
-        constraints: BoxConstraints(
-          minHeight: 44,
-          minWidth: tongueState.type == TongueType.newMessages ||
-                  tongueState.type == TongueType.unreadMessages
-              ? 132
-              : 0,
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: colorsTheme.bgColorOperate,
-          borderRadius: BorderRadius.circular(22),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.1),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildLeadingIcon(colorsTheme),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                text,
-                style: FontScheme.caption2Regular.copyWith(
-                  color: colorsTheme.buttonColorPrimaryDefault,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+    return Semantics(
+      identifier: isMention ? 'tim.groupMention.jump' : null,
+      button: true,
+      child: GestureDetector(
+        onTap: tongueState.isLoading ? null : onTap,
+        child: Container(
+          // 数量提示沿用132宽设计基线，长文案仍可随可用空间扩展。
+          constraints: BoxConstraints(
+            minHeight: 44,
+            minWidth: isMention
+                ? 114
+                : tongueState.type == TongueType.newMessages ||
+                        tongueState.type == TongueType.unreadMessages
+                    ? 132
+                    : 0,
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: isMention
+                ? context.appColors.primary
+                : colorsTheme.bgColorOperate,
+            borderRadius: BorderRadius.circular(22),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.1),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
               ),
-            ),
-          ],
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildLeadingIcon(foreground),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  text,
+                  style: FontScheme.caption2Regular.copyWith(
+                    color: foreground,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -157,16 +170,15 @@ class MessageTongueWidget extends StatelessWidget {
   /// Build leading icon: loading spinner or double arrow
   ///
   /// 构建前导图标：加载旋转图标或双箭头
-  Widget _buildLeadingIcon(SemanticColorScheme colorsTheme) {
+  Widget _buildLeadingIcon(Color color) {
     if (tongueState.isLoading) {
       return const CupertinoActivityIndicator(radius: 8);
     }
-    return _buildDoubleArrow(colorsTheme);
+    return _buildDoubleArrow(color);
   }
 
   /// 两种方向使用同源字体的双箭头，不改变各自跳转目标。
-  Widget _buildDoubleArrow(SemanticColorScheme colorsTheme) {
-    final color = colorsTheme.buttonColorPrimaryDefault;
+  Widget _buildDoubleArrow(Color color) {
     final icon =
         _isUpDirection ? AppIcons.directionIcon2 : AppIcons.directionIcon;
     return Icon(

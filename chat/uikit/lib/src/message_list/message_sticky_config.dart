@@ -2,9 +2,10 @@ import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/widgets.dart';
 
 import 'utils/big_file_message.dart';
+import 'utils/group_announcement_message.dart';
 import 'utils/rich_content_message.dart';
 
-/// 宿主提供单聊置顶状态和动作；UIKit只编排菜单、定位和叠放区域。
+/// 宿主提供会话置顶状态和动作；UIKit只编排菜单、定位和叠放区域。
 final class ChatMessageStickyConfig {
   const ChatMessageStickyConfig(
       {required this.pin,
@@ -46,6 +47,13 @@ final class ChatStickyPreview {
 
   /// 按消息自身类型派生，已知自定义内容沿用各自的协议校验器。
   factory ChatStickyPreview.fromMessage(MessageInfo message) {
+    final announcement = message.conversationType == ConversationType.group
+        ? GroupAnnouncementMessage.fromConversation(
+            message, 'group_${message.to}')
+        : null;
+    if (announcement != null) {
+      return ChatStickyPreview(text: announcement.preview);
+    }
     final payload = message.messagePayload;
     return switch (payload) {
       TextMessagePayload p => ChatStickyPreview(text: p.text),

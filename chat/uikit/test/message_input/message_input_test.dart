@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:app_core/app_core.dart';
 import 'package:app_ui/app_ui.dart';
+import 'package:flutter/cupertino.dart' show CupertinoPageRoute;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/semantics.dart';
@@ -41,7 +42,10 @@ void main() {
   Future<void> mount(WidgetTester tester,
           {RichContentAttachmentUploader? uploader,
           ChatMessageReplyConfig? replyConfig,
-          bool voicePreview = false}) =>
+          ChatMentionPicker? mentionPicker,
+          String conversationID = 'c2c_test',
+          bool voicePreview = false,
+          bool sendMuted = false}) =>
       tester.pumpWidget(
         MaterialApp(
           builder: AppDialog.init(),
@@ -53,10 +57,12 @@ void main() {
             body: Column(children: [
               const Spacer(),
               MessageInput(
-                conversationID: 'c2c_test',
+                conversationID: conversationID,
+                sendMuted: sendMuted,
                 replyConfig: replyConfig,
                 config: ChatMessageInputConfig(
                     actionGuard: ActionGuard(),
+                    mentionPicker: mentionPicker,
                     previewVoiceBeforeSend: voicePreview,
                     enableReadReceipt: false,
                     richContentAttachmentUploader: uploader),
@@ -65,6 +71,63 @@ void main() {
           ),
         ),
       );
+
+  testWidgets('群聊两个 @ 入口都能打开全屏选人并回填原编辑器', (tester) async {
+    await mount(tester,
+        conversationID: 'group_test',
+        mentionPicker: (context) => Navigator.of(context, rootNavigator: true)
+            .push(CupertinoPageRoute<List<MentionInfo>>(
+              fullscreenDialog: true,
+              builder: (context) => Scaffold(
+                body: Center(
+                  child: TextButton(
+                    onPressed: () => Navigator.of(context).pop([
+                      MentionInfo(
+                          userID: 'member', displayName: '小张', startIndex: 0),
+                    ]),
+                    child: const Text('选择小张'),
+                  ),
+                ),
+              ),
+            )));
+    sdk.conversations.completeDraft('');
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('提及成员'));
+    await tester.pumpAndSettle();
+    final choose = find.text('选择小张');
+    expect(choose.hitTestable(), findsOneWidget);
+    await tester.tap(choose);
+    await tester.pumpAndSettle();
+    final normalField = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('message_input_text_field')));
+    expect(normalField.controller!.text, '@小张 ');
+
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    final editor = find.byType(RichContentEditorSheet);
+    final editorState = tester.state(editor);
+    final editorMention = find.descendant(
+      of: find.byKey(const Key('rich_content_overlay_toolbar')),
+      matching: find.byTooltip('提及成员'),
+    );
+    await tester.tap(editorMention);
+    await tester.pumpAndSettle();
+    expect(choose.hitTestable(), findsOneWidget);
+    await tester.tap(choose);
+    await tester.pumpAndSettle();
+    expect(tester.state(editor), same(editorState));
+    final richField = tester.widget<ExtendedTextField>(
+        find.descendant(of: editor, matching: find.byType(ExtendedTextField)).last);
+    expect(richField.controller!.text, '@小张 @小张 ');
+
+    await tester.tap(editorMention);
+    await tester.pumpAndSettle();
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(tester.state(editor), same(editorState));
+    expect(richField.controller!.text, '@小张 @小张 ');
+  });
 
   Future<void> enter(WidgetTester tester, String text) async {
     if (find.byType(ExtendedTextField).evaluate().isEmpty) {
@@ -98,6 +161,32 @@ void main() {
             matching: find.byIcon(AppIcons.send1)),
         matching: find.byType(IconButton),
       ));
+
+  testWidgets('禁言时底部输入失去焦点和点击能力，解禁后保留草稿', (tester) async {
+    await mount(tester);
+    sdk.conversations.completeDraft('');
+    await tester.pump();
+    await enter(tester, '保留这条草稿');
+    expect(sendButton(tester).onPressed, isNotNull);
+
+    await mount(tester, sendMuted: true);
+    await tester.pumpAndSettle();
+    final muted = find.bySemanticsIdentifier('tim.input.muted');
+    expect(muted, findsOneWidget);
+    expect(find.descendant(of: muted, matching: find.byType(ColorFiltered)),
+        findsOneWidget);
+    expect(sendButton(tester).onPressed, isNull);
+    expect(find.byIcon(AppIcons.send1).hitTestable(), findsNothing);
+    final field =
+        tester.widget<ExtendedTextField>(find.byType(ExtendedTextField));
+    expect(field.focusNode!.hasFocus, isFalse);
+
+    await mount(tester);
+    await tester.pumpAndSettle();
+    expect(muted, findsNothing);
+    expect(sendButton(tester).onPressed, isNotNull);
+    expect(field.controller!.text, '保留这条草稿');
+  });
 
   for (final route in [
     '输入框菜单',

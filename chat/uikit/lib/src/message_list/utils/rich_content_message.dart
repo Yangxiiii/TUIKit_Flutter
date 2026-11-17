@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'rich_content_markdown_parser.dart';
+
 /// 解析应用的图文自定义消息；其他业务类型和未知版本不在此协议中处理。
 final class RichContentMessage {
   /// 当前应用图文消息的业务标识，与其他自定义消息区分。
@@ -40,6 +42,17 @@ final class RichContentMessage {
       .map((block) => block.text)
       .join(' ')
       .trim();
+
+  /// 转发提及时保留可读文字和媒体位置，移除原富文本样式。
+  String get plainTextForForward => blocks
+      .map((block) => switch (block) {
+            RichTextBlock(:final text) => richContentMarkdownPlainText(text),
+            RichImageBlock() => '[图片]',
+            RichFileBlock(:final mimeType, :final name) =>
+              mimeType.startsWith('video/') ? '[视频]' : '[文件] $name',
+          })
+      .where((text) => text.isNotEmpty)
+      .join('\n');
 
   /// 保持正文顺序，仅提取可在媒体结果中单独预览的块。
   Iterable<RichContentBlock> get mediaBlocks => blocks.where((block) =>
@@ -91,7 +104,9 @@ final class RichContentMessage {
     switch (data['type']) {
       case 'text':
         final text = data['text'];
-        return text is String && text.isNotEmpty ? RichTextBlock(text) : null;
+        return text is String && text.isNotEmpty
+            ? RichTextBlock(text, title: data['title'] == true)
+            : null;
       case 'image':
         final url = data['url'];
         final width = data['width'];
@@ -145,7 +160,11 @@ final class RichContentMessage {
     bool preserveLegacyDimensions,
   ) {
     return switch (block) {
-      RichTextBlock block => {'type': 'text', 'text': block.text},
+      RichTextBlock block => {
+          'type': 'text',
+          'text': block.text,
+          if (block.title) 'title': true,
+        },
       RichImageBlock block => {
           'type': 'image',
           'url': block.url,
@@ -203,7 +222,10 @@ final class RichTextBlock extends RichContentBlock {
   /// 原始 Markdown 文本，不进行 trim，以免改变用户输入的排版。
   final String text;
 
-  const RichTextBlock(this.text);
+  /// 文字块首个非空行包含发送方编码的标题。
+  final bool title;
+
+  const RichTextBlock(this.text, {this.title = false});
 }
 
 /// 使用远端 URL 展示的图片段。

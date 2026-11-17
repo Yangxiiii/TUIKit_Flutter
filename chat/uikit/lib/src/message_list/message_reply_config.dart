@@ -15,6 +15,7 @@ final class ChatMessageReplyConfig {
     required this.sendError,
     required this.canStart,
     required this.contentTooLongMessage,
+    this.sendMentionReply,
   });
 
   /// 每次窗口变化按可见消息派生引用与计数。
@@ -40,6 +41,12 @@ final class ChatMessageReplyConfig {
   /// 进入输入区前检查当前已知的回复资格；提交时由宿主再次校验。
   final bool Function(BuildContext context, MessageInfo source, int count)
       canStart;
+
+  /// 含 @ 的回复使用独立发送入口，由宿主绑定原消息并转换业务失败。
+  final Future<CompletionHandler> Function(
+    String sourceId,
+    Future<CompletionHandler> Function() send,
+  )? sendMentionReply;
 
   /// SDK 原始扩展字段只在 UIKit 边界取出，宿主无需读取可变的内部消息对象。
   static String? cloudDataOf(MessageInfo message) =>

@@ -1,3 +1,6 @@
+import '../../message_list/utils/conversation_notice.dart';
+import '../../message_list/utils/group_announcement_message.dart';
+import 'package:app_ui/app_ui.dart' show AppColorBuildContext;
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -19,6 +22,9 @@ class ConversationItem extends StatefulWidget {
 
   /// 自定义行布局并复用SDK摘要，点击及长按继续由UIKit管理。
   final Widget Function(BuildContext context, Widget subtitle)? contentBuilder;
+
+  /// 宿主传入的未读提及原消息。已指定但消息暂缺时，提醒后沿用常规会话摘要。
+  final ({MessageInfo? message})? mentionPreview;
 
   /// 业务传入的精确未读前缀，仅在接收但不通知时使用；空值保留SDK默认格式。
   final String? mutedUnreadPrefix;
@@ -49,6 +55,7 @@ class ConversationItem extends StatefulWidget {
     required this.conversation,
     this.backgroundColor,
     this.contentBuilder,
+    this.mentionPreview,
     this.mutedUnreadPrefix,
     this.draftIndicator,
     this.onTap,
@@ -161,6 +168,10 @@ class _ConversationItemState extends State<ConversationItem> {
     //
     // 构建 @ 提及前缀。
     String atPrefix = _buildAtMentionPrefix();
+    // 宿主的未读提及指向真实消息，不能用草稿占据提醒后的摘要位置。
+    if (atPrefix.isNotEmpty && widget.mentionPreview != null) {
+      return _buildLastMessageSubtitle(context, colorsTheme);
+    }
 
     // 仅有效草稿占用摘要位置，空白文本和无内容的富文本仍显示末条消息。
     if (draft != null && draft.isNotEmpty) {
@@ -191,7 +202,7 @@ class _ConversationItemState extends State<ConversationItem> {
               TextSpan(
                 text: atPrefix,
                 style: FontScheme.caption2Regular.copyWith(
-                  color: colorsTheme.textColorError,
+                  color: context.appColors.chatMention,
                 ),
               ),
             if (unreadPrefix.isNotEmpty)
@@ -215,8 +226,9 @@ class _ConversationItemState extends State<ConversationItem> {
                 ),
               ),
             TextSpan(
-              text:
-                  draftIndicator == null ? ' $singleLineDraft' : singleLineDraft,
+              text: draftIndicator == null
+                  ? ' $singleLineDraft'
+                  : singleLineDraft,
               style: FontScheme.caption2Regular.copyWith(
                 color: colorsTheme.textColorSecondary,
               ),
@@ -240,31 +252,38 @@ class _ConversationItemState extends State<ConversationItem> {
         : '';
   }
 
-  /// 展示末条消息的单行摘要，富文本保留样式并与提醒前缀统一省略。
+  /// 优先展示提及原消息的摘要，与富文本及提醒共用单行省略。
   Widget _buildLastMessageSubtitle(
     BuildContext context,
     SemanticColorScheme colorsTheme,
   ) {
     final atPrefix = _buildAtMentionPrefix();
+    final mention = atPrefix.isNotEmpty ? widget.mentionPreview : null;
+    // 提及详情加载中、失败或离线缺失时，仍保留可用的常规摘要。
+    final lastMessage = mention?.message ?? widget.conversation.lastMessage;
     final style = FontScheme.caption2Regular.copyWith(
       color: colorsTheme.textColorSecondary,
     );
     final richPreview = richContentConversationPreview(
       context,
-      widget.conversation.lastMessage,
+      lastMessage,
       style,
     );
-    String replaceText = richPreview != null
-        ? ''
-        : EmojiManager.createLocalizedStringFromEmojiCodes(
-            context,
-            MessageUtil.getMessageAbstract(
-                widget.conversation.lastMessage, context),
-          );
+    // 以会话归属核对自定义公告，在线消息和离线缓存使用相同的摘要。
+    final announcement = GroupAnnouncementMessage.fromConversation(
+      lastMessage,
+      widget.conversation.conversationID,
+    );
+    String replaceText = announcement?.preview ??
+        (richPreview != null
+            ? ''
+            : EmojiManager.createLocalizedStringFromEmojiCodes(
+                context,
+                MessageUtil.getMessageAbstract(lastMessage, context),
+              ));
 
     replaceText = singleLineConversationPreview(replaceText);
     // 在线SDK与离线还原都从同一个音频载荷取秒数；草稿和撤回摘要继续优先。
-    final lastMessage = widget.conversation.lastMessage;
     final audio = lastMessage?.messagePayload;
     if (widget.conversation.type == ConversationType.c2c &&
         lastMessage?.status != MessageStatus.revoked &&
@@ -273,6 +292,28 @@ class _ConversationItemState extends State<ConversationItem> {
       replaceText = voiceConversationPreview(replaceText, audio.audioDuration);
     }
     final unreadPrefix = _unreadPrefix();
+    // 回退的摘要可能来自其他人，只有原消息能提供提及操作者。
+    final senderMessage = mention == null ? lastMessage : mention.message;
+    // 管理员通知已含认证操作人，投递账号不再作为摘要前缀。
+    final adminNotice = senderMessage != null &&
+        ConversationNotice.fromMessage(senderMessage)?.isGroupAdminChange ==
+            true;
+    final sender = adminNotice || senderMessage?.status == MessageStatus.revoked
+        ? null
+        : senderMessage?.from;
+    // 普通群消息的昵称与未读状态无关；群公告和 UIKit 自带提及优先取群名片。
+    final nickname = sender?.nickname?.trim() ?? '';
+    final nameCard = sender?.nameCard?.trim() ?? '';
+    final useNameCard =
+        mention == null && (announcement != null || atPrefix.isNotEmpty);
+    final senderName = useNameCard && nameCard.isNotEmpty ? nameCard : nickname;
+    final isGroupMessage = widget.conversation.type == ConversationType.group &&
+        lastMessage?.messageType != MessageType.tips;
+    final senderPrefix = senderName.isNotEmpty &&
+            (atPrefix.isNotEmpty || announcement != null || isGroupMessage) &&
+            (richPreview != null || replaceText.isNotEmpty)
+        ? '$senderName：'
+        : '';
 
     // 富文本与提醒前缀合并到同一个文字段落，统一按剩余宽度省略。
     if (atPrefix.isNotEmpty || richPreview != null) {
@@ -283,9 +324,10 @@ class _ConversationItemState extends State<ConversationItem> {
           children: [
             if (atPrefix.isNotEmpty)
               TextSpan(
-                text: atPrefix,
+                text: atPrefix.trimRight(),
                 style: FontScheme.caption2Regular.copyWith(
-                  color: colorsTheme.textColorError,
+                  // 会话行的按压色可以独立配置，提及仍使用聊天主题色。
+                  color: context.appColors.chatMention,
                 ),
               ),
             if (unreadPrefix.isNotEmpty)
@@ -295,6 +337,8 @@ class _ConversationItemState extends State<ConversationItem> {
                   color: colorsTheme.textColorSecondary,
                 ),
               ),
+            if (senderPrefix.isNotEmpty)
+              TextSpan(text: senderPrefix, style: style),
             richPreview ??
                 TextSpan(
                   text: replaceText,
@@ -307,7 +351,7 @@ class _ConversationItemState extends State<ConversationItem> {
       );
     }
 
-    String displayText = '$unreadPrefix$replaceText';
+    final displayText = '$unreadPrefix$senderPrefix$replaceText';
 
     return Text(
       displayText,
@@ -394,7 +438,8 @@ class _ConversationItemState extends State<ConversationItem> {
 
     return Avatar.image(
       userID: widget.conversation.conversationID.startsWith('c2c_')
-          ? widget.conversation.conversationID.substring(4) : null,
+          ? widget.conversation.conversationID.substring(4)
+          : null,
       name: _getAvatarText(),
       url: widget.conversation.avatarURL,
       badge: hasDot ? DotBadge() : NoBadge(),
