@@ -20,6 +20,73 @@ import 'package:tencent_cloud_chat_sdk/models/v2_tim_user_full_info.dart';
 import 'package:tencent_cloud_chat_sdk/tencent_im_sdk_plugin.dart';
 
 void main() {
+  testWidgets('群聊和单聊的富文本气泡都渲染正文表情', (tester) async {
+    final previousEmojis = EmojiManager.emojis.toList();
+    final previousAssetPackage = EmojiManager.assetPackage;
+    addTearDown(() => EmojiManager.configure(
+        emojis: previousEmojis,
+        assetPackage: previousAssetPackage.isEmpty
+            ? 'tencent_chat_uikit'
+            : previousAssetPackage));
+    EmojiManager.configure(assetPackage: 'tencent_chat_uikit', emojis: const [
+      EmojiPickerModelItem(
+          name: '[ZDEmoji_Like]',
+          label: '点赞',
+          path: 'chat_assets/icon/loading-blue.png'),
+    ]);
+    const text = '收到[ZDEmoji_Like][ZDEmoji_Like] @小张 '
+        '**加粗[ZDEmoji_Like]**\n\n- 列表[ZDEmoji_Like] [ZDEmoji_Unknown]😀';
+    for (final type in [ConversationType.group, ConversationType.c2c]) {
+      final message = MessageInfo(
+        conversationType: type,
+        messageType: MessageType.custom,
+        messagePayload: CustomMessagePayload(
+            customData:
+                const RichContentMessage([RichTextBlock(text)]).toCustomData()),
+        rawMessage: type != ConversationType.group
+            ? null
+            : V2TimMessage.fromJson({
+                'message_risk_type_identified': 0,
+                'message_cloud_custom_str': jsonEncode({
+                  MessageMentions.key: {
+                    'version': 1,
+                    'items': MessageMentions.encode(
+                        text,
+                        [
+                          MentionInfo(
+                              userID: 'member',
+                              displayName: '小张',
+                              startIndex: text.indexOf('@')),
+                        ],
+                        0),
+                  },
+                }),
+              }),
+      );
+      await tester.pumpWidget(DefaultAssetBundle(
+        bundle: _EmojiAssetBundle(),
+        child: MaterialApp(
+          home: Scaffold(
+            body: CustomMessageWidget(
+                message: message,
+                isSelf: true,
+                maxWidth: 400,
+                config: const ChatMessageListConfig()),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(
+          find.byWidgetPredicate((w) => w is Image && w.semanticLabel == '点赞'),
+          findsNWidgets(4),
+          reason: type.name);
+      expect(find.textContaining('[ZDEmoji_Unknown]😀', findRichText: true),
+          findsOneWidget);
+      expect(find.textContaining('@小张', findRichText: true), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    }
+  });
+
   for (final rich in [false, true]) {
     testWidgets('${rich ? '图文' : '普通'}群消息只给当前接收者的个人提及添加胶囊', (tester) async {
       final sdk = TencentImSDKPlugin.v2TIMManager;
@@ -562,6 +629,16 @@ void main() {
     expect(visibleText, contains('粗体叠加'));
     expect(visibleText, isNot(contains('*')));
   });
+}
+
+/// 为表情提供测试图片，避免测试依赖工作区根目录是否打包了 SDK 资源。
+class _EmojiAssetBundle extends CachingAssetBundle {
+  @override
+  Future<ByteData> load(String key) async => key ==
+          'packages/tencent_chat_uikit/chat_assets/icon/loading-blue.png'
+      ? ByteData.sublistView(base64Decode(
+              'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNwmLAAAAKEAXHfuOXoAAAAAElFTkSuQmCC'))
+      : rootBundle.load(key);
 }
 
 /// 模拟当前登录资料的本机更新，避免视觉回归依赖在线账号。

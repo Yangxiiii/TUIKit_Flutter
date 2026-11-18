@@ -71,6 +71,7 @@ class RichContentMarkdown extends StatelessWidget {
       onMentionTap,
       buildMentionReceipt,
     );
+    final hasEmoji = EmojiManager.tokenPattern.hasMatch(display);
     // 富文本保留消息原始字号，仅跟随平台无障碍缩放，不叠加宿主的普通文字档位。
     return MediaQuery(
       data: MediaQuery.of(context).copyWith(
@@ -78,24 +79,44 @@ class RichContentMarkdown extends StatelessWidget {
       ),
       child: MarkdownBody(
         // 正文相同时 Markdown 会复用行内节点。接收者变化时重新生成提及样式。
-        key: mentionsByToken.isEmpty ? null : ValueKey(highlightedMentionUserId),
+        key:
+            mentionsByToken.isEmpty ? null : ValueKey(highlightedMentionUserId),
         data: display,
         styleSheet: style,
         softLineBreak: true,
         extensionSet: richContentMarkdownExtensionSet,
         inlineSyntaxes: [
           if (mentionsByToken.isNotEmpty) _MentionSyntax(prefix),
+          if (hasEmoji) _EmojiSyntax(),
         ],
         // 与会话列表共用行内样式转换，块级排版继续使用 MarkdownBody。
         builders: {
           for (final tag in ['strong', 'em', 'u', 'del', 'a', 'code'])
             if (tag != 'code' || mentionsByToken.isNotEmpty) tag: inlineBuilder,
           if (mentionsByToken.isNotEmpty) 'zd-mention': inlineBuilder,
+          if (hasEmoji) _EmojiSyntax.tag: inlineBuilder,
         },
         // 消息文字中的 Markdown 图片不是附件块，不允许借此读取本地资源。
         imageBuilder: (uri, title, alt) => Text(alt ?? '', style: textStyle),
       ),
     );
+  }
+}
+
+/// 把已注册表情交给行内渲染器，普通段落也能和加粗等格式共用表情展示。
+final class _EmojiSyntax extends md.InlineSyntax {
+  // 方括号后紧跟链接地址时，保留 Markdown 对链接标签的解释。
+  _EmojiSyntax()
+      : super('(?:${EmojiManager.tokenPattern.pattern})(?!\\()',
+            startCharacter: 0x5b);
+
+  /// 仅供气泡展示用的节点，原始消息正文及表情编码不变。
+  static const tag = 'zd-emoji';
+
+  @override
+  bool onMatch(md.InlineParser parser, Match match) {
+    parser.addNode(md.Element.text(tag, match[0]!));
+    return true;
   }
 }
 
