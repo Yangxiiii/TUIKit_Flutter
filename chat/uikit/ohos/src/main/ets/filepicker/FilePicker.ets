@@ -134,7 +134,7 @@ export default class FilePicker implements MethodCallHandler {
    * 顺序:
    *   1. viewData + uri + mime + read flag  (标准,应该覆盖大多数视频/图片播放器)
    *   2. viewData + uri +        read flag  (去掉 mime,让系统自己按扩展名/URI 猜)
-   *   3. viewData + uri + mime + read+write flag  (某些播放器/编辑器需要写权限)
+   *   3. 视频播放器兼容路径允许写入播放状态，文档和其他资源只授予读权限。
    */
   private async startAbilityWithFallback(
     ctx: common.UIAbilityContext,
@@ -162,17 +162,17 @@ export default class FilePicker implements MethodCallHandler {
     };
     attempts.push(w2);
 
-    // attempt #3: read + write flag,某些视频播放器起播时会尝试写状态
-    const w3: Want = {
-      action: 'ohos.want.action.viewData',
-      uri: uri,
-      flags: wantConstant.Flags.FLAG_AUTH_READ_URI_PERMISSION
-        | wantConstant.Flags.FLAG_AUTH_WRITE_URI_PERMISSION,
-    };
-    if (mime.length > 0) {
-      w3.type = mime;
+    // 部分视频播放器会写入起播状态，文档预览不得请求写权限。
+    if (mime.startsWith('video/')) {
+      const w3: Want = {
+        action: 'ohos.want.action.viewData',
+        uri: uri,
+        type: mime,
+        flags: wantConstant.Flags.FLAG_AUTH_READ_URI_PERMISSION
+          | wantConstant.Flags.FLAG_AUTH_WRITE_URI_PERMISSION,
+      };
+      attempts.push(w3);
     }
-    attempts.push(w3);
 
     for (let i = 0; i < attempts.length; i++) {
       const w = attempts[i];

@@ -102,7 +102,7 @@ class _FileMessageWidgetState extends State<FileMessageWidget> {
       if (path == null || !await File(path).exists()) throw StateError('文件不可用');
       _localPath = path;
       if (!mounted) return;
-      if (!await FilePicker.openFile(path) && mounted) {
+      if (!await FilePicker.openFile(path, fileName: _name) && mounted) {
         AppToast.show(AppLocalization.of(context).appFileOpenFailed);
       }
     } on ChatFileExpiredException {

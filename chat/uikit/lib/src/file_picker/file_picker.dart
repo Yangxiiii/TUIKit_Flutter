@@ -98,7 +98,8 @@ class FilePicker {
   ///
   /// 如果文件成功打开返回 true，否则返回 false。在 Android 上，使用 Intent.ACTION_VIEW 打开文件。在 iOS 上，使用
   /// UIDocumentInteractionController 打开文件。在 HarmonyOS 上，使用带有隐式 want（viewData）的 startAbility。
-  static Future<bool> openFile(String filePath) async {
+  /// [fileName] 仅用于恢复鸿蒙 UUID 缓存中的 Word 扩展名。
+  static Future<bool> openFile(String filePath, {String? fileName}) async {
     try {
       if (!Platform.isAndroid && !Platform.isIOS && !_isOhos) {
         throw UnsupportedError(
@@ -121,6 +122,35 @@ class FilePicker {
         }
       }
 
+      // 鸿蒙按落盘后缀匹配文档应用，普通IM文件的SDK缓存名可能只有UUID。
+      // 只从消息名提取已知文档后缀，外部文件名不能参与路径拼接。
+      if (_isOhos && fileName != null && filePath.startsWith('/')) {
+        final suffix = RegExp(r'\.(docx?)$', caseSensitive: false)
+            .firstMatch(fileName)?[0]
+            ?.toLowerCase();
+        if (suffix != null && !filePath.toLowerCase().endsWith(suffix)) {
+          final source = File(filePath);
+          final preview = File('$filePath$suffix');
+          final sourceStat = await source.stat();
+          if (sourceStat.type != FileSystemEntityType.file ||
+              sourceStat.size == 0) {
+            return false;
+          }
+          final previewStat = await preview.stat();
+          if (previewStat.size != sourceStat.size ||
+              previewStat.modified.isBefore(sourceStat.modified)) {
+            // 临时副本写完再替换，聊天和历史同时打开也只会读到完整文件。
+            final staging = await Directory('$filePath.open-').createTemp();
+            try {
+              final copy = await source.copy('${staging.path}/document$suffix');
+              await copy.rename(preview.path);
+            } finally {
+              await staging.delete(recursive: true);
+            }
+          }
+          filePath = preview.path;
+        }
+      }
       return await FilePickerPlatform.openFile(filePath);
     } catch (e) {
       debugPrint('FilePicker.openFile error: $e');
