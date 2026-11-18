@@ -148,6 +148,9 @@ final class RichContentInputToolbar extends StatelessWidget {
 
   /// 表情面板展开时，原表情入口显示键盘字形。
   final bool _showKeyboard;
+
+  /// 移动端展开输入仅展示设计提供的快捷键，文件和通话仍由普通栏提供。
+  final bool _showVideoAndFile;
   final String _emojiTooltip;
   final String _imageTooltip;
   final String _fileTooltip;
@@ -171,6 +174,7 @@ final class RichContentInputToolbar extends StatelessWidget {
     required Set<String> activeFormats,
     required bool canSend,
     bool showKeyboard = false,
+    bool showVideoAndFile = true,
     required String emojiTooltip,
     required String imageTooltip,
     required String fileTooltip,
@@ -190,6 +194,7 @@ final class RichContentInputToolbar extends StatelessWidget {
         _activeFormats = activeFormats,
         _canSend = canSend,
         _showKeyboard = showKeyboard,
+        _showVideoAndFile = showVideoAndFile,
         _emojiTooltip = emojiTooltip,
         _imageTooltip = imageTooltip,
         _fileTooltip = fileTooltip,
@@ -244,7 +249,7 @@ final class RichContentInputToolbar extends StatelessWidget {
     );
   }
 
-  /// 快捷栏使用同源字体字形，保留六个入口和独立的发送区域。
+  /// 快捷栏依次展示表情、可用操作和文字格式，发送保留独立区域。
   Widget _buildMainToolbar(SemanticColorScheme colors) => _buildActionRow(
         [
           _iconButton(_showKeyboard ? AppIcons.inputKeyboard : AppIcons.emoji,
@@ -254,13 +259,14 @@ final class RichContentInputToolbar extends StatelessWidget {
               identifier: 'tim.$_keyPrefix.mention',
               child: _iconButton(AppIcons.a, '提及成员', _onMention, colors),
             ),
-          MergeSemantics(
-            child: Semantics(
-              identifier: 'tim.$_keyPrefix.call',
-              child: _iconButton(
-                  AppIcons.startVideoConference, '视频通话', _onVideo, colors),
+          if (_showVideoAndFile)
+            MergeSemantics(
+              child: Semantics(
+                identifier: 'tim.$_keyPrefix.call',
+                child: _iconButton(
+                    AppIcons.startVideoConference, '视频通话', _onVideo, colors),
+              ),
             ),
-          ),
           MergeSemantics(
             child: Semantics(
               identifier: 'tim.$_keyPrefix.album',
@@ -268,12 +274,14 @@ final class RichContentInputToolbar extends StatelessWidget {
                   _iconButton(AppIcons.photo, _imageTooltip, _onImage, colors),
             ),
           ),
-          MergeSemantics(
-            child: Semantics(
-              identifier: 'tim.$_keyPrefix.file',
-              child: _iconButton(AppIcons.flile, _fileTooltip, _onFile, colors),
+          if (_showVideoAndFile)
+            MergeSemantics(
+              child: Semantics(
+                identifier: 'tim.$_keyPrefix.file',
+                child:
+                    _iconButton(AppIcons.flile, _fileTooltip, _onFile, colors),
+              ),
             ),
-          ),
           _formatButton(
               AppIcons.format, '文字格式', 'show', _onShowFormatting, colors),
         ],
@@ -1075,12 +1083,14 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
     }
 
     final locale = Localizations.localeOf(context);
+    final platform = Theme.of(context).platform;
     await AlbumPicker.pickMedia(
       config: AlbumPickerConfig(
         mediaFilter: AlbumPickerMediaFilter.imageAndVideo,
         maxSelectionCount: 9,
         itemsPerRow: 3,
-        showsCameraItem: false,
+        showsCameraItem: platform == TargetPlatform.iOS ||
+            platform == TargetPlatform.android,
         // 图文附件在宿主上传，相册保留本地导出能力。
         maxOutputFileSizeInMB: AlbumPickerConfig.unrestrictedOutputFileSizeInMB,
         style: AlbumPickerStyle.likeWeChat,
@@ -1323,6 +1333,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
   @override
   Widget build(BuildContext context) {
     final colors = SemanticColorScheme.of(context);
+    final platform = Theme.of(context).platform;
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     final renderEmojis =
         _showEmojiPanel || (_keyboardPanel?.returningToSystem ?? false);
@@ -1345,6 +1356,8 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
                 activeFormats: _activeFormats,
                 canSend: canSend,
                 showKeyboard: _showEmojiPanel,
+                showVideoAndFile:
+                    platform != TargetPlatform.iOS && platform.name != 'ohos',
                 emojiTooltip: _showEmojiPanel ? '显示键盘' : '表情',
                 imageTooltip: '插入图片/视频',
                 fileTooltip: '插入文件',
@@ -1353,7 +1366,7 @@ final class RichContentEditorSheetState extends State<RichContentEditorSheet> {
                 onMention: insertMention,
                 onVideo: null,
                 onImage: pickAlbumMedia,
-                // 展开编辑器不提供文件插入，保留按钮位置并使用统一禁用样式。
+                // 展开态不支持文件发送，仍按平台的工具栏设计决定是否保留位置。
                 onFile: null,
                 onShowFormatting: showFormattingToolbar,
                 onCloseFormatting: closeFormattingToolbar,

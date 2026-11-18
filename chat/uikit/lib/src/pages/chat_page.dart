@@ -29,6 +29,9 @@ class ChatPage extends AppBaseStatefulPage {
   /// 宿主派生的姓名与昵称；为空时保留 SDK 会话标题。
   final String? displayName;
 
+  /// 输入占位优先展示联系人的昵称，缺失时沿用聊天标题。
+  final String? recipientName;
+
   /// 宿主提供的主职组织名称；为空时不展示副标题，也不从长组织路径推测部门。
   final String? subtitle;
 
@@ -109,6 +112,7 @@ class ChatPage extends AppBaseStatefulPage {
     super.key,
     required this.conversation,
     this.displayName,
+    this.recipientName,
     this.subtitle,
     this.totalUnreadCount,
     this.localMessagesLoader,
@@ -912,7 +916,8 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
                 maintainAnimation: true,
                 maintainSize: _multiSelectState?.isActive != true,
                 child: MessageInput(
-                  conversationDisplayName: widget.displayName,
+                  conversationDisplayName:
+                      widget.recipientName ?? widget.displayName,
                   // 在线输入状态持有草稿和 SDK 订阅，切换时独立挂载只读布局。
                   key: widget.offlineMessages == null ? _messageInputKey : null,
                   readOnly: widget.offlineMessages != null,
@@ -1015,9 +1020,12 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
       canPop: widget.historySelection != null ||
           (_editingMessage == null && _multiSelectState?.isActive != true),
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop && _editingMessage != null) {
+        if (didPop) {
+          // 系统侧滑也走这里，退出时只释放当前聊天输入区的焦点。
+          _messageInputKey.currentState?.collapseAllPanels();
+        } else if (_editingMessage != null) {
           _cancelEditing();
-        } else if (!didPop && _multiSelectState?.isActive == true) {
+        } else if (_multiSelectState?.isActive == true) {
           _multiSelectState?.onCancel();
         }
       },

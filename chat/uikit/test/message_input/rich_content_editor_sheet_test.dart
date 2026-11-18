@@ -23,6 +23,33 @@ import 'package:tuikit_atomic_x/base_component/base_component.dart'
 import 'package:tuikit_atomic_x/album_picker/album_picker.dart';
 
 void main() {
+  testWidgets('iOS 单聊展开页使用接收昵称，快捷栏只保留表情、相册、格式和发送', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        theme: AppThemeFactory.create(
+                const AppNormalColorScheme(), Brightness.light)
+            .copyWith(platform: TargetPlatform.iOS),
+        home: const Scaffold(
+            body: Column(children: [
+          Expanded(child: SizedBox()),
+          MessageInput(
+              conversationID: 'c2c_peer', conversationDisplayName: '小明'),
+        ]))));
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    expect(find.text('发送给 小明'), findsOneWidget);
+    final toolbar = find.byKey(const Key('rich_content_overlay_toolbar'));
+    expect(find.descendant(of: toolbar, matching: find.byTooltip('视频通话')),
+        findsNothing);
+    expect(find.descendant(of: toolbar, matching: find.byTooltip('插入文件')),
+        findsNothing);
+    expect(find.descendant(of: toolbar, matching: find.byTooltip('提及成员')),
+        findsNothing);
+    expect(find.descendant(of: toolbar, matching: find.byTooltip('表情')),
+        findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('收起富文本时保留表情键盘高度和正文选区，普通输入继续原位插入', (tester) async {
     _configureEditorEmojis();
     tester.view.physicalSize = const Size(390, 844);

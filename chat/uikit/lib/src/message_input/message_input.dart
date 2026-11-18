@@ -2889,27 +2889,28 @@ class MessageInputState extends State<MessageInput>
 
   @override
   Widget build(BuildContext context) => Stack(
-    fit: StackFit.passthrough,
-    children: [
-      _buildInput(context),
-      // 路由内的覆盖层锚点与输入区并列，输入区保留自身的交互和语义布局。
-      Positioned.fill(
-        child: OverlayPortal(
-          controller: _richContentEditorPortal,
-          overlayChildBuilder: (context) => MediaQuery(
-            // 使用覆盖层的原始键盘 Insets，避免聊天 Scaffold 已消费底部缩进。
-            data: MediaQuery.of(Overlay.of(context).context),
-            child: ValueListenableBuilder<int>(
-              valueListenable: _richContentEditorLayout,
-              builder: (context, _, __) =>
-                  _richContentEditorBuilder?.call(context) ?? const SizedBox(),
+        fit: StackFit.passthrough,
+        children: [
+          _buildInput(context),
+          // 路由内的覆盖层锚点与输入区并列，输入区保留自身的交互和语义布局。
+          Positioned.fill(
+            child: OverlayPortal(
+              controller: _richContentEditorPortal,
+              overlayChildBuilder: (context) => MediaQuery(
+                // 使用覆盖层的原始键盘 Insets，避免聊天 Scaffold 已消费底部缩进。
+                data: MediaQuery.of(Overlay.of(context).context),
+                child: ValueListenableBuilder<int>(
+                  valueListenable: _richContentEditorLayout,
+                  builder: (context, _, __) =>
+                      _richContentEditorBuilder?.call(context) ??
+                      const SizedBox(),
+                ),
+              ),
+              child: const IgnorePointer(child: SizedBox.expand()),
             ),
           ),
-          child: const IgnorePointer(child: SizedBox.expand()),
-        ),
-      ),
-    ],
-  );
+        ],
+      );
 
   /// 保留普通输入和键盘占位，富文本与工具条由覆盖层绘制。
   Widget _buildInput(BuildContext context) {
@@ -3115,6 +3116,7 @@ class MessageInputState extends State<MessageInput>
   /// 构建普通输入和展开编辑器共用同一状态与回调的工具条视图。
   Widget _buildSharedToolbar({required Key key}) {
     final richEditor = _richContentEditorKey.currentState;
+    final platform = Theme.of(context).platform;
     return RichContentInputToolbar(
       key: key,
       switcherKey: const Key('message_input_toolbar_switcher'),
@@ -3136,6 +3138,8 @@ class MessageInputState extends State<MessageInput>
                   ? _canSubmitRichContentDraft(_buildInlineRichContentDraft())
                   : _showSendButton),
       showKeyboard: _isEmojiPanelVisible,
+      showVideoAndFile: !_isRichContentEditorOpen ||
+          (platform != TargetPlatform.iOS && platform.name != 'ohos'),
       emojiTooltip: _isEmojiPanelVisible ? '显示键盘' : '表情',
       imageTooltip: _isRichContentEditorOpen ? '插入图片/视频' : atomicLocale.album,
       fileTooltip: _isRichContentEditorOpen ? '插入文件' : atomicLocale.file,
@@ -3159,7 +3163,7 @@ class MessageInputState extends State<MessageInput>
       onImage: _isRichContentEditorOpen || widget.config.isShowAlbum
           ? _onPickAlbum
           : null,
-      // 展开编辑器时禁用文件；收起后恢复宿主配置的独立文件发送入口。
+      // 展开态不发送独立文件，收起后恢复宿主配置的入口。
       onFile: !_isRichContentEditorOpen && widget.config.isShowFile
           ? _onPickFile
           : null,
