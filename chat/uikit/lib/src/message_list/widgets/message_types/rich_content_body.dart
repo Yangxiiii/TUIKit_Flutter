@@ -168,6 +168,8 @@ final class RichContentBody extends StatelessWidget {
           ? const []
           : MessageMentions.read(message!, text, index),
       onMentionTap: config.onMentionTap,
+      highlightedMentionUserId:
+          isSelf ? null : incomingGroupMentionUserId(source),
       buildMentionReceipt: source == null || mentionReceiptBuilder == null
           ? null
           : (userId) => mentionReceiptBuilder(source, userId),

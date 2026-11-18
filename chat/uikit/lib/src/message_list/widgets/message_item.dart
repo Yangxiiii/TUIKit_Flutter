@@ -48,9 +48,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   /// 头像点击交给会话页打开资料。
   final OnUserClick? onUserClick;
 
-  /// Callback when user long presses on avatar (for @ mention feature)
-  ///
-  /// 用户长按头像时的回调（用于@提及功能）
+  /// 已确认在群的成员头像长按时，向输入栏传递该成员的身份和名称。
   final OnUserLongPress? onUserLongPress;
 
   /// Callback when call message is clicked in C2C conversation
@@ -577,6 +575,45 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
           ?.callerId ??
       message.from.userID;
 
+  /// 各种对齐方式共用头像交互。多选时头像仅用于切换消息选择。
+  Widget _buildSenderAvatar(String? avatarUrl, String senderName,
+      {required bool isSelf}) {
+    final userID = _displaySenderId;
+    // 历史消息会保留已退群成员的头像，长按资格以当前群名单为准。
+    final mention = isGroup &&
+            !isSelf &&
+            !isInMergedDetailView &&
+            !isMultiSelectMode &&
+            config.avatarMentionMemberIds.contains(userID)
+        ? onUserLongPress
+        : null;
+    final avatar = GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: isInMergedDetailView
+          ? null
+          : () {
+              if (isMultiSelectMode) {
+                onToggleSelection?.call();
+              } else if (!isSelf) {
+                onUserClick?.call(userID);
+              }
+            },
+      onLongPress: mention == null ? null : () => mention(userID, senderName),
+      child: Avatar(
+        userID: userID,
+        content: AvatarImageContent(url: avatarUrl, name: senderName),
+      ),
+    );
+    return _groupAvatar(
+      mention != null && message.msgID.isNotEmpty
+          ? Semantics(
+              identifier: 'tim.message.avatar.${message.msgID}',
+              child: avatar,
+            )
+          : avatar,
+    );
+  }
+
   Widget _buildLeftAlignedLayout(
       BuildContext context, Widget messageBubble, bool isSelf,
       [String? avatarUrl, String? senderName]) {
@@ -609,41 +646,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (shouldShowAvatar)
-            GestureDetector(
-              onTap: isInMergedDetailView
-                  ? null
-                  : () {
-                      // Disable avatar click in multi-select mode
-                      //
-                      // 多选模式下禁用头像点击
-                      if (isMultiSelectMode) {
-                        onToggleSelection?.call();
-                        return;
-                      }
-                      if (!isSelf && onUserClick != null) {
-                        onUserClick!(_displaySenderId);
-                      }
-                    },
-              onLongPress: isInMergedDetailView || isSelf
-                  ? null
-                  : () {
-                      // Disable avatar long press in multi-select mode
-                      //
-                      // 在多选模式下禁用头像长按
-                      if (isMultiSelectMode) return;
-                      // Trigger @ mention callback
-                      //
-                      // 触发@提及回调
-                      if (onUserLongPress != null) {
-                        onUserLongPress!(_displaySenderId, displaySenderName);
-                      }
-                    },
-              child: _groupAvatar(Avatar(
-                userID: _displaySenderId,
-                content: AvatarImageContent(
-                    url: displayAvatarUrl, name: displaySenderName),
-              )),
-            ),
+            _buildSenderAvatar(displayAvatarUrl, displaySenderName,
+                isSelf: isSelf),
           if (shouldShowAvatar) SizedBox(width: config.avatarSpacing),
           Flexible(
             child: Column(
@@ -772,25 +776,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
           ),
           if (config.isShowLeftAvatar) SizedBox(width: config.avatarSpacing),
           if (config.isShowLeftAvatar)
-            GestureDetector(
-              onTap: () {
-                // Disable avatar click in multi-select mode
-                //
-                // 在多选模式下禁用头像点击
-                if (isMultiSelectMode) {
-                  onToggleSelection?.call();
-                  return;
-                }
-                if (!isSelf && onUserClick != null) {
-                  onUserClick!(_displaySenderId);
-                }
-              },
-              child: _groupAvatar(Avatar(
-                userID: _displaySenderId,
-                content: AvatarImageContent(
-                    url: displayAvatarUrl, name: displaySenderName),
-              )),
-            ),
+            _buildSenderAvatar(displayAvatarUrl, displaySenderName,
+                isSelf: isSelf),
         ],
       ),
     );
@@ -881,34 +868,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
 
     return [
       if (config.isShowLeftAvatar)
-        GestureDetector(
-          onTap: isInMergedDetailView
-              ? null
-              : () {
-                  // 多选期间点击头像仅切换消息选择，不能打开用户资料。
-                  if (isMultiSelectMode) {
-                    onToggleSelection?.call();
-                    return;
-                  }
-                  if (onUserClick != null) {
-                    onUserClick!(_displaySenderId);
-                  }
-                },
-          onLongPress: isInMergedDetailView
-              ? null
-              : () {
-                  // 多选期间头像长按不能向输入栏插入提及。
-                  if (isMultiSelectMode) return;
-                  if (onUserLongPress != null) {
-                    onUserLongPress!(_displaySenderId, displaySenderName);
-                  }
-                },
-          child: _groupAvatar(Avatar(
-            userID: _displaySenderId,
-            content: AvatarImageContent(
-                url: displayAvatarUrl, name: displaySenderName),
-          )),
-        ),
+        _buildSenderAvatar(displayAvatarUrl, displaySenderName, isSelf: false),
       if (config.isShowLeftAvatar) SizedBox(width: config.avatarSpacing),
       Flexible(
         child: Column(

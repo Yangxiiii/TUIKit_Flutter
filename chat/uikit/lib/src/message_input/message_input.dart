@@ -608,83 +608,42 @@ class MessageInputState extends State<MessageInput>
     }
   }
 
-  /// Insert a mention into the input field from external source (e.g., long press on avatar)
-  /// This is called when user long presses on another member's avatar in the message list
-  ///
-  /// 从外部源在输入框中插入提及（例如，长按头像）。当用户在消息列表中长按其他成员的头像时会调用这个功能。
+  /// 将长按头像选中的成员插入群聊草稿，并保留发送所需的成员身份。
   void insertMention({required String userID, required String displayName}) {
-    if (!_isGroupChat || widget.sendMuted) return;
-
-    // Don't allow mentioning self
-    //
-    // 不允许提及自己
+    if (!_isGroupChat ||
+        !widget.config.enableMention ||
+        widget.readOnly ||
+        widget.sendMuted ||
+        widget.connectionUnavailable ||
+        _isRichContentEditorOpen ||
+        userID.isEmpty) {
+      return;
+    }
     final currentUserID = LoginStore.shared.loginState.loginUserInfo?.userID;
     if (userID == currentUserID) return;
 
-    final text = _textEditingController.text;
-    final cursorPos = _textEditingController.selection.baseOffset;
-    final insertPos = cursorPos < 0 ? text.length : cursorPos;
-
-    // Create mention info
-    //
-    // 创建提及信息
-    final mention = MentionInfo(
-      userID: userID,
-      displayName: displayName,
-      startIndex: insertPos,
+    final selection = _textEditingController.selection;
+    final cursor =
+        selection.isValid ? selection.end : _textEditingController.text.length;
+    // 从选区末端插入以保留原草稿，避开已有提及的内部。
+    final offset =
+        _textEditingController.getMentionContaining(cursor)?.endIndex ?? cursor;
+    _textEditingController.insertMentions(
+      TextSelection.collapsed(offset: offset),
+      [
+        MentionInfo(
+          userID: userID,
+          displayName: displayName.isEmpty ? userID : displayName,
+          startIndex: 0,
+        ),
+      ],
     );
-    final mentionText = mention.mentionText; // "@displayName "
-
-    // Build new text
-    //
-    // 构建新文本
-    final beforeCursor = text.substring(0, insertPos);
-    final afterCursor = text.substring(insertPos);
-    final newText = '$beforeCursor$mentionText$afterCursor';
-    final newCursorPos = insertPos + mentionText.length;
-
-    // Update mention positions for existing mentions after insert position
-    //
-    // 在插入位置后更新现有提及的位置
-    for (final m in _textEditingController.mentionList) {
-      if (m.startIndex >= insertPos) {
-        m.startIndex += mentionText.length;
-      }
-    }
-
-    // Add the new mention
-    //
-    // 添加新的提及
-    _textEditingController.addMention(mention);
-
-    // Update text field
-    //
-    // 更新文本字段
-    _textEditingController.removeListener(_onTextChanged);
-    _textEditingController.isInternalUpdate = true;
-    _textEditingController.value = TextEditingValue(
-      text: newText,
-      selection: TextSelection.collapsed(offset: newCursorPos),
-    );
-    _textEditingController.isInternalUpdate = false;
-    _previousTextLength = newText.length;
-    _textEditingController.addListener(_onTextChanged);
-
-    // Request focus on the input field
-    //
-    // 请求输入框获取焦点
-    _textEditingFocusNode.requestFocus();
-
-    // Update send button state and switch to text mode
-    //
-    // 更新发送按钮状态并切换到文本模式
     setState(() {
       _inputMode = _InputMode.text;
       _showEmojiPanel = false;
       _showMorePanel = false;
     });
-    // 提及回填临时移除了监听，必须补走统一校验和草稿版本更新。
-    _onTextChanged();
+    _textEditingFocusNode.requestFocus();
   }
 
   /// Set a message to be quoted. Shows the quote preview bar and raises keyboard.

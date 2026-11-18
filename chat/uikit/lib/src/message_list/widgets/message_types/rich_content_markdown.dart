@@ -1,4 +1,3 @@
-import 'package:app_ui/app_ui.dart';
 import '../../../emoji_picker/emoji_manager.dart';
 import '../../../message_input/mention/mention_info.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../utils/rich_content_markdown_parser.dart';
 import '../../utils/rich_content_markdown_span.dart';
+import 'chat_mention_span.dart';
 
 /// 在聊天气泡的文字块中展示 Markdown，不创建独立滚动区域。
 class RichContentMarkdown extends StatelessWidget {
@@ -21,6 +21,9 @@ class RichContentMarkdown extends StatelessWidget {
   /// 已按当前块原文验证的提及定位。
   final List<MentionInfo> mentions;
 
+  /// 仅接收端群聊传入当前账号，用于标出匹配该账号的个人提及。
+  final String? highlightedMentionUserId;
+
   /// 成员点击交还宿主复核权限。
   final void Function(BuildContext, String)? onMentionTap;
 
@@ -32,6 +35,7 @@ class RichContentMarkdown extends StatelessWidget {
     required this.data,
     required this.textStyle,
     this.mentions = const [],
+    this.highlightedMentionUserId,
     this.onMentionTap,
     this.buildMentionReceipt,
   });
@@ -63,6 +67,7 @@ class RichContentMarkdown extends StatelessWidget {
     final inlineBuilder = _InlineFormatBuilder(
       textStyle,
       mentionsByToken,
+      highlightedMentionUserId,
       onMentionTap,
       buildMentionReceipt,
     );
@@ -72,6 +77,8 @@ class RichContentMarkdown extends StatelessWidget {
         textScaler: MediaQueryData.fromView(View.of(context)).textScaler,
       ),
       child: MarkdownBody(
+        // 正文相同时 Markdown 会复用行内节点。接收者变化时重新生成提及样式。
+        key: mentionsByToken.isEmpty ? null : ValueKey(highlightedMentionUserId),
         data: display,
         styleSheet: style,
         softLineBreak: true,
@@ -106,10 +113,17 @@ final class _MentionSyntax extends md.InlineSyntax {
 /// 将聊天窗口的行内节点交给共用样式转换，保留 MarkdownBody 提供的段落上下文。
 class _InlineFormatBuilder extends MarkdownElementBuilder {
   _InlineFormatBuilder(
-      this.baseStyle, this.mentions, this.onMentionTap, this.buildMentionReceipt);
+      this.baseStyle,
+      this.mentions,
+      this.highlightedMentionUserId,
+      this.onMentionTap,
+      this.buildMentionReceipt);
 
   /// 当前文字块从展示令牌到已校验身份的映射。
   final Map<String, MentionInfo> mentions;
+
+  /// 当前接收者 ID。段落拆分或嵌套格式不会改变提及对象。
+  final String? highlightedMentionUserId;
 
   /// 仅用户提及会触发宿主名片入口。
   final void Function(BuildContext, String)? onMentionTap;
@@ -127,6 +141,7 @@ class _InlineFormatBuilder extends MarkdownElementBuilder {
         element: element,
         style: parentStyle ?? baseStyle,
         mentions: mentions,
+        highlightedMentionUserId: highlightedMentionUserId,
         onMentionTap: onMentionTap,
         buildMentionReceipt: buildMentionReceipt,
       );
@@ -138,12 +153,16 @@ class _InlineFormattedText extends StatefulWidget {
     required this.element,
     required this.style,
     required this.mentions,
+    required this.highlightedMentionUserId,
     required this.onMentionTap,
     required this.buildMentionReceipt,
   });
 
   /// 当前消息块中的定位令牌及成员 ID。
   final Map<String, MentionInfo> mentions;
+
+  /// 当前接收者 ID，按令牌绑定的成员身份匹配。
+  final String? highlightedMentionUserId;
 
   /// 宿主按真实成员 ID 处理点击。
   final void Function(BuildContext, String)? onMentionTap;
@@ -198,9 +217,11 @@ class _InlineFormattedTextState extends State<_InlineFormattedText> {
             ..onTap = () => open(context, mention.userID))
           : null;
       if (tap != null) _linkRecognizers.add(tap);
-      spans.add(TextSpan(
-        text: '@${mention.displayName}',
-        style: TextStyle(color: context.appColors.primary),
+      spans.add(buildChatMentionSpan(
+        context,
+        mention,
+        style: style,
+        highlightedUserId: widget.highlightedMentionUserId,
         recognizer: tap,
       ));
       // 无论提及处于何种嵌套格式，全体提及都没有个人回执。

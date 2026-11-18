@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart' hide IconButton;
+import 'package:tencent_chat_uikit/src/message_input/mention/mention_text_editing_controller.dart';
 import 'package:tencent_chat_uikit/src/third_party/extended_text_field/extended_text_field.dart';
 import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
 import 'package:tencent_chat_uikit/src/message_input/message_clipboard.dart';
@@ -44,6 +45,7 @@ void main() {
           ChatMessageReplyConfig? replyConfig,
           ChatMentionPicker? mentionPicker,
           String conversationID = 'c2c_test',
+          Widget? message,
           bool voicePreview = false,
           bool sendMuted = false}) =>
       tester.pumpWidget(
@@ -55,6 +57,7 @@ void main() {
           ),
           home: Scaffold(
             body: Column(children: [
+              if (message != null) message,
               const Spacer(),
               MessageInput(
                 conversationID: conversationID,
@@ -71,6 +74,83 @@ void main() {
           ),
         ),
       );
+
+  testWidgets('长按群成员头像保留原草稿，成员退群后撤销长按入口', (tester) async {
+    const conversation = 'group_test';
+    final memberIds = ValueNotifier<Set<String>>({'member'});
+    addTearDown(memberIds.dispose);
+    String? openedContact;
+    final message = MessageInfo(
+      msgID: 'avatar-message',
+      conversationType: ConversationType.group,
+      from: MessageSenderInfo(userID: 'member', nickname: '小张'),
+      messageType: MessageType.text,
+      messagePayload: TextMessagePayload(text: '测试消息'),
+    );
+    await mount(tester,
+        conversationID: conversation,
+        mentionPicker: (_) async => throw StateError('头像长按不应弹出选人'),
+        message: ValueListenableBuilder<Set<String>>(
+          valueListenable: memberIds,
+          builder: (context, ids, child) => MessageItem(
+            message: message,
+            conversationID: conversation,
+            isGroup: true,
+            maxWidth: 350,
+            messageListStore: null,
+            isHighlighted: false,
+            config: ChatMessageListConfig(
+              alignment: AppBuilder.MESSAGE_ALIGNMENT_RIGHT,
+              avatarMentionMemberIds: ids,
+            ),
+            onUserClick: (userID) => openedContact = userID,
+            onUserLongPress: (userID, displayName) => tester
+                .state<MessageInputState>(find.byType(MessageInput))
+                .insertMention(userID: userID, displayName: displayName),
+          ),
+        ));
+    sdk.conversations.completeDraft('');
+    await tester.pumpAndSettle();
+    final avatar =
+        find.bySemanticsIdentifier('tim.message.avatar.avatar-message');
+    expect(
+        tester
+            .getSemantics(avatar)
+            .getSemanticsData()
+            .hasAction(SemanticsAction.longPress),
+        isTrue);
+    await tester.longPress(avatar);
+    await tester.pumpAndSettle();
+    final field =
+        tester.widget<ExtendedTextField>(find.byType(ExtendedTextField));
+    final input = field.controller! as MentionTextEditingController;
+    expect(input.text, '@小张 ');
+    expect(field.focusNode!.hasFocus, isTrue);
+
+    input.value = const TextEditingValue(
+      text: '@小张 草稿',
+      selection: TextSelection(baseOffset: 6, extentOffset: 4),
+    );
+    await tester.pump();
+    await tester.longPress(avatar);
+    await tester.pumpAndSettle();
+    expect(input.text, '@小张 草稿@小张 ');
+    expect(
+        input.mentionsIn(0, input.text.length).map((mention) => mention.userID),
+        ['member', 'member']);
+
+    memberIds.value = const {'another-member'};
+    await tester.pumpAndSettle();
+    expect(avatar, findsNothing);
+    final historicalAvatar = find.byWidgetPredicate(
+      (widget) => widget is Avatar && widget.userID == 'member',
+    );
+    await tester.longPress(historicalAvatar);
+    await tester.pumpAndSettle();
+    expect(input.text, '@小张 草稿@小张 ');
+    await tester.tap(historicalAvatar);
+    expect(openedContact, 'member');
+  });
 
   testWidgets('群聊两个 @ 入口都能打开全屏选人并回填原编辑器', (tester) async {
     await mount(tester,

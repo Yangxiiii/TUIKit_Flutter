@@ -857,7 +857,9 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
                 widget.messageStickyConfig?.onInitialLoadFinished?.call();
               },
               onUserClick: widget.offlineMessages == null ? _onUserClick : null,
-              onUserLongPress: widget.offlineMessages != null
+              onUserLongPress: widget.offlineMessages != null ||
+                      _editingMessage != null ||
+                      widget.historySelection != null
                   ? null
                   : (String userID, String displayName) {
                       _messageInputKey.currentState?.insertMention(

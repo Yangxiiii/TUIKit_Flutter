@@ -16,6 +16,7 @@ import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_message.d
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/rich_content_markdown.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../utils/big_file_message.dart';
+import 'chat_mention_span.dart';
 import 'file_message_widget.dart';
 import 'rich_content_video_preview.dart';
 import '../../utils/rich_content_media_viewer.dart';

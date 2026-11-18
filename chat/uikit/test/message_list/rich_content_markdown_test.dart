@@ -13,12 +13,97 @@ import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_message.d
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/rich_content_markdown.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/text_message_widget.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
+import 'package:tencent_cloud_chat_sdk/manager/v2_tim_manager.dart';
+import 'package:tencent_cloud_chat_sdk/models/v2_tim_callback.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_message.dart';
+import 'package:tencent_cloud_chat_sdk/models/v2_tim_user_full_info.dart';
+import 'package:tencent_cloud_chat_sdk/tencent_im_sdk_plugin.dart';
 
 void main() {
   for (final rich in [false, true]) {
-    testWidgets('${rich ? '图文' : '普通'}消息仅给个人提及附加行内回执',
-        (tester) async {
+    testWidgets('${rich ? '图文' : '普通'}群消息只给当前接收者的个人提及添加胶囊', (tester) async {
+      final sdk = TencentImSDKPlugin.v2TIMManager;
+      final login = LoginStore.shared;
+      final previous = login.loginState.loginUserInfo;
+      TencentImSDKPlugin.v2TIMManager = _MentionLoginSdk();
+      addTearDown(() async {
+        await login.setSelfInfo(userInfo: previous ?? UserProfile(userID: ''));
+        TencentImSDKPlugin.v2TIMManager = sdk;
+      });
+      await login.setSelfInfo(userInfo: UserProfile(userID: 'me'));
+
+      const text = '@同名 @同名 @所有人';
+      final mentions = [
+        MentionInfo(userID: 'other', displayName: '同名', startIndex: 0),
+        MentionInfo(userID: 'me', displayName: '同名', startIndex: 4),
+        MentionInfo(
+            userID: MentionInfo.atAllUserID, displayName: '所有人', startIndex: 8),
+      ];
+      final message = MessageInfo(
+        conversationType: ConversationType.group,
+        messageType: rich ? MessageType.custom : MessageType.text,
+        messagePayload: rich
+            ? CustomMessagePayload(
+                customData:
+                    RichContentMessage([RichTextBlock(text)]).toCustomData())
+            : TextMessagePayload(text: text),
+        rawMessage: V2TimMessage.fromJson({
+          'message_risk_type_identified': 0,
+          'message_cloud_custom_str': jsonEncode({
+            MessageMentions.key: {
+              'version': 1,
+              'items': MessageMentions.encode(text, mentions, 0),
+            },
+          }),
+        }),
+      );
+      final clicked = <String>[];
+      final config =
+          ChatMessageListConfig(onMentionTap: (_, id) => clicked.add(id));
+      Future<void> mount({bool isSelf = false}) =>
+          tester.pumpWidget(MaterialApp(
+            home: Scaffold(
+              body: rich
+                  ? CustomMessageWidget(
+                      message: message,
+                      isSelf: isSelf,
+                      maxWidth: 320,
+                      config: config)
+                  : TextMessageWidget(
+                      message: message,
+                      isSelf: isSelf,
+                      maxWidth: 320,
+                      config: config),
+            ),
+          ));
+
+      await mount();
+      const colors = AppNormalColorScheme();
+      final pill = find.byWidgetPredicate((widget) =>
+          widget is DecoratedBox &&
+          widget.decoration is BoxDecoration &&
+          (widget.decoration as BoxDecoration).color == colors.chatMention &&
+          (widget.decoration as BoxDecoration).borderRadius ==
+              BorderRadius.circular(27));
+      expect(pill, findsOneWidget);
+      final label = find.descendant(of: pill, matching: find.byType(Text));
+      final labelWidget = tester.widget<Text>(label);
+      expect(labelWidget.data, '@同名');
+      expect(labelWidget.style?.color, colors.onPrimary);
+      expect(labelWidget.style?.height, 20 / 16);
+      expect(tester.getSize(pill).height, 28);
+      await tester.tap(label);
+      expect(clicked, ['me']);
+
+      message.conversationType = ConversationType.c2c;
+      await mount();
+      expect(pill, findsNothing);
+      message.conversationType = ConversationType.group;
+      await mount(isSelf: true);
+      expect(pill, findsNothing);
+    });
+
+    testWidgets('${rich ? '图文' : '普通'}消息仅给个人提及附加行内回执', (tester) async {
       const text = '@甲 @乙 @所有人';
       final mentions = [
         MentionInfo(userID: 'a', displayName: '甲', startIndex: 0),
@@ -477,6 +562,14 @@ void main() {
     expect(visibleText, contains('粗体叠加'));
     expect(visibleText, isNot(contains('*')));
   });
+}
+
+/// 模拟当前登录资料的本机更新，避免视觉回归依赖在线账号。
+class _MentionLoginSdk extends Fake implements V2TIMManager {
+  @override
+  Future<V2TimCallback> setSelfInfo(
+          {required V2TimUserFullInfo userFullInfo}) async =>
+      V2TimCallback(code: 0, desc: '');
 }
 
 /// 枚举格式叠加顺序，覆盖下划线位于内层、外层及连续波浪号的组合。

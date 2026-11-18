@@ -1,5 +1,5 @@
-import 'package:app_ui/app_ui.dart' show AppColorBuildContext;
 import 'package:flutter/gestures.dart';
+import '../../../message_input/mention/mention_info.dart';
 import '../../../message_input/mention/message_mentions.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_input/src/chat_special_text_span_builder.dart';
@@ -11,6 +11,7 @@ import 'package:tencent_chat_uikit/src/common/utils/uikit_util.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../message_actions_scope.dart';
+import 'chat_mention_span.dart';
 
 typedef BackgroundBuilder = Widget Function(Widget child);
 
@@ -104,6 +105,20 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
   @override
   Widget build(BuildContext context) {
     final colors = SemanticColorScheme.of(context);
+    final payload = widget.message.messagePayload;
+    final text = payload is TextMessagePayload ? payload.text : '';
+    final mentions =
+        widget.isInMergedDetailView || widget.contentBuilder != null
+            ? const <MentionInfo>[]
+            : MessageMentions.read(widget.message, text, 0);
+    final highlightedUserId = widget.isSelf || mentions.isEmpty
+        ? null
+        : incomingGroupMentionUserId(widget.message);
+    // 仅含一个胶囊时，用它的内边距占去对应外边距，保持设计中的气泡高度。
+    final singleHighlightedMention = mentions.length == 1 &&
+        !mentions.single.isAtAll &&
+        mentions.single.userID == highlightedUserId &&
+        text.trim() == '@${mentions.single.displayName}';
 
     final content = Container(
       key: widget.bubbleKey,
@@ -113,10 +128,13 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
       // 群聊正文按 20 高的文字行排版，气泡上下各保留 10。
       padding: EdgeInsets.symmetric(
           horizontal: 14,
-          vertical: widget.message.conversationType == ConversationType.group
-              ? 10
-              : 8),
-      child: _buildTextWithStatusAndTime(colors),
+          vertical: singleHighlightedMention
+              ? 6
+              : widget.message.conversationType == ConversationType.group
+                  ? 10
+                  : 8),
+      child: _buildTextWithStatusAndTime(
+          colors, text, mentions, highlightedUserId),
     );
 
     final bubble = widget.backgroundBuilder?.call(content) ??
@@ -136,7 +154,8 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
   }
 
   /// 只有实际显示内部时间或状态时才预留间隔，普通正文不保留空白尾槽。
-  Widget _buildTextWithStatusAndTime(SemanticColorScheme colors) {
+  Widget _buildTextWithStatusAndTime(SemanticColorScheme colors, String text,
+      List<MentionInfo> mentions, String? highlightedUserId) {
     final style = FontScheme.caption1Regular.copyWith(
       height: widget.message.conversationType == ConversationType.group
           ? 20 / 16
@@ -160,7 +179,8 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
         Flexible(
           // 通话记录复用外框和状态栏，正文沿用自己的图标与文案。
           child: widget.contentBuilder?.call(style) ??
-              _buildTextContent(colors, style),
+              _buildTextContent(
+                  colors, style, text, mentions, highlightedUserId),
         ),
         if (indicators.isNotEmpty) ...[
           const SizedBox(width: 8),
@@ -171,10 +191,8 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
   }
 
   /// 保留正文的链接及表情解析，追加 SDK 或归档数据确认的编辑标签。
-  Widget _buildTextContent(SemanticColorScheme colorsTheme, TextStyle style) {
-    final text =
-        (widget.message.messagePayload as TextMessagePayload?)?.text ?? '';
-
+  Widget _buildTextContent(SemanticColorScheme colorsTheme, TextStyle style,
+      String text, List<MentionInfo> mentions, String? highlightedUserId) {
     final config = MessageActionsScope.maybeOf(context)?.config;
     final edited =
         (config?.editedMessageIds.contains(widget.message.msgID) ?? false) ||
@@ -186,9 +204,6 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
       showAtBackground: true,
     );
     _clearMentionTaps();
-    final mentions = widget.isInMergedDetailView
-        ? const []
-        : MessageMentions.read(widget.message, text, 0);
     if (mentions.isNotEmpty) {
       final children = <InlineSpan>[];
       var offset = 0;
@@ -207,9 +222,11 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
               ..onTap = () => open(context, mention.userID))
             : null;
         if (tap != null) _mentionTaps.add(tap);
-        children.add(TextSpan(
-          text: text.substring(mention.startIndex, offset),
-          style: TextStyle(color: context.appColors.chatMention),
+        children.add(buildChatMentionSpan(
+          context,
+          mention,
+          style: style,
+          highlightedUserId: highlightedUserId,
           recognizer: tap,
         ));
         // 回执紧跟个人提及，全体提及不占回执空间。

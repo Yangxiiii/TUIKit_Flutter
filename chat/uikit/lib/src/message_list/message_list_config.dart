@@ -107,6 +107,9 @@ abstract class MessageListConfigProtocol {
   /// 由群聊宿主提供气泡标题；空回调时使用 UIKit 的发送者名称。
   String Function(MessageInfo)? get groupSenderName;
 
+  /// 当前群已确认可长按头像提及的成员 ID。空集合关闭入口。
+  Set<String> get avatarMentionMemberIds;
+
   /// 宿主可替换群回执的展示与导航，默认沿用 UIKit。
   Widget? Function(BuildContext, MessageInfo, MessageListStore)?
       get groupReadReceiptBuilder;
@@ -132,6 +135,10 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
   /// 按当前群的名称策略生成发送者标题。
   @override
   final String Function(MessageInfo)? groupSenderName;
+
+  /// 由宿主从当前群成员名单提供，成员资料未确认时保持为空。
+  @override
+  final Set<String> avatarMentionMemberIds;
 
   /// 仅在消息满足群回执条件且有实时列表时调用。
   @override
@@ -324,6 +331,7 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
     this.showGroupDepartureNotices = true,
     this.groupMemberNoticeBuilder,
     this.groupSenderName,
+    this.avatarMentionMemberIds = const {},
     this.groupReadReceiptBuilder,
     this.reactionConfig,
     this.onGroupInfoOperatorTap,
