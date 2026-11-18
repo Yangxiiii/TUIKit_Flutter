@@ -115,7 +115,7 @@ abstract class MessageInputConfigProtocol {
   ChatRichMentionSender? get richMentionSender;
   bool get enableVoiceToTextOnRecord;
 
-  /// 单聊先识别预览再确认发送，并支持在同一音频末尾继续录音；默认保留旧流程。
+  /// 开启后先识别预览再确认发送，并支持在同一音频末尾继续录音；默认保留旧流程。
   bool get previewVoiceBeforeSend;
 
   /// More panel items (order matches the more panel UI)

@@ -10,7 +10,7 @@ import { media } from '@kit.MediaKit';
  *   2. 加了 filepath 参数,允许 Dart 侧传入指定路径,否则内部生成
  *   3. 录音结果通过 CompletionListener.onCompleted(resultCode, path, durationMs) 返回,
  *      对齐 Android AudioRecorderHandler 的 result payload。
- *   4. powerLevel: harmony 端 media.AVRecorder 无原生 API 拿实时音量,先不发。
+ *   4. powerLevel 随录音进度采样，转换为 Dart 使用的 dBFS 数值。
  *
  * ResultCode 定义与 Dart AudioRecordResultCode 一一对齐:
  *   success                      =  0
@@ -37,7 +37,7 @@ export enum RecordResultCode {
 export interface RecordProgressListener {
   /** 录音时长回调,timeMs 累计毫秒。 */
   onRecordTime?(timeMs: number): void;
-  /** 音量等级回调,鸿蒙暂未实现,保留接口。 */
+  /** 峰值音量回调，单位为 dBFS。 */
   onPowerLevel?(powerLevel: number): void;
 }
 
@@ -246,8 +246,26 @@ export default class AudioRecorderHelper {
         this.finishAndEmit(true).catch((e: Error) => {
           console.warn(`${AudioRecorderHelper.TAG} auto stop on max duration failed`, e.message);
         });
+      } else {
+        void this.samplePowerLevel();
       }
     }, AudioRecorderHelper.PROGRESS_INTERVAL_MS);
+  }
+
+  /** 音量采样失败不应中断录音；停止或切换会话后丢弃迟到结果。 */
+  private async samplePowerLevel(): Promise<void> {
+    const recorder = this.avRecorder;
+    if (recorder === null || !this.progress?.onPowerLevel) return;
+    try {
+      const amplitude = await recorder.getAudioCapturerMaxAmplitude();
+      if (this.isRecording && this.avRecorder === recorder) {
+        // 采集峰值按 16 位满幅换算，与 Android 和 iOS 使用同一音量契约。
+        const ratio = Math.min(1, Math.max(1, amplitude) / 32768);
+        this.progress?.onPowerLevel?.(Math.round(20 * Math.log10(ratio)));
+      }
+    } catch (_err) {
+      // 设备中断或停止时统计可能暂不可用，下一次进度采样可以恢复。
+    }
   }
 
   private stopProgressTracking(): void {

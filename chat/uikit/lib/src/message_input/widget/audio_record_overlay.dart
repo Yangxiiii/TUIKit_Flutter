@@ -1,6 +1,5 @@
 import 'package:app_ui/app_ui.dart';
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -106,9 +105,8 @@ class AudioRecordOverlay extends StatefulWidget {
 }
 
 class AudioRecordOverlayState extends State<AudioRecordOverlay>
-    with TickerProviderStateMixin {
+    with SingleTickerProviderStateMixin {
   late AudioRecorder _audioRecorder;
-  late AnimationController _waveAnimationController;
   late AnimationController _dotsAnimationController;
   late AiMediaProcessManager _mediaProcessManager;
 
@@ -228,20 +226,12 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
   final GlobalKey _cancelButtonKey = GlobalKey();
   final GlobalKey _convertButtonKey = GlobalKey();
 
-  // Random wave heights for animation
-  //
-  // 动画用的随机波高
-  final List<double> _waveHeights = List.generate(20, (_) => 0.5);
-  final Random _random = Random();
+  /// 最近20次采样的归一化音量，越靠右越接近当前录音时刻。
+  final List<double> _waveHeights = List.filled(20, 0, growable: true);
 
   @override
   void initState() {
     super.initState();
-    _waveAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 200),
-      vsync: this,
-    )..addListener(_updateWaveHeights);
-
     // Three-dot pulse: 1.2s loop is comfortable.
     //
     // 三点脉冲：1.2秒循环比较舒适。
@@ -254,6 +244,7 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
     _audioRecorder.initialize(
       onProgressUpdate: _onProgressUpdate,
       onStateChanged: _onStateChanged,
+      onPowerLevel: _updateWaveHeights,
     );
 
     _mediaProcessManager =
@@ -262,8 +253,6 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
 
   @override
   void dispose() {
-    _waveAnimationController.removeListener(_updateWaveHeights);
-    _waveAnimationController.dispose();
     _dotsAnimationController.dispose();
     _audioRecorder.cancelRecord();
     _audioRecorder.dispose();
@@ -273,16 +262,14 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
     super.dispose();
   }
 
-  void _updateWaveHeights() {
+  /// 将原生 dBFS 映射为波高，平滑相邻采样并维持静音下限。
+  void _updateWaveHeights(int powerLevel) {
     if (!_isRecording || !mounted) return;
+    final level = ((powerLevel + 60) / 60).clamp(0.0, 1.0);
     setState(() {
-      for (int i = 0; i < _waveHeights.length; i++) {
-        // Smoothly interpolate toward new random target
-        //
-        // 平滑地插值到新的随机目标
-        final target = 0.2 + _random.nextDouble() * 0.8;
-        _waveHeights[i] = _waveHeights[i] + (target - _waveHeights[i]) * 0.3;
-      }
+      final previous = _waveHeights.last;
+      _waveHeights.removeAt(0);
+      _waveHeights.add((previous + level) / 2);
     });
   }
 
@@ -298,14 +285,9 @@ class AudioRecordOverlayState extends State<AudioRecordOverlay>
     if (mounted) {
       setState(() {
         _isRecording = isRecording;
+        // 每次开始采音先清空前一段的波形，避免续录沿用旧音量。
+        if (isRecording) _waveHeights.fillRange(0, _waveHeights.length, 0);
       });
-
-      if (isRecording) {
-        _waveAnimationController.repeat();
-      } else {
-        _waveAnimationController.stop();
-        _waveAnimationController.reset();
-      }
     }
   }
 

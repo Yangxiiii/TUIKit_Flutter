@@ -2341,7 +2341,7 @@ class MessageInputState extends State<MessageInput>
     }
   }
 
-  /// 在宿主上下文内捕获主题，单聊预览与旧录音浮层各自持有独立生命周期。
+  /// 在宿主上下文内捕获主题，预览与旧录音浮层各自持有独立生命周期。
   void _showRecordOverlay() {
     _removeRecordOverlay();
 

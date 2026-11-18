@@ -29,7 +29,7 @@ import AudioRecorderHelper, {
  *     cancelRecord() -> null    (触发取消,startRecord 那次 return errorCancel)
  *   EventChannel  : 'tencent_chat_uikit/audio_recorder_events'
  *     { type: 'recordTime',  timeMs: int }
- *     { type: 'powerLevel',  powerLevel: int }   ← 鸿蒙暂不发,harmony 端也未实现
+ *     { type: 'powerLevel',  powerLevel: int }   ← 录音峰值，单位为 dBFS
  *
  * 需要 UIAbilityContext:麦克风权限 checkAccessToken 不需要,但 helper 保留了
  * requestPermissionsFromUser 的可能性,先把 context 传下去。
