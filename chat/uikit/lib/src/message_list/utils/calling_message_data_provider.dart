@@ -28,7 +28,7 @@ enum CallParticipantRole { unknown, caller, callee }
 
 enum CallMessageDirection { incoming, outcoming }
 
-/// 解析腾讯通话信令用于气泡及摘要；兼容在线原始消息与离线自定义载荷，不发送信令。
+/// 解析腾讯通话信令与 OA 通话消息，为聊天气泡、会话摘要及历史过滤提供展示信息。
 class CallingMessageDataProvider {
   bool _isExcludedFromLastMessage = false;
   bool _isExcludedFromUnreadCount = false;
@@ -49,6 +49,9 @@ class CallingMessageDataProvider {
 
   /// 自有终态报告有完整多人身份；不能把两人临时通话误识别为普通单聊。
   GroupCallRecordData? _personalRecord;
+
+  /// 已核对发起人、会话及受邀范围的业务发起消息。
+  GroupCallStartData? _callStart;
 
   CallProtocolType get protocolType => _protocolType;
 
@@ -78,6 +81,12 @@ class CallingMessageDataProvider {
   /// 经发送身份与会话校验的个人报告，展示资料不能作为权限依据。
   GroupCallRecordData? get personalRecord => _personalRecord;
 
+  /// 群发起通知和临时多人发起通知按实际发送者显示左右气泡。
+  bool get isCallStart => _callStart != null;
+
+  /// 只有发起气泡随同场的 SDK 实时接通状态更新。
+  String? get attemptId => _callStart?.attemptId;
+
   // 是否需要上屏
   bool get excludeFromHistory => _excludeFromHistory;
 
@@ -95,16 +104,34 @@ class CallingMessageDataProvider {
   bool get isTemporaryMultiParty =>
       isCallingSignal &&
       _groupID.isEmpty &&
-      (_personalRecord != null || _inviteeList.toSet().length > 1);
+      (_personalRecord != null || isCallStart || _inviteeList.toSet().length > 1);
 
   late MessageInfo messageInfo;
   late AppLocalizedText atomicLocale;
+
+  CallingMessageDataProvider._(this.messageInfo);
+
+  /// 识别腾讯群通话信令，聊天记录由独立的 OA 发起及结果消息承载。
+  static bool isSdkGroupCallSignal(MessageInfo message) {
+    if (message.messagePayload is! CustomMessagePayload) return false;
+    final signal = CallingMessageDataProvider._(message);
+    return signal._readSignalEnvelope() && signal._isSdkGroupCallSignal;
+  }
+
+  /// 仅在解析腾讯信令的分支中使用，OA 通话消息单独校验展示范围。
+  bool get _isSdkGroupCallSignal => _isCallingSignal && _groupID.isNotEmpty;
 
   CallingMessageDataProvider(this.messageInfo, BuildContext context,
       {String? viewerId}) {
     atomicLocale = AppLocalization.of(context);
     final account =
         viewerId ?? LoginStore.shared.loginState.loginUserInfo?.userID ?? '';
+    final payload = messageInfo.messagePayload;
+    if (payload is CustomMessagePayload &&
+        GroupCallStartData.isStart(payload.customData)) {
+      _readCallStart(account);
+      return;
+    }
     if (GroupCallRecordMessage.isMessage(messageInfo)) {
       _isCallingSignal = true;
       final record = GroupCallRecordMessage.fromMessage(messageInfo, account);
@@ -130,6 +157,7 @@ class CallingMessageDataProvider {
         GroupCallRecordOutcome.unanswered => CallProtocolType.timeout,
         GroupCallRecordOutcome.rejected => CallProtocolType.reject,
         GroupCallRecordOutcome.busy => CallProtocolType.lineBusy,
+        GroupCallRecordOutcome.otherDeviceAccepted => CallProtocolType.accept,
         GroupCallRecordOutcome.completed ||
         GroupCallRecordOutcome.interrupted =>
           CallProtocolType.hangup,
@@ -142,16 +170,53 @@ class CallingMessageDataProvider {
     _isExcludedFromUnreadCount =
         messageInfo.rawMessage?.isExcludedFromUnreadCount ?? false;
 
-    // 腾讯历史信令外层包含 JSON 字符串 data；离线快照只有 CustomMessagePayload，不能强依赖 rawMessage。
+    if (!_readSignalEnvelope()) return;
+    _setStreamMediaType();
+    _setParticipantType();
+    _setCallerId();
+    _setParticipantRole();
+    _setDirection();
+    _setExcludeFromHistory();
+    _setContent();
+  }
+
+  /// 以实际会话和发起人校验展示范围，原始载荷不提供入会入口。
+  void _readCallStart(String account) {
+    _isCallingSignal = true;
+    final start = GroupCallRecordMessage.startFromMessage(messageInfo, account);
+    if (start == null) {
+      _excludeFromHistory = true;
+      return;
+    }
+    _callStart = start;
+    _groupID = start.groupId;
+    _callerId = start.callerId;
+    _participantType = start.groupId.isEmpty
+        ? CallParticipantType.c2c
+        : CallParticipantType.group;
+    _participantRole = account == start.callerId
+        ? CallParticipantRole.caller
+        : CallParticipantRole.callee;
+    _setDirection();
+    _protocolType = CallProtocolType.send;
+    _streamMediaType = start.mediaType == 'video'
+        ? CallStreamMediaType.video
+        : CallStreamMediaType.audio;
+    _content = atomicLocale.startCall;
+  }
+
+  /// 从在线和离线共用的自定义载荷识别信令动作，供列表过滤与气泡展示使用。
+  bool _readSignalEnvelope() {
     final payload = messageInfo.messagePayload;
     final raw = payload is CustomMessagePayload ? payload.customData : null;
+    // 腾讯信令的内层 data 可能是 JSON 字符串，容器异常时按普通消息处理。
     try {
-      if (raw == null || raw.isEmpty) return;
+      if (raw == null || raw.isEmpty) return false;
       final outer = jsonDecode(raw);
-      if (outer is! Map<String, dynamic>) return;
+      if (outer is! Map<String, dynamic>) return false;
       final inner = outer['data'];
       final decoded = inner is String ? jsonDecode(inner) : inner;
-      if (decoded is! Map<String, dynamic>) return;
+      if (decoded is! Map<String, dynamic>) return false;
       _jsonData = decoded;
       _groupID = outer['groupID'] is String ? outer['groupID'] as String : '';
       _inviteeList = outer['inviteeList'] is List
@@ -160,27 +225,15 @@ class CallingMessageDataProvider {
       _actionType = outer['actionType'] is int ? outer['actionType'] as int : 0;
       if (_jsonData['data'] != null &&
           _jsonData['data'] is! Map<String, dynamic>) {
-        return;
+        return false;
       }
     } on FormatException {
-      return;
+      return false;
     }
 
     _setIsCallingSignal();
     _setProtocolType();
-    _setStreamMediaType();
-    _setParticipantType();
-    _setCallerId();
-    _setParticipantRole();
-    _setDirection();
-    _setExcludeFromHistory();
-    // 群信令可能广播给整个群；只有真实发起人与受邀者可看到个人通话提示。
-    if (_groupID.isNotEmpty &&
-        (account.isEmpty ||
-            (account != _callerId && !_inviteeList.contains(account)))) {
-      _excludeFromHistory = true;
-    }
-    _setContent();
+    return true;
   }
 
   _setIsCallingSignal() {
@@ -347,10 +400,12 @@ class CallingMessageDataProvider {
     }
   }
 
-  _setExcludeFromHistory() {
-    _excludeFromHistory = _protocolType != CallProtocolType.unknown &&
-        _isExcludedFromLastMessage &&
-        _isExcludedFromUnreadCount;
+  /// 群通话信令不生成会话摘要或独立消息项，单聊仍按 SDK 标志判断。
+  void _setExcludeFromHistory() {
+    _excludeFromHistory = _isSdkGroupCallSignal ||
+        (_protocolType != CallProtocolType.unknown &&
+            _isExcludedFromLastMessage &&
+            _isExcludedFromUnreadCount);
   }
 
   _setContent() {
@@ -360,7 +415,6 @@ class CallingMessageDataProvider {
     }
 
     bool isCaller = _participantRole == CallParticipantRole.caller;
-    final showName = _getShowName();
 
     if (_participantType == CallParticipantType.c2c) {
       if (_protocolType == CallProtocolType.reject) {
@@ -395,43 +449,6 @@ class CallingMessageDataProvider {
       } else {
         _content = atomicLocale.unknownCall;
       }
-    } else if (_participantType == CallParticipantType.group) {
-      if (_protocolType == CallProtocolType.send) {
-        _content = '"$showName" ${atomicLocale.groupCallSend}';
-      } else if (_protocolType == CallProtocolType.cancel) {
-        _content = atomicLocale.groupCallEnd;
-      } else if (_protocolType == CallProtocolType.hangup) {
-        _content = atomicLocale.groupCallEnd;
-      } else if (_protocolType == CallProtocolType.timeout ||
-          _protocolType == CallProtocolType.lineBusy) {
-        String inviteeNames = '';
-        if (_participantType == CallParticipantType.group) {
-          for (String invitee in _inviteeList) {
-            inviteeNames = '$inviteeNames$invitee、';
-          }
-        }
-        if (_protocolType == CallProtocolType.lineBusy) {
-          _content = (inviteeNames.isEmpty
-                  ? ''
-                  : inviteeNames.substring(0, inviteeNames.length - 1)) +
-              atomicLocale.callLineBusyCallee;
-        } else {
-          _content = (inviteeNames.isEmpty
-                  ? ''
-                  : inviteeNames.substring(0, inviteeNames.length - 1)) +
-              atomicLocale.groupCallNoAnswer;
-        }
-      } else if (_protocolType == CallProtocolType.reject) {
-        _content = '"$showName" ${atomicLocale.groupCallReject}';
-      } else if (_protocolType == CallProtocolType.accept) {
-        _content = '"$showName" ${atomicLocale.groupCallAccept}';
-      } else if (_protocolType == CallProtocolType.switchToAudio) {
-        _content = '"$showName" ${atomicLocale.callingSwitchToAudio}';
-      } else if (_protocolType == CallProtocolType.switchToAudioConfirm) {
-        _content = '"$showName" ${atomicLocale.groupCallConfirmSwitchToAudio}';
-      } else {
-        _content = atomicLocale.unknownCall;
-      }
     } else {
       _content = atomicLocale.unknownCall;
     }
@@ -446,19 +463,5 @@ class CallingMessageDataProvider {
     int secondsShow = seconds % 60;
     int minutesShow = seconds ~/ 60;
     return "${_twoDigits(minutesShow)}:${_twoDigits(secondsShow)}";
-  }
-
-  String _getShowName() {
-    final from = messageInfo.from;
-    if (from.nameCard?.isNotEmpty == true) {
-      return from.nameCard!;
-    }
-    if (from.friendRemark?.isNotEmpty == true) {
-      return from.friendRemark!;
-    }
-    if (from.nickname?.isNotEmpty == true) {
-      return from.nickname!;
-    }
-    return from.userID;
   }
 }

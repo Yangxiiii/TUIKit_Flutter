@@ -24,7 +24,7 @@ GroupControlState _control(
         bool known = true,
         bool allowUnmute = false,
         bool allowVideo = false,
-        Map<String, GroupControlDevice?> pending = const {},
+        Map<String, Set<GroupControlDevice?>> pending = const {},
         Map<String, GroupControlOutcome> results = const {}}) =>
     GroupControlState(
         callId: 'call',
@@ -211,13 +211,17 @@ void main() {
     await tester.tap(target);
     expect(command, ('peer', GroupControlDevice.microphone, false));
     await tester.pumpWidget(_app(
-        sheet(_control(pending: {'peer': GroupControlDevice.microphone}))));
+        sheet(_control(pending: {'peer': {GroupControlDevice.microphone}}))));
     expect(
         tester
             .getSemantics(target)
             .getSemanticsData()
             .hasAction(SemanticsAction.tap),
         isFalse);
+    final cameraTarget =
+        find.bySemanticsIdentifier('call.group.members.camera.peer');
+    expect(tester.getSemantics(cameraTarget).getSemanticsData()
+        .hasAction(SemanticsAction.tap), isTrue);
     expect(find.text('正在等待1位成员确认'), findsOneWidget);
     await tester.pumpWidget(_app(sheet(_control(results: {
       'peer': const GroupControlOutcome(GroupControlStatus.denied,

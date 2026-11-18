@@ -86,6 +86,9 @@ class CallManager {
   /// 本地选人与提交共用的总人数上限，含本人及等待接听的成员。
   static const maxParticipants = 9;
 
+  /// 主叫发起有效群通话或独立多人后通知宿主，入会和追加邀请不经过此回调。
+  GroupCallStartedHandler? onGroupCallStarted;
+
   /// 仅用于重新发起的参数副本；不保存或恢复已结束的 SDK callId。
   ({
     String accountId,
@@ -168,6 +171,15 @@ class CallManager {
     final isGroup = effectiveParams.chatGroupId.isNotEmpty ||
         ids.length > 1 ||
         GroupCallMetadata.isTemporaryMulti(effectiveParams.userData);
+    final onStarted = onGroupCallStarted;
+    // OA 自定义记录入口透传本次请求标识，保留独立多人的场景字段。
+    final attemptId = onStarted != null && isGroup && effectiveParams.isEphemeralCall
+        ? GroupCallMetadata.newAttemptId()
+        : null;
+    if (attemptId != null) {
+      effectiveParams.userData =
+          GroupCallMetadata.withAttempt(effectiveParams.userData, attemptId);
+    }
     final history = GlobalState.instance.groupCallSession;
     final previousResult = history.value;
     final previousRequest = _lastGroupRequest;
@@ -179,6 +191,7 @@ class CallManager {
         params: effectiveParams
       );
       history.begin(
+          attemptId: attemptId,
           callId: '',
           groupId: effectiveParams.chatGroupId,
           groupName:
@@ -200,6 +213,18 @@ class CallManager {
       history.value = previousResult?.ended == true ? previousResult : null;
       _lastGroupRequest =
           previousResult?.canRetry == true ? previousRequest : null;
+    }
+    final groupId = effectiveParams.chatGroupId;
+    if (result.errorCode == 0 && attemptId != null && onStarted != null) {
+      // 只有 SDK 接受首次呼叫后才生成气泡，IM 发送失败不影响通话生命周期。
+      unawaited(
+        Future.sync(
+          () =>
+              onStarted(groupId, accountId, mediaType, List.unmodifiable(ids), attemptId),
+        ).catchError((Object error, StackTrace stack) {
+          appLogger.error('群通话发起消息发送失败', error: error, stackTrace: stack);
+        }),
+      );
     }
     return result;
   }
@@ -599,13 +624,12 @@ class CallManager {
     DeviceStore.shared.setAudioRoute(route);
   }
 
-  /// 只有本端主动 join 才补齐真实媒体类型，普通接听保留其原权限流程。
+  /// 主动加入后按真实媒体类型补查权限，设备初始化由接通后的会控负责。
   Future<void> prepareJoinedCallDevices(String callId) async {
     final call = _activeCallMatching(callId);
     if (_joiningCallId != callId || call?.mediaType == null) return;
     _joiningCallId = null;
-    await prepareCallDevices(
-        callId: callId, mediaType: call!.mediaType!, isCalled: true);
+    await _runPermissionGate(callId: callId, mediaType: call!.mediaType!);
   }
 
   /// 按真实媒体类型准备设备，异步权限和设备返回均受本场代次约束。
@@ -655,12 +679,14 @@ class CallManager {
     return activeCall;
   }
 
+  /// 权限回包仅作用于等待结果的原场次，旧回包不得结束新通话。
   Future<bool> _runPermissionGate({
     required String callId,
     required CallMediaType mediaType,
   }) async {
     final epoch = _deviceEpoch;
-    final deniedPermission = await _deniedMediaPermission(mediaType);
+    final deniedPermission = await (_permissionOverride?.call(mediaType) ??
+        _deniedMediaPermission(mediaType));
     if (epoch != _deviceEpoch || _activeCallMatching(callId) == null) {
       return false;
     }
@@ -675,6 +701,13 @@ class CallManager {
   Future<bool> _openDevices(CallMediaType mediaType,
       {bool preserveSelections = true}) async {
     if (_groupPolicyRequired) {
+      // 快速接通时，迟到的准备任务不能关闭已由会控初始化的设备。
+      final controller = groupControl;
+      if (controller != null &&
+          controller.callId == _store.state.activeCall.value.callId &&
+          _store.state.selfInfo.value.status == CallParticipantStatus.accept) {
+        return true;
+      }
       final epoch = _deviceEpoch;
       final result = await _sdkResult(() async {
         await _suspendGroupDevices();

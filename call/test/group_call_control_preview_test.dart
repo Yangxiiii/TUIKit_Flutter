@@ -21,10 +21,12 @@ void main() {
     final success =
         await session.execute('mute', session.host.value, session.host.muteAll);
     expect(success, isTrue);
-    expect(session.host.value.resultsByUserId.keys.toSet(),
-        {'self', 'user1', 'user2'});
+    expect(session.host.value.resultsByUserId.keys.toSet(), {'user1', 'user2'});
     expect(session.host.value.allowSelfUnmute, isFalse);
-    expect(session.members.every((member) => !member.microphoneOn), isTrue);
+    expect(
+        session.members
+            .every((member) => member.microphoneOn == (member.id == 'self')),
+        isTrue);
     expect(session.host.value.pendingByUserId, isEmpty);
   });
 
@@ -102,7 +104,7 @@ void main() {
     expect(
         members.members
             .where((member) => member.joined)
-            .every((member) => !member.cameraOn),
+            .every((member) => member.cameraOn == (member.id == 'self')),
         isTrue);
     await tester
         .tap(find.bySemanticsIdentifier('call.group.permissions.cancel'));
@@ -132,7 +134,7 @@ void main() {
     expect(
         muted.members
             .where((member) => member.joined)
-            .every((member) => !member.microphoneOn),
+            .every((member) => member.microphoneOn == (member.id == 'self')),
         isTrue);
     expect(tester.takeException(), isNull);
   });

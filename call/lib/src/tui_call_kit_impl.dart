@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
 import 'package:app_core/app_core.dart';
 import 'package:app_service/app_service.dart';
 import 'package:app_ui/app_ui.dart';
@@ -49,6 +50,12 @@ class TUICallKitImpl implements TUICallKit {
   /// 本人真实参与区间独立于房间计时，结束后通过宿主发布个人结果。
   late final GroupCallResultTracker _groupCallResultTracker;
 
+  /// 仅记录本端实际接通的呼叫标识，退出场次或登录时清除。
+  final _acceptedCallAttempt = ValueNotifier<String?>(null);
+
+  @override
+  ValueListenable<String?> get acceptedCallAttempt => _acceptedCallAttempt;
+
   /// 时长限制独立于页面；群场次消费可信统一截止，SDK 时长仅作补充。
   late final _durationLimit = CallDurationLimit(onLimit: () async {
     if (!await CallManager.instance.hangup(transferHost: false)) {
@@ -71,9 +78,16 @@ class TUICallKitImpl implements TUICallKit {
     onUserLeave: (id) => _onGroupMember(id, GroupCallMemberStatus.left),
     onCallBegin: (callId, mediaType, info) {
       _syncGroupCall();
-      GlobalState.instance.groupCallSession.updateMember(
+      final session = GlobalState.instance.groupCallSession;
+      session.updateMember(
           CallStore.shared.state.selfInfo.value.id,
           GroupCallMemberStatus.joined);
+      if (session.value?.callId == callId && session.value?.ended == false) {
+        session.completeAttempt(
+            GroupCallMetadata.attemptId(info.userData) ??
+                _groupCallResultTracker.attemptForCall(callId));
+        _acceptedCallAttempt.value = session.attemptId;
+      }
       unawaited(CallManager.instance.refreshGroupCallTitle());
       // join 的早期 Store 事件尚无准确媒体类型，真实接通后补齐本端设备准备。
       unawaited(CallManager.instance.prepareJoinedCallDevices(callId));
@@ -87,7 +101,7 @@ class TUICallKitImpl implements TUICallKit {
   }
 
   /// 从 SDK 补齐群标识和资料，空状态及已结束旧场次不会重新打开结果。
-  void _syncGroupCall() {
+  void _syncGroupCall({String? attemptId}) {
     final call = CallStore.shared.state.activeCall.value;
     if (call.mediaType == null) return;
     final session = GlobalState.instance.groupCallSession;
@@ -102,6 +116,7 @@ class TUICallKitImpl implements TUICallKit {
         (previous.ended && previous.callId != call.callId)) {
       if (!group) return;
       session.begin(
+          attemptId: attemptId,
           callId: call.callId,
           groupId: call.chatGroupId,
           groupName: GlobalState.instance.groupCallTitle(call.chatGroupId),
@@ -134,11 +149,14 @@ class TUICallKitImpl implements TUICallKit {
         (String callId, CallMediaType mediaType, String userData) async {
       CallManager.instance.invalidateDevicePreparation();
       CallManager.instance.clearGroupRequest();
+      _acceptedCallAttempt.value = null;
       // 腾讯真实群来源优先；展示标识只能补充独立多人，不能改写群关系或权限。
       final call = CallStore.shared.state.activeCall.value;
+      final attemptId = GroupCallMetadata.attemptId(userData);
       if (call.chatGroupId.isEmpty &&
           GroupCallMetadata.isTemporaryMulti(userData)) {
         GlobalState.instance.groupCallSession.begin(
+            attemptId: attemptId,
             callId: callId,
             groupId: '',
             groupName: '',
@@ -150,7 +168,7 @@ class TUICallKitImpl implements TUICallKit {
               CallStore.shared.state.selfInfo.value.id
             });
       }
-      _syncGroupCall();
+      _syncGroupCall(attemptId: attemptId);
       unawaited(CallManager.instance.refreshGroupCallTitle());
       // SDK 先通知待接听状态，再补充多人元数据；补齐资料不能把来电横幅强制展开。
       _showPage();
@@ -170,6 +188,7 @@ class TUICallKitImpl implements TUICallKit {
       }));
       aiTranscriberConfigManager.reset(preserveSettings: false);
       final session = GlobalState.instance.groupCallSession;
+      if (session.value?.callId == callId) _acceptedCallAttempt.value = null;
       session.end(callId, reason,
           isCaller: session.value?.inviterId ==
               LoginStore.shared.loginState.loginUserInfo?.userID);
@@ -216,7 +235,6 @@ class TUICallKitImpl implements TUICallKit {
 
   TUICallKitImpl() {
     CallStore.shared;
-    _groupControlLifecycle = GroupControlLifecycle();
     _groupCallResultTracker = GroupCallResultTracker(
         session: GlobalState.instance.groupCallSession,
         accountId: () =>
@@ -230,6 +248,8 @@ class TUICallKitImpl implements TUICallKit {
     pageRouter = CallPageRouter(
       navigatorGetter: () => Bootloader.instance.navigator,
     );
+    _groupControlLifecycle = GroupControlLifecycle(
+        confirmDeviceOpen: pageRouter.confirmGroupDeviceOpen);
     CallManager.instance.bindPageManager(pageRouter);
     _subscribeState();
   }
@@ -370,6 +390,11 @@ class TUICallKitImpl implements TUICallKit {
   }
 
   @override
+  void setGroupCallStartedHandler(GroupCallStartedHandler? handler) {
+    CallManager.instance.onGroupCallStarted = handler;
+  }
+
+  @override
   void setGroupCallTitle(String groupId, String title) {
     GlobalState.instance.setGroupCallTitle(groupId, title);
   }
@@ -426,6 +451,7 @@ class TUICallKitImpl implements TUICallKit {
 
   /// 先使异步操作失效并清理展示资料，再释放 SDK 与平台资源。
   void handleLogoutSuccess() async {
+    _acceptedCallAttempt.value = null;
     _groupControlLifecycle.clear(clearAuthority: true);
     _groupCallResultTracker.clear();
     CallManager.instance.invalidateDevicePreparation();

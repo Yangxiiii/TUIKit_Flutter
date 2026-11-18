@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 /// 会控设备，仅包括本次明确接入的麦克风和摄像头。
 enum GroupControlDevice { microphone, camera }
 
-/// 发送成功不属于成功状态；只有真实 SDK 结果与状态一致才是 success。
+/// 本机结果来自 SDK 操作或媒体事件，远端执行须核对目标回执和设备状态。
 enum GroupControlStatus {
   success,
   failed,
@@ -20,7 +20,7 @@ class GroupControlOutcome {
   const GroupControlOutcome(this.status,
       {this.error, this.microphoneOn, this.cameraOn});
 
-  /// 成功仅确认目标端实际结果；发送成功、超时和未知状态各自保持非成功。
+  /// 设备执行结果，IM 消息发送成功不能推导设备成功。
   final GroupControlStatus status;
 
   /// 面向用户的失败原因；不能包含 UserSig 等身份凭证。
@@ -68,10 +68,16 @@ class GroupControlState {
       required this.cameraOn,
       this.connectedAtMs,
       this.deadlineMs,
-      Map<String, GroupControlDevice?> pendingByUserId = const {},
-      Map<String, GroupControlOutcome> resultsByUserId = const {}})
-      : pendingByUserId = Map.unmodifiable(pendingByUserId),
-        resultsByUserId = Map.unmodifiable(resultsByUserId);
+      Map<String, Set<GroupControlDevice?>> pendingByUserId = const {},
+      Map<String, GroupControlOutcome> resultsByUserId = const {},
+      Map<(String, GroupControlDevice), GroupControlOutcome>
+          resultsByDevice = const {}})
+      : pendingByUserId = Map.unmodifiable({
+          for (final entry in pendingByUserId.entries)
+            entry.key: Set<GroupControlDevice?>.unmodifiable(entry.value),
+        }),
+        resultsByUserId = Map.unmodifiable(resultsByUserId),
+        resultsByDevice = Map.unmodifiable(resultsByDevice);
 
   /// 腾讯真实场次。
   final String callId;
@@ -103,7 +109,7 @@ class GroupControlState {
   /// 当前全员关闭摄像头策略，决定新入会默认摄像头状态。
   final bool cameraAllClosed;
 
-  /// SDK available 事件确认的本端设备状态。
+  /// 本端麦克风与摄像头按钮各自使用的状态。
   final bool microphoneOn, cameraOn;
 
   /// 可信主持首次接通的统一 UTC 毫秒起点，未知策略时可以为空。
@@ -112,11 +118,18 @@ class GroupControlState {
   /// 所有同场成员继承的绝对截止点，迟到入会与主持交接不得延长。
   final int? deadlineMs;
 
-  /// 尚未收到真实 ACK 的用户；空设备表示策略或主持交接。
-  final Map<String, GroupControlDevice?> pendingByUserId;
+  /// 用户各设备独立等待确认，集合内的 null 表示策略或主持交接。
+  final Map<String, Set<GroupControlDevice?>> pendingByUserId;
 
   /// 最近操作的逐目标结果，发送成功不能提前写 success。
   final Map<String, GroupControlOutcome> resultsByUserId;
+
+  /// 每个用户和设备各自的最近结果，用于对应设备的状态提示。
+  final Map<(String, GroupControlDevice), GroupControlOutcome> resultsByDevice;
+
+  /// 通用策略进度不会让无关的设备按钮一并转圈。
+  bool isDevicePending(String userId, GroupControlDevice device) =>
+      pendingByUserId[userId]?.contains(device) == true;
 
   /// 主持权必须已由可信消息确认，未知策略阶段没有管理权限。
   bool get canManage => policyKnown && hostId == selfId;

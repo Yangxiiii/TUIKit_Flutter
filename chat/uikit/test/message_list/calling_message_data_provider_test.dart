@@ -1,10 +1,89 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tencent_chat_uikit/src/message_list/utils/calling_message_data_provider.dart'
+    show CallProtocolType;
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
-import 'package:tencent_chat_uikit/src/message_list/utils/calling_message_data_provider.dart';
 
 void main() {
+  testWidgets('群通话发起及挂断信令不占消息行或摘要，保留普通消息及单聊通话', (tester) async {
+    MessageInfo signal(String id, String group, Object data) => MessageInfo(
+          msgID: id,
+          to: group,
+          from: MessageSenderInfo(userID: 'caller'),
+          messageType: MessageType.custom,
+          messagePayload: CustomMessagePayload(
+              customData: jsonEncode({
+            'businessID': 1,
+            'actionType': 1,
+            'groupID': group,
+            'inviteeList': ['peer'],
+            'data': data,
+          })),
+        );
+    final audio = signal('audio-start', 'group',
+        jsonEncode({'businessID': 'av_call', 'call_type': 1}));
+    final video = signal('video-start', 'group', {
+      'businessID': 'rtc_call',
+      'data': {'cmd': 'videoCall', 'inviter': 'caller'},
+    });
+    final result = jsonEncode({
+      'businessID': 'rtc_call',
+      'version': 4,
+      'call_type': 1,
+      'call_end': 0,
+      'data': {
+        'cmd': 'hangup',
+        'inviter': 'caller',
+        'excludeFromHistoryMessage': false,
+      },
+    });
+    final hangup = signal('hangup', 'group', result);
+    final direct = signal('direct', '', result);
+    final text = MessageInfo(
+      msgID: 'text',
+      messageType: MessageType.text,
+      messagePayload: TextMessagePayload(text: '普通群消息'),
+    );
+    late BuildContext page;
+    await tester.pumpWidget(ProviderScope(
+      child: MaterialApp(
+        home: Scaffold(
+          body: Column(children: [
+            Builder(builder: (context) {
+              page = context;
+              return MessageList(
+                conversationID: 'group_group',
+                config: const ChatMessageListConfig(),
+                offlineMessages: [text, hangup, video, audio],
+              );
+            }),
+          ]),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widgetList<MessageItem>(find.byType(MessageItem))
+            .map((item) => item.message.msgID),
+        ['text']);
+    for (final message in [audio, video, hangup]) {
+      expect(CallingMessageDataProvider.isSdkGroupCallSignal(message), isTrue);
+      for (final viewer in ['caller', 'peer']) {
+        final parsed =
+            CallingMessageDataProvider(message, page, viewerId: viewer);
+        expect(parsed.excludeFromHistory, isTrue);
+        expect(parsed.content, isEmpty);
+      }
+      expect(MessageUtil.getMessageAbstract(message, page), isEmpty);
+    }
+    expect(CallingMessageDataProvider.isSdkGroupCallSignal(direct), isFalse);
+    expect(CallingMessageDataProvider(direct, page, viewerId: 'peer').content,
+        '通话时长 00:00');
+  });
+
   testWidgets('离线通话载荷保留媒体、时长与列表摘要，拒绝异常 JSON', (tester) async {
     late BuildContext page;
     await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) {
@@ -44,7 +123,8 @@ void main() {
       'inviteeList': ['peer', 'another'],
       'data': jsonEncode({'businessID': 'av_call', 'call_type': 1}),
     }));
-    expect(CallingMessageDataProvider(multi, page).isTemporaryMultiParty, isTrue);
+    expect(
+        CallingMessageDataProvider(multi, page).isTemporaryMultiParty, isTrue);
   });
 
   testWidgets('异常时长不伪造通话时长，取消与超时仍保持不同事件', (tester) async {

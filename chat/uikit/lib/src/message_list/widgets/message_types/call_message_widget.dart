@@ -7,7 +7,7 @@ import 'package:tencent_chat_uikit/src/message_list/utils/calling_message_data_p
 import 'system_message_widget.dart';
 import 'text_message_widget.dart';
 
-/// 用气泡承载个人通话记录；仅可确认的单聊记录提供按原类型回拨。
+/// 用气泡展示群通话发起和个人通话记录，单聊旧记录可按原媒体类型回拨。
 class CallMessageWidget extends StatelessWidget {
   const CallMessageWidget({
     super.key,
@@ -61,9 +61,9 @@ class CallMessageWidget extends StatelessWidget {
       return Container();
     }
 
-    // 群通话记录是系统提示，没有单聊气泡及回拨入口。
-    if (provider.participantType == CallParticipantType.group &&
-        provider.personalRecord == null) {
+    // 腾讯原生群提示沿用系统样式，业务发起与个人结果使用普通气泡。
+    final group = provider.participantType == CallParticipantType.group;
+    if (group && provider.personalRecord == null && !provider.isCallStart) {
       return SystemMessageWidget(customContent: provider.content);
     }
 
@@ -74,6 +74,9 @@ class CallMessageWidget extends StatelessWidget {
       CallProtocolType.timeout,
       CallProtocolType.lineBusy
     ].contains(provider.protocolType);
+    final openGroupCall = config.onGroupCallBubbleTap;
+    final accepted = config.acceptedCallAttempt;
+    final attempt = provider.attemptId;
     return Semantics(
       identifier: 'tim.message.call.${message.msgID}',
       child: TextMessageWidget(
@@ -85,19 +88,16 @@ class CallMessageWidget extends StatelessWidget {
         backgroundBuilder: backgroundBuilder,
         onResendTap: onResendTap,
         isInMergedDetailView: isInMergedDetailView,
-        onTap: () {
-          // 多人记录缺少完整可恢复的场次，不得误拨气泡中的一个收发方。
-          if (provider.isTemporaryMultiParty ||
-              provider.personalRecord != null) {
-            return;
-          }
-          // 旧记录和离线消息也可用公开收发方字段回拨。
-          final userId =
-              message.isSentBySelf ? message.to : message.from.userID;
-          if (userId.isNotEmpty) {
-            onCallMessageClick?.call(userId, isVideo);
-          }
-        },
+        onTap: group
+            ? (openGroupCall == null ? null : () => openGroupCall(context))
+            : provider.isTemporaryMultiParty
+                ? null
+                : () {
+                    // 单聊旧记录继续向实际对端回拨。
+                    final userId =
+                        message.isSentBySelf ? message.to : message.from.userID;
+                    if (userId.isNotEmpty) onCallMessageClick?.call(userId, isVideo);
+                  },
         contentBuilder: (style) => Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -108,7 +108,17 @@ class CallMessageWidget extends StatelessWidget {
                 size: 20,
                 color: style.color),
             const SizedBox(width: 8),
-            Flexible(child: Text(provider.content, style: style)),
+            Flexible(
+              child: attempt == null || accepted == null
+                  ? Text(provider.content, style: style)
+                  : ValueListenableBuilder<String?>(
+                      valueListenable: accepted,
+                      builder: (_, confirmed, __) => Text(
+                        confirmed == attempt ? '已接听' : provider.content,
+                        style: style,
+                      ),
+                    ),
+            ),
           ],
         ),
       ),

@@ -112,7 +112,7 @@ class GroupCallManagementFlow {
   /// 本人关闭不依赖控制链路就绪；开启与远端操作均需当前策略和真实回执。
   Future<void> setDevice(
           String userId, GroupControlDevice device, bool enabled) =>
-      _guard.singleFlight<void>(('call.group.device', _epoch, userId),
+      _guard.singleFlight<void>(('call.group.device', _epoch, userId, device),
           () async {
         if (!_current) return;
         final state = _state;
@@ -161,7 +161,7 @@ class GroupCallManagementFlow {
         }
       });
 
-  /// 解除全员静音由控制器同时授权和下发开麦，不能仅切换一个界面开关。
+  /// 解除全员静音由控制器恢复策略，成员自行决定何时开麦。
   Future<void> unmuteAll() =>
       _guard.singleFlight<void>(('call.group.unmuteAll', _epoch), () async {
         final state = _state;

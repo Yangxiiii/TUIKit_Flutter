@@ -14,6 +14,14 @@ String groupControlOutcomeText(GroupControlOutcome outcome) =>
       GroupControlStatus.failed => outcome.error ?? '设备执行失败',
     };
 
+/// 当前设备的上一次失败才进入自身提示，另一设备的失败由自己的按钮展示。
+String? groupDeviceHint(
+    GroupControlState? state, String userId, GroupControlDevice device) {
+  if (state == null || !state.policyKnown) return '会控权限尚未同步，暂不可开启设备';
+  final result = state.resultsByDevice[(userId, device)];
+  return result != null && !result.success ? groupControlOutcomeText(result) : null;
+}
+
 /// 汇总当前操作进度与失败目标，空值表示没有需要额外提示的控制状态。
 String? groupControlStatusText(
     GroupControlState? state, List<GroupCallMember> members) {

@@ -20,6 +20,8 @@ class GroupCallControls extends StatelessWidget {
     required this.onCamera,
     required this.onFlip,
     required this.onRetry,
+    this.speakerOn = false,
+    this.onSpeaker,
     this.canOpenMicrophone = true,
     this.canOpenCamera = true,
     this.microphonePending = false,
@@ -43,6 +45,9 @@ class GroupCallControls extends StatelessWidget {
   /// SDK的本端麦克风、摄像头实际状态。
   final bool microphoneOn, cameraOn;
 
+  /// 由 SDK 当前音频路由决定扬声器是否开启。
+  final bool speakerOn;
+
   /// 已知策略只限制开启；成员仍可关闭已经开启的本人设备。
   final bool canOpenMicrophone, canOpenCamera;
 
@@ -52,7 +57,7 @@ class GroupCallControls extends StatelessWidget {
   /// 当前会控给出的限制、等待或失败原因。
   final String? microphoneHint, cameraHint;
 
-  /// 已接通、本地画面可用且设备确认支持切换时显示入口，实际可用性单独受 SDK 限制。
+  /// 设备确认具备前后摄像头时允许显示翻转入口。
   final bool canFlip;
 
   /// 拒绝、取消或确认挂断当前场次。
@@ -64,14 +69,18 @@ class GroupCallControls extends StatelessWidget {
   /// 本人设备操作复用权限检查和 SDK 错误处理。
   final VoidCallback onMicrophone, onCamera;
 
-  /// 保留宿主翻转动作；当前 SDK 无切换结果回调，入口在设备验证通过前禁用。
-  final VoidCallback onFlip;
+  /// 切换本机听筒和免提，与群会控权限无关。
+  final VoidCallback? onSpeaker;
+
+  /// 请求 SDK 切换前后摄像头，无媒体执行入口的预览可传空。
+  final VoidCallback? onFlip;
 
   /// 创建新通话，不能恢复旧callId。
   final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalization.of(context);
     if (incoming && !ended) {
       return Padding(
           padding: const EdgeInsets.only(left: 60, right: 72),
@@ -83,20 +92,9 @@ class GroupCallControls extends StatelessWidget {
                 background: context.appColors.success),
           ]));
     }
-    // 录制能力未验证时入口保留但禁用，不把本地动画作为录制状态。
     return Column(mainAxisSize: MainAxisSize.min, children: [
+      // 上排集中本机设备，扬声器显示当前播放路由。
       _row([
-        _button(
-            context,
-            'camera',
-            cameraOn ? AppIcons.cameraOn : AppIcons.videoOff,
-            cameraOn ? '摄像头已开' : '摄像头已关',
-            ended || cameraPending || (!cameraOn && !canOpenCamera)
-                ? null
-                : onCamera,
-            active: cameraOn,
-            pending: cameraPending,
-            hint: cameraHint),
         _button(
             context,
             'microphone',
@@ -108,11 +106,30 @@ class GroupCallControls extends StatelessWidget {
             active: microphoneOn,
             pending: microphonePending,
             hint: microphoneHint),
-        _recordUnavailable(context),
+        _button(
+          context,
+          'speaker',
+          speakerOn ? AppIcons.voiceOn : AppIcons.voiceOff,
+          speakerOn ? l10n.callSpeakerIsOn : l10n.callSpeakerIsOff,
+          ended ? null : onSpeaker,
+          active: speakerOn && !ended,
+        ),
+        _button(
+            context,
+            'camera',
+            cameraOn ? AppIcons.cameraOn : AppIcons.videoOff,
+            cameraOn ? '摄像头已开' : '摄像头已关',
+            ended || cameraPending || (!cameraOn && !canOpenCamera)
+                ? null
+                : onCamera,
+            active: cameraOn,
+            pending: cameraPending,
+            hint: cameraHint),
       ]),
       const SizedBox(height: 40),
+      // 下排保留禁用的云端录制入口，挂断始终居中。
       _row([
-        const SizedBox(width: 60),
+        _recordUnavailable(context),
         _button(
           context,
           retryable ? 'retry' : 'end',
@@ -128,21 +145,20 @@ class GroupCallControls extends StatelessWidget {
           background:
               retryable ? context.appColors.success : context.appColors.danger,
         ),
-        if (canFlip && !ended)
-          Tooltip(
-              message: '当前SDK无法回传切换结果，待设备验证后开放',
-              child: ControlsButton(
-                dimension: 60,
-                labelSpacing: 8,
-                labelMaxLines: 1,
-                semanticsIdentifier: 'call.group.flip',
-                // 字体库缺少双循环翻转字形，复用SDK既有同语义资源。
-                imgUrl: 'call_assets/switch_camera_group.png',
-                tips: '翻转摄像头',
-                textColor: context.appColors.onScrim,
-                backgroundColor: context.appColors.groupCallControlBackground,
-                onTap: null,
-              ))
+        if (canFlip && connected && cameraOn && !ended)
+          ControlsButton(
+            dimension: 60,
+            labelSpacing: 8,
+            labelMaxLines: 1,
+            semanticsIdentifier: 'call.group.flip',
+            // 字体库缺少双循环翻转字形，复用 SDK 既有同语义资源。
+            imgUrl: 'call_assets/switch_camera_group.png',
+            tips: '翻转摄像头',
+            textColor: context.appColors.onScrim,
+            backgroundColor: context.appColors.groupCallControlBackground,
+            // 摄像头开关尚未确认时不能同时切换镜头。
+            onTap: cameraPending ? null : onFlip,
+          )
         else
           const SizedBox(width: 60),
       ]),

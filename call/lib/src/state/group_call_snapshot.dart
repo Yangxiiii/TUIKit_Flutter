@@ -88,6 +88,15 @@ class GroupCallSession extends ValueNotifier<GroupCallSnapshot?> {
   /// 当前展示生命周期；不能用它替代腾讯场次 ID 或服务器入会资格。
   int get generation => _generation;
 
+  /// 当前快照对应的主叫请求标识，供发起气泡与本人结果匹配。
+  String? get attemptId => _attemptId;
+
+  /// 每次新场次清空，接通回调只为当前场次补齐。
+  String? _attemptId;
+
+  /// 初始邀请缺少标识时，只允许当前场次的 SDK 接通事件补齐。
+  void completeAttempt(String? attemptId) => _attemptId ??= attemptId;
+
   /// 每场加入事件的本地顺序，重新发起后从零开始，不使用接口列表顺序代替。
   int _joinSequence = 0;
 
@@ -101,8 +110,10 @@ class GroupCallSession extends ValueNotifier<GroupCallSnapshot?> {
       required String groupName,
       required String inviterId,
       required CallMediaType mediaType,
-      required Iterable<String> memberIds}) {
+      required Iterable<String> memberIds,
+      String? attemptId}) {
     _generation++;
+    _attemptId = attemptId;
     _joinSequence = 0;
     _joinedEventUsers.clear();
     value = GroupCallSnapshot(
@@ -275,6 +286,7 @@ class GroupCallSession extends ValueNotifier<GroupCallSnapshot?> {
   /// 新账号、新来电或用户关闭结果页后丢弃旧展示数据。
   void clear() {
     _generation++;
+    _attemptId = null;
     value = null;
   }
 }

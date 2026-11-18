@@ -13,14 +13,15 @@ void main() {
       accountId: () => 'peer',
       now: () => now,
     )..setHandler((report) async => reports.add(report));
-    void begin() => session.begin(
+    void begin({String? attemptId}) => session.begin(
         callId: 'call',
+        attemptId: attemptId,
         groupId: '',
         groupName: '',
         inviterId: 'caller',
         mediaType: CallMediaType.audio,
         memberIds: ['caller', 'peer', 'other']);
-    begin();
+    begin(attemptId: 'attempt');
     session.updateMember('other', GroupCallMemberStatus.joined);
     now = now.add(const Duration(seconds: 20));
     session.updateMember('peer', GroupCallMemberStatus.joined);
@@ -39,6 +40,7 @@ void main() {
     expect(reports.last.durationSeconds, 20);
     expect(reports.last.revision, 2);
     expect(reports.last.reporterId, 'peer');
+    expect(reports.last.attemptId, 'attempt');
     tracker.dispose();
     session.dispose();
   });

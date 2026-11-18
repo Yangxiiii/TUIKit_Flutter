@@ -1,9 +1,11 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:tuikit_atomic_x/atomicx.dart';
 import 'package:tencent_calls_uikit/src/tui_call_kit_impl.dart';
 import 'bridge/bootloader/bootloader.dart';
 import 'control/group_control_transport.dart';
 import 'manager/group_call_result_tracker.dart' show GroupCallResultHandler;
+import 'state/group_call_metadata.dart' show GroupCallStartedHandler;
 
 /// 宿主选人入口；groupId 为空表示独立多人，excludedUserIds 含已占名额成员和本人。
 typedef GroupMemberPicker = Future<List<String>?> Function(BuildContext context,
@@ -175,6 +177,12 @@ abstract class TUICallKit {
 
   /// 注册本人通话结果发布器，发送失败传播为记录失败，不影响 SDK 媒体清理。
   void setGroupCallResultHandler(GroupCallResultHandler? handler);
+
+  /// 注册群通话和临时多人发起通知发布器，随宿主登录装配和清除。
+  void setGroupCallStartedHandler(GroupCallStartedHandler? handler);
+
+  /// 当前已由 SDK 确认接通的 OA 群或多人呼叫，用于更新原发起气泡。
+  ValueListenable<String?> get acceptedCallAttempt;
 
   /// 设置已由宿主读取的群名称，供群通话标题展示。
   void setGroupCallTitle(String groupId, String title);

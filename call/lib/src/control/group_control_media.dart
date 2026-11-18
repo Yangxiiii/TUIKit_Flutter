@@ -6,36 +6,49 @@ import '../state/group_control_state.dart';
 
 /// 会控只操作本端设备；远端实际状态必须由目标端执行后通过 ACK 返回。
 abstract interface class GroupControlMedia {
-  /// 真实 SDK available 状态变化，不能使用业务乐观开关替代。
+  /// 本端设备操作或 SDK 媒体事件引起的状态变化。
   Listenable get changes;
 
   /// SDK 报告的本端麦克风可用状态。
   bool get microphoneOn;
 
-  /// SDK 报告的本端摄像头可用状态。
+  /// 本机摄像头状态，按 SDK 的本机开启和关闭结果更新。
   bool get cameraOn;
 
-  /// 权限拒绝、SDK 错误、状态未确认均返回非成功；失效入会不能继续开启设备。
+  /// 执行当前入会的本机设备操作，权限拒绝和 SDK 错误保持非成功。
   Future<GroupControlOutcome> setDevice(GroupControlDevice device, bool enabled,
       {required bool Function() isCurrent});
 }
 
-/// 调用 TUICallEngine 真实 Future 接口，并以 CallStore available 事件确认结果。
-/// DeviceStore 的 Call 模式摄像头接口会立即乐观返回成功，因此不能用于控制 ACK。
-class SdkGroupControlMedia implements GroupControlMedia {
+/// 管理本次入会的本机设备操作和状态，入会结束后释放观察者。
+class SdkGroupControlMedia extends ChangeNotifier implements GroupControlMedia {
   SdkGroupControlMedia({
     CallStore? store,
     TUICallEngine? engine,
     Future<bool> Function(GroupControlDevice)? requestPermission,
     bool Function()? isFrontCamera,
+    int? Function()? readLocalVideoView,
+    Listenable? localVideoViewChanges,
     this.confirmationTimeout = const Duration(seconds: 4),
   })  : _storeOverride = store,
         _engineOverride = engine,
         _permissionOverride = requestPermission,
-        _frontCameraOverride = isFrontCamera;
+        _frontCameraOverride = isFrontCamera,
+        _readLocalVideoView = readLocalVideoView,
+        _localVideoViewChanges = localVideoViewChanges {
+    final self = _store.state.selfInfo.value;
+    _selfId = self.id;
+    _cameraOn = self.isCameraOpened;
+    _observedMicrophone = _microphoneOn = self.isMicrophoneOpened;
+    _store.state.selfInfo.addListener(_observeStore);
+    unawaited(_observeNative());
+  }
 
-  /// 原生执行及实际状态确认的最长等待，超时只表示未确认而非设备成功。
+  /// 单次原生调用及麦克风关闭状态等待的时间上限。
   final Duration confirmationTimeout;
+
+  /// 接通可能早于预览挂载，稍候句柄；浮窗或后台没有预览时仍可请求开启。
+  static const _localVideoViewWait = Duration(milliseconds: 500);
 
   /// 测试显式替换外部依赖，生产仍使用已登录的共享实例，不创建第二套媒体实例。
   final CallStore? _storeOverride;
@@ -43,55 +56,127 @@ class SdkGroupControlMedia implements GroupControlMedia {
 
   /// 仅替换系统权限边界，权限异步完成后仍复核入会有效性。
   final Future<bool> Function(GroupControlDevice)? _permissionOverride;
+
+  /// 测试可替换本端镜头方向，生产使用 DeviceStore 当前选择。
   final bool Function()? _frontCameraOverride;
   CallStore get _store => _storeOverride ?? CallStore.shared;
   TUICallEngine get _engine => _engineOverride ?? TUICallEngine.instance;
 
+  /// 仅在本场预览视图仍存活时取得非空原生句柄，浮窗可能没有视图。
+  final int? Function()? _readLocalVideoView;
+
+  /// 本端预览句柄变化，开启操作只读取本次入会对应的句柄。
+  final Listenable? _localVideoViewChanges;
+
+  /// 媒体事件必须归属本次入会的账号。
+  late final String _selfId;
+
+  /// 入会销毁后的迟到事件与结果均不再发布。
+  bool _disposed = false;
+
+  /// 最近一次成功返回的本机摄像头操作，驱动按钮及下一次切换。
+  late bool _cameraOn;
+
+  /// 保存 SDK 最近一次确认的本机麦克风状态。
+  late bool _microphoneOn;
+
+  /// 记录 CallStore 的麦克风原始位，资料更新不能用旧值覆盖操作结果。
+  late bool _observedMicrophone;
+
+  /// 保留麦克风的已有确认路径；远端视频流通知不参与本机摄像头状态。
+  late final TUICallObserver _observer = TUICallObserver(
+      onUserAudioAvailable: (id, enabled) {
+        if (id == _selfId) _confirm(GroupControlDevice.microphone, enabled);
+      });
+
   @override
-  Listenable get changes => _store.state.selfInfo;
+  Listenable get changes => this;
   @override
-  bool get microphoneOn => _store.state.selfInfo.value.isMicrophoneOpened;
+  bool get microphoneOn => _microphoneOn;
   @override
-  bool get cameraOn => _store.state.selfInfo.value.isCameraOpened;
+  bool get cameraOn => _cameraOn;
+
+  /// 保留 CallStore 已有媒体观察链，注册失败时仍可使用明确的开启回调。
+  Future<void> _observeNative() async {
+    try {
+      await _engine.addObserver(_observer);
+      if (_disposed) await _engine.removeObserver(_observer);
+    } catch (error) {
+      debugPrint('会控设备监听初始化失败：$error');
+    }
+  }
+
+  /// 只消费当前账号的麦克风位变化，跳过其他成员及资料更新。
+  void _observeStore() {
+    final self = _store.state.selfInfo.value;
+    if (self.id != _selfId) return;
+    if (_observedMicrophone != self.isMicrophoneOpened) {
+      _observedMicrophone = self.isMicrophoneOpened;
+      _confirm(GroupControlDevice.microphone, _observedMicrophone);
+    }
+  }
+
+  /// 只在对应设备状态变化时通知控制器，避免两个按钮互相影响。
+  void _confirm(GroupControlDevice device, bool enabled) {
+    if (_disposed) return;
+    if (device == GroupControlDevice.camera) {
+      if (_cameraOn == enabled) return;
+      _cameraOn = enabled;
+    } else {
+      if (_microphoneOn == enabled) return;
+      _microphoneOn = enabled;
+    }
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _store.state.selfInfo.removeListener(_observeStore);
+    unawaited(_engine.removeObserver(_observer).catchError((Object error) {
+      debugPrint('会控设备监听清理失败：$error');
+    }));
+    super.dispose();
+  }
 
   @override
   Future<GroupControlOutcome> setDevice(GroupControlDevice device, bool enabled,
       {required bool Function() isCurrent}) async {
     try {
       // 远端要求打开设备同样受本机系统权限约束，拒绝只回执失败，不挂断整场。
-      if (!isCurrent()) return _result(GroupControlStatus.expired);
+      if (!isCurrent() || _disposed) return _result(GroupControlStatus.expired);
       if (enabled) {
         final permitted = await (_permissionOverride?.call(device) ??
             _requestPermission(device));
-        if (!isCurrent()) return _result(GroupControlStatus.expired);
+        if (!isCurrent() || _disposed) return _result(GroupControlStatus.expired);
         if (!permitted) {
-          return _result(GroupControlStatus.denied, '未获得设备权限');
+          return _result(GroupControlStatus.failed, '未获得设备权限');
         }
       }
-      if (!isCurrent()) return _result(GroupControlStatus.expired);
-      // 摄像头用公开 openCamera 的原生完成结果；不调用乐观的 experimental 包装。
+      if (!isCurrent() || _disposed) return _result(GroupControlStatus.expired);
+      // 标准开启接口有明确回包，失败时保留当前设备状态。
       if (enabled) {
-        final result = await (device == GroupControlDevice.microphone
-                ? _engine.openMicrophone()
-                : _engine.openCamera(
-                    (_frontCameraOverride?.call() ??
-                            DeviceStore.shared.state.isFrontCamera.value)
-                        ? TUICamera.front
-                        : TUICamera.back,
-                    null))
-            .timeout(confirmationTimeout);
+        final result = await _open(device, isCurrent);
+        if (!isCurrent() || _disposed) return _result(GroupControlStatus.expired);
+        if (result == null) return _result(GroupControlStatus.expired);
         if (result.code.rawValue != 0) {
-          return _result(
-              GroupControlStatus.failed, '设备开启失败（${result.code.rawValue}）');
+          return _result(GroupControlStatus.failed,
+              '设备开启失败（${result.code.rawValue}）');
         }
-      } else {
-        await (device == GroupControlDevice.microphone
-                ? _engine.closeMicrophone()
-                : _engine.closeCamera())
-            .timeout(confirmationTimeout);
+        _confirm(device, true);
+        return _result(GroupControlStatus.success);
       }
-      if (!isCurrent()) return _result(GroupControlStatus.expired);
-      final observed = await _waitForState(device, enabled, isCurrent);
+      await (device == GroupControlDevice.microphone
+              ? _engine.closeMicrophone()
+              : _engine.closeCamera())
+          .timeout(confirmationTimeout);
+      if (!isCurrent() || _disposed) return _result(GroupControlStatus.expired);
+      if (device == GroupControlDevice.camera) {
+        // 腾讯关闭接口返回后更新本机状态，避免等待远端视频流变化。
+        _confirm(device, false);
+        return _result(GroupControlStatus.success);
+      }
+      final observed = await _waitForMicrophoneOff(isCurrent);
       return _result(
           observed
               ? GroupControlStatus.success
@@ -101,6 +186,58 @@ class SdkGroupControlMedia implements GroupControlMedia {
       return _result(GroupControlStatus.unconfirmed, '设备操作未在时限内确认');
     } catch (_) {
       return _result(GroupControlStatus.failed, '设备操作失败');
+    }
+  }
+
+  /// 群视频重开时先恢复仍存活的本端预览，再使用 SDK 开启接口的明确回包。
+  Future<TUIActionCallback?> _open(
+      GroupControlDevice device, bool Function() isCurrent) async {
+    if (device == GroupControlDevice.microphone) {
+      return _engine.openMicrophone().timeout(confirmationTimeout);
+    }
+    final isFront = _frontCameraOverride?.call() ??
+        DeviceStore.shared.state.isFrontCamera.value;
+    final viewId = await _waitForLocalVideoView(isCurrent);
+    if (_disposed || !isCurrent()) return null;
+    if (viewId != null && viewId != 0) {
+      await _engine.callExperimentalAPI({
+        'api': 'setLocalView',
+        'params': {'videoView': viewId},
+      }).timeout(confirmationTimeout);
+    }
+    if (_disposed || !isCurrent()) return null;
+    // 绑定期间视图可能销毁或替换，重新读取句柄；无预览时传空值。
+    final currentViewId = _readLocalVideoView?.call();
+    return _engine
+        .openCamera(isFront ? TUICamera.front : TUICamera.back,
+            currentViewId == 0 ? null : currentViewId)
+        .timeout(confirmationTimeout);
+  }
+
+  /// 接通后的首帧可以补齐本端原生句柄，未挂载时仍由 SDK 的开启回包决定结果。
+  Future<int?> _waitForLocalVideoView(bool Function() isCurrent) async {
+    final changes = _localVideoViewChanges;
+    final viewId = _readLocalVideoView?.call();
+    if ((viewId != null && viewId != 0) || changes == null) return viewId;
+
+    final ready = Completer<int?>();
+    void onViewChanged() {
+      if (ready.isCompleted) return;
+      final currentViewId = _readLocalVideoView?.call();
+      if (_disposed || !isCurrent()) {
+        ready.complete(null);
+      } else if (currentViewId != null && currentViewId != 0) {
+        ready.complete(currentViewId);
+      }
+    }
+
+    changes.addListener(onViewChanged);
+    try {
+      onViewChanged();
+      return await ready.future.timeout(_localVideoViewWait,
+          onTimeout: () => null);
+    } finally {
+      changes.removeListener(onViewChanged);
     }
   }
 
@@ -119,13 +256,9 @@ class SdkGroupControlMedia implements GroupControlMedia {
         status == PermissionStatus.limited;
   }
 
-  /// 原生完成后仍需媒体事实一致；等待期间入会失效立即按未确认处理。
-  Future<bool> _waitForState(GroupControlDevice device, bool expected,
-      bool Function() isCurrent) async {
-    bool matches() =>
-        isCurrent() &&
-        (device == GroupControlDevice.microphone ? microphoneOn : cameraOn) ==
-            expected;
+  /// 保留麦克风关闭的事件确认，等待期间入会失效不能报告成功。
+  Future<bool> _waitForMicrophoneOff(bool Function() isCurrent) async {
+    bool matches() => !_disposed && isCurrent() && !microphoneOn;
     if (matches()) return true;
     final completed = Completer<bool>();
     void changed() {

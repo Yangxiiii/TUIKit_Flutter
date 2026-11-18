@@ -66,6 +66,9 @@ class _PreviewPageState extends State<_PreviewPage> {
   bool _microphoneOn = true;
   bool _cameraOn = false;
 
+  /// 仅模拟音频路由，离线预览无需启动腾讯音频设备。
+  bool _speakerOn = true;
+
   /// 每次预览启动只记录一次设备指标，避免动画帧产生重复日志。
   bool _metricsPrinted = false;
 
@@ -136,13 +139,16 @@ class _PreviewPageState extends State<_PreviewPage> {
               retryable: ended,
               microphoneOn: _microphoneOn,
               cameraOn: _cameraOn,
+              speakerOn: _speakerOn,
               canFlip: connected && _cameraOn,
               onEnd: () => _notice('离线预览：结束操作'),
               onAccept: () => setState(() => _preview = _Preview.three),
               onMicrophone: () =>
                   setState(() => _microphoneOn = !_microphoneOn),
               onCamera: () => setState(() => _cameraOn = !_cameraOn),
-              onFlip: () {},
+              onSpeaker: () => setState(() => _speakerOn = !_speakerOn),
+              // 离线预览没有真实摄像头，仅展示按钮位置。
+              onFlip: null,
               onRetry: () => setState(() => _preview = _Preview.nineWaiting))),
       Positioned.fill(
           child: GroupCallHeaderActions(

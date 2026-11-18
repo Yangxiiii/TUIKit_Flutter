@@ -5,7 +5,8 @@ export 'package:tuikit_atomic_x/base_component/base_component.dart'
 export 'src/view/harmony_call_overlay.dart' show HarmonyCallOverlay;
 export 'src/state/group_call_snapshot.dart'
     show GroupCallSnapshot, GroupCallMember, GroupCallMemberStatus;
-export 'src/state/group_call_metadata.dart' show GroupCallMetadata;
+export 'src/state/group_call_metadata.dart'
+    show GroupCallMetadata, GroupCallStartedHandler;
 export 'src/control/group_control_transport.dart'
     show GroupControlTransport, GroupControlInbound;
 export 'src/manager/group_call_result_tracker.dart'

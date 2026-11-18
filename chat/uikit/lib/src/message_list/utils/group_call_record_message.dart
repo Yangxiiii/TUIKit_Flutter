@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:app_api/app_api_models.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 
@@ -8,14 +6,32 @@ abstract final class GroupCallRecordMessage {
   /// 畸形的已知协议也不回退为普通自定义消息，避免暴露原始参与者载荷。
   static bool isMessage(MessageInfo message) {
     final payload = message.messagePayload;
-    if (payload is! CustomMessagePayload) return false;
-    try {
-      final value = jsonDecode(payload.customData);
-      return value is Map &&
-          value['protocol'] == GroupCallRecordData.protocolName;
-    } on FormatException {
-      return false;
+    return payload is CustomMessagePayload &&
+        GroupCallRecordData.isRecord(payload.customData);
+  }
+
+  /// 校验发起气泡的真实发件人及受邀范围，支持群聊和独立多人单聊。
+  static GroupCallStartData? startFromMessage(MessageInfo message, String viewerId) {
+    final payload = message.messagePayload;
+    final group = message.conversationType == ConversationType.group;
+    if (payload is! CustomMessagePayload ||
+        message.status == MessageStatus.deleted ||
+        message.status == MessageStatus.revoked ||
+        message.status == MessageStatus.violation ||
+        (!group && message.conversationType != ConversationType.c2c)) {
+      return null;
     }
+    final start = GroupCallStartData.parse(payload.customData,
+        senderId: message.from.userID, groupId: group ? message.to : '');
+    if (start == null ||
+        (group && start.groupId.isEmpty) ||
+        (viewerId != start.callerId && !start.inviteeIds.contains(viewerId))) {
+      return null;
+    }
+    return group || message.to == start.callerId ||
+            message.to == start.inviteeIds.single
+        ? start
+        : null;
   }
 
   /// 只允许受邀本人查看所属群或主叫与被叫之间的消息，不从载荷授予会控权限。
@@ -54,7 +70,7 @@ abstract final class GroupCallRecordMessage {
         : null;
   }
 
-  /// 同callId优先本人的最高版本；不能用远端时长覆盖本人区间。
+  /// 保留独立的发起气泡，同场个人结果只展示优先级最高的一条。
   static List<MessageInfo> visibleMessages(
       Iterable<MessageInfo> messages, String viewerId) {
     final visible = <MessageInfo>[];
@@ -90,6 +106,10 @@ abstract final class GroupCallRecordMessage {
     final own = next.reporterId == viewerId;
     final previousOwn = old.reporterId == viewerId;
     if (own != previousOwn) return own;
+    // 另一台设备的真实个人结果优先于本机的接听提示，即使 IM 送达顺序颠倒。
+    final elsewhere = next.outcome == GroupCallRecordOutcome.otherDeviceAccepted;
+    final wasElsewhere = old.outcome == GroupCallRecordOutcome.otherDeviceAccepted;
+    if (elsewhere != wasElsewhere) return !elsewhere;
     if (next.reporterId == old.reporterId && next.revision != old.revision) {
       return next.revision > old.revision;
     }
@@ -105,27 +125,29 @@ abstract final class GroupCallRecordMessage {
         ? record.outcomesByUserId[viewerId] ?? record.outcome
         : record.outcome;
     final seconds = record.durationSeconds;
-    final time = '${(seconds ~/ 60).toString().padLeft(2, '0')}:'
+    final minutes = '${(seconds ~/ 60 % 60).toString().padLeft(2, '0')}:'
         '${(seconds % 60).toString().padLeft(2, '0')}';
+    final time = seconds < 3600 ? minutes
+        : '${(seconds ~/ 3600).toString().padLeft(2, '0')}:$minutes';
     return switch (outcome) {
-      GroupCallRecordOutcome.cancelled => caller || group ? '已取消' : '对方已取消',
-      GroupCallRecordOutcome.unanswered => caller && !group ? '对方未接听' : '未接听',
-      GroupCallRecordOutcome.rejected => caller && !group ? '对方已拒绝' : '已拒绝',
+      GroupCallRecordOutcome.cancelled => caller ? '已取消' : '对方已取消',
+      GroupCallRecordOutcome.unanswered => caller ? '无人接听' : '未接听',
+      GroupCallRecordOutcome.rejected => caller ? '对方已拒接' : '已拒绝',
+      GroupCallRecordOutcome.otherDeviceAccepted =>
+        caller ? '已接听' : '已在其它设备接听',
       GroupCallRecordOutcome.busy => caller && !group ? '对方忙线' : '忙线未接听',
       GroupCallRecordOutcome.completed => own
           ? '通话时长 $time'
           : group
               ? '发起人已结束通话'
               : '对方已结束通话',
-      GroupCallRecordOutcome.interrupted => own && seconds > 0
+      GroupCallRecordOutcome.interrupted => own
           ? '通话中断 $time'
-          : !own
-              ? (group && record.outcome != GroupCallRecordOutcome.interrupted
+          : (group && record.outcome != GroupCallRecordOutcome.interrupted
                   ? '通话状态未确认'
                   : group
                       ? '发起人通话中断'
-                      : '对方通话中断')
-              : '通话中断',
+                      : '对方通话中断'),
     };
   }
 }

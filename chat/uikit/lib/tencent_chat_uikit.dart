@@ -29,6 +29,8 @@ export 'src/message_input/message_text.dart'
     show messageTextByteCount, messageTextByteLimit;
 export 'src/message_input/chat_media_sender.dart';
 export 'src/message_list/utils/big_file_message.dart';
+export 'src/message_list/utils/calling_message_data_provider.dart'
+    show CallingMessageDataProvider;
 export 'src/message_list/utils/group_announcement_message.dart';
 export 'src/message_list/utils/group_call_control_message.dart';
 export 'src/message_list/utils/group_call_record_message.dart'

@@ -49,7 +49,7 @@ class GroupCallMembersSheet extends StatefulWidget {
   final void Function(String userId, GroupControlDevice device, bool enabled)?
       onMemberDevice;
 
-  /// 全员静音先确认，解除静音同时解除限制并下发开麦，不在本组件执行 SDK。
+  /// 全员静音先确认，解除时只恢复权限，成员自行决定是否开麦。
   final VoidCallback? onMuteAll, onUnmuteAll;
 
   /// 展示基于当前策略的更多管理；未配置时仅供只读预览。

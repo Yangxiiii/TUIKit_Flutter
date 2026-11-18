@@ -122,6 +122,8 @@ class _GroupCallMediaState extends State<GroupCallMedia> {
   Widget _thumbnails(List<GroupCallMember> members, String focusedId) =>
       ListView.separated(
         scrollDirection: Axis.horizontal,
+        // 最多九人，保留视口外本端纹理，避免切大画面时无法确认本地开摄像头。
+        cacheExtent: 9 * 98,
         itemCount: members.length,
         separatorBuilder: (_, __) => const SizedBox(width: 4),
         itemBuilder: (context, index) {

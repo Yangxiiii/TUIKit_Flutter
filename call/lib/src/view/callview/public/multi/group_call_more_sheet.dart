@@ -32,7 +32,7 @@ class GroupCallMoreSheet extends StatefulWidget {
   /// 返回真实执行结果；成功才关闭，失败保留面板供检查和重试。
   final Future<bool> Function(bool allowSelfUnmute, bool allowVideo)? onConfirm;
 
-  /// 附件补充的全员相机动作独立于权限草稿，开启由控制器同时授权并下发设备指令。
+  /// 全员设备操作独立于权限草稿，开启时由各目标成员本人确认。
   final Future<bool> Function(bool enabled)? onAllCameras;
 
   @override
@@ -200,7 +200,7 @@ class _GroupCallMoreSheetState extends State<GroupCallMoreSheet> {
                                 letterSpacing: 0)))))),
       ]));
 
-  /// 原稿只有权限开关；全员相机是本轮按附件授权增加的独立设备操作。
+  /// 批量关闭直接执行，开启按钮向成员发出确认请求。
   Widget _cameraActions() => Row(children: [
         for (final enabled in [false, true]) ...[
           if (enabled) const SizedBox(width: 10),
@@ -210,7 +210,7 @@ class _GroupCallMoreSheetState extends State<GroupCallMoreSheet> {
                       'call.group.permissions.${enabled ? 'openCameras' : 'closeCameras'}',
                   container: true,
                   button: true,
-                  label: enabled ? '打开全员摄像头' : '关闭全员摄像头',
+                  label: enabled ? '请求全员开启摄像头' : '关闭全员摄像头',
                   enabled: _editable && widget.onAllCameras != null,
                   onTap: _editable && widget.onAllCameras != null
                       ? () => _setAllCameras(enabled)
@@ -224,7 +224,7 @@ class _GroupCallMoreSheetState extends State<GroupCallMoreSheet> {
                       onPressed: _editable && widget.onAllCameras != null
                           ? () => _setAllCameras(enabled)
                           : null,
-                      child: Text(enabled ? '打开全员摄像头' : '关闭全员摄像头',
+                      child: Text(enabled ? '请全员开摄像头' : '关闭全员摄像头',
                           maxLines: 1, style: const TextStyle(fontSize: 14))))),
         ],
       ]);

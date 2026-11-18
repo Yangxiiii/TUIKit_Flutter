@@ -1,5 +1,6 @@
 import 'package:tuikit_atomic_x/base_component/utils/app_builder.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart';
 import '../message_input/chat_media_sender.dart';
 import 'message_forward_config.dart';
@@ -56,6 +57,12 @@ abstract class MessageListConfigProtocol {
 
   /// 本账号已确认的本机删除标识，阻止SDK窗口与进程快照重新呈现旧记录。
   Set<String> get hiddenMessageIDs;
+
+  /// 当前 SDK 接通的多人呼叫标识，供匹配的发起气泡刷新正文。
+  ValueListenable<String?>? get acceptedCallAttempt;
+
+  /// 点击已校验的群通话气泡时打开原群的媒体选择。
+  void Function(BuildContext)? get onGroupCallBubbleTap;
 
   /// 宿主提供的视频播放图标；缺省时使用 UIKit 字体图标。
   ImageProvider? get videoPlayIcon;
@@ -159,6 +166,14 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
       onGroupAnnouncementTap;
   @override
   final Set<String> hiddenMessageIDs;
+
+  /// 未注入时，离线气泡按消息记录展示。
+  @override
+  final ValueListenable<String?>? acceptedCallAttempt;
+
+  /// 旧消息详情没有宿主入口时保持只读。
+  @override
+  final void Function(BuildContext)? onGroupCallBubbleTap;
   @override
   final ImageProvider? videoPlayIcon;
   @override
@@ -317,6 +332,8 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
     this.onMentionTap,
     this.mentionReceiptBuilder,
     this.onGroupAnnouncementTap,
+    this.acceptedCallAttempt,
+    this.onGroupCallBubbleTap,
     this.hiddenMessageIDs = const {},
     this.videoPlayIcon,
     this.imageLoadingPlaceholder,

@@ -29,6 +29,8 @@ class GroupControlPreviewSession extends ChangeNotifier {
           transport: _PreviewTransport(id, _streams),
           media: device,
           guard: ActionGuard(),
+          // 离线预览仅展示主持端，替成员模拟已在各自通话页同意开启。
+          confirmDeviceOpen: (_, _) async => true,
           newId: () => '$id-${++_serial}');
       _controls[id] = control;
       control.updateMembers(joined);

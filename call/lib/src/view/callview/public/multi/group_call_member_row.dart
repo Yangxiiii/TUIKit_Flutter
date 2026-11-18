@@ -145,7 +145,7 @@ class GroupCallMemberRow extends StatelessWidget {
     final device =
         microphone ? GroupControlDevice.microphone : GroupControlDevice.camera;
     final state = controlState;
-    final pending = state?.pendingByUserId.containsKey(member.id) == true;
+    final pending = state?.isDevicePending(member.id, device) == true;
     final canOpen = microphone
         ? state?.canOpenMicrophone == true
         : state?.canOpenCamera == true;
@@ -155,7 +155,7 @@ class GroupCallMemberRow extends StatelessWidget {
         !pending &&
         permitted &&
         (member.id == selfId || onMemberDevice != null);
-    final result = state?.resultsByUserId[member.id];
+    final result = state?.resultsByDevice[(member.id, device)];
     final reason = pending
         ? '正在等待设备确认'
         : result != null && !result.success
@@ -163,26 +163,32 @@ class GroupCallMemberRow extends StatelessWidget {
             : !permitted
                 ? '当前策略或主持权限不允许此操作'
                 : '$label${on ? '已开' : '已关'}';
+    // 设备的可用性与点击动作一起暴露在同一原生语义节点。
+    final action = !enabled
+        ? null
+        : () {
+            if (onMemberDevice != null) {
+              onMemberDevice!(member.id, device, !on);
+            } else {
+              (microphone ? onMicrophone : onCamera)();
+            }
+          };
     return Semantics(
         identifier:
             'call.group.members.${microphone ? 'microphone' : 'camera'}.${member.id}',
         enabled: enabled,
+        container: true,
+        button: true,
         label: '$label${on ? '已开' : '已关'}，$reason',
+        onTap: action,
+        excludeSemantics: true,
         child: SizedBox(
             width: 40,
             height: 40,
             child: IconButton(
                 padding: EdgeInsets.zero,
                 tooltip: reason,
-                onPressed: !enabled
-                    ? null
-                    : () {
-                        if (onMemberDevice != null) {
-                          onMemberDevice!(member.id, device, !on);
-                        } else {
-                          (microphone ? onMicrophone : onCamera)();
-                        }
-                      },
+                onPressed: action,
                 icon: pending
                     ? SizedBox.square(
                         dimension: 18,

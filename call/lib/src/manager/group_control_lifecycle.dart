@@ -5,22 +5,29 @@ import 'package:tuikit_atomic_x/atomicx.dart';
 import '../control/group_control_media.dart';
 import '../control/group_control_transport.dart';
 import '../state/global_state.dart';
+import '../state/group_control_state.dart';
 import 'group_control_controller.dart';
 
 /// 将 SDK 已接通/离开事实映射为会控入会生命周期，重入必定创建新 session。
 class GroupControlLifecycle {
-  GroupControlLifecycle() {
+  GroupControlLifecycle({required this.confirmDeviceOpen}) {
     CallStore.shared.state.activeCall.addListener(_refresh);
     CallStore.shared.state.selfInfo.addListener(_refresh);
     CallStore.shared.state.allParticipants.addListener(_refresh);
     GlobalState.instance.groupCall.addListener(_refresh);
   }
 
+  /// 在通话界面向当前设备本人询问，离开通话时该确认随页面销毁。
+  final Future<bool> Function(GroupControlDevice, Duration) confirmDeviceOpen;
+
   /// 宿主已登录 IM 在线通道；替换或注销后旧控制器立即失效。
   GroupControlTransport? _transport;
 
   /// 仅本端真实接通场次拥有控制器，等待邀请不获得主持或设备权限。
   GroupControlController? _controller;
+
+  /// 本次接通负责原生设备观察，离场先解绑控制器再释放监听。
+  SdkGroupControlMedia? _media;
 
   /// 同账号同场保留已验证主持链和到期锚点，过期后重入也不能恢复旧主持或新计一小时。
   final Map<
@@ -68,6 +75,17 @@ class GroupControlLifecycle {
       clear();
       _authority.removeWhere((_, entry) => entry.account != self.id);
       final known = _authority[call.callId];
+      final localVideoView = GlobalState.instance.groupLocalVideoView;
+      _media = SdkGroupControlMedia(
+        localVideoViewChanges:
+            call.mediaType == CallMediaType.video ? localVideoView : null,
+        readLocalVideoView: () {
+          final view = localVideoView.value;
+          return view?.callId == call.callId && view?.userId == self.id
+              ? view?.viewId
+              : null;
+        },
+      );
       _controller = GroupControlController(
           callId: call.callId,
           selfId: self.id,
@@ -75,7 +93,8 @@ class GroupControlLifecycle {
           groupId: call.chatGroupId,
           video: call.mediaType == CallMediaType.video,
           transport: _transport!,
-          media: SdkGroupControlMedia(),
+          media: _media!,
+          confirmDeviceOpen: confirmDeviceOpen,
           trustedHostId: known?.account == self.id ? known?.host : null,
           trustedHostEpoch: known?.account == self.id ? known!.epoch : 0,
           // CallStore.startTime 是本端 onCallBegin 时间，只有初始主持可以它建立锚点。
@@ -152,6 +171,8 @@ class GroupControlLifecycle {
     _controller?.removeListener(_publish);
     _controller?.dispose();
     _controller = null;
+    _media?.dispose();
+    _media = null;
     GlobalState.instance.groupControlController = null;
     GlobalState.instance.setGroupControlState(null);
     if (clearAuthority) _authority.clear();

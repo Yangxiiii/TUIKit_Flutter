@@ -10,26 +10,28 @@ import '../state/group_control_state.dart';
 
 /// 每次真实入会创建一个控制器；鉴权、设备执行与 ACK 都绑定此入会生命周期。
 class GroupControlController extends ValueNotifier<GroupControlState> {
-  GroupControlController(
-      {required this.callId,
-      required this.selfId,
-      required String inviterId,
-      required this.groupId,
-      required this.video,
-      required GroupControlTransport transport,
-      required GroupControlMedia media,
-      required ActionGuard guard,
-      DateTime Function()? now,
-      String Function()? newId,
-      String? trustedHostId,
-      int trustedHostEpoch = 0,
-      int? connectedAtMs,
-      int? deadlineMs,
-      Random? random,
-      this.ackTimeout = const Duration(seconds: 8)})
-      : _transport = transport,
+  GroupControlController({
+    required this.callId,
+    required this.selfId,
+    required String inviterId,
+    required this.groupId,
+    required this.video,
+    required GroupControlTransport transport,
+    required GroupControlMedia media,
+    required ActionGuard guard,
+    Future<bool> Function(GroupControlDevice, Duration)? confirmDeviceOpen,
+    DateTime Function()? now,
+    String Function()? newId,
+    String? trustedHostId,
+    int trustedHostEpoch = 0,
+    int? connectedAtMs,
+    int? deadlineMs,
+    Random? random,
+    this.ackTimeout = const Duration(seconds: 8),
+  })  : _transport = transport,
         _media = media,
         _guard = guard,
+        _confirmDeviceOpen = confirmDeviceOpen,
         _now = now ?? DateTime.now,
         _newId = newId ?? _randomId,
         _random = random ?? Random.secure(),
@@ -38,7 +40,8 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
         _connectedAtMs = connectedAtMs,
         _deadlineMs = deadlineMs,
         sessionId = (newId ?? _randomId)(),
-        super(GroupControlState(
+        super(
+          GroupControlState(
             callId: callId,
             sessionId: '',
             selfId: selfId,
@@ -50,7 +53,9 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
             muteAll: false,
             cameraAllClosed: false,
             microphoneOn: media.microphoneOn,
-            cameraOn: media.cameraOn)) {
+            cameraOn: media.cameraOn,
+          ),
+        ) {
     _sessions[selfId] = sessionId;
     _subscription = _transport.messages.listen(_received);
     _media.changes.addListener(_publish);
@@ -69,11 +74,17 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
   /// 本次入会唯一标识，重入创建新控制器，绝不重用旧命令或个人静音。
   final String sessionId;
 
-  /// IM 发送及 ACK 的最大等待，超时始终作为非成功结果。
+  /// IM 发送和普通指令的等待上限，开启请求另留本人确认时间。
   final Duration ackTimeout;
   final GroupControlTransport _transport;
   final GroupControlMedia _media;
   final ActionGuard _guard;
+
+  /// 仅通话界面能取得本人的开启同意；没有确认入口时保持设备关闭。
+  final Future<bool> Function(GroupControlDevice, Duration)? _confirmDeviceOpen;
+
+  /// 开启请求给本人留出确认时间，其余指令沿用短超时。
+  static const _openRequestTimeout = Duration(seconds: 30);
 
   /// 注入时间与随机源只用于可重复验证；生产有效期以本机墙钟判断。
   final DateTime Function() _now;
@@ -101,9 +112,31 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
 
   /// 权限与入会默认状态分别保存，个人设备命令不改变全员默认策略。
   bool _allowUnmute = true,
+      _muteBlocksUnmute = false,
       _allowVideo = true,
       _muteAll = false,
       _cameraAllClosed = false;
+
+  /// 当前主持代次已接收的各设备指令版本，避免另一个设备使本设备的指令失效。
+  final Map<GroupControlDevice, int> _deviceVersions = {};
+
+  /// 最近一次可信策略同步的版本；旧授权指令不能覆盖已同步的更新权限。
+  int _policyVersion = -1;
+
+  /// 成员收到的逐设备实际权限，优先于同步中的群体默认值。
+  final Map<GroupControlDevice, bool> _memberPermissions = {};
+
+  /// 远端开启同意可能跨多个消息回调，执行中收到同 ID 时等待首个结果。
+  final Set<String> _runningCommands = {};
+
+  /// 计算本端实际开麦权限，解除全员静音后仍保留单独配置的限制。
+  bool get _canMemberUnmute =>
+      _memberPermissions[GroupControlDevice.microphone] ??
+      (_allowUnmute && !_muteBlocksUnmute);
+
+  /// 计算本端实际摄像头权限，逐人权限先于全员默认。
+  bool get _canMemberOpenCamera =>
+      _memberPermissions[GroupControlDevice.camera] ?? _allowVideo;
 
   /// SDK 确认的在场成员，调用方优先按真实加入事件排序，缺少事件不伪造序号。
   List<String> _members = [];
@@ -120,19 +153,21 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
   /// 主持端等待的真实回执，以 commandId 唯一关联。
   final Map<String, _PendingControl> _pending = {};
 
-  /// 发送和本人执行共享的 UI 进度，空设备表示策略或交接。
-  final Map<String, GroupControlDevice?> _pendingUsers = {};
-
-  /// 同一成员的操作可能交错完成，只有最新操作能撤销自己的等待态。
-  final Map<String, Object> _pendingOwners = {};
+  /// 按成员和设备保留等待所有权，空设备表示策略或交接。
+  final Map<(String, GroupControlDevice?), Object> _pendingOwners = {};
 
   /// 最近一次实际执行/回执结果，绝不由发送成功推导设备成功。
   final Map<String, GroupControlOutcome> _results = {};
 
-  /// 设备执行和主持发送分别串行，ACK 接收不排队，避免等待自身回执死锁。
-  Future<void> _receiving = Future.value(),
-      _sending = Future.value(),
-      _mediaQueue = Future.value();
+  /// 设备提示独立保存，某个设备的失败不覆盖另一个设备。
+  final Map<(String, GroupControlDevice), GroupControlOutcome> _deviceResults =
+      {};
+
+  /// 可信命令和主持发送分别串行，ACK 接收不排队，避免等待自身回执死锁。
+  Future<void> _receiving = Future.value(), _sending = Future.value();
+
+  /// 同一设备按顺序执行，麦克风不必等待摄像头确认。
+  final Map<GroupControlDevice, Future<void>> _mediaQueues = {};
 
   /// 结束/注销后使所有待返回设备、发送及 ACK 结果失效。
   bool _disposed = false;
@@ -169,9 +204,8 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
     _publish();
   }
 
-  /// 入会先关闭设备再同步当前策略，新 session 不继承上一次个人静音意图。
+  /// 主持按本场策略初始化设备，其他成员先停止采集并同步可信策略。
   Future<void> start() async {
-    await _suspend();
     if (_disposed) return;
     if (_hostId == selfId) {
       // 首名被叫接通后初始主持才进入此阶段；SDK 时间缺失才取同一刻本机时间。
@@ -181,7 +215,8 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
       _publish();
       await _applyJoinDefaults();
     } else {
-      await requestSync();
+      await _suspend();
+      if (!_disposed) await requestSync();
     }
   }
 
@@ -196,86 +231,127 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
     }
   }
 
-  /// 全员静音默认禁止成员自行开麦，勾选允许时只改变该独立权限。
+  /// 全员静音只作用于其他成员，允许自行开麦时下发单纯关麦。
   Future<GroupControlResult> muteAll({bool allowSelfUnmute = false}) =>
       _hostAction('muteAll', () async {
         _muteAll = true;
-        _allowUnmute = allowSelfUnmute;
-        return _broadcast(GroupControlMessageKind.command,
-            device: GroupControlDevice.microphone, enabled: false);
+        _muteBlocksUnmute = !allowSelfUnmute;
+        final allowed = _allowUnmute && !_muteBlocksUnmute;
+        return _broadcastDevices({
+          GroupControlDevice.microphone: allowed
+              ? (GroupControlAction.close, null)
+              : (GroupControlAction.setAllowed, false),
+        });
       });
 
-  /// 恢复开麦同时恢复自行开麦权限，逐目标等待真实设备 ACK。
+  /// 解除全员静音只恢复相应权限，保留单独限制，成员自行决定是否开麦。
   Future<GroupControlResult> unmuteAll() => _hostAction('unmuteAll', () async {
         _muteAll = false;
-        _allowUnmute = true;
-        return _broadcast(GroupControlMessageKind.command,
-            device: GroupControlDevice.microphone, enabled: true);
+        _muteBlocksUnmute = false;
+        return _broadcastDevices({
+          GroupControlDevice.microphone: (
+            GroupControlAction.setAllowed,
+            _allowUnmute,
+          ),
+        });
       });
 
-  /// 控制他人须为主持；本人按当前授权操作。单成员命令不改变全员入会默认策略。
+  /// 控制他人须为主持，开启只向本人发送请求；直接操作自己的设备沿用本地入口。
   Future<GroupControlResult> setMemberDevice(
-      String userId, GroupControlDevice device, bool enabled) async {
+    String userId,
+    GroupControlDevice device,
+    bool enabled,
+  ) async {
     if (userId == selfId) {
       return GroupControlResult({selfId: await setSelfDevice(device, enabled)});
     }
     return _hostAction(
-        'device/$userId/${device.name}/$enabled',
-        () => _broadcast(GroupControlMessageKind.command,
-            targets: [userId], device: device, enabled: enabled));
+      'device/$userId/${device.name}/$enabled',
+      () => _broadcast(
+        GroupControlMessageKind.command,
+        targets: [userId],
+        device: device,
+        action:
+            enabled ? GroupControlAction.requestOpen : GroupControlAction.close,
+      ),
+    );
   }
 
-  /// 修改自行开启权限，允许不等于立即开启；禁止时同步关闭对应设备。
-  Future<GroupControlResult> updatePolicy(
-          {bool? allowSelfUnmute, bool? allowVideo}) =>
+  /// 发布逐设备权限；恢复时不启动采集，禁止时目标端同步关闭设备。
+  Future<GroupControlResult> updatePolicy({
+    bool? allowSelfUnmute,
+    bool? allowVideo,
+  }) =>
       _hostAction('policy', () async {
-        if (allowSelfUnmute != null) _allowUnmute = allowSelfUnmute;
-        if (allowVideo != null) _allowVideo = allowVideo;
-        return _broadcast(GroupControlMessageKind.policy);
+        _allowUnmute = allowSelfUnmute ?? _allowUnmute;
+        _allowVideo = allowVideo ?? _allowVideo;
+        if (allowSelfUnmute != null) _muteBlocksUnmute = false;
+        return _broadcastDevices({
+          if (allowSelfUnmute != null)
+            GroupControlDevice.microphone: (
+              GroupControlAction.setAllowed,
+              _allowUnmute,
+            ),
+          if (allowVideo != null)
+            GroupControlDevice.camera: (
+              GroupControlAction.setAllowed,
+              _allowVideo
+            ),
+        });
       });
 
-  /// 全员摄像头恢复同时授权，关闭与是否允许自行重新开启分别表示。
+  /// 全员摄像头动作保持开启权限，开启时逐人请求本人确认。
   Future<GroupControlResult> setAllCameras(bool enabled) =>
       _hostAction('cameras/$enabled', () async {
         _cameraAllClosed = !enabled;
-        if (enabled) _allowVideo = true;
-        return _broadcast(GroupControlMessageKind.command,
-            device: GroupControlDevice.camera, enabled: enabled);
+        return _broadcastDevices({
+          GroupControlDevice.camera: (
+            enabled ? GroupControlAction.requestOpen : GroupControlAction.close,
+            null,
+          ),
+        });
       });
 
   /// 本人设备入口同样执行策略；关闭始终允许，未知或被禁止时不能自行打开。
   Future<GroupControlOutcome> setSelfDevice(
-          GroupControlDevice device, bool enabled) =>
+    GroupControlDevice device,
+    bool enabled,
+  ) =>
       _guard.singleFlight(
-          ('tim.call.control.self', callId, sessionId, device, enabled),
-          () async {
-        if (_disposed ||
-            (enabled &&
-                !(device == GroupControlDevice.microphone
-                    ? value.canOpenMicrophone
-                    : value.canOpenCamera))) {
-          const denied = GroupControlOutcome(GroupControlStatus.denied,
-              error: '当前策略不允许开启设备');
-          _results[selfId] = denied;
-          _publish();
-          return denied;
-        }
-        final pending = _beginPending(selfId, device);
-        try {
-          final result = await _executeDevice(device, enabled);
-          _finishPending(selfId, pending, result);
-          return result;
-        } finally {
-          _finishPending(selfId, pending, null);
-        }
-      });
+        ('tim.call.control.self', callId, sessionId, device, enabled),
+        () async {
+          if (_disposed ||
+              (enabled &&
+                  !(device == GroupControlDevice.microphone
+                      ? value.canOpenMicrophone
+                      : value.canOpenCamera))) {
+            const denied = GroupControlOutcome(
+              GroupControlStatus.denied,
+              error: '当前策略不允许开启设备',
+            );
+            _results[selfId] = denied;
+            _deviceResults[(selfId, device)] = denied;
+            _publish();
+            return denied;
+          }
+          final pending = _beginPending(selfId, device);
+          try {
+            final result = await _executeDevice(device, enabled);
+            _finishPending(pending, result);
+            return result;
+          } finally {
+            _finishPending(pending, null);
+          }
+        },
+      );
 
   /// 正常离开先按可信管理员名单交接；失败结果交给宿主提示，不阻止资源释放。
   Future<GroupControlResult> prepareLeave() => _hostAction('leave', () async {
         final remaining = _members.where((id) => id != selfId).toList();
         if (remaining.isEmpty) {
-          return GroupControlResult(
-              {selfId: const GroupControlOutcome(GroupControlStatus.success)});
+          return GroupControlResult({
+            selfId: const GroupControlOutcome(GroupControlStatus.success),
+          });
         }
         Set<String> admins;
         try {
@@ -284,8 +360,10 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
               .timeout(ackTimeout);
         } catch (_) {
           return GroupControlResult({
-            selfId: const GroupControlOutcome(GroupControlStatus.unconfirmed,
-                error: '无法确认管理员，主持交接未完成')
+            selfId: const GroupControlOutcome(
+              GroupControlStatus.unconfirmed,
+              error: '无法确认管理员，主持交接未完成',
+            ),
           });
         }
         if (_disposed || !value.canManage) return _denied();
@@ -295,8 +373,11 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
         final successor = candidates.isEmpty
             ? stillPresent.first
             : candidates[_random.nextInt(candidates.length)];
-        final result = await _broadcast(GroupControlMessageKind.transfer,
-            targets: stillPresent, nextHost: successor);
+        final result = await _broadcast(
+          GroupControlMessageKind.transfer,
+          targets: stillPresent,
+          nextHost: successor,
+        );
         // 本端随可信交接消息一同交出权限；未确认接收的成员不能被标为交接成功。
         _hostId = successor;
         _hostEpoch++;
@@ -307,67 +388,121 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
 
   /// 同类重复操作合并，其他操作串行并复核排队前的主持身份、策略版本。
   Future<GroupControlResult> _hostAction(
-      String action, Future<GroupControlResult> Function() execute) {
+    String action,
+    Future<GroupControlResult> Function() execute,
+  ) {
     // 确认时的权限快照随动作入队，等待其他主持动作后不能悄悄采用另一版策略。
     final expectedVersion = _version;
     final expectedHost = _hostId;
-    return _guard.singleFlight(('tim.call.control', callId, sessionId, action),
-        () {
-      final result = _sending.then((_) async {
-        if (_disposed ||
-            !value.canManage ||
-            expectedHost != _hostId ||
-            expectedVersion != _version) {
-          return _denied();
-        }
-        // 同一主持操作只占一个版本，所有目标都接收同一策略快照。
-        _version++;
-        _results.clear();
-        _publish();
-        return execute();
-      });
-      _sending =
-          result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
-      return result;
-    });
+    return _guard.singleFlight(
+      ('tim.call.control', callId, sessionId, action),
+      () {
+        final result = _sending.then((_) async {
+          if (_disposed ||
+              !value.canManage ||
+              expectedHost != _hostId ||
+              expectedVersion != _version) {
+            return _denied();
+          }
+          // 同一主持操作只占一个版本，所有目标都接收同一策略快照。
+          _version++;
+          _results.clear();
+          _publish();
+          return execute();
+        });
+        _sending = result.then<void>(
+          (_) {},
+          onError: (Object _, StackTrace _) {},
+        );
+        return result;
+      },
+    );
   }
 
   GroupControlResult _denied() => GroupControlResult({
-        selfId: const GroupControlOutcome(GroupControlStatus.denied,
-            error: '主持身份或通话策略已变更')
+        selfId: const GroupControlOutcome(
+          GroupControlStatus.denied,
+          error: '主持身份或通话策略已变更',
+        ),
       });
 
+  /// 每种设备独立等待回执，汇总时为每位成员保留失败，当前策略另行同步。
+  Future<GroupControlResult> _broadcastDevices(
+    Map<GroupControlDevice, (GroupControlAction, bool?)> devices,
+  ) async {
+    final targets = _members.where((id) => id != selfId).toList();
+    final results = await Future.wait(
+      devices.entries.map((entry) {
+        final (action, allowed) = entry.value;
+        return _broadcast(
+          GroupControlMessageKind.command,
+          targets: targets,
+          device: entry.key,
+          action: action,
+          allowed: allowed,
+        );
+      }),
+    );
+    final outcomes = <String, GroupControlOutcome>{};
+    // 一位成员的另一设备成功时，不能覆盖本设备已有的失败。
+    for (final result in results) {
+      for (final entry in result.outcomes.entries) {
+        outcomes.update(
+          entry.key,
+          (prior) => prior.success ? entry.value : prior,
+          ifAbsent: () => entry.value,
+        );
+      }
+    }
+    // 成员可能错过逐设备指令；同步当前策略也会在其再次入会或重连时重发。
+    if (!_disposed && value.canManage) {
+      for (final id in targets.where(_sessions.containsKey)) {
+        unawaited(
+          _send(
+            _message(GroupControlMessageKind.sync, id, commandId: _newId()),
+          ).catchError((Object _) {}),
+        );
+      }
+    }
+    return GroupControlResult(outcomes);
+  }
+
   /// 每个目标单独关联 session 与命令，缺少会控接入的成员必须返回未确认。
-  Future<GroupControlResult> _broadcast(GroupControlMessageKind kind,
-      {List<String>? targets,
-      GroupControlDevice? device,
-      bool? enabled,
-      String? nextHost}) async {
-    final recipients = targets ?? List<String>.from(_members);
+  Future<GroupControlResult> _broadcast(
+    GroupControlMessageKind kind, {
+    required List<String> targets,
+    GroupControlDevice? device,
+    GroupControlAction? action,
+    bool? allowed,
+    String? nextHost,
+  }) async {
     final outcomes = <String, GroupControlOutcome>{};
     _publish();
-    // 定向逐人发送避免把不存在会控接入的成员算成功；不同目标的 ACK 可并行等待。
-    await Future.wait(recipients.map((id) async {
-      if (!_members.contains(id) || _sessions[id] == null) {
-        outcomes[id] = const GroupControlOutcome(GroupControlStatus.unavailable,
-            error: '成员尚未接入会控');
-        return;
-      }
-      final message = _message(kind, id,
+    // 各目标单独发送并等待回执，IM 的发送成功不标记设备成功。
+    await Future.wait(
+      targets.map((id) async {
+        if (!_members.contains(id) || _sessions[id] == null) {
+          outcomes[id] = const GroupControlOutcome(
+            GroupControlStatus.unavailable,
+            error: '成员尚未接入会控',
+          );
+          return;
+        }
+        final message = _message(
+          kind,
+          id,
           commandId: _newId(),
           device: device,
-          enabled: enabled,
-          nextHost: nextHost);
-      final pending = _beginPending(id, device);
-      GroupControlOutcome outcome;
-      if (id == selfId) {
-        outcome = await _apply(message);
-      } else {
-        outcome = await _sendAndWait(message);
-      }
-      outcomes[id] = outcome;
-      _finishPending(id, pending, outcome);
-    }));
+          action: action,
+          allowed: allowed,
+          nextHost: nextHost,
+        );
+        final pending = _beginPending(id, device);
+        final outcome = await _sendAndWait(message);
+        outcomes[id] = outcome;
+        _finishPending(pending, outcome);
+      }),
+    );
     return GroupControlResult(outcomes);
   }
 
@@ -377,77 +512,101 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
     _pending[message.commandId] = pending;
     try {
       await _send(message).timeout(ackTimeout);
-      return await pending.result.future.timeout(ackTimeout,
-          onTimeout: () => const GroupControlOutcome(GroupControlStatus.timeout,
-              error: '未收到设备确认'));
+      return await pending.result.future.timeout(
+        _remaining(message),
+        onTimeout: () => const GroupControlOutcome(
+          GroupControlStatus.timeout,
+          error: '未收到设备确认',
+        ),
+      );
     } catch (_) {
-      return const GroupControlOutcome(GroupControlStatus.failed,
-          error: '控制消息发送失败');
+      return const GroupControlOutcome(
+        GroupControlStatus.failed,
+        error: '控制消息发送失败',
+      );
     } finally {
       _pending.remove(message.commandId);
     }
   }
 
-  /// 先从 IM 实际发送者和目标会话过滤，ACK 快速完成等待，设备指令串行执行。
+  /// 回执直接完成等待，其余消息按接收顺序验证可信主持和入会身份。
   void _received(GroupControlInbound inbound) {
     if (_disposed) return;
     final message = GroupControlMessage.decode(inbound.payload);
     if (message == null ||
         message.callId != callId ||
+        message.groupId != groupId ||
         message.targetUserId != selfId ||
         !_members.contains(inbound.senderId)) {
       return;
     }
-    if (message.kind == GroupControlMessageKind.ack) {
-      final pending = _pending[message.commandId];
-      if (pending == null ||
-          pending.userId != inbound.senderId ||
-          pending.sessionId != message.senderSessionId ||
-          message.targetSessionId != sessionId ||
-          message.version != pending.message.version ||
-          message.expiresAtMs < _now().millisecondsSinceEpoch ||
-          pending.result.isCompleted) {
-        return;
-      }
-      final status = GroupControlStatus.values
-          .where((v) => v.name == message.status)
-          .firstOrNull;
-      if (status == null) return;
-      // ACK 的成功状态必须与原指令目标一致，缺失或矛盾的实际设备字段只算未确认。
-      final consistent = status != GroupControlStatus.success ||
-          _ackMatchesTarget(pending.message, message);
-      pending.result.complete(GroupControlOutcome(
-          consistent ? status : GroupControlStatus.unconfirmed,
-          error: consistent ? message.error : '回执设备状态与指令不一致',
-          microphoneOn: message.microphoneOn,
-          cameraOn: message.cameraOn));
+    if (message.kind == GroupControlMessageKind.ack ||
+        message.kind == GroupControlMessageKind.transferAck) {
+      _receiveAck(inbound.senderId, message);
       return;
     }
     _receiving = _receiving
         .then((_) => _receive(inbound.senderId, message))
-        .catchError((Object _, StackTrace __) {});
+        .catchError((Object _, StackTrace _) {});
   }
 
-  /// 成功 ACK 除身份和版本外，还必须报告所控设备；授权本身不要求设备已开启。
-  bool _ackMatchesTarget(GroupControlMessage command, GroupControlMessage ack) {
-    if (command.kind == GroupControlMessageKind.command) {
-      return switch (command.device) {
-        'microphone' => ack.microphoneOn == command.enabled,
-        'camera' => ack.cameraOn == command.enabled,
-        _ => false,
+  /// 只以已登记的对端会话、主持代次和实际设备状态完成等待。
+  void _receiveAck(String sender, GroupControlMessage ack) {
+    final pending = _pending[ack.commandId];
+    if (pending == null ||
+        pending.userId != sender ||
+        pending.sessionId != ack.senderSessionId ||
+        ack.targetSessionId != sessionId ||
+        ack.hostEpoch != pending.message.hostEpoch ||
+        ack.version != pending.message.version ||
+        ack.device != pending.message.device ||
+        _remaining(pending.message) == Duration.zero ||
+        pending.result.isCompleted) {
+      return;
+    }
+    // 线上的 applied 还需要对应动作的 SDK 状态佐证，恢复授权允许设备继续关闭。
+    final status = switch (ack.status!) {
+      GroupControlAckStatus.applied => _ackMatchesTarget(pending.message, ack)
+          ? GroupControlStatus.success
+          : GroupControlStatus.unconfirmed,
+      GroupControlAckStatus.rejected => GroupControlStatus.denied,
+      GroupControlAckStatus.failed => GroupControlStatus.failed,
+      GroupControlAckStatus.expired => GroupControlStatus.expired,
+    };
+    final enabled = switch (ack.deviceState) {
+      GroupControlDeviceState.on => true,
+      GroupControlDeviceState.off => false,
+      _ => null,
+    };
+    pending.result.complete(
+      GroupControlOutcome(
+        status,
+        microphoneOn:
+            ack.device == GroupControlDevice.microphone ? enabled : null,
+        cameraOn: ack.device == GroupControlDevice.camera ? enabled : null,
+      ),
+    );
+  }
+
+  /// 成功回执按原指令检查设备；交接和恢复权限没有必须开启的设备。
+  bool _ackMatchesTarget(
+    GroupControlMessage command,
+    GroupControlMessage ack,
+  ) =>
+      switch (command.action) {
+        GroupControlAction.close =>
+          ack.deviceState == GroupControlDeviceState.off,
+        GroupControlAction.requestOpen =>
+          ack.deviceState == GroupControlDeviceState.on,
+        GroupControlAction.setAllowed =>
+          command.allowed! || ack.deviceState == GroupControlDeviceState.off,
+        null => command.kind == GroupControlMessageKind.transfer,
       };
-    }
-    if (command.kind == GroupControlMessageKind.policy) {
-      return (command.allowSelfUnmute || ack.microphoneOn == false) &&
-          (command.allowVideo || ack.cameraOn == false);
-    }
-    return command.kind == GroupControlMessageKind.transfer;
-  }
 
-  /// hello 仅注册 SDK 已在场成员；其他消息必须来自当前可信主持并命中本次入会。
+  /// hello 从 SDK 在场成员登记会话，命令和同步必须来自当前可信主持。
   Future<void> _receive(String sender, GroupControlMessage message) async {
     if (_disposed || !_members.contains(sender)) return;
-    final expired = message.expiresAtMs < _now().millisecondsSinceEpoch;
+    final expired = _remaining(message) == Duration.zero;
     if (message.kind == GroupControlMessageKind.hello) {
       if (!value.canManage ||
           expired ||
@@ -458,7 +617,8 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
       if (registered != null && registered != message.senderSessionId) return;
       _sessions[sender] = message.senderSessionId;
       await _send(
-          _message(GroupControlMessageKind.sync, sender, commandId: _newId()));
+        _message(GroupControlMessageKind.sync, sender, commandId: _newId()),
+      );
       return;
     }
     if (sender != _hostId ||
@@ -467,136 +627,236 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
       return;
     }
     final knownHostSession = _sessions[sender];
-    if (knownHostSession != null &&
-        knownHostSession != message.senderSessionId) {
+    if (knownHostSession != null && knownHostSession != message.senderSessionId) {
       return;
     }
-    if (message.kind == GroupControlMessageKind.transfer) {
-      if (message.hostEpoch != _hostEpoch + 1 ||
-          !_members.contains(message.hostId)) {
-        return;
+    if (message.kind == GroupControlMessageKind.command) {
+      // 设备指令不能建立主持会话，须先完成可信策略同步。
+      if (_known &&
+          knownHostSession == message.senderSessionId &&
+          message.hostEpoch == _hostEpoch) {
+        _receiveCommand(sender, message);
       }
-    } else if (message.hostEpoch != _hostEpoch || message.hostId != _hostId) {
       return;
     }
-    // 时间锚点属于可信策略，消息不能为晚加入或新主持重新开始一小时。
-    if (message.connectedAtMs == null ||
-        message.deadlineMs == null ||
+    // 同步和交接延续原通话锚点，较旧同步不能覆盖较新的可信策略。
+    final transfer = message.kind == GroupControlMessageKind.transfer;
+    if (expired ||
+        (transfer
+            ? message.hostEpoch != _hostEpoch + 1 ||
+                !_members.contains(message.hostId) ||
+                message.version <= _version
+            : message.hostEpoch != _hostEpoch ||
+                message.hostId != _hostId ||
+                message.version < _policyVersion) ||
         (_connectedAtMs != null &&
             (_connectedAtMs != message.connectedAtMs ||
                 _deadlineMs != message.deadlineMs))) {
       return;
     }
-    final cacheKey = '$sender/${message.senderSessionId}/${message.commandId}';
-    // 同一命令重传直接复用旧回执，不能因用户当前设备状态不同而再次执行。
-    final cached = _ackCache[cacheKey];
-    if (cached != null) {
-      await _send(cached);
-      return;
-    }
-    if (expired) {
-      await _reply(sender, message,
-          const GroupControlOutcome(GroupControlStatus.expired));
-      return;
-    }
-    if (message.version < _version ||
-        (message.version == _version &&
-            message.kind != GroupControlMessageKind.sync)) {
-      return;
-    }
-    // 可信消息先提交权限版本，再串行执行设备；本人同时操作也必须复核此版本。
     final wasKnown = _known;
     _sessions[sender] = message.senderSessionId;
-    _version = message.version;
+    if (message.version > _version) _version = message.version;
+    _policyVersion = message.version;
     _connectedAtMs = message.connectedAtMs;
     _deadlineMs = message.deadlineMs;
-    _allowUnmute = message.allowSelfUnmute;
-    _allowVideo = message.allowVideo;
-    _muteAll = message.muteAll;
-    _cameraAllClosed = message.cameraAllClosed;
+    _allowUnmute = message.allowSelfUnmute!;
+    _muteBlocksUnmute = message.muteBlocksUnmute!;
+    _allowVideo = message.allowVideo!;
+    _muteAll = message.muteAll!;
+    _cameraAllClosed = message.cameraAllClosed!;
     _known = true;
-    _publish();
-    final pending = _beginPending(
-        selfId,
-        GroupControlDevice.values
-            .where((device) => device.name == message.device)
-            .firstOrNull);
-    GroupControlOutcome outcome;
-    if (message.kind == GroupControlMessageKind.transfer) {
-      _hostId = message.hostId;
+    if (transfer) {
+      _hostId = message.hostId!;
       _hostEpoch = message.hostEpoch;
-      _sessions.addAll(Map.fromEntries(message.sessions.entries.where((e) =>
-          _members.contains(e.key) &&
-          e.value.isNotEmpty &&
-          !_retiredSessions.contains('${e.key}/${e.value}'))));
-      outcome = _actual(GroupControlStatus.success);
-    } else if (message.kind == GroupControlMessageKind.sync) {
-      outcome =
-          wasKnown ? await _applyRestrictions() : await _applyJoinDefaults();
+      _deviceVersions.clear();
+      _memberPermissions.clear();
+      _sessions.addAll(
+        Map.fromEntries(
+          message.sessions!.entries.where(
+            (e) =>
+                _members.contains(e.key) &&
+                e.value.isNotEmpty &&
+                !_retiredSessions.contains('${e.key}/${e.value}'),
+          ),
+        ),
+      );
+      _publish();
+      await _send(
+        _replyMessage(sender, message, _actual(GroupControlStatus.success)),
+      );
     } else {
+      // 同步只替代不晚于该快照的逐设备权限，不能撤销已经收到的后续操作。
+      _memberPermissions.removeWhere(
+        (device, _) => (_deviceVersions[device] ?? -1) <= message.version,
+      );
+      _publish();
+      if (wasKnown) {
+        await _applyRestrictions();
+      } else {
+        await _applyJoinDefaults();
+      }
+    }
+  }
+
+  /// 等待本人确认前登记版本，后续关停或禁止无需等待弹窗结束。
+  void _receiveCommand(String sender, GroupControlMessage message) {
+    final key = '$sender/${message.senderSessionId}/${message.commandId}';
+    final cached = _ackCache[key];
+    if (cached != null) {
+      unawaited(_send(cached).catchError((Object _) {}));
+      return;
+    }
+    if (_runningCommands.contains(key)) return;
+    if (_remaining(message) == Duration.zero) {
+      // 过期指令只回执，不占用当前设备的版本或处理中状态。
+      unawaited(
+        _cacheAndSendAck(
+          sender,
+          message,
+          key,
+          _actual(GroupControlStatus.expired),
+        ).catchError((Object _) {}),
+      );
+      return;
+    }
+    final device = message.device!;
+    if (message.version <= (_deviceVersions[device] ?? -1) ||
+        (message.action == GroupControlAction.setAllowed &&
+            message.version < _policyVersion)) {
+      return;
+    }
+    _deviceVersions[device] = message.version;
+    if (message.version > _version) _version = message.version;
+    _runningCommands.add(key);
+    final pending = _beginPending(selfId, device);
+    unawaited(
+      _completeCommand(
+        sender,
+        message,
+        key,
+        pending,
+      ).catchError((Object _, StackTrace _) {}),
+    );
+  }
+
+  /// 完成设备动作后记下回执，同一指令重传只返回该执行结果。
+  Future<void> _completeCommand(
+    String sender,
+    GroupControlMessage message,
+    String key,
+    ((String, GroupControlDevice?), Object) pending,
+  ) async {
+    GroupControlOutcome outcome;
+    try {
       outcome = await _apply(message);
+    } catch (_) {
+      outcome = _actual(GroupControlStatus.failed, '设备执行失败');
+    } finally {
+      _runningCommands.remove(key);
     }
     if (_disposed) return;
-    // 只有执行完成才回执，UI 同步展示本端被控操作的真实结果。
-    _finishPending(selfId, pending, outcome);
+    _finishPending(pending, outcome);
+    await _cacheAndSendAck(sender, message, key, outcome);
+  }
+
+  /// 先缓存再发送，IM 发送失败也能在指令重发时返回同一执行结果。
+  Future<void> _cacheAndSendAck(
+    String sender,
+    GroupControlMessage message,
+    String key,
+    GroupControlOutcome outcome,
+  ) async {
     final ack = _replyMessage(sender, message, outcome);
     if (_ackCache.length >= 256) _ackCache.remove(_ackCache.keys.first);
-    _ackCache[cacheKey] = ack;
-    _publish();
+    _ackCache[key] = ack;
     await _send(ack);
   }
 
-  /// 授权与设备分开处理；策略不允许时关闭，允许策略本身不主动打开现有成员设备。
+  /// 远端开启需要本次指令的本人许可，授权恢复本身不启动采集。
   Future<GroupControlOutcome> _apply(GroupControlMessage message) async {
-    if (_disposed) return _actual(GroupControlStatus.expired);
-    if (message.kind == GroupControlMessageKind.policy) {
-      return _applyRestrictions();
+    final device = message.device!;
+    bool current() =>
+        !_disposed &&
+        _known &&
+        _hostEpoch == message.hostEpoch &&
+        _sessions[_hostId] == message.senderSessionId &&
+        _deviceVersions[device] == message.version &&
+        _remaining(message) != Duration.zero;
+    if (!current()) return _actual(GroupControlStatus.expired);
+    // 更新授权后立即生效，即使本机暂时未确认停止采集也禁止用户重新开启。
+    if (message.action == GroupControlAction.setAllowed) {
+      _memberPermissions[device] = message.allowed!;
+      _publish();
+      if (message.allowed!) return _actual(GroupControlStatus.success);
     }
-    final device = GroupControlDevice.values
-        .where((v) => v.name == message.device)
-        .firstOrNull;
-    if (device == null || message.enabled == null) {
-      return _actual(GroupControlStatus.failed, '设备指令无效');
+    final opening = message.action == GroupControlAction.requestOpen;
+    if (opening) {
+      if (!_canOpen(device)) return _actual(GroupControlStatus.denied);
+      final remaining = _remaining(message);
+      final confirmed = await _confirmDeviceOpen
+          ?.call(device, remaining)
+          .timeout(remaining, onTimeout: () => false);
+      // 弹窗返回时旧主持或旧指令可能已失效，系统授权完成后还会再校验。
+      if (!current()) return _actual(GroupControlStatus.expired);
+      if (confirmed != true || !_canOpen(device)) {
+        return _actual(GroupControlStatus.denied);
+      }
     }
-    return _executeDevice(device, message.enabled!);
+    return _executeDevice(device, opening, isCommandCurrent: current);
   }
 
   /// 禁止策略关闭相关设备；允许策略保留成员自己的当前设备选择。
-  Future<GroupControlOutcome> _applyRestrictions() async {
-    if (!_allowUnmute) {
-      final result = await _executeDevice(GroupControlDevice.microphone, false);
-      if (!result.success) return result;
-    }
-    if (!_allowVideo) return _executeDevice(GroupControlDevice.camera, false);
-    return _actual(GroupControlStatus.success);
+  Future<void> _applyRestrictions() async {
+    // 同步可能同时限制两种设备，一种设备失败仍须关闭另一种设备。
+    await Future.wait([
+      for (final device in GroupControlDevice.values)
+        if (!_canOpen(device) &&
+            (_deviceOn(device) || _pendingOwners.containsKey((selfId, device))))
+          _executeDevice(
+            device,
+            false,
+            isCommandCurrent: () => _known && !_canOpen(device),
+          ),
+    ]);
   }
 
-  /// 仅全新入会采用全局默认；重连同步不会覆盖此前的个人设备选择。
-  Future<GroupControlOutcome> _applyJoinDefaults() async {
-    final microphone = await _executeDevice(
-        GroupControlDevice.microphone, !_muteAll && _allowUnmute);
-    if (_disposed) return _actual(GroupControlStatus.expired);
-    final camera = await _executeDevice(
-        GroupControlDevice.camera, video && !_cameraAllClosed && _allowVideo);
-    return !microphone.success ? microphone : camera;
+  /// 初次取得策略时应用默认值，摄像头无需等待麦克风回包。
+  Future<void> _applyJoinDefaults() async {
+    await Future.wait([
+      _executeDevice(
+        GroupControlDevice.microphone,
+        !_muteAll && (_hostId == selfId || _canMemberUnmute),
+      ),
+      _executeDevice(
+        GroupControlDevice.camera,
+        video && !_cameraAllClosed && (_hostId == selfId || _canMemberOpenCamera),
+      ),
+    ]);
   }
 
   /// 同步前以及主持失联时先停止本端采集，未知策略不能自动打开设备。
   Future<void> _suspend() async {
-    await _executeDevice(GroupControlDevice.microphone, false);
-    await _executeDevice(GroupControlDevice.camera, false);
+    await Future.wait([
+      _executeDevice(GroupControlDevice.microphone, false),
+      _executeDevice(GroupControlDevice.camera, false),
+    ]);
   }
 
-  /// 默认准备、本人操作和远端命令共用设备队列，旧版本不能覆盖后发策略。
+  /// 默认准备、本人操作和远端命令按设备串行，旧版本不能覆盖后发策略。
   Future<GroupControlOutcome> _executeDevice(
-      GroupControlDevice device, bool enabled) {
+    GroupControlDevice device,
+    bool enabled, {
+    bool Function()? isCommandCurrent,
+  }) {
     final expected = _version;
-    final result = _mediaQueue.then<GroupControlOutcome>((_) async {
+    final result = (_mediaQueues[device] ?? Future<void>.value())
+        .then<GroupControlOutcome>((_) async {
       bool current() =>
           !_disposed &&
-          expected == _version &&
+          (isCommandCurrent?.call() ?? (expected == _version)) &&
           (!enabled ||
-              (_known &&
+              (_canOpen(device) &&
                   (_deadlineMs == null ||
                       _now().millisecondsSinceEpoch < _deadlineMs!)));
       if (!current()) return _actual(GroupControlStatus.expired);
@@ -606,108 +866,184 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
         return _actual(GroupControlStatus.failed, '设备执行失败');
       }
     });
-    _mediaQueue =
-        result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    _mediaQueues[device] = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
     return result;
   }
 
   GroupControlOutcome _actual(GroupControlStatus status, [String? error]) =>
-      GroupControlOutcome(status,
-          error: error,
-          microphoneOn: _media.microphoneOn,
-          cameraOn: _media.cameraOn);
+      GroupControlOutcome(
+        status,
+        error: error,
+        microphoneOn: _media.microphoneOn,
+        cameraOn: _media.cameraOn,
+      );
 
-  /// 每条定向消息固定当前入会与策略快照，不在传输期间补写新场次字段。
-  GroupControlMessage _message(GroupControlMessageKind kind, String target,
-          {required String commandId,
-          String? targetSession,
-          GroupControlDevice? device,
-          bool? enabled,
-          String? nextHost}) =>
-      GroupControlMessage(
-          kind: kind,
-          callId: callId,
-          commandId: commandId,
-          senderSessionId: sessionId,
-          targetUserId: target,
-          targetSessionId: targetSession ?? _sessions[target] ?? '',
-          version: _version,
-          expiresAtMs: _now().add(ackTimeout * 2).millisecondsSinceEpoch,
-          hostId: nextHost ?? _hostId,
-          hostEpoch: _hostEpoch + (nextHost == null ? 0 : 1),
-          allowSelfUnmute: _allowUnmute,
-          allowVideo: _allowVideo,
-          muteAll: _muteAll,
-          cameraAllClosed: _cameraAllClosed,
-          connectedAtMs: _connectedAtMs,
-          deadlineMs: _deadlineMs,
-          sessions: Map.unmodifiable(_sessions),
-          device: device?.name,
-          enabled: enabled);
+  /// 本人和远端开启共用当前策略，关闭操作始终可执行。
+  bool _canOpen(GroupControlDevice device) =>
+      device == GroupControlDevice.microphone
+          ? value.canOpenMicrophone
+          : value.canOpenCamera;
 
-  /// ACK 绑定原始 commandId 和版本，发送时携带执行结束后的真实设备状态。
-  GroupControlMessage _replyMessage(String sender, GroupControlMessage original,
-          GroupControlOutcome result) =>
-      GroupControlMessage(
-          kind: GroupControlMessageKind.ack,
-          callId: callId,
-          commandId: original.commandId,
-          senderSessionId: sessionId,
-          targetUserId: sender,
-          targetSessionId: original.senderSessionId,
-          version: original.version,
-          expiresAtMs: _now().add(ackTimeout).millisecondsSinceEpoch,
-          hostId: _hostId,
-          hostEpoch: _hostEpoch,
-          status: result.status.name,
-          microphoneOn: result.microphoneOn,
-          cameraOn: result.cameraOn,
-          error: result.error);
+  /// 依据 SDK 状态判断有无采集，避免策略同步重复关闭已停止的设备。
+  bool _deviceOn(GroupControlDevice device) =>
+      device == GroupControlDevice.microphone
+          ? _media.microphoneOn
+          : _media.cameraOn;
 
-  Future<void> _reply(String sender, GroupControlMessage original,
-          GroupControlOutcome result) =>
-      _send(_replyMessage(sender, original, result));
+  /// 发送和确认都使用指令的剩余时间，超时不会延长有效期。
+  Duration _remaining(GroupControlMessage message) => Duration(
+        milliseconds:
+            max(0, message.expiresAtMs! - _now().millisecondsSinceEpoch),
+      );
+
+  /// 每条定向消息固定当前入会，策略快照只附在同步及交接消息上。
+  GroupControlMessage _message(
+    GroupControlMessageKind kind,
+    String target, {
+    required String commandId,
+    String? targetSession,
+    GroupControlDevice? device,
+    GroupControlAction? action,
+    bool? allowed,
+    String? nextHost,
+  }) {
+    final carriesPolicy = kind == GroupControlMessageKind.sync ||
+        kind == GroupControlMessageKind.transfer;
+    final ttl = action == GroupControlAction.requestOpen
+        ? _openRequestTimeout
+        : ackTimeout;
+    return GroupControlMessage(
+      kind: kind,
+      callId: callId,
+      groupId: groupId,
+      commandId: commandId,
+      senderSessionId: sessionId,
+      targetUserId: target,
+      targetSessionId: targetSession ?? _sessions[target] ?? '',
+      version: _version,
+      expiresAtMs: _now().add(ttl).millisecondsSinceEpoch,
+      hostId: carriesPolicy ? nextHost ?? _hostId : null,
+      hostEpoch: _hostEpoch + (nextHost == null ? 0 : 1),
+      allowSelfUnmute: carriesPolicy ? _allowUnmute : null,
+      muteBlocksUnmute: carriesPolicy ? _muteBlocksUnmute : null,
+      allowVideo: carriesPolicy ? _allowVideo : null,
+      muteAll: carriesPolicy ? _muteAll : null,
+      cameraAllClosed: carriesPolicy ? _cameraAllClosed : null,
+      connectedAtMs: carriesPolicy ? _connectedAtMs : null,
+      deadlineMs: carriesPolicy ? _deadlineMs : null,
+      sessions: nextHost != null ? Map.unmodifiable(_sessions) : null,
+      device: device,
+      action: action,
+      allowed: allowed,
+    );
+  }
+
+  /// 回执调换收发入会标识，仅报告原指令对应设备的 SDK 状态。
+  GroupControlMessage _replyMessage(
+    String sender,
+    GroupControlMessage original,
+    GroupControlOutcome result,
+  ) {
+    final device = original.device;
+    // 每次只回报原指令所控设备，系统执行结果映射到线上状态枚举。
+    final enabled = switch (device) {
+      GroupControlDevice.microphone => result.microphoneOn,
+      GroupControlDevice.camera => result.cameraOn,
+      null => null,
+    };
+    return GroupControlMessage(
+      kind: device == null
+          ? GroupControlMessageKind.transferAck
+          : GroupControlMessageKind.ack,
+      callId: callId,
+      groupId: groupId,
+      commandId: original.commandId,
+      senderSessionId: sessionId,
+      targetUserId: sender,
+      targetSessionId: original.senderSessionId,
+      version: original.version,
+      hostEpoch: original.hostEpoch,
+      device: device,
+      status: switch (result.status) {
+        GroupControlStatus.success => GroupControlAckStatus.applied,
+        GroupControlStatus.denied => GroupControlAckStatus.rejected,
+        GroupControlStatus.expired => GroupControlAckStatus.expired,
+        _ => GroupControlAckStatus.failed,
+      },
+      deviceState: device == null
+          ? null
+          : switch (enabled) {
+              true => GroupControlDeviceState.on,
+              false => GroupControlDeviceState.off,
+              null => result.status == GroupControlStatus.unavailable
+                  ? GroupControlDeviceState.unavailable
+                  : GroupControlDeviceState.unknown,
+            },
+    );
+  }
+
+  /// 序列化后直接走本场在线 C2C 通道。
   Future<void> _send(GroupControlMessage message) =>
       _transport.send(message.targetUserId, jsonEncode(message.toJson()));
 
   /// 自行操作和远端控制共用等待出口，操作身份用于拒绝迟到结果覆盖后续操作。
-  Object _beginPending(String id, GroupControlDevice? device) {
+  ((String, GroupControlDevice?), Object) _beginPending(
+    String id,
+    GroupControlDevice? device,
+  ) {
+    final key = (id, device);
     final owner = Object();
-    _pendingOwners[id] = owner;
-    _pendingUsers[id] = device;
+    _pendingOwners[key] = owner;
+    if (device != null) _deviceResults.remove((id, device));
     _publish();
-    return owner;
+    return (key, owner);
   }
 
-  /// 旧操作完成只返回给原调用者，不清除或覆盖新操作正在展示的状态。
-  void _finishPending(String id, Object owner, GroupControlOutcome? outcome) {
-    if (!identical(_pendingOwners[id], owner)) return;
-    _pendingOwners.remove(id);
-    _pendingUsers.remove(id);
-    if (outcome != null) _results[id] = outcome;
+  /// 旧操作完成只返回给原调用者，不清除或覆盖同一设备的新操作。
+  void _finishPending(
+    ((String, GroupControlDevice?), Object) pending,
+    GroupControlOutcome? outcome,
+  ) {
+    final (key, owner) = pending;
+    if (!identical(_pendingOwners[key], owner)) return;
+    _pendingOwners.remove(key);
+    if (outcome != null) {
+      final (id, device) = key;
+      _results[id] = outcome;
+      if (device != null) _deviceResults[(id, device)] = outcome;
+    }
     _publish();
   }
 
   /// 只读状态复制集合，UI 无法修改控制器正在等待或已经验证的结果。
   void _publish() {
     if (_disposed) return;
+    final pendingByUserId = <String, Set<GroupControlDevice?>>{};
+    for (final (id, device) in _pendingOwners.keys) {
+      pendingByUserId.putIfAbsent(id, () => {}).add(device);
+    }
     value = GroupControlState(
-        callId: callId,
-        sessionId: sessionId,
-        selfId: selfId,
-        hostId: _hostId,
-        policyKnown: _known,
-        version: _version,
-        allowSelfUnmute: _known && _allowUnmute,
-        allowVideo: _known && _allowVideo,
-        muteAll: _muteAll,
-        cameraAllClosed: _cameraAllClosed,
-        microphoneOn: _media.microphoneOn,
-        cameraOn: _media.cameraOn,
-        connectedAtMs: _connectedAtMs,
-        deadlineMs: _deadlineMs,
-        pendingByUserId: _pendingUsers,
-        resultsByUserId: _results);
+      callId: callId,
+      sessionId: sessionId,
+      selfId: selfId,
+      hostId: _hostId,
+      policyKnown: _known,
+      version: _version,
+      allowSelfUnmute: _known && _canMemberUnmute,
+      allowVideo: _known && _canMemberOpenCamera,
+      muteAll: _muteAll,
+      cameraAllClosed: _cameraAllClosed,
+      microphoneOn: _media.microphoneOn,
+      cameraOn: _media.cameraOn,
+      connectedAtMs: _connectedAtMs,
+      deadlineMs: _deadlineMs,
+      pendingByUserId: pendingByUserId,
+      resultsByUserId: _results,
+      resultsByDevice: _deviceResults,
+    );
   }
 
   @override
@@ -717,14 +1053,16 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
     _media.changes.removeListener(_publish);
     for (final pending in _pending.values) {
       if (!pending.result.isCompleted) {
-        pending.result
-            .complete(const GroupControlOutcome(GroupControlStatus.expired));
+        pending.result.complete(
+          const GroupControlOutcome(GroupControlStatus.expired),
+        );
       }
     }
     _pending.clear();
     _pendingOwners.clear();
     _sessions.clear();
     _ackCache.clear();
+    _runningCommands.clear();
     super.dispose();
   }
 }

@@ -187,10 +187,8 @@ class IncomingBannerContent extends StatelessWidget {
                 Text(
                     multi
                         ? video
-                            ? text.resolve('chat.uikit.invitedToMultiVideoCall',
-                                '邀请你加入多人视频通话…')
-                            : text.resolve('chat.uikit.invitedToMultiAudioCall',
-                                '邀请你加入多人语音通话…')
+                            ? text.invitedToMultiVideoCall
+                            : text.invitedToMultiAudioCall
                         : video
                             ? text.callInvitedToVideoCall
                             : text.callInvitedToAudioCall,

@@ -457,6 +457,7 @@ class MessageUtil {
           final callingProvider = CallingMessageDataProvider(message, context);
           if (callingProvider.isCallingSignal &&
               callingProvider.personalRecord == null &&
+              !callingProvider.isCallStart &&
               callingProvider.participantType == CallParticipantType.group) {
             return true;
           }

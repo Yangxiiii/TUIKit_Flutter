@@ -41,6 +41,10 @@ class GlobalState {
   /// 本次真实入会的会控入口，SDK 生命周期层创建/清理，UI 不另存主持权限。
   GroupControlController? groupControlController;
 
+  /// 通知设备初始化本端预览句柄已就绪，随视图销毁或退出账号清除。
+  final groupLocalVideoView =
+      ValueNotifier<({String callId, String userId, int viewId})?>(null);
+
   /// 全局只读会控展示出口，未知或退出状态为空。
   final ValueNotifier<GroupControlState?> _groupControl = ValueNotifier(null);
 
@@ -66,6 +70,7 @@ class GlobalState {
 
   /// 退出账号后清理群资料和展示结果，保留宿主提供的选人能力。
   void clearGroupCall() {
+    groupLocalVideoView.value = null;
     _groupTitles.clear();
     groupCallSession.clear();
   }

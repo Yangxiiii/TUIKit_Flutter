@@ -58,6 +58,28 @@ void main() {
     expect(store.joins, isEmpty);
   });
 
+  test('视频加入先停止旧采集，接通后补查权限时不重复关闭摄像头', () async {
+    var suspensions = 0;
+    final permissionChecks = <CallMediaType>[];
+    manager = CallManager.testing(
+        store: store,
+        accountId: () => account,
+        requestPermission: (type) async {
+          permissionChecks.add(type);
+          return null;
+        },
+        suspendGroupDevices: () async => suspensions++);
+    expect((await manager.join('room')).errorCode, 0);
+    store.state.activeCall.value = FakeCallInfo(
+        callId: 'room', mediaType: CallMediaType.video, chatGroupId: 'group');
+    store.state.selfInfo.value =
+        FakeParticipant('self', status: CallParticipantStatus.accept);
+    await manager.prepareJoinedCallDevices('room');
+    await manager.prepareJoinedCallDevices('room');
+    expect(permissionChecks, [CallMediaType.audio, CallMediaType.video]);
+    expect(suspensions, 1);
+  });
+
   test('等待主持交接期间进入新场次，旧挂断不能结束新通话', () async {
     final transfer = Completer<GroupControlResult>();
     GlobalState.instance.groupControlController =
@@ -271,8 +293,16 @@ void main() {
   });
 
   test('全员未接重呼创建新请求，既不沿用 roomId 也不邀请已结束场次', () async {
+    final starts = <List<Object>>[];
+    final attempts = <String>[];
+    manager.onGroupCallStarted = (group, caller, media, invitees, attemptId) async {
+      starts.add([group, caller, media, invitees]);
+      attempts.add(attemptId);
+    };
+    final expected = ['g', 'self', CallMediaType.video, ['a', 'b']];
     await manager.calls(['a', 'b'], CallMediaType.video,
-        CallParams(chatGroupId: 'g', roomId: 'old-room'));
+        CallParams(chatGroupId: 'g', roomId: 'old-room', isEphemeralCall: true));
+    expect(starts, [expected]);
     GlobalState.instance.groupCallSession
         .end('ended-call', CallEndReason.noResponse, isCaller: true);
     expect((await manager.retryGroupCall()).errorCode, 0);
@@ -280,8 +310,12 @@ void main() {
     expect(store.lastParams!.roomId, isEmpty);
     expect(store.lastParams!.chatGroupId, 'g');
     expect(store.invitations, isEmpty);
+    expect(starts, [expected, expected]);
+    expect(attempts.toSet(), hasLength(2));
+    expect(store.lastParams!.userData, contains(attempts.last));
     manager.clearGroupRequest();
     expect((await manager.retryGroupCall()).errorCode, isNot(0));
+    expect(starts, [expected, expected]);
   });
 }
 

@@ -5,6 +5,7 @@ import 'package:app_ui/app_ui.dart';
 import 'package:app_core/app_core.dart';
 import 'package:app_service/app_service.dart';
 import '../state/global_state.dart';
+import '../state/group_control_state.dart';
 import '../common/utils/error_parser.dart';
 import 'call_manager.dart';
 
@@ -64,6 +65,10 @@ class CallPageRouter {
   CallPageType _pageTypeBeforeInvite = CallPageType.none;
 
   OverlayEntry? _callOverlayEntry;
+
+  /// 切换通话页或离场前取消所属确认，不干扰后续页面路由。
+  VoidCallback? _cancelDeviceOpen;
+
   bool _hasManuallyShownCalling = false;
   bool _shouldAnimateRect = false;
 
@@ -114,6 +119,49 @@ class CallPageRouter {
 
   CallPageRouter({required NavigatorState? Function() navigatorGetter})
       : _navigatorGetter = navigatorGetter;
+
+  /// 只在可操作的通话页获取本人同意，到期只关闭该指令自己的弹窗。
+  Future<bool> confirmGroupDeviceOpen(
+      GroupControlDevice device, Duration remaining) async {
+    final navigator = callNavigator;
+    if (_currentPageType != CallPageType.calling ||
+        navigator == null ||
+        _cancelDeviceOpen != null) {
+      return false;
+    }
+    final text = AppLocalization.of(navigator.context);
+    final title = device == GroupControlDevice.microphone
+        ? text.groupCallRequestMic
+        : text.groupCallRequestCamera;
+    late final DialogRoute<bool> route;
+    void finish(bool agreed) {
+      if (navigator.mounted && route.isActive) {
+        navigator.removeRoute(route, agreed);
+      }
+    }
+
+    route = DialogRoute<bool>(
+        context: navigator.context,
+        barrierDismissible: false,
+        builder: (_) => AppAlertDialog(
+            semanticsIdentifier: 'call.group.requestOpen.${device.name}',
+            title: title,
+            cancelText: text.groupCallDeclineDevice,
+            confirmText: text.groupCallEnableDevice,
+            onCancel: () => finish(false),
+            onConfirm: () => finish(true)));
+    // 关闭当前确认路由，避免进入小窗时替换到弹窗而非通话页。
+    void cancel() => finish(false);
+    _cancelDeviceOpen = cancel;
+    final expiration = Timer(remaining, cancel);
+    try {
+      return await navigator.push(route) == true &&
+          _currentPageType == CallPageType.calling;
+    } finally {
+      expiration.cancel();
+      _cancelDeviceOpen = null;
+    }
+  }
 
   void showCallingPage() {
     pipController.onEnterPip = () {
@@ -264,6 +312,7 @@ class CallPageRouter {
       return;
     }
 
+    _cancelDeviceOpen?.call();
     SystemChannels.textInput.invokeMethod('TextInput.hide');
 
     if (_callOverlayEntry == null) {
@@ -339,6 +388,7 @@ class CallPageRouter {
   }
 
   void _removeCallOverlay() {
+    _cancelDeviceOpen?.call();
     _callOverlayEntry?.remove();
     _callOverlayEntry = null;
     _currentPageType = CallPageType.none;

@@ -19,6 +19,7 @@ class GroupCallResultReport {
     required this.durationSeconds,
     required this.endedAtMs,
     required this.revision,
+    this.attemptId,
   })  : participantIds = List.unmodifiable(participantIds),
         invitationResults = Map.unmodifiable(invitationResults),
         joinedUserIds = Set.unmodifiable(joinedUserIds);
@@ -61,6 +62,9 @@ class GroupCallResultReport {
 
   /// 同场同报告者重入后的递增版本。
   final int revision;
+
+  /// 初始呼叫的气泡关联标识，未收到 SDK 透传时为空。
+  final String? attemptId;
 }
 
 /// 与SDK结束事件对应的结果值；业务序列化在宿主边界处理。
@@ -71,6 +75,9 @@ enum GroupCallResultOutcome {
   busy,
   completed,
   interrupted,
+
+  /// 同账号其他设备接听，本机不生成时长。
+  otherDeviceAccepted,
 }
 
 /// 宿主按真实报告发布个人记录；失败须传播，不把发送失败当作已保存。
@@ -116,6 +123,10 @@ class GroupCallResultTracker {
   /// 宿主替换发布器不补发旧账号的结果。
   void setHandler(GroupCallResultHandler? handler) => _handler = handler;
 
+  /// 同一场重新加入时复用已校验的标识，新场次或账号不复用。
+  String? attemptForCall(String callId) =>
+      _account == _accountId() ? _calls[callId]?.attemptId : null;
+
   /// 每次SDK快照变化只维护计时，不在资料变化或重建时写聊天消息。
   void _refresh() {
     final account = _accountId();
@@ -149,6 +160,7 @@ class GroupCallResultTracker {
     if (_active != entry) _active?.leave(now);
     _active = entry;
     entry.touchedAt = now;
+    entry.attemptId ??= _session.attemptId;
     final self = snapshot.members.where((m) => m.id == account).firstOrNull;
     // 主叫自身waiting不表示接通；必须有SDK确认的首次通话建立。
     final joined = !snapshot.ended &&
@@ -192,7 +204,11 @@ class GroupCallResultTracker {
             ? GroupCallResultOutcome.completed
             : GroupCallResultOutcome.interrupted)
         : switch (reason) {
-            CallEndReason.reject => GroupCallResultOutcome.rejected,
+            CallEndReason.reject ||
+            CallEndReason.otherDeviceReject =>
+              GroupCallResultOutcome.rejected,
+            CallEndReason.otherDeviceAccepted =>
+              GroupCallResultOutcome.otherDeviceAccepted,
             CallEndReason.noResponse ||
             CallEndReason.offline =>
               GroupCallResultOutcome.unanswered,
@@ -221,6 +237,7 @@ class GroupCallResultTracker {
       durationSeconds: entry.elapsed.inSeconds,
       endedAtMs: now.millisecondsSinceEpoch,
       revision: ++entry.revision,
+      attemptId: entry.attemptId,
     );
     await _handler?.call(report);
   }
@@ -249,6 +266,9 @@ class GroupCallResultTracker {
 /// 单个场次内本人的累计区间，离开后保留供同callId重入。
 class _Participation {
   _Participation(this.touchedAt);
+
+  /// 同一 SDK 场次内保留，重新加入可继续更新原气泡。
+  String? attemptId;
 
   /// 最近SDK快照时间，用于一小时缓存淘汰。
   DateTime touchedAt;

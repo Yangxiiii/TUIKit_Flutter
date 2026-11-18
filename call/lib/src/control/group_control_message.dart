@@ -1,166 +1,239 @@
 import 'dart:convert';
+
 import 'package:json_annotation/json_annotation.dart';
+import 'package:tencent_chat_uikit/tencent_chat_uikit.dart'
+    show GroupCallControlMessage;
+
+import '../state/group_control_state.dart';
 
 part 'group_control_message.g.dart';
 
-/// 在线会控消息类型；策略同步与设备执行分开，不能将授权等同于设备开启。
-enum GroupControlMessageKind { hello, sync, command, policy, ack, transfer }
+/// 设备指令与在席握手、策略同步、主持交接共用在线消息外层。
+enum GroupControlMessageKind {
+  hello,
+  sync,
+  command,
+  ack,
+  transfer,
+  transferAck,
+}
 
-/// 本项目正式在线会控信封，序列化由生成器完成，控制器负责业务鉴权。
-@JsonSerializable(checked: true, disallowUnrecognizedKeys: true)
+/// 恢复权限、关闭设备和请求本人开启是独立操作。
+enum GroupControlAction { close, requestOpen, setAllowed }
+
+/// 设备回执的实际状态，缺少 SDK 确认为 unknown。
+enum GroupControlDeviceState { on, off, unavailable, unknown }
+
+/// 会控线上回执状态，超时由等待方本地判定。
+enum GroupControlAckStatus { applied, rejected, failed, expired }
+
+/// v1 会控载荷，外层标记只用于路由，身份和入会权限由控制器验证。
+@JsonSerializable(
+  checked: true,
+  disallowUnrecognizedKeys: true,
+  includeIfNull: false,
+)
 class GroupControlMessage {
   const GroupControlMessage({
-    this.protocol = 'zd.group-call.control.v1',
-    this.schemaVersion = 1,
     required this.kind,
     required this.callId,
+    required this.groupId,
     required this.commandId,
     required this.senderSessionId,
     required this.targetUserId,
     required this.targetSessionId,
     required this.version,
-    required this.expiresAtMs,
-    this.hostId = '',
-    this.hostEpoch = 0,
-    this.allowSelfUnmute = true,
-    this.allowVideo = true,
-    this.muteAll = false,
-    this.cameraAllClosed = false,
+    required this.hostEpoch,
+    this.expiresAtMs,
+    this.device,
+    this.action,
+    this.allowed,
+    this.status,
+    this.deviceState,
+    this.hostId,
+    this.allowSelfUnmute,
+    this.muteBlocksUnmute,
+    this.allowVideo,
+    this.muteAll,
+    this.cameraAllClosed,
     this.connectedAtMs,
     this.deadlineMs,
-    this.sessions = const {},
-    this.device,
-    this.enabled,
-    this.status,
-    this.microphoneOn,
-    this.cameraOn,
-    this.error,
+    this.sessions,
   });
 
-  /// 固定协议命名空间，与普通聊天自定义消息隔离。
-  final String protocol;
-
-  /// 信封结构版本，未知版本不得降级执行。
-  final int schemaVersion;
-
-  /// 消息阶段，不从缺失字段猜测命令类型。
+  /// 消息阶段，决定哪些附加字段可用。
   final GroupControlMessageKind kind;
 
-  /// 腾讯真实场次标识。
+  /// 腾讯 SDK 的真实通话场次 ID，同场重入沿用。
   final String callId;
 
-  /// 同一逻辑命令及回执关联标识，重复接收不得重复执行设备。
+  /// 该场通话所属的原始 IM 群 ID，临时多人通话为空。
+  final String groupId;
+
+  /// 单条逻辑指令的唯一标识，回执和重发沿用该值。
   final String commandId;
 
-  /// 实际发送者本次入会标识。
+  /// IM 发送者本次入会的标识。
   final String senderSessionId;
 
-  /// 唯一目标用户，群发由发送端逐人构造。
+  /// 目标 IM 用户 ID，与 C2C receiver 一致。
   final String targetUserId;
 
-  /// 目标本次入会标识，仅 hello 允许空值请求当前策略。
+  /// 目标设备本次入会的标识，只有 hello 允许尚未获知目标入会标识。
   final String targetSessionId;
 
-  /// 当前主持人代次中的递增操作版本。
+  /// 同一场次、同一主持权代次内递增的操作版本。
+  @JsonKey(name: 'revision')
   final int version;
 
-  /// UTC 毫秒有效期，超时消息不能执行设备操作。
-  final int expiresAtMs;
-
-  /// 当前主持人或交接后的主持人，仅可信 IM 主持人消息可更新。
-  final String hostId;
-
-  /// 主持交接单调递增，旧主持人命令随交接失效。
+  /// 当前主持权代次，主持权交接后递增。
   final int hostEpoch;
 
-  /// 成员能否自行开启麦克风，与实际开关状态分离。
-  final bool allowSelfUnmute;
+  /// 指令或同步消息的有效期，使用 UTC Unix 毫秒时间戳。
+  final int? expiresAtMs;
 
-  /// 成员能否自行开启摄像头，与实际开关状态分离。
-  final bool allowVideo;
+  /// 一个指令只控制一个设备类型，回执沿用原指令的设备。
+  final GroupControlDevice? device;
 
-  /// 新入会是否应保持静音，不继承上次个人设备意图。
-  final bool muteAll;
+  /// 目标设备的操作，开启必须由本人确认。
+  final GroupControlAction? action;
 
-  /// 新入会是否应保持摄像头关闭，不继承上次个人设备意图。
-  final bool cameraAllClosed;
+  /// setAllowed 必填，true 只恢复权限，false 还会关闭正在采集的设备。
+  final bool? allowed;
 
-  /// 初始主持首次真实 SDK 接通时固定的 UTC 毫秒起点，后续入会与交接不得改写。
-  final int? connectedAtMs;
+  /// 回执结果，发送成功不能作为 applied。
+  final GroupControlAckStatus? status;
 
-  /// 同场绝对截止点，必须等于 connectedAtMs 加一小时；不是后端强制结束承诺。
-  final int? deadlineMs;
+  /// 回执时 SDK 确认的设备状态。
+  final GroupControlDeviceState? deviceState;
 
-  /// 主持人确认的在场入会标识，交接时传递给新主持人。
-  final Map<String, String> sessions;
+  /// 策略发布者或交接后的可信主持。
+  final String? hostId;
 
-  /// 设备命令目标，仅接受 microphone 或 camera。
-  final String? device;
+  /// 同步的原始开麦权限，全员静音额外限制由 muteBlocksUnmute 表示。
+  final bool? allowSelfUnmute, muteBlocksUnmute;
 
-  /// 设备命令目标状态。
-  final bool? enabled;
+  /// 允许成员开启视频的策略，与实际采集无关。
+  final bool? allowVideo;
 
-  /// 回执状态，必须使用真实执行结果或明确的未确认状态。
-  final String? status;
+  /// 新入会的默认关麦、关摄像头策略。
+  final bool? muteAll, cameraAllClosed;
 
-  /// 回执中的 SDK 本端真实麦克风状态。
-  final bool? microphoneOn;
+  /// 初始主持确认的同场接通时间及截止时间，单位为 UTC 毫秒。
+  final int? connectedAtMs, deadlineMs;
 
-  /// 回执中的 SDK 本端真实摄像头状态。
-  final bool? cameraOn;
+  /// 交接时交给继任主持的已验证在席标识。
+  final Map<String, String>? sessions;
 
-  /// 可展示失败原因，不携带凭证或原始敏感载荷。
-  final String? error;
+  /// 生成 OA 自定义消息外层，发送给 IM 时序列化为字符串。
+  Map<String, dynamic> toJson() => {
+        'businessID': GroupCallControlMessage.businessID,
+        'version': 1,
+        'payload': _$GroupControlMessageToJson(this),
+      };
 
-  factory GroupControlMessage.fromJson(Map<String, dynamic> json) =>
-      _$GroupControlMessageFromJson(json);
-  Map<String, dynamic> toJson() => _$GroupControlMessageToJson(this);
-
-  /// 解码生成器支持的结构，限制载荷尺寸并拒绝缺失身份字段和未知协议。
+  /// 校验外层、整数精度和每种消息的必填字段，失败后直接丢弃。
   static GroupControlMessage? decode(String raw) {
     if (raw.length > 32768) return null;
     try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map<String, dynamic>) return null;
-      // 生成器会将 num 转为 int；协议序号不得把小数截断成另一个有效版本。
+      // 聊天侧按业务标识拦截，执行侧只接受完整的当前版本外层。
+      final envelope = jsonDecode(raw);
+      if (envelope is! Map<String, dynamic> ||
+          envelope.length != 3 ||
+          envelope['businessID'] != GroupCallControlMessage.businessID ||
+          envelope['version'] is! int ||
+          envelope['version'] != 1 ||
+          envelope['payload'] is! Map<String, dynamic>) {
+        return null;
+      }
+      final payload = envelope['payload'] as Map<String, dynamic>;
+      // 生成器会把 JSON 浮点数转成整数，先限制精度和取值。
       for (final key in [
-        'version',
+        'revision',
+        'hostEpoch',
         'expiresAtMs',
-        'schemaVersion',
-        'hostEpoch'
+        'connectedAtMs',
+        'deadlineMs',
       ]) {
-        if (decoded.containsKey(key) && decoded[key] is! int) return null;
+        final number = payload[key];
+        if (payload.containsKey(key) &&
+            (number is! int || number < 0 || number > 9007199254740991)) {
+          return null;
+        }
       }
-      for (final key in ['connectedAtMs', 'deadlineMs']) {
-        if (decoded[key] != null && decoded[key] is! int) return null;
-      }
-      final message = GroupControlMessage.fromJson(decoded);
-      if (message.protocol != 'zd.group-call.control.v1' ||
-          message.schemaVersion != 1 ||
-          message.version < 0 ||
-          message.hostEpoch < 0 ||
-          message.expiresAtMs <= 0 ||
-          [
+      final message = _$GroupControlMessageFromJson(payload);
+      if ([
             message.callId,
             message.commandId,
             message.senderSessionId,
-            message.targetUserId
-          ].any((id) => id.isEmpty || id != id.trim())) {
+            message.targetUserId,
+            if (message.kind != GroupControlMessageKind.hello)
+              message.targetSessionId,
+          ].any((id) => id.isEmpty || id != id.trim()) ||
+          message.groupId != message.groupId.trim()) {
         return null;
       }
-      // 只有 hello 能在尚未获知主持 session 时定向请求，其他消息必须命中具体入会。
-      if (message.kind != GroupControlMessageKind.hello &&
-          (message.targetSessionId.isEmpty ||
-              message.targetSessionId != message.targetSessionId.trim())) {
-        return null;
-      }
-      if ((message.connectedAtMs == null) != (message.deadlineMs == null) ||
-          (message.connectedAtMs != null &&
-              (message.connectedAtMs! <= 0 ||
-                  message.deadlineMs! - message.connectedAtMs! != 3600000))) {
-        return null;
-      }
-      return message;
+      // 同步元数据只在同步、交接中出现，设备指令仅使用对应设备的字段。
+      final hasPolicy = const {
+        'hostId',
+        'allowSelfUnmute',
+        'muteBlocksUnmute',
+        'allowVideo',
+        'muteAll',
+        'cameraAllClosed',
+        'connectedAtMs',
+        'deadlineMs',
+        'sessions',
+      }.any(payload.containsKey);
+      final hasAction = const {'action', 'allowed'}.any(payload.containsKey);
+      final hasStatus = const {'status', 'deviceState'}.any(payload.containsKey);
+      final hasExpiry = (message.expiresAtMs ?? 0) > 0;
+      final valid = switch (message.kind) {
+        GroupControlMessageKind.command => !hasPolicy &&
+            !hasStatus &&
+            hasExpiry &&
+            message.device != null &&
+            message.action != null &&
+            (message.action == GroupControlAction.setAllowed
+                ? message.allowed != null
+                : !payload.containsKey('allowed')),
+        GroupControlMessageKind.ack => !hasPolicy &&
+            !hasAction &&
+            message.expiresAtMs == null &&
+            message.device != null &&
+            message.status != null &&
+            message.deviceState != null,
+        GroupControlMessageKind.transferAck => !hasPolicy &&
+            !hasAction &&
+            message.expiresAtMs == null &&
+            !payload.containsKey('device') &&
+            message.status != null &&
+            !payload.containsKey('deviceState'),
+        GroupControlMessageKind.hello => !hasPolicy &&
+            !hasAction &&
+            !hasStatus &&
+            hasExpiry &&
+            message.targetSessionId.isEmpty &&
+            !payload.containsKey('device'),
+        GroupControlMessageKind.sync ||
+        GroupControlMessageKind.transfer =>
+          !hasAction &&
+              !hasStatus &&
+              hasExpiry &&
+              !payload.containsKey('device') &&
+              message.hostId?.isNotEmpty == true &&
+              message.allowSelfUnmute != null &&
+              message.muteBlocksUnmute != null &&
+              message.allowVideo != null &&
+              message.muteAll != null &&
+              message.cameraAllClosed != null &&
+              (message.connectedAtMs ?? 0) > 0 &&
+              message.deadlineMs == message.connectedAtMs! + 3600000 &&
+              (message.kind == GroupControlMessageKind.transfer
+                  ? message.sessions != null
+                  : !payload.containsKey('sessions')),
+      };
+      return valid ? message : null;
     } catch (_) {
       return null;
     }

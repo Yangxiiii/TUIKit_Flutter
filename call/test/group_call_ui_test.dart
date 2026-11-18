@@ -256,9 +256,80 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets('来电只显示拒绝接听，接通后挂断，云录制及未验证翻转禁用', (tester) async {
+  testWidgets('扬声器跟随本机路由，群呼叫与接通可切换，结束后禁用', (tester) async {
+    final route = ValueNotifier(false);
+    addTearDown(route.dispose);
+    var switches = 0;
+    Future<void> showControls({
+      bool incoming = false,
+      bool connected = false,
+      bool ended = false,
+    }) => tester.pumpWidget(_app(ValueListenableBuilder<bool>(
+        valueListenable: route,
+        builder: (_, speakerOn, _) => GroupCallControls(
+            incoming: incoming,
+            connected: connected,
+            ended: ended,
+            retryable: false,
+            microphoneOn: false,
+            cameraOn: false,
+            speakerOn: speakerOn,
+            canFlip: false,
+            canOpenMicrophone: false,
+            canOpenCamera: false,
+            onEnd: () {},
+            onAccept: () {},
+            onMicrophone: () {},
+            onCamera: () {},
+            onSpeaker: () => switches++,
+            onFlip: null,
+            onRetry: () {}))));
+
+    final speaker = find.bySemanticsIdentifier('call.group.speaker');
+    await showControls(incoming: true);
+    expect(speaker, findsNothing);
+
+    for (final connected in [false, true]) {
+      await showControls(connected: connected);
+      expect(speaker, findsOneWidget);
+      expect(find.byIcon(AppIcons.voiceOff), findsOneWidget);
+      await tester.tap(speaker);
+      await tester.pump();
+      expect(find.text('扬声器已关'), findsOneWidget);
+    }
+    expect(switches, 2);
+
+    Offset buttonPosition(String id) =>
+        tester.getTopLeft(find.bySemanticsIdentifier('call.group.$id'));
+    final mic = buttonPosition('microphone');
+    final speakerPosition = buttonPosition('speaker');
+    final camera = buttonPosition('camera');
+    final end = buttonPosition('end');
+    expect(mic.dx, lessThan(speakerPosition.dx));
+    expect(speakerPosition.dx, lessThan(camera.dx));
+    expect(mic.dy, speakerPosition.dy);
+    expect(camera.dy, speakerPosition.dy);
+    expect(end.dy, greaterThan(speakerPosition.dy));
+    expect(end.dx, speakerPosition.dx);
+
+    route.value = true;
+    await tester.pump();
+    expect(find.byIcon(AppIcons.voiceOn), findsOneWidget);
+    expect(find.text('扬声器已开'), findsOneWidget);
+
+    await showControls(ended: true);
+    await tester.tap(speaker);
+    expect(switches, 2);
+  });
+
+  testWidgets('接通后支持翻转已开启的摄像头，录制保持禁用', (tester) async {
     final semantics = tester.ensureSemantics();
-    for (final incoming in [true, false]) {
+    var flips = 0;
+    for (final (incoming, cameraPending) in [
+      (true, false),
+      (false, false),
+      (false, true),
+    ]) {
       await tester.pumpWidget(_app(GroupCallControls(
           incoming: incoming,
           connected: !incoming,
@@ -266,12 +337,13 @@ void main() {
           retryable: false,
           microphoneOn: true,
           cameraOn: true,
+          cameraPending: cameraPending,
           canFlip: !incoming,
           onEnd: () {},
           onAccept: () {},
           onMicrophone: () {},
           onCamera: () {},
-          onFlip: () {},
+          onFlip: () => flips++,
           onRetry: () {})));
       await tester.pump();
       expect(find.text('挂断'), incoming ? findsNothing : findsOneWidget);
@@ -279,14 +351,16 @@ void main() {
           incoming ? findsOneWidget : findsNothing);
       expect(find.bySemanticsIdentifier('call.group.microphone'),
           incoming ? findsNothing : findsOneWidget);
+      final flip = find.bySemanticsIdentifier('call.group.flip');
+      expect(flip, incoming ? findsNothing : findsOneWidget);
       if (!incoming) {
-        for (final id in ['record', 'flip']) {
-          final data = tester
-              .getSemantics(find.bySemanticsIdentifier('call.group.$id'))
-              .getSemanticsData();
-          expect(data.flagsCollection.isEnabled, isNot(Tristate.isTrue));
-          expect(data.hasAction(SemanticsAction.tap), isFalse);
-        }
+        final record = tester
+            .getSemantics(find.bySemanticsIdentifier('call.group.record'))
+            .getSemanticsData();
+        expect(record.flagsCollection.isEnabled, isNot(Tristate.isTrue));
+        expect(record.hasAction(SemanticsAction.tap), isFalse);
+        await tester.tap(flip);
+        expect(flips, 1);
       }
       expect(tester.takeException(), isNull);
     }

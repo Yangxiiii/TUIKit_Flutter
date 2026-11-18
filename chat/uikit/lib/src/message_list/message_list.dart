@@ -1,5 +1,6 @@
 import 'package:app_ui/app_ui.dart';
 import 'dart:async';
+import 'utils/calling_message_data_provider.dart';
 import 'utils/conversation_notice.dart';
 import 'utils/group_call_control_message.dart';
 import 'utils/group_call_record_message.dart';
@@ -426,8 +427,9 @@ class _MessageListState extends State<MessageList>
     final visible = <MessageInfo>[];
     final seen = <String>{};
     for (final message in messages) {
-      // 在线控制不属于聊天内容；历史恢复与离线输入也遵守相同边界。
+      // 在线会控和腾讯群呼叫信令不占消息行，历史恢复与离线输入也统一过滤。
       if (GroupCallControlMessage.isMessage(message) ||
+          CallingMessageDataProvider.isSdkGroupCallSignal(message) ||
           widget.config.hiddenMessageIDs.contains(message.msgID) ||
           (widget.offlineMessages != null &&
               message.status == MessageStatus.deleted)) {
@@ -439,7 +441,8 @@ class _MessageListState extends State<MessageList>
     }
     _localWindow.reconcileRevocations(visible);
     return ConversationNotice.visibleMessages(
-        GroupCallRecordMessage.visibleMessages(_uploadMessageOrder.apply(visible),
+        GroupCallRecordMessage.visibleMessages(
+            _uploadMessageOrder.apply(visible),
             LoginStore.shared.loginState.loginUserInfo?.userID ?? ''));
   }
 

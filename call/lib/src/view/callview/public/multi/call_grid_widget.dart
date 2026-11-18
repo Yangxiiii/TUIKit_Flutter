@@ -58,6 +58,7 @@ class _CallGridWidgetState extends State<CallGridWidget> {
         CallStore.shared.state.speakerVolumes,
         DeviceStore.shared.state.microphoneStatus,
         DeviceStore.shared.state.cameraStatus,
+        DeviceStore.shared.state.currentAudioRoute,
         GlobalState.instance.groupCall,
         GlobalState.instance.groupControl,
       ]);
@@ -104,8 +105,6 @@ class _CallGridWidgetState extends State<CallGridWidget> {
           final control = _control;
           final microphoneOn = control?.microphoneOn ?? self.isMicrophoneOpened;
           final cameraOn = control?.cameraOn ?? self.isCameraOpened;
-          final devicePending =
-              control?.pendingByUserId.containsKey(self.id) == true;
           final ended = snapshot?.ended ?? false;
           final connected =
               !ended && self.status == CallParticipantStatus.accept;
@@ -146,7 +145,8 @@ class _CallGridWidgetState extends State<CallGridWidget> {
                   ? CallVideoView(
                       key: _videoKeys.putIfAbsent(id, GlobalKey.new),
                       userId: id,
-                      local: id == self.id)
+                      local: id == self.id,
+                      groupCallId: id == self.id ? call.callId : null)
                   : const SizedBox.shrink(),
               onRetry: !ended && call.callId.isNotEmpty ? _invite : null,
               controls: GroupCallControls(
@@ -156,12 +156,18 @@ class _CallGridWidgetState extends State<CallGridWidget> {
                   retryable: snapshot?.canRetry ?? false,
                   microphoneOn: !ended && microphoneOn,
                   cameraOn: !ended && cameraOn,
+                  speakerOn: DeviceStore.shared.state.currentAudioRoute.value ==
+                      AudioRoute.speakerphone,
                   canOpenMicrophone: control?.canOpenMicrophone == true,
                   canOpenCamera: control?.canOpenCamera == true,
-                  microphonePending: devicePending,
-                  cameraPending: devicePending,
-                  microphoneHint: groupControlStatusText(control, members),
-                  cameraHint: groupControlStatusText(control, members),
+                  microphonePending: control?.isDevicePending(
+                          self.id, GroupControlDevice.microphone) == true,
+                  cameraPending: control?.isDevicePending(
+                          self.id, GroupControlDevice.camera) == true,
+                  microphoneHint: groupDeviceHint(
+                      control, self.id, GroupControlDevice.microphone),
+                  cameraHint: groupDeviceHint(
+                      control, self.id, GroupControlDevice.camera),
                   canFlip: connected && cameraOn && (_cameraCount ?? 0) > 1,
                   onEnd: () => _end(incoming: incoming, connected: connected),
                   onAccept: CallManager.instance.accept,
@@ -169,6 +175,7 @@ class _CallGridWidgetState extends State<CallGridWidget> {
                       self.id, GroupControlDevice.microphone, !microphoneOn),
                   onCamera: () => _management()
                       .setDevice(self.id, GroupControlDevice.camera, !cameraOn),
+                  onSpeaker: CallManager.instance.toggleSpeaker,
                   onFlip: () => CallManager.instance.switchCamera(
                       !DeviceStore.shared.state.isFrontCamera.value),
                   onRetry: _retry));
