@@ -10,36 +10,49 @@ import 'image_viewer_widget.dart';
 class ImageViewer {
   /// 复用全屏预览，仅打开设备上仍存在的照片或视频文件。
   static Future<void> viewLocalMessage(
-      BuildContext context, MessageInfo message) async {
-    final media = switch (message.messagePayload) {
-      ImageMessagePayload(
-        :final largeImagePath,
-        :final originalImagePath,
-        :final thumbImagePath,
-      ) =>
-        ImageElement(
-          type: 0,
-          imagePath: _firstLocalFile(
-              [largeImagePath, originalImagePath, thumbImagePath]),
-        ),
-      VideoMessagePayload(:final videoSnapshotPath, :final videoPath) =>
-        ImageElement(
-          type: 1,
-          imagePath: _firstLocalFile([videoSnapshotPath]),
-          videoPath: _firstLocalFile([videoPath]),
-        ),
-      _ => null,
-    };
-    if (!context.mounted ||
-        media == null ||
-        (media.isImage ? media.imagePath.isEmpty : !media.hasVideoFile)) {
-      return;
+    BuildContext context,
+    MessageInfo message, {
+    List<MessageInfo>? mediaMessages,
+  }) async {
+    final elements = <ImageElement>[];
+    var initialIndex = -1;
+    // 本机窗口不触发远端分页，并以消息标识定位用户点击的照片。
+    for (final candidate in mediaMessages ?? [message]) {
+      final media = _localMedia(candidate);
+      if (media == null ||
+          (media.isImage ? media.imagePath.isEmpty : !media.hasVideoFile))
+        continue;
+      if (candidate.msgID == message.msgID) initialIndex = elements.length;
+      elements.add(media);
     }
+    if (!context.mounted || initialIndex < 0) return;
     await view(context,
-        imageElements: [media],
-        initialIndex: 0,
+        imageElements: elements,
+        initialIndex: initialIndex,
         onEventTriggered: (_, complete) => complete(null));
   }
+
+  /// 离线预览只从当前设备取得资源，缺失文件不会展示为空白页。
+  static ImageElement? _localMedia(MessageInfo message) =>
+      switch (message.messagePayload) {
+        ImageMessagePayload(
+          :final largeImagePath,
+          :final originalImagePath,
+          :final thumbImagePath,
+        ) =>
+          ImageElement(
+            type: 0,
+            imagePath: _firstLocalFile(
+                [largeImagePath, originalImagePath, thumbImagePath]),
+          ),
+        VideoMessagePayload(:final videoSnapshotPath, :final videoPath) =>
+          ImageElement(
+            type: 1,
+            imagePath: _firstLocalFile([videoSnapshotPath]),
+            videoPath: _firstLocalFile([videoPath]),
+          ),
+        _ => null,
+      };
 
   /// 缩略图可在原图已清理时继续用于本机预览。
   static String _firstLocalFile(List<String?> paths) {

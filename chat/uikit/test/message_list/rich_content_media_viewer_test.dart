@@ -78,6 +78,36 @@ void main() {
     final restored = ImageElement.fromMap(rich.toMap());
     expect(restored, rich);
     expect(restored.resourceKey, video);
+    const fallback =
+        ImageElement(type: 0, imagePath: image1, fallbackImagePaths: [image2]);
+    expect(ImageElement.fromMap(fallback.toMap()), fallback);
+  });
+
+  testWidgets('本机大图缺失时显示备用图，左右滑动定位其他照片', (tester) async {
+    final cache = PaintingBinding.instance.imageCache;
+    addTearDown(cache.clear);
+    for (final url in [image1, image2]) {
+      final image = await tester.runAsync(() => createTestImage());
+      cache.putIfAbsent(
+          CachedNetworkImageProvider(url),
+          () => OneFrameImageStreamCompleter(
+              Future.value(ImageInfo(image: image!))));
+    }
+    await tester.pumpWidget(MaterialApp(
+        home: ImageViewerWidget(
+      imageElements: const [
+        ImageElement(type: 0, imagePath: '', fallbackImagePaths: [image1]),
+        ImageElement(type: 0, imagePath: image2),
+      ],
+      onEventTriggered: (_, complete) => complete(null),
+    )));
+    await tester.pumpAndSettle();
+    Finder picture(String url) => find.byWidgetPredicate((widget) =>
+        widget is Image && widget.image == CachedNetworkImageProvider(url));
+    expect(picture(image1).hitTestable(), findsOneWidget);
+    await tester.drag(find.byType(PageView), const Offset(-600, 0));
+    await tester.pumpAndSettle();
+    expect(picture(image2).hitTestable(), findsOneWidget);
   });
 
   testWidgets('多个无封面视频按资源区分，下载失败可重试且关闭后的失败不再提示', (tester) async {
@@ -96,7 +126,7 @@ void main() {
       return pending.future;
     });
     await tester.tap(
-        find.bySemanticsIdentifier('tim.rich.video.rich.${second.hashCode}'));
+        find.bySemanticsIdentifier('tim.rich.rich.video.${second.hashCode}'));
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.download).hitTestable());
     await tester.pumpAndSettle();
@@ -118,7 +148,7 @@ void main() {
   testWidgets('点击富文本中的第二张图片进入共用预览器，顺序忽略文字文件且支持双击缩放', (tester) async {
     await mount(tester);
     await tester.tap(
-        find.bySemanticsIdentifier('tim.rich.image.rich.${image2.hashCode}'));
+        find.bySemanticsIdentifier('tim.rich.rich.image.${image2.hashCode}'));
     await tester.pumpAndSettle();
     final viewer =
         tester.widget<ImageViewerWidget>(find.byType(ImageViewerWidget));
@@ -155,7 +185,7 @@ void main() {
       return pending.future;
     });
     await tester.tap(
-        find.bySemanticsIdentifier('tim.rich.video.rich.${video.hashCode}'));
+        find.bySemanticsIdentifier('tim.rich.rich.video.${video.hashCode}'));
     await tester.pumpAndSettle();
     expect(
         tester
@@ -181,7 +211,7 @@ void main() {
     final pending = Completer<String>();
     await mount(tester, download: (_) => pending.future);
     await tester.tap(
-        find.bySemanticsIdentifier('tim.rich.video.rich.${video.hashCode}'));
+        find.bySemanticsIdentifier('tim.rich.rich.video.${video.hashCode}'));
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.download));
     await tester.pump();

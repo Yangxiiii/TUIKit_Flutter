@@ -1380,7 +1380,8 @@ class _MessageListState extends State<MessageList>
         final notice = ConversationNotice.fromMessage(message);
         // 通知按投递策略计数，不通过提示消息清空会话未读。
         if (notice != null &&
-            ((notice.isGroupDeparture && !widget.config.showGroupDepartureNotices) ||
+            ((notice.isGroupDeparture &&
+                    !widget.config.showGroupDepartureNotices) ||
                 notice.usesOriginalMessage ||
                 notice.matchesNativeDescriptionIn(_messages) ||
                 _messages.any((item) =>
@@ -1529,7 +1530,9 @@ class _MessageListState extends State<MessageList>
           batch.map((id, message) => MapEntry(id, message.reactionList));
       try {
         final response = await manager.getMessageReactions(
-          messageList: [for (final message in batch.values) message.rawMessage!],
+          messageList: [
+            for (final message in batch.values) message.rawMessage!
+          ],
           maxUserCountPerReaction: 10,
         );
         if (!mounted || store != _messageListStore) return;
@@ -1765,13 +1768,15 @@ class _MessageListState extends State<MessageList>
     BuildContext context,
     int index,
     ChatMessageReplyView? replies,
+    List<MessageInfo>? mediaWindow,
   ) {
     if (index >= _messages.length) return Container();
     final message = _messages[index];
 
     if (StickyMessageEvent.fromMessage(message)?.isControl == true ||
         (!widget.config.showGroupDepartureNotices &&
-            ConversationNotice.fromMessage(message)?.isGroupDeparture == true) ||
+            ConversationNotice.fromMessage(message)?.isGroupDeparture ==
+                true) ||
         (!widget.config.isShowSystemMessage && _isSystemMessage(message))) {
       return const SizedBox.shrink();
     }
@@ -1823,6 +1828,7 @@ class _MessageListState extends State<MessageList>
             isContinuation: isContinuation,
             replyQuote: replies?.quotes[message.msgID],
             replyIds: replies?.replies[message.msgID] ?? const [],
+            mediaWindow: mediaWindow,
           ),
           if (_isLoadingNewer && index == _messages.length - 1)
             const Padding(
@@ -1838,7 +1844,8 @@ class _MessageListState extends State<MessageList>
   Widget _buildMessageItem(MessageInfo message, SemanticColorScheme colors,
       {bool isContinuation = false,
       MessageQuoteInfo? replyQuote,
-      List<String> replyIds = const []}) {
+      List<String> replyIds = const [],
+      List<MessageInfo>? mediaWindow}) {
     bool isGroup = widget.conversationID.startsWith(groupConversationIDPrefix);
 
     final messageWidget = RepaintBoundary(
@@ -1874,12 +1881,13 @@ class _MessageListState extends State<MessageList>
             onUserLongPress: isGroup ? widget.onUserLongPress : null,
             onCallMessageClick: widget.onCallMessageClick,
             customActions: widget.customActions,
-            // 归档媒体没有 SDK 原消息，用现有预览器直接读取归档地址。
-            mergedMediaMessages: _archiveLoaded &&
-                    _localWindow.isPending(message.msgID) &&
-                    (message.messageType == MessageType.image ||
-                        message.messageType == MessageType.video)
-                ? [message]
+            // 离线和归档预览从已展示窗口取得相邻媒体，归档图不依赖 SDK 媒体查询。
+            mergedMediaMessages: (message.messageType == MessageType.image ||
+                        message.messageType == MessageType.video) &&
+                    (widget.offlineMessages != null ||
+                        (_archiveLoaded &&
+                            _localWindow.isPending(message.msgID)))
+                ? mediaWindow
                 : null,
             config: widget.config,
             isMultiSelectMode: _isMultiSelectMode,
@@ -1973,6 +1981,14 @@ class _MessageListState extends State<MessageList>
     // 每个窗口只合并一次回复索引，滚动复用同一份派生数据。
     final replies =
         widget.replyConfig?.project(_messages, _localWindow.isRevoked);
+    // 同一窗口只构造一次媒体快照，避免每个归档气泡反复扫描消息。
+    final mediaWindow = _archiveLoaded || widget.offlineMessages != null
+        ? _messages.reversed
+            .where((item) =>
+                item.messageType == MessageType.image ||
+                item.messageType == MessageType.video)
+            .toList(growable: false)
+        : null;
 
     return Expanded(
       child: MessageOverlayAvoider(
@@ -1998,7 +2014,8 @@ class _MessageListState extends State<MessageList>
                             reverse: true,
                             // 短会话由外层顶部对齐；内容超出视口时仍保留反向分页与最新端锚点。
                             shrinkWrap: true,
-                            physics: const AlwaysScrollableScrollPhysics(),
+                            // 内容未撑满时禁止回弹拖移，历史续查仍由可见索引触发。
+                            physics: const ScrollPhysics(),
                             itemScrollController: _itemScrollController,
                             itemPositionsListener: _itemPositionsListener,
                             initialScrollIndex: _initialScrollIndex,
@@ -2010,7 +2027,8 @@ class _MessageListState extends State<MessageList>
                             itemBuilder: (context, index) =>
                                 index == _messages.length
                                     ? _buildOlderHistoryEntry(context)
-                                    : _renderItem(context, index, replies),
+                                    : _renderItem(
+                                        context, index, replies, mediaWindow),
                             addRepaintBoundaries: true,
                             addAutomaticKeepAlives: true,
                             addSemanticIndexes: false,

@@ -1,9 +1,10 @@
-import 'package:atomic_x_core/api/message/message_action_store.dart';
 import 'dart:io';
 
+import 'package:atomic_x_core/api/message/message_action_store.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
 import 'package:tencent_chat_uikit/src/image_viewer/image_element.dart';
+import 'package:tencent_cloud_chat_sdk/tencent_im_sdk_plugin.dart';
 
 /// 将消息媒体转换为预览数据，静态转发集合不拉取原会话历史。
 class ImageViewerManager {
@@ -63,11 +64,14 @@ class ImageViewerManager {
     );
     _imageViewerDataManager = dataManager;
 
-    final result = await dataManager.loadInitialData();
-    _initialImageElements = result.mediaElements;
-    _initialImageIndex = result.currentIndex;
-    _isLoadingImageData = false;
-    _isShowingImageViewer = true;
+    try {
+      final result = await dataManager.loadInitialData();
+      _initialImageElements = result.mediaElements;
+      _initialImageIndex = result.currentIndex;
+      _isShowingImageViewer = _initialImageElements.isNotEmpty;
+    } finally {
+      _isLoadingImageData = false;
+    }
   }
 
   void hideImageViewer() {
@@ -224,10 +228,20 @@ class ImageViewerDataManager {
     option.cursor = currentMessage;
     option.messageTypeList = [MessageType.image, MessageType.video];
 
-    final mediaElements =
-        await _loadMediaMessages(option: option, isInitialLoad: true);
-    final currentIndex = _findCurrentMessageIndex();
-    return (mediaElements: mediaElements, currentIndex: currentIndex);
+    try {
+      final mediaElements = await _loadMediaMessages(option: option);
+      final currentIndex = _mediaMessages
+          .indexWhere((message) => message.msgID == currentMessage.msgID);
+      if (currentIndex >= 0) {
+        return (mediaElements: mediaElements, currentIndex: currentIndex);
+      }
+    } on Object {
+      // 历史窗口查询失败时仍保留用户点开的资源，便于弱网和归档场景重试。
+    }
+    return (
+      mediaElements: [await _processMediaMessage(currentMessage)],
+      currentIndex: 0
+    );
   }
 
   Future<({List<ImageElement> elements, bool hasMoreData})> loadMoreData(
@@ -272,8 +286,7 @@ class ImageViewerDataManager {
       option.cursor = anchorMessage;
       option.messageTypeList = [MessageType.image, MessageType.video];
 
-      final allElements =
-          await _loadMediaMessages(option: option, isInitialLoad: false);
+      final allElements = await _loadMediaMessages(option: option);
       hasMoreData = isOlder
           ? messageListStore.state.hasOlderMessages.value
           : messageListStore.state.hasNewerMessages.value;
@@ -325,7 +338,8 @@ class ImageViewerDataManager {
         final payload = message.messagePayload as VideoMessagePayload?;
         final videoSnapshotPath = payload?.videoSnapshotPath;
         return videoSnapshotPath == byImagePath ||
-            (message.messagePayload as VideoMessagePayload?)?.videoSnapshotURL ==
+            (message.messagePayload as VideoMessagePayload?)
+                    ?.videoSnapshotURL ==
                 byImagePath;
       }
       return false;
@@ -354,7 +368,6 @@ class ImageViewerDataManager {
 
   Future<List<ImageElement>> _loadMediaMessages({
     required MessageLoadOption option,
-    required bool isInitialLoad,
   }) async {
     final result = await messageListStore.loadMessages(option: option);
     if (!result.isSuccess) {
@@ -394,56 +407,84 @@ class ImageViewerDataManager {
     }
   }
 
-  /// 优先预览已有本地图片或有效远端地址，仍无资源时才通过原生消息下载。
+  /// 依次收集本机大图、SDK下载和预览降级资源，解码时由查看器按顺序尝试。
   Future<ImageElement> _processImageMessagePayload(MessageInfo msg) async {
     final imagePayload = msg.messagePayload as ImageMessagePayload?;
-    String imagePath = '';
-
-    if (imagePayload?.largeImagePath != null &&
-        imagePayload!.largeImagePath!.isNotEmpty) {
-      final file = File(imagePayload.largeImagePath!);
-      if (await file.exists()) {
-        imagePath = imagePayload.largeImagePath!;
+    final paths = <String>{};
+    Future<void> addLocal(String? path) async {
+      if (path == null || path.isEmpty) return;
+      try {
+        final stat = await File(path).stat();
+        if (stat.type == FileSystemEntityType.file && stat.size > 0) {
+          paths.add(path);
+        }
+      } on FileSystemException {
+        // 沙盒清理期间本地候选可能消失，继续尝试剩余资源。
       }
     }
 
-    if (imagePath.isEmpty &&
-        imagePayload?.originalImagePath != null &&
-        imagePayload!.originalImagePath!.isNotEmpty) {
-      final file = File(imagePayload.originalImagePath!);
-      if (await file.exists()) {
-        imagePath = imagePayload.originalImagePath!;
+    await addLocal(imagePayload?.largeImagePath);
+    await addLocal(imagePayload?.originalImagePath);
+    // 收到的消息可能只有部分规格，SDK失败后继续尝试其他尺寸和在线地址。
+    if (paths.isEmpty && msg.rawMessage != null && imagePayload != null) {
+      final action = MessageActionStore.create(msg);
+      for (final quality in [MediaQuality.standard, MediaQuality.original]) {
+        try {
+          final result = await action.downloadMedia(quality: quality);
+          if (result.isSuccess) {
+            await addLocal(quality == MediaQuality.standard
+                ? imagePayload.largeImagePath
+                : imagePayload.originalImagePath);
+          }
+          if (paths.isNotEmpty) break;
+        } on Object {
+          // 单个规格下载异常不能阻止打开其他可用图片。
+        }
       }
     }
 
-    // 静态转发载荷可能只有远端地址，不依赖原生消息对象也能打开图片预览。
-    if (imagePath.isEmpty && msg.rawMessage == null) {
-      imagePath = _remotePreviewUrl([
-        imagePayload?.originalImageURL,
-        imagePayload?.largeImageURL,
-        imagePayload?.thumbImageURL,
-      ]);
+    final remote = [
+      imagePayload?.largeImageURL,
+      imagePayload?.originalImageURL
+    ];
+    if (paths.isEmpty &&
+        _remotePreviewUrl(remote).isEmpty &&
+        msg.rawMessage != null) {
+      try {
+        final result = await TencentImSDKPlugin.v2TIMManager
+            .getMessageManager()
+            .getMessageOnlineUrl(message: msg.rawMessage, msgID: msg.msgID);
+        if (result.code == 0) {
+          remote.addAll(
+              result.data?.imageElem?.imageList?.map((image) => image?.url) ??
+                  const []);
+        }
+      } on Object {
+        // 无在线地址时仍尝试本机缩略图，打开失败保留原会话可再次点开。
+      }
     }
-    if (imagePath.isEmpty && msg.rawMessage != null) {
-      await MessageActionStore.create(msg)
-          .downloadMedia(quality: MediaQuality.standard);
-
-      final updatedMessage =
-          messageListStore.state.messageList.value.firstWhere(
-        (message) => message.msgID == msg.msgID,
-        orElse: () => msg,
-      );
-
-      imagePath = (updatedMessage.messagePayload as ImageMessagePayload?)
-              ?.largeImagePath ??
-          (updatedMessage.messagePayload as ImageMessagePayload?)
-              ?.originalImagePath ??
-          '';
+    for (final url in remote) {
+      final path = _remotePreviewUrl([url]);
+      if (path.isNotEmpty) paths.add(path);
+    }
+    await addLocal(imagePayload?.thumbImagePath);
+    final thumbnail = _remotePreviewUrl([imagePayload?.thumbImageURL]);
+    if (thumbnail.isNotEmpty) paths.add(thumbnail);
+    if (paths.isEmpty && msg.rawMessage != null && imagePayload != null) {
+      try {
+        final result = await MessageActionStore.create(msg)
+            .downloadMedia(quality: MediaQuality.thumbnail);
+        if (result.isSuccess) await addLocal(imagePayload.thumbImagePath);
+      } on Object {
+        // 全部规格暂不可用时保留占位，用户可关闭后再次尝试。
+      }
     }
 
     return ImageElement(
       type: 0,
-      imagePath: imagePath,
+      imagePath: paths.firstOrNull ?? '',
+      mediaId: msg.msgID.isNotEmpty ? msg.msgID : null,
+      fallbackImagePaths: paths.skip(1).toList(growable: false),
     );
   }
 
@@ -495,6 +536,7 @@ class ImageViewerDataManager {
       final uri = Uri.tryParse(value);
       if (uri != null &&
           uri.host.isNotEmpty &&
+          uri.userInfo.isEmpty &&
           (uri.scheme == 'http' || uri.scheme == 'https')) {
         return value;
       }

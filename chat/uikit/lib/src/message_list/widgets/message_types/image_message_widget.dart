@@ -32,7 +32,7 @@ class ImageMessageWidget extends StatefulWidget {
   /// own message list here so the viewer can render images / videos
   /// from the bundle directly.
   ///
-  /// 当这个组件在合并消息详情页中渲染时，基于会话的 [messageListStore] 是空的，图片查看器无法浏览实时历史记录。将合并包自身的消息列表传入，以便查看器可以直接渲染包中的图片/视频。
+  /// 合并转发、归档及离线窗口传入有序媒体快照，避免对当前来源发起实时历史分页。
   final List<MessageInfo>? mergedMediaMessages;
 
   static const double kImageFixedHeight = 160.0;
@@ -60,32 +60,13 @@ class ImageMessageWidget extends StatefulWidget {
 /// 管理图片消息预览入口，加载占位沿用气泡的固定尺寸。
 class _ImageMessageWidgetState extends State<ImageMessageWidget>
     with MessageStatusMixin {
+  /// 从点击开始到预览关闭只保留一个管理器，避免并发拉取同一会话媒体。
   ImageViewerManager? _imageViewerManager;
-
-  @override
-  void initState() {
-    super.initState();
-    _initializeImageViewerManager();
-  }
-
-  void _initializeImageViewerManager() {
-    if (widget.localOnly) return;
-    // 转发已有静态媒体集合时，可直接预览载荷中的本地文件或有效URL。
-    if (widget.message.rawMessage == null && widget.mergedMediaMessages == null) {
-      return;
-    }
-
-    _imageViewerManager = ImageViewerManager(
-      conversationID: widget.conversationID,
-      currentMessage: widget.message,
-      context: context,
-      presetMediaMessages: widget.mergedMediaMessages,
-    );
-  }
 
   @override
   void dispose() {
     _imageViewerManager?.dispose();
+    _imageViewerManager = null;
     super.dispose();
   }
 
@@ -142,7 +123,8 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget>
   void _handleTap() {
     widget.onTap?.call();
     if (widget.localOnly) {
-      ImageViewer.viewLocalMessage(context, widget.message);
+      ImageViewer.viewLocalMessage(context, widget.message,
+          mediaMessages: widget.mergedMediaMessages);
       return;
     }
     _showImageViewer();
@@ -162,10 +144,8 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget>
     //
     // 远程 URL 回退。在合并转发的详情视图中，每次打开都会重新下载 bundle，本地缩略图文件是临时的／第二次可能已经不存在，所以我们必须能够直接从服务器 URL
     // 渲染，而不是卡在加载动画上（bug#161210776）。本地路径存在时总是优先。
-    final thumbImageURL =
-        widget.localOnly ? null : imagePayload?.thumbImageURL;
-    final largeImageURL =
-        widget.localOnly ? null : imagePayload?.largeImageURL;
+    final thumbImageURL = widget.localOnly ? null : imagePayload?.thumbImageURL;
+    final largeImageURL = widget.localOnly ? null : imagePayload?.largeImageURL;
     final originalImageURL =
         widget.localOnly ? null : imagePayload?.originalImageURL;
 
@@ -305,18 +285,31 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget>
           : ChatMediaPlaceholder(
               image: widget.config.imageLoadingPlaceholder, showLoading: true);
 
+  /// 点击时读取当前媒体窗口，展示后释放本次查看器分页状态。
   Future<void> _showImageViewer() async {
-    if (_imageViewerManager == null) return;
-
-    await _imageViewerManager!.showImageViewerIfAvailable();
-
-    if (_imageViewerManager!.initialImageElements.isNotEmpty && mounted) {
-      ImageViewer.view(
+    if (_imageViewerManager != null) return;
+    final manager = ImageViewerManager(
+      conversationID: widget.conversationID,
+      currentMessage: widget.message,
+      context: context,
+      presetMediaMessages: widget.mergedMediaMessages ??
+          (widget.message.rawMessage == null ? [widget.message] : null),
+    );
+    _imageViewerManager = manager;
+    try {
+      await manager.showImageViewerIfAvailable();
+      if (manager.initialImageElements.isEmpty || !mounted) return;
+      await ImageViewer.view(
         context,
-        imageElements: _imageViewerManager!.initialImageElements,
-        initialIndex: _imageViewerManager!.initialImageIndex,
-        onEventTriggered: _imageViewerManager!.handleImageViewerEvent,
+        imageElements: manager.initialImageElements,
+        initialIndex: manager.initialImageIndex,
+        onEventTriggered: manager.handleImageViewerEvent,
       );
+    } finally {
+      if (_imageViewerManager == manager) {
+        manager.dispose();
+        _imageViewerManager = null;
+      }
     }
   }
 }

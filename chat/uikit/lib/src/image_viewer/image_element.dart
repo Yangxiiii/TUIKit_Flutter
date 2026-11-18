@@ -1,9 +1,15 @@
+import 'package:flutter/foundation.dart';
+
+/// 保存全屏预览资源及用于分页重新定位的稳定标识。
 class ImageElement {
   /// 预览器内部类型：0为图片，1为视频。
   final int type;
 
   /// 图片或视频封面的本地路径，也可为富文本协议校验过的HTTP(S)地址。
   final String imagePath;
+
+  /// 主图下载或解码失败时，按顺序尝试剩余地址。
+  final List<String> fallbackImagePaths;
 
   /// 已下载视频的本地路径，未下载时为空并展示下载入口。
   final String? videoPath;
@@ -19,6 +25,7 @@ class ImageElement {
     required this.imagePath,
     this.videoPath,
     this.mediaId,
+    this.fallbackImagePaths = const [],
   });
 
   bool get isImage => type == 0;
@@ -34,6 +41,8 @@ class ImageElement {
       imagePath: map['imagePath'] as String,
       videoPath: map['videoPath'] as String?,
       mediaId: map['mediaId'] as String?,
+      fallbackImagePaths:
+          (map['fallbackImagePaths'] as List?)?.cast<String>() ?? const [],
     );
   }
 
@@ -44,6 +53,8 @@ class ImageElement {
       'imagePath': imagePath,
       'videoPath': videoPath,
       if (mediaId != null) 'mediaId': mediaId,
+      if (fallbackImagePaths.isNotEmpty)
+        'fallbackImagePaths': fallbackImagePaths,
     };
   }
 
@@ -59,7 +70,8 @@ class ImageElement {
         other.type == type &&
         other.imagePath == imagePath &&
         other.videoPath == videoPath &&
-        other.mediaId == mediaId;
+        other.mediaId == mediaId &&
+        listEquals(other.fallbackImagePaths, fallbackImagePaths);
   }
 
   @override
@@ -67,6 +79,7 @@ class ImageElement {
     return type.hashCode ^
         imagePath.hashCode ^
         videoPath.hashCode ^
-        mediaId.hashCode;
+        mediaId.hashCode ^
+        Object.hashAll(fallbackImagePaths);
   }
 }

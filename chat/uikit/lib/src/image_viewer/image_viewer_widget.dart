@@ -90,6 +90,7 @@ class _ImageItemView extends StatefulWidget {
   final ValueChanged<bool>? onZoomChanged;
 
   const _ImageItemView({
+    super.key,
     required this.element,
     required this.onTap,
     this.onZoomChanged,
@@ -107,6 +108,9 @@ class _ImageItemViewState extends State<_ImageItemView>
   /// 用于获取图片原始比例的监听，必须随页面释放以免保留远端图片流。
   ImageStream? _sizeStream;
   ImageStreamListener? _sizeListener;
+
+  /// 当前尝试的图片源，解码失败时与尺寸监听一起切换。
+  ImageProvider? _imageProvider;
 
   // Current committed scale & offset (updated on gesture end / animation)
   //
@@ -164,8 +168,17 @@ class _ImageItemViewState extends State<_ImageItemView>
   }
 
   /// 从实际图片来源读取固有尺寸，缩放边界不能假设远端资源存在于本地文件系统。
-  void _loadImageSize() {
-    final provider = _previewImageProvider(widget.element.imagePath);
+  void _loadImageSize([int candidate = 0]) {
+    if (_sizeListener != null) _sizeStream?.removeListener(_sizeListener!);
+    final paths = [
+      widget.element.imagePath,
+      ...widget.element.fallbackImagePaths
+    ];
+    ImageProvider? provider;
+    while (candidate < paths.length && provider == null) {
+      provider = _previewImageProvider(paths[candidate++]);
+    }
+    _imageProvider = provider;
     if (provider == null) return;
     _sizeStream = provider.resolve(const ImageConfiguration());
     _sizeListener = ImageStreamListener((ImageInfo info, bool _) {
@@ -179,7 +192,11 @@ class _ImageItemViewState extends State<_ImageItemView>
       }
       info.dispose();
     }, onError: (Object error, StackTrace? stackTrace) {
-      // 可见图片组件负责展示错误占位，尺寸监听不重复上抛网络或解码错误。
+      // 下一个资源可能已在解码缓存中，延到当前图片流通知完毕再切换监听。
+      scheduleMicrotask(() {
+        if (!mounted) return;
+        setState(() => _loadImageSize(candidate));
+      });
     });
     _sizeStream!.addListener(_sizeListener!);
   }
@@ -596,11 +613,15 @@ class _ImageItemViewState extends State<_ImageItemView>
   }
 
   Widget _buildImage() {
-    final provider = _previewImageProvider(widget.element.imagePath);
+    final provider = _imageProvider;
     if (provider != null) {
       return Image(
         image: provider,
         fit: BoxFit.contain,
+        frameBuilder: (context, child, frame, synchronous) =>
+            frame != null || synchronous
+                ? child
+                : const Center(child: CircularProgressIndicator()),
         errorBuilder: (context, error, stackTrace) => _buildErrorImage(),
       );
     } else {
@@ -951,6 +972,7 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
 
   void _handleLoadMoreResponse(
       List<ImageElement> newElementsData, bool isOlder) {
+    if (!mounted) return;
     _cancelLoadingTimer();
 
     final newElements = newElementsData;
@@ -995,7 +1017,8 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
   }
 
   String _getElementSignature(ImageElement element) {
-    return '${element.type}_${element.imagePath}_${element.videoPath ?? ""}';
+    return element.mediaId ??
+        '${element.type}_${element.imagePath}_${element.videoPath ?? ""}';
   }
 
   int _findElementIndex(List<ImageElement> elements, String signature) {
@@ -1117,6 +1140,7 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
                 onPageChanged: (index) {
                   setState(() {
                     _currentIndex = index;
+                    _isImageZoomed = false;
                   });
                   _handleIndexChange(index);
                 },
@@ -1143,9 +1167,11 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
 
     if (element.isImage) {
       final image = _ImageItemView(
+        key: ValueKey(element),
         element: element,
         onTap: _onImageTap,
         onZoomChanged: (isZoomed) {
+          if (index != _currentIndex) return;
           if (_isImageZoomed != isZoomed) {
             setState(() {
               _isImageZoomed = isZoomed;
