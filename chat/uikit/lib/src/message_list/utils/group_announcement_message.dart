@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:atomic_x_core/atomicxcore.dart';
 
+import 'rich_content_message.dart';
+
 /// 从当前群会话的自定义消息读取公告卡片，供消息行和会话摘要共用。
 final class GroupAnnouncementMessage {
   const GroupAnnouncementMessage._(
@@ -13,7 +15,7 @@ final class GroupAnnouncementMessage {
   /// 原始群 ID，用于校验卡片与会话的归属。
   final String groupId;
 
-  /// 服务端提供的纯文本摘要。
+  /// 卡片、置顶和会话列表共用的纯文本摘要，可由公告内容块提取。
   final String summary;
 
   /// 撤回、删除、违规、跨群或不符合 v1 格式的消息回退到既有消息处理。
@@ -52,18 +54,38 @@ final class GroupAnnouncementMessage {
       final id = data['announcementId'];
       final group = data['groupId'];
       final summary = data['summary'];
+      final content = data['content'];
       if (id is! String ||
           id.trim().isEmpty ||
           group is! String ||
           group.trim().isEmpty ||
           'group_$group' != conversationId ||
-          summary is! String) {
+          (summary is! String && content is! String)) {
         return null;
       }
-      return GroupAnnouncementMessage._(id, group, summary);
+      // 新卡片可携带完整内容，旧卡片只带摘要。正文不可用时仍保留详情入口。
+      final preview =
+          _readSummary(content) ?? _readSummary(summary) ?? '公告内容暂无法显示';
+      return GroupAnnouncementMessage._(id, group, preview);
     } on FormatException {
       return null;
     }
+  }
+
+  /// 复用聊天的内容块与摘要规则，为紧凑卡片保留正文和媒体类型。
+  static String? _readSummary(Object? value) {
+    if (value is! String) return null;
+    final text = value.trim();
+    // 识别内容块数组，同时保留旧摘要中单独出现的「[图片]」等文本。
+    final isStructured =
+        text.startsWith('{') || RegExp(r'^\[\s*(?:\{|\[|\]|")').hasMatch(text);
+    if (!isStructured) return text.isEmpty ? null : value;
+
+    // 降级时不把 JSON 显示给用户，优先回到消息自带的摘要。
+    final parsed = RichContentMessage.tryParse(text, allowBareBlocks: true);
+    final preview =
+        parsed?.plainTextForForward.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return preview == null || preview.isEmpty ? null : preview;
   }
 
   /// 为会话列表生成带公告标记的纯文本。

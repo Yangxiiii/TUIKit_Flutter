@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_actions_scope.dart';
@@ -6,6 +8,8 @@ import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
 const _group = 'group_group-001';
 const _id = '9007199254740993';
 const _summary = '明天下午三点召开项目会议，请准时参加。';
+const _richBody = '[{"type":"text","text":"**会议通知**","title":false},'
+    '{"type":"image","url":"https://example.com/notice.png","name":"image.png"}]';
 const _wire = '''
 {
   "businessID": "oa_group_announcement",
@@ -17,6 +21,16 @@ const _wire = '''
   }
 }
 ''';
+
+String _wireWithContent(Map<String, String> fields) => jsonEncode({
+      'businessID': 'oa_group_announcement',
+      'version': 1,
+      'payload': {
+        'announcementId': _id,
+        'groupId': 'group-001',
+        ...fields,
+      },
+    });
 
 MessageInfo _message(String data,
         {MessageStatus status = MessageStatus.sendSuccess}) =>
@@ -62,13 +76,34 @@ void main() {
     );
   });
 
-  testWidgets('公告卡显示两行摘要，整卡把长 ID 交给宿主', (tester) async {
+  test('公告从正文或摘要读取富文本块，异常正文回退到摘要', () {
+    GroupAnnouncementMessage? parse(Map<String, String> fields) =>
+        GroupAnnouncementMessage.fromConversation(
+            _message(_wireWithContent(fields)), _group);
+    expect(parse({'content': _richBody})?.summary, '会议通知 [图片]');
+    expect(
+      parse({'content': _richBody, 'summary': _summary})?.summary,
+      '会议通知 [图片]',
+    );
+    expect(parse({'summary': _richBody})?.preview, '[群公告]会议通知 [图片]');
+    expect(parse({'summary': '[图片]'})?.summary, '[图片]');
+    expect(
+      parse({'content': '[{"type":"image"}]', 'summary': _summary})?.summary,
+      _summary,
+    );
+    expect(
+      parse({'content': '[{"type":"image"}]'})?.summary,
+      '公告内容暂无法显示',
+    );
+  });
+
+  testWidgets('富文本公告卡显示两行摘要，整卡把长 ID 交给宿主', (tester) async {
     GroupAnnouncementMessage? opened;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: MessageBubble(
-            message: _message(_wire),
+            message: _message(_wireWithContent({'content': _richBody})),
             conversationID: _group,
             isSelf: false,
             maxWidth: 350,
@@ -81,8 +116,9 @@ void main() {
       ),
     );
     expect(find.text('群公告'), findsOneWidget);
-    expect(tester.widget<Text>(find.text(_summary)).maxLines, 2);
-    await tester.tap(find.text(_summary));
+    final preview = find.text('会议通知 [图片]');
+    expect(tester.widget<Text>(preview).maxLines, 2);
+    await tester.tap(preview);
     expect(opened?.announcementId, _id);
   });
 
@@ -116,7 +152,7 @@ void main() {
           body: MessageActionsScope(
             config: null,
             onMessagesChanged: (_) {},
-            showActions: (message, anchor, items, react) => actions =
+            showActions: (message, anchor, row, items, react) => actions =
                 items.map((item) => item.id).whereType<String>().toList(),
             child: MessageBubble(
               message: _message(_wire),

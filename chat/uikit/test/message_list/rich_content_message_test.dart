@@ -8,6 +8,36 @@ import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_message.d
 import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_markdown_format.dart';
 
 void main() {
+  test('公告可解析直接提供的内容块，聊天仍校验协议头', () {
+    const blocks = [
+      {'type': 'text', 'text': '公告正文'},
+      {'type': 'image', 'url': 'https://example.com/photo.png'},
+    ];
+    for (final body in [
+      blocks,
+      {'blocks': blocks}
+    ]) {
+      final json = jsonEncode(body);
+      expect(RichContentMessage.tryParse(json), isNull);
+      final parsed = RichContentMessage.tryParse(json, allowBareBlocks: true)!;
+      expect(parsed.plainTextPreview, '公告正文');
+      expect(parsed.blocks.last, isA<RichImageBlock>());
+    }
+    for (final body in [
+      {'businessID': 'other', 'blocks': blocks},
+      {'version': 2, 'blocks': blocks},
+      [
+        ...blocks,
+        {'type': 'image', 'url': 'file:///tmp/photo.png'}
+      ],
+    ]) {
+      expect(
+        RichContentMessage.tryParse(jsonEncode(body), allowBareBlocks: true),
+        isNull,
+      );
+    }
+  });
+
   test('草稿视频时长可缺省并拒绝负数及错误类型', () {
     const draft = RichContentDraft(blocks: [
       RichContentDraftAttachmentBlock(1,

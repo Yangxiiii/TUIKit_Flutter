@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'rich_content_markdown_parser.dart';
 
-/// 解析应用的图文自定义消息；其他业务类型和未知版本不在此协议中处理。
+/// 解析应用图文内容，统一校验自定义消息和公告正文中的内容块。
 final class RichContentMessage {
   /// 当前应用图文消息的业务标识，与其他自定义消息区分。
   static const businessID = 'oa_rich_content';
@@ -68,35 +68,51 @@ final class RichContentMessage {
         if (text != null && text.isNotEmpty) text,
       ].join(' ');
 
-  /// 从 SDK 的 customData 解析图文消息；不属于本协议或内容不完整时返回 null。
-  static RichContentMessage? tryParse(String? raw) {
+  /// 默认解析完整的图文自定义消息。公告正文可开启 [allowBareBlocks]，
+  /// 接受块数组或顶层含 blocks 的对象；无效内容返回 null。
+  static RichContentMessage? tryParse(
+    String? raw, {
+    bool allowBareBlocks = false,
+  }) {
     if (raw == null || raw.isEmpty) return null;
 
     // 自定义消息来自会话成员，不能让无效 JSON 或错误字段类型打断整页消息渲染。
     try {
       final decoded = jsonDecode(raw);
-      if (decoded is! Map<String, dynamic> ||
-          decoded['businessID'] != businessID ||
+      if (allowBareBlocks && decoded is List) return _parseBlocks(decoded);
+      if (decoded is! Map<String, dynamic>) return null;
+
+      // 带协议标识或版本的内容仍须通过协议校验，避免误读其他业务消息。
+      if (allowBareBlocks &&
+          !decoded.containsKey('businessID') &&
+          !decoded.containsKey('version')) {
+        return _parseBlocks(decoded['blocks']);
+      }
+      if (decoded['businessID'] != businessID ||
           decoded['version'] != version) {
         return null;
       }
 
       final payload = decoded['payload'];
       if (payload is! Map<String, dynamic>) return null;
-      final rawBlocks = payload['blocks'];
-      if (rawBlocks is! List || rawBlocks.isEmpty) return null;
-
-      final blocks = <RichContentBlock>[];
-      for (final rawBlock in rawBlocks) {
-        if (rawBlock is! Map<String, dynamic>) return null;
-        final block = _parseBlock(rawBlock);
-        if (block == null) return null;
-        blocks.add(block);
-      }
-      return RichContentMessage(List.unmodifiable(blocks));
+      return _parseBlocks(payload['blocks']);
     } on FormatException {
       return null;
     }
+  }
+
+  /// 按原顺序解析所有块，任何无效块都使整段内容走降级展示。
+  static RichContentMessage? _parseBlocks(Object? rawBlocks) {
+    if (rawBlocks is! List || rawBlocks.isEmpty) return null;
+
+    final blocks = <RichContentBlock>[];
+    for (final rawBlock in rawBlocks) {
+      if (rawBlock is! Map<String, dynamic>) return null;
+      final block = _parseBlock(rawBlock);
+      if (block == null) return null;
+      blocks.add(block);
+    }
+    return RichContentMessage(List.unmodifiable(blocks));
   }
 
   /// 校验并解析单个内容块；拒绝未知类型，避免静默丢失消息中的一段内容。
