@@ -221,6 +221,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
   void _showActions(
       MessageInfo message,
       GlobalKey bubble,
+      BuildContext? messageRow,
       List<MessageMenuItem> original,
       void Function(EmojiPickerModelItem)? reaction) {
     Future<void> open() async {
@@ -265,7 +266,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
           onClose: () => Navigator.of(sheetContext).pop(),
           onBounds: (bounds) {
             if (mounted) {
-              _overlay.avoid(bubble, bounds.top);
+              _overlay.avoid(bubble, bounds.top, row: messageRow);
             }
           },
           onReaction: reaction,

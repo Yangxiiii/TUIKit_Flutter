@@ -22,8 +22,8 @@ class MessageActionsScope extends InheritedWidget {
   final ChatMessageEditConfig? config;
 
   /// 由聊天页展示底部面板并协调目标气泡避让；回应沿用原有SDK回调。
-  final void Function(MessageInfo, GlobalKey, List<MessageMenuItem>,
-      void Function(EmojiPickerModelItem)?) showActions;
+  final void Function(MessageInfo, GlobalKey, BuildContext?,
+      List<MessageMenuItem>, void Function(EmojiPickerModelItem)?) showActions;
 
   /// SDK列表完成更新后检查当前编辑目标并批量派生附加数据。
   final ValueChanged<List<MessageInfo>> onMessagesChanged;

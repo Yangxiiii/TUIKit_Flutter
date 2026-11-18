@@ -213,6 +213,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     }
 
     final messageBubble = MessageBubble(
+      actionRowContext: context,
       message: message,
       conversationID: conversationID,
       isSelf: isSelf,

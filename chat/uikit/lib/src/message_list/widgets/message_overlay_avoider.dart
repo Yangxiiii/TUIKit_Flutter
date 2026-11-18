@@ -6,16 +6,16 @@ double messageOverlayLift(
     messageBottom > overlayTop ? messageBottom - overlayTop + 16 : 0;
 
 /// 聊天页提供实测浮层边界，列表临时平移绘制而不改动历史浏览和分页锚点。
-class MessageOverlayController
-    extends ValueNotifier<({GlobalKey bubble, double top})?> {
+class MessageOverlayController extends ValueNotifier<
+    ({GlobalKey bubble, BuildContext? row, double top})?> {
   MessageOverlayController() : super(null);
 
   /// 同一气泡与顶部边界只通知一次，避免布局测量形成无效重绘循环。
-  void avoid(GlobalKey bubble, double top) {
-    if (value?.bubble == bubble && value?.top == top) {
+  void avoid(GlobalKey bubble, double top, {BuildContext? row}) {
+    if (value?.bubble == bubble && value?.top == top && value?.row == row) {
       return;
     }
-    value = (bubble: bubble, top: top);
+    value = (bubble: bubble, row: row, top: top);
   }
 
   /// 关闭浮层后移除临时位移，原始滚动位置不需要重建或重新定位。
@@ -71,7 +71,10 @@ class _MessageOverlayAvoiderState extends State<MessageOverlayAvoider> {
         return;
       }
       final target = widget.controller?.value;
-      final box = target?.bubble.currentContext?.findRenderObject();
+      final row = target?.row;
+      final box = row?.mounted == true
+          ? row?.findRenderObject()
+          : target?.bubble.currentContext?.findRenderObject();
       var next = 0.0;
       if (target != null && box is RenderBox && box.attached && box.hasSize) {
         // 气泡已被上一次绘制位移抬高，先加回才能避免同一浮层重复累加。

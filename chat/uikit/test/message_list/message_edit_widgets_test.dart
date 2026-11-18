@@ -11,6 +11,7 @@ import 'package:tencent_chat_uikit/src/message_input/widget/message_edit_compose
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_action_sheet.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_actions_scope.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_overlay_avoider.dart';
+import 'package:tencent_chat_uikit/src/message_list/widgets/reaction_emoji_picker.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_tooltip.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/text_message_widget.dart';
 
@@ -21,6 +22,32 @@ Widget _host(Widget body) => MaterialApp(
     );
 
 void main() {
+  testWidgets('更多回应展示常用表情，网格上滑展开面板', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    EmojiManager.configure(emojis: [
+      for (var index = 0; index < 45; index++)
+        EmojiPickerModelItem(
+            path: 'assets/images/zd_emoji/zd_emoji_like.png',
+            name: '[ZDEmoji_Test$index]',
+            label: '表情$index'),
+    ], assetPackage: 'feature_tim');
+    addTearDown(
+        () => EmojiManager.configure(emojis: [], assetPackage: 'feature_tim'));
+    await tester.pumpWidget(_host(Builder(
+        builder: (context) => TextButton(
+              onPressed: () => ReactionEmojiPickerSheet.show(context),
+              child: const Text('打开回应表情'),
+            ))));
+    await tester.tap(find.text('打开回应表情'));
+    await tester.pumpAndSettle();
+    expect(find.text('最常使用'), findsOneWidget);
+    final sheet = find.byType(ReactionEmojiPickerSheet);
+    final before = tester.getSize(sheet).height;
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -250));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(sheet).height, greaterThan(before));
+  });
+
   test('只有实际遮挡才计算16像素留白，未遮挡但距离不足也不移动', () {
     expect(messageOverlayLift(messageBottom: 500, overlayTop: 400), 116);
     expect(messageOverlayLift(messageBottom: 400, overlayTop: 400), 0);
@@ -147,7 +174,7 @@ void main() {
           save: (id, text) async => null,
           onMessageWindowChanged: (_) {},
           editedMessageIds: {'edited'}),
-      showActions: (message, key, items, reaction) {},
+      showActions: (message, key, row, items, reaction) {},
       onMessagesChanged: (_) {},
       child: Align(
           alignment: Alignment.topLeft,
@@ -292,7 +319,7 @@ void main() {
             ))));
     await tester.tap(find.text('打开面板'));
     await tester.pumpAndSettle();
-    expect(top, 303);
+    expect(top, tester.getTopLeft(find.byType(MessageActionSheet)).dy);
     await tester.pumpWidget(_host(Align(
         alignment: Alignment.bottomCenter,
         child: MessageEditComposer(

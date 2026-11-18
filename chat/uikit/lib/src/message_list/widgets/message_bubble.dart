@@ -261,6 +261,7 @@ class MessageBubble extends StatefulWidget {
 
   const MessageBubble({
     super.key,
+    this.actionRowContext,
     required this.message,
     required this.conversationID,
     required this.isSelf,
@@ -282,6 +283,9 @@ class MessageBubble extends StatefulWidget {
     this.replyDetail,
     this.mergedMediaMessages,
   });
+
+  /// 聊天消息整行的布局上下文，菜单避让时包含气泡下方的表情回应。
+  final BuildContext? actionRowContext;
 
   @override
   State<StatefulWidget> createState() => _MessageBubbleState();
@@ -899,8 +903,8 @@ class _MessageBubbleState extends State<MessageBubble>
         widget.message.status != MessageStatus.violation;
     final scope = MessageActionsScope.maybeOf(context);
     if (scope != null) {
-      scope.showActions(widget.message, _messageKey, _buildMenuItems(),
-          canReact ? _handleReactionSelected : null);
+      scope.showActions(widget.message, _messageKey, widget.actionRowContext,
+          _buildMenuItems(), canReact ? _handleReactionSelected : null);
       return;
     }
     if (tooltip != null && tooltip!.isOpen) {
@@ -1688,7 +1692,7 @@ class _MessageBubbleState extends State<MessageBubble>
               padding: const EdgeInsets.all(8),
               child: Text.rich(
                 TextSpan(
-                  children: EmojiManager.buildInlineSpans(data, size: 48),
+                  children: EmojiManager.buildInlineSpans(data),
                 ),
                 textWidthBasis: TextWidthBasis.longestLine,
               ),

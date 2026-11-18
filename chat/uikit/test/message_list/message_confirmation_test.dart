@@ -22,7 +22,7 @@ void main() {
       home: MessageActionsScope(
           config: null,
           actionGuard: guard,
-          showActions: (message, key, items, reaction) {},
+          showActions: (message, key, row, items, reaction) {},
           onMessagesChanged: (_) {},
           child: Builder(builder: (context) {
             target = context;
