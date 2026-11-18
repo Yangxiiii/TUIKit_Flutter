@@ -3,15 +3,50 @@ import 'dart:io';
 
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_chat_uikit/src/message_input/album_picker_media_send_manager.dart';
 import 'package:tencent_chat_uikit/src/message_input/chat_media_sender.dart';
+import 'package:tencent_chat_uikit/src/message_input/message_input.dart';
 import 'package:tuikit_atomic_x/album_picker/album_picker.dart';
 import 'package:tuikit_atomic_x/album_picker/album_picker_platform.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('安卓普通输入和富文本相册都向原生选择器开启拍照入口', (tester) async {
+    const method = MethodChannel('atomic_x/album_picker');
+    const events = MethodChannel('atomic_x/album_picker_events');
+    final messenger = tester.binding.defaultBinaryMessenger;
+    final cameraFlags = <bool?>[];
+    messenger.setMockMethodCallHandler(events, (_) async => null);
+    messenger.setMockMethodCallHandler(method, (call) async {
+      expect(call.method, 'pickMedia');
+      cameraFlags.add(call.arguments['showsCameraItem'] as bool?);
+      return null;
+    });
+    addTearDown(() async {
+      await AlbumPickerPlatform.dispose();
+      messenger.setMockMethodCallHandler(method, null);
+      messenger.setMockMethodCallHandler(events, null);
+    });
+
+    await tester.pumpWidget(const MaterialApp(
+        home: Scaffold(
+            body: Column(
+      children: [Spacer(), MessageInput(conversationID: 'c2c_album_camera')],
+    ))));
+    await tester
+        .tap(find.bySemanticsIdentifier('tim.message_input_toolbar.album'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('open_rich_content_editor')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+        find.bySemanticsIdentifier('tim.rich_content_overlay_toolbar.album'));
+    await tester.pumpAndSettle();
+    expect(cameraFlags, [true, true]);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
 
   test('压缩时先显示文件占位，导出后按实际大小移交或清理', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;

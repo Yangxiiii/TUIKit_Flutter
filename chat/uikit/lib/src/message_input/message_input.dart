@@ -1724,6 +1724,7 @@ class MessageInputState extends State<MessageInput>
         },
       );
 
+  /// 按当前输入模式打开相册，普通媒体交给既有发送流程。
   void _onPickAlbum() async {
     // 点击时重新判断模式，避免切换帧内残留的普通回调把图片作为独立消息发送。
     if (_isRichContentEditorOpen) {
@@ -1737,7 +1738,8 @@ class MessageInputState extends State<MessageInput>
       mediaFilter: AlbumPickerMediaFilter.imageAndVideo,
       maxSelectionCount: 9,
       itemsPerRow: 3,
-      showsCameraItem: false,
+      showsCameraItem: defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.android,
       // 保留腾讯相册界面，确认时读取原件大小供占位和发送分流。
       includeSourceMetadata: canUploadLargeFiles,
       maxOutputFileSizeInMB: canUploadLargeFiles

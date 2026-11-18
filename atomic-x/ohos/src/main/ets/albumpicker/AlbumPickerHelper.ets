@@ -70,10 +70,12 @@ interface ThumbSize {
 const IMAGE_EXT: string[] = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff', 'svg', 'heic', 'heif'];
 const VIDEO_EXT: string[] = ['mp4', 'mov', 'avi', 'mkv', 'wmv', 'flv', '3gp', 'webm', 'm4v'];
 
+/// 为系统选图和应用内选图共享沙盒拷贝及视频元数据提取能力。
 export default class AlbumPickerHelper {
   private static readonly TAG = 'AtomicX.AlbumPickerHelper';
   private static readonly SANDBOX_SUBDIR = 'album_picker';
 
+  /// 打开系统选图页，取消或无法获取媒体时返回空列表。
   static async pickMedia(
     pickMode: number,
     maxCount: number,
@@ -103,85 +105,95 @@ export default class AlbumPickerHelper {
         return [];
       }
 
-      const sandboxDir = await AlbumPickerHelper.ensureSandboxDir(cacheDir);
-      if (sandboxDir === null) {
-        console.error(`${AlbumPickerHelper.TAG} no cacheDir available, aborting`);
-        return [];
-      }
-
-      const results: AlbumPickResult[] = [];
-      for (const uri of selectResult.photoUris) {
-        const fileName = AlbumPickerHelper.getFileNameFromPath(uri);
-        const ext = AlbumPickerHelper.getFileExtension(fileName);
-        const mediaTypeIndex = AlbumPickerHelper.resolveMediaTypeIndex(ext);
-
-        // 视频分支:必须在拷贝到沙盒 *之前* 用原 media library URI 拿 asset,
-        // 因为 asset 只认 file://media/... 这类系统 URI。拷贝到沙盒之后原 URI 就丢了。
-        // 拿不到 asset(权限缺失 / 非 media URI / ctx 空)时返回 {0, ''},由拷贝后 fallback 兜底。
-        let assetMeta: VideoAssetMeta = { durationMs: 0, thumbnailPath: '' };
-        if (mediaTypeIndex === AlbumPickMode.VIDEO && ctx !== null) {
-          assetMeta = await AlbumPickerHelper.resolveVideoMetadataFromAsset(uri, sandboxDir, ctx);
-        }
-
-        const sandboxPath = await AlbumPickerHelper.copyToSandbox(uri, sandboxDir, fileName);
-        if (sandboxPath === null) {
-          console.warn(`${AlbumPickerHelper.TAG} skip media: copy failed for ${uri}`);
-          continue;
-        }
-
-        let size = 0;
-        try {
-          const stat = await fs.stat(sandboxPath);
-          size = stat.size;
-        } catch (statErr) {
-          console.warn(`${AlbumPickerHelper.TAG} stat failed for ${sandboxPath}`,
-            (statErr as BusinessError).message);
-        }
-
-        // 视频必须补齐 duration + 缩略图,否则:
-        //   1) VideoMessagePayload.videoDuration=0 -> bubble 显示 00:00
-        //   2) videoSnapshotPath 为空 -> Dart 侧只能用黑图占位,且部分场景 IMSDK
-        //      createVideoMessage 因 snapshot 缺失导致发送失败(bug#161206638)。
-        let durationMs = assetMeta.durationMs;
-        let videoThumbnailPath = assetMeta.thumbnailPath;
-        if (mediaTypeIndex === AlbumPickMode.VIDEO
-          && (durationMs === 0 || videoThumbnailPath.length === 0)) {
-          console.info(`${AlbumPickerHelper.TAG} asset path incomplete ` +
-            `(duration=${durationMs}, thumb='${videoThumbnailPath}'), fallback to AVMetadataExtractor`);
-          const fb = await AlbumPickerHelper.resolveVideoMetadataFromFile(sandboxPath, sandboxDir);
-          if (durationMs === 0) {
-            durationMs = fb.durationMs;
-          }
-          if (videoThumbnailPath.length === 0) {
-            videoThumbnailPath = fb.thumbnailPath;
-          }
-        }
-        // 双路径都拿不到缩略图 -> 兜底黑图,保证 IMSDK createVideoMessage 不会因缺 snapshot 失败
-        if (mediaTypeIndex === AlbumPickMode.VIDEO && videoThumbnailPath.length === 0) {
-          videoThumbnailPath = await AlbumPickerHelper.generateBlackThumbnail(sandboxDir);
-          console.info(`${AlbumPickerHelper.TAG} both paths failed, fallback black thumb=${videoThumbnailPath}`);
-        }
-        if (mediaTypeIndex === AlbumPickMode.VIDEO) {
-          console.info(`${AlbumPickerHelper.TAG} video meta durationMs=${durationMs} ` +
-            `thumb=${videoThumbnailPath.length > 0 ? 'ok' : 'empty'} path=${sandboxPath}`);
-        }
-
-        results.push({
-          filePath: sandboxPath,
-          fileName: fileName,
-          fileSize: size,
-          extension: ext,
-          mediaTypeIndex: mediaTypeIndex,
-          durationMs: durationMs,
-          videoThumbnailPath: videoThumbnailPath,
-        });
-      }
-      return results;
+      return await AlbumPickerHelper.exportSelectedMedia(selectResult.photoUris, cacheDir, ctx);
     } catch (e) {
       const err = e as BusinessError;
       console.error(`${AlbumPickerHelper.TAG} pickMedia failed code=${err.code}, msg=${err.message}`);
       return [];
     }
+  }
+
+  /// 在选择器仍持有读取授权时，按选择顺序拷贝媒体到沙盒并补齐视频信息。
+  /// 单项拷贝失败时跳过该项，调用方可比对数量以决定是否接受部分结果。
+  static async exportSelectedMedia(
+    uris: string[],
+    cacheDir: string | null,
+    ctx: common.Context | null,
+  ): Promise<AlbumPickResult[]> {
+    const sandboxDir = await AlbumPickerHelper.ensureSandboxDir(cacheDir);
+    if (sandboxDir === null) {
+      console.error(`${AlbumPickerHelper.TAG} no cacheDir available, aborting`);
+      return [];
+    }
+
+    const results: AlbumPickResult[] = [];
+    for (const uri of uris) {
+      const fileName = AlbumPickerHelper.getFileNameFromPath(uri);
+      const ext = AlbumPickerHelper.getFileExtension(fileName);
+      const mediaTypeIndex = AlbumPickerHelper.resolveMediaTypeIndex(ext);
+
+      // 视频分支:必须在拷贝到沙盒 *之前* 用原 media library URI 拿 asset,
+      // 因为 asset 只认 file://media/... 这类系统 URI。拷贝到沙盒之后原 URI 就丢了。
+      // 拿不到 asset(权限缺失 / 非 media URI / ctx 空)时返回 {0, ''},由拷贝后 fallback 兜底。
+      let assetMeta: VideoAssetMeta = { durationMs: 0, thumbnailPath: '' };
+      if (mediaTypeIndex === AlbumPickMode.VIDEO && ctx !== null) {
+        assetMeta = await AlbumPickerHelper.resolveVideoMetadataFromAsset(uri, sandboxDir, ctx);
+      }
+
+      const sandboxPath = await AlbumPickerHelper.copyToSandbox(uri, sandboxDir, fileName);
+      if (sandboxPath === null) {
+        console.warn(`${AlbumPickerHelper.TAG} skip media: copy failed for ${uri}`);
+        continue;
+      }
+
+      let size = 0;
+      try {
+        const stat = await fs.stat(sandboxPath);
+        size = stat.size;
+      } catch (statErr) {
+        console.warn(`${AlbumPickerHelper.TAG} stat failed for ${sandboxPath}`,
+          (statErr as BusinessError).message);
+      }
+
+      // 视频必须补齐 duration + 缩略图,否则:
+      //   1) VideoMessagePayload.videoDuration=0 -> bubble 显示 00:00
+      //   2) videoSnapshotPath 为空 -> Dart 侧只能用黑图占位,且部分场景 IMSDK
+      //      createVideoMessage 因 snapshot 缺失导致发送失败(bug#161206638)。
+      let durationMs = assetMeta.durationMs;
+      let videoThumbnailPath = assetMeta.thumbnailPath;
+      if (mediaTypeIndex === AlbumPickMode.VIDEO
+        && (durationMs === 0 || videoThumbnailPath.length === 0)) {
+        console.info(`${AlbumPickerHelper.TAG} asset path incomplete ` +
+          `(duration=${durationMs}, thumb='${videoThumbnailPath}'), fallback to AVMetadataExtractor`);
+        const fb = await AlbumPickerHelper.resolveVideoMetadataFromFile(sandboxPath, sandboxDir);
+        if (durationMs === 0) {
+          durationMs = fb.durationMs;
+        }
+        if (videoThumbnailPath.length === 0) {
+          videoThumbnailPath = fb.thumbnailPath;
+        }
+      }
+      // 双路径都拿不到缩略图 -> 兜底黑图,保证 IMSDK createVideoMessage 不会因缺 snapshot 失败
+      if (mediaTypeIndex === AlbumPickMode.VIDEO && videoThumbnailPath.length === 0) {
+        videoThumbnailPath = await AlbumPickerHelper.generateBlackThumbnail(sandboxDir);
+        console.info(`${AlbumPickerHelper.TAG} both paths failed, fallback black thumb=${videoThumbnailPath}`);
+      }
+      if (mediaTypeIndex === AlbumPickMode.VIDEO) {
+        console.info(`${AlbumPickerHelper.TAG} video meta durationMs=${durationMs} ` +
+          `thumb=${videoThumbnailPath.length > 0 ? 'ok' : 'empty'} path=${sandboxPath}`);
+      }
+
+      results.push({
+        filePath: sandboxPath,
+        fileName: fileName,
+        fileSize: size,
+        extension: ext,
+        mediaTypeIndex: mediaTypeIndex,
+        durationMs: durationMs,
+        videoThumbnailPath: videoThumbnailPath,
+      });
+    }
+    return results;
   }
 
   /** 确保 ${cacheDir}/album_picker 存在,返回子目录绝对路径。 */
