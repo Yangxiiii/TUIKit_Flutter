@@ -1,6 +1,8 @@
 package com.tencent.cloud.tuikit.flutter.tuicallkit
 import android.app.KeyguardManager
 import android.content.Context
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import com.tencent.cloud.tuikit.flutter.tuicallkit.view.NotificationView
 import com.tencent.cloud.tuikit.flutter.tuicallkit.utils.CallingVibrator
 import com.tencent.qcloud.tuicore.TUIConstants
@@ -12,7 +14,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 
-/** TencentCallsUikitPlugin */
+/** 提供通话原生窗口、前台服务和设备能力查询。 */
 class TencentCallsUikitPlugin: FlutterPlugin, MethodCallHandler {
   private lateinit var channel : MethodChannel
   private lateinit var appContext: Context
@@ -32,6 +34,7 @@ class TencentCallsUikitPlugin: FlutterPlugin, MethodCallHandler {
 
   override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
     when (call.method) {
+      "getCameraCount" -> getCameraCount(result)
       "openNotificationView" -> openNotificationView(call, result)
       "closeNotificationView" -> closeNotificationView(call, result)
       "startVibration" -> startVibration(call, result)
@@ -41,6 +44,21 @@ class TencentCallsUikitPlugin: FlutterPlugin, MethodCallHandler {
       "isScreenLocked" -> isScreenLocked(result)
       "imSDKInitSuccess" -> imSDKInitSuccess()
       else -> result.notImplemented()
+    }
+  }
+
+  /** 只统计前后朝向，避免多枚后置镜头被误判为可翻转到前置。 */
+  private fun getCameraCount(result: MethodChannel.Result) {
+    try {
+      val manager = appContext.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+      val facing = manager.cameraIdList.mapNotNull {
+        manager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING)
+      }.filter {
+        it == CameraCharacteristics.LENS_FACING_FRONT || it == CameraCharacteristics.LENS_FACING_BACK
+      }.toSet()
+      result.success(facing.size)
+    } catch (error: Exception) {
+      result.error("CAMERA_QUERY_FAILED", "无法读取摄像头能力", null)
     }
   }
 

@@ -4,6 +4,7 @@ import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
 import 'package:tencent_calls_uikit/src/manager/call_manager.dart';
+import 'package:tencent_calls_uikit/src/state/global_state.dart';
 
 /// 在聊天上方展示来电资料与接听/拒绝入口，操作沿用同一 SDK 通话。
 class IncomingBannerWidget extends StatelessWidget {
@@ -19,11 +20,19 @@ class IncomingBannerWidget extends StatelessWidget {
   Widget build(BuildContext context) => ListenableBuilder(
         listenable: Listenable.merge([
           CallStore.shared.state.activeCall,
-          CallStore.shared.state.allParticipants
+          CallStore.shared.state.allParticipants,
+          GlobalState.instance.groupCall,
         ]),
         builder: (context, _) {
           final call = CallStore.shared.state.activeCall.value;
           if (call.callId.isEmpty) return const SizedBox.shrink();
+          final epoch = CallManager.instance.sessionEpoch;
+          bool isCurrent() =>
+              context.mounted &&
+              epoch == CallManager.instance.sessionEpoch &&
+              call.callId == CallStore.shared.state.activeCall.value.callId;
+          final group = GlobalState.instance.groupCall.value;
+          // G21 展示邀请人资料；真实群名属于场次信息，不能替换邀请人姓名。
           final inviter = CallStore.shared.state.allParticipants.value
               .where((p) => p.id == call.inviterId)
               .firstOrNull;
@@ -39,19 +48,36 @@ class IncomingBannerWidget extends StatelessWidget {
             name: name,
             avatarUrl: inviter?.avatarURL,
             video: call.mediaType == CallMediaType.video,
-            onShowCalling: onShowCalling,
+            multi: call.chatGroupId.isNotEmpty ||
+                call.inviteeIds.length > 1 ||
+                (group != null && !group.ended && group.callId == call.callId),
+            onShowCalling: () {
+              if (isCurrent()) onShowCalling?.call();
+            },
             onReject: () async {
-              if (await CallManager.instance.reject()) onCloseAll?.call();
+              if (!isCurrent()) return;
+              final rejected = await CallManager.instance.reject();
+              // SDK 可能先清空旧通话；迟到结果只能关闭旧场次或已清空的浮层。
+              final currentId = CallStore.shared.state.activeCall.value.callId;
+              if (rejected &&
+                  context.mounted &&
+                  epoch == CallManager.instance.sessionEpoch &&
+                  (currentId.isEmpty || currentId == call.callId)) {
+                onCloseAll?.call();
+              }
             },
             onAccept: () async {
-              if (await CallManager.instance.accept()) onShowCalling?.call();
+              if (!isCurrent()) return;
+              if (await CallManager.instance.accept() && isCurrent()) {
+                onShowCalling?.call();
+              }
             },
           );
         },
       );
 }
 
-/// 单聊来电横幅的共享布局，操作与资料由当前平台通话层提供。
+/// 单聊及多人来电横幅的共享布局，操作与邀请人资料由当前平台通话层提供。
 class IncomingBannerContent extends StatelessWidget {
   const IncomingBannerContent({
     super.key,
@@ -59,6 +85,7 @@ class IncomingBannerContent extends StatelessWidget {
     required this.name,
     required this.avatarUrl,
     required this.video,
+    this.multi = false,
     required this.onShowCalling,
     required this.onReject,
     required this.onAccept,
@@ -75,11 +102,26 @@ class IncomingBannerContent extends StatelessWidget {
 
   /// 用来电者标识复用消息列表的头像缓存。
   final String userId;
+
+  /// 邀请人的真实显示名称，缺少资料时由调用方使用账号标识。
   final String name;
+
+  /// 邀请人的 SDK 头像；缺失时保留基础头像组件的默认显示。
   final String? avatarUrl;
+
+  /// 当前邀请是否为视频，用于选择副标题。
   final bool video;
+
+  /// 群来源或明确临时多人场景；只影响文案，不授予任何会控权限。
+  final bool multi;
+
+  /// 点击邀请人资料后展开同一场通话。
   final VoidCallback? onShowCalling;
+
+  /// 拒绝当前邀请，结果由平台通话层处理。
   final VoidCallback onReject;
+
+  /// 接听当前邀请，权限及 SDK 失败由平台通话层处理。
   final VoidCallback onAccept;
 
   @override
@@ -143,9 +185,15 @@ class IncomingBannerContent extends StatelessWidget {
                       color: colors.onScrim,
                     )),
                 Text(
-                    video
-                        ? text.callInvitedToVideoCall
-                        : text.callInvitedToAudioCall,
+                    multi
+                        ? video
+                            ? text.resolve('chat.uikit.invitedToMultiVideoCall',
+                                '邀请你加入多人视频通话…')
+                            : text.resolve('chat.uikit.invitedToMultiAudioCall',
+                                '邀请你加入多人语音通话…')
+                        : video
+                            ? text.callInvitedToVideoCall
+                            : text.callInvitedToAudioCall,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(

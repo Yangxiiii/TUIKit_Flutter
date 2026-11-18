@@ -5,6 +5,11 @@ import 'package:app_core/app_core.dart';
 import 'package:app_service/app_service.dart';
 import 'package:app_ui/app_ui.dart';
 import 'manager/call_duration_limit.dart';
+import 'manager/group_member_subtitle_cache.dart';
+import 'manager/group_control_lifecycle.dart';
+import 'control/group_control_transport.dart';
+import 'manager/group_call_result_tracker.dart';
+import 'state/group_call_metadata.dart';
 
 import 'package:tencent_calls_uikit/src/common/metrics/key_metrics.dart';
 import 'package:tuikit_atomic_x/atomicx.dart';
@@ -35,9 +40,18 @@ class TUICallKitImpl implements TUICallKit {
   final contactStore = ContactStore.shared;
   bool isNotificationPreparing = false;
 
-  /// 时长限制独立于页面生命周期；最小化和恢复继续使用同一 SDK 时长。
+  /// 宿主机构岗位资料只缓存当前账号和当前群场次，登出时清理待返回查询。
+  late final GroupMemberSubtitleCache _memberSubtitleCache;
+
+  /// 以真实 SDK 接通、成员及结束事件管理本次入会的控制 session。
+  late final GroupControlLifecycle _groupControlLifecycle;
+
+  /// 本人真实参与区间独立于房间计时，结束后通过宿主发布个人结果。
+  late final GroupCallResultTracker _groupCallResultTracker;
+
+  /// 时长限制独立于页面；群场次消费可信统一截止，SDK 时长仅作补充。
   late final _durationLimit = CallDurationLimit(onLimit: () async {
-    if (!await CallManager.instance.hangup()) {
+    if (!await CallManager.instance.hangup(transferHost: false)) {
       throw StateError('Call duration limit hangup failed');
     }
     AppToast.show(
@@ -45,6 +59,66 @@ class TUICallKitImpl implements TUICallKit {
             .resolve('chat.uikit.callDurationLimit', '已达通话最长时长，通话结束'),
         duration: const Duration(seconds: 3));
   });
+
+  /// 成员回调补齐 Store 会移除的邀请结果，不传输自定义会控协议。
+  late final TUICallObserver _groupObserver = TUICallObserver(
+    onUserInviting: (id) => _onGroupMember(id, GroupCallMemberStatus.waiting),
+    onUserJoin: (id) => _onGroupMember(id, GroupCallMemberStatus.joined),
+    onUserReject: (id) => _onGroupMember(id, GroupCallMemberStatus.rejected),
+    onUserNoResponse: (id) =>
+        _onGroupMember(id, GroupCallMemberStatus.noResponse),
+    onUserLineBusy: (id) => _onGroupMember(id, GroupCallMemberStatus.busy),
+    onUserLeave: (id) => _onGroupMember(id, GroupCallMemberStatus.left),
+    onCallBegin: (callId, mediaType, info) {
+      _syncGroupCall();
+      GlobalState.instance.groupCallSession.updateMember(
+          CallStore.shared.state.selfInfo.value.id,
+          GroupCallMemberStatus.joined);
+      unawaited(CallManager.instance.refreshGroupCallTitle());
+      // join 的早期 Store 事件尚无准确媒体类型，真实接通后补齐本端设备准备。
+      unawaited(CallManager.instance.prepareJoinedCallDevices(callId));
+    },
+  );
+
+  /// 应用层仅保留本场成员展示；底层事件未提供 callId 时以当前有效场次为边界。
+  void _onGroupMember(String userId, GroupCallMemberStatus status) {
+    _syncGroupCall();
+    GlobalState.instance.groupCallSession.updateMember(userId, status);
+  }
+
+  /// 从 SDK 补齐群标识和资料，空状态及已结束旧场次不会重新打开结果。
+  void _syncGroupCall() {
+    final call = CallStore.shared.state.activeCall.value;
+    if (call.mediaType == null) return;
+    final session = GlobalState.instance.groupCallSession;
+    final previous = session.value;
+    if (previous?.ended == true && previous?.callId == call.callId) return;
+    // 只在 SDK 已给出群或多人事实时创建快照；两人临时多人由明确展示元数据创建。
+    final participants = CallStore.shared.state.allParticipants.value;
+    final group = call.chatGroupId.isNotEmpty ||
+        call.inviteeIds.length > 1 ||
+        participants.length > 2;
+    if (previous == null ||
+        (previous.ended && previous.callId != call.callId)) {
+      if (!group) return;
+      session.begin(
+          callId: call.callId,
+          groupId: call.chatGroupId,
+          groupName: GlobalState.instance.groupCallTitle(call.chatGroupId),
+          inviterId: call.inviterId,
+          mediaType: call.mediaType!,
+          memberIds: {
+            call.inviterId,
+            ...call.inviteeIds,
+            CallStore.shared.state.selfInfo.value.id,
+            ...participants.map((member) => member.id),
+          });
+    }
+    // 资料补齐不会删除已拒绝或超时成员，也不会重新激活已结束的场次。
+    session.sync(call, participants);
+  }
+
+  /// 共享 Store 的场次回调，负责界面路由、设备准备及结束后的展示清理。
   late CallEventListener callEventListener = CallEventListener(
     onCallStarted: (callId, mediaType) async {
       await CallManager.instance.prepareCallDevices(
@@ -59,16 +133,62 @@ class TUICallKitImpl implements TUICallKit {
     onCallReceived:
         (String callId, CallMediaType mediaType, String userData) async {
       CallManager.instance.invalidateDevicePreparation();
+      CallManager.instance.clearGroupRequest();
+      // 腾讯真实群来源优先；展示标识只能补充独立多人，不能改写群关系或权限。
+      final call = CallStore.shared.state.activeCall.value;
+      if (call.chatGroupId.isEmpty &&
+          GroupCallMetadata.isTemporaryMulti(userData)) {
+        GlobalState.instance.groupCallSession.begin(
+            callId: callId,
+            groupId: '',
+            groupName: '',
+            inviterId: call.inviterId,
+            mediaType: mediaType,
+            memberIds: {
+              call.inviterId,
+              ...call.inviteeIds,
+              CallStore.shared.state.selfInfo.value.id
+            });
+      }
+      _syncGroupCall();
+      unawaited(CallManager.instance.refreshGroupCallTitle());
+      // SDK 先通知待接听状态，再补充多人元数据；补齐资料不能把来电横幅强制展开。
+      _showPage();
       KeyMetrics.instance.countUV(EventId.received);
       if (mediaType == CallMediaType.video) {
         await CallManager.instance.openLocalCameraIfPermitted();
       }
     },
     onCallEnded: (callId, mediaType, reason, userId) {
+      _groupControlLifecycle.clear();
       CallManager.instance.invalidateDevicePreparation();
-      CallManager.instance.closeLocalMicrophone();
+      unawaited(CallManager.instance
+          .closeLocalMicrophone()
+          .catchError((Object error, StackTrace stack) {
+        // SDK 结束仍继续原生资源回收，补充关闭失败不能中断结果记录与界面清理。
+        appLogger.error('通话结束补充关闭麦克风失败', error: error, stackTrace: stack);
+      }));
       aiTranscriberConfigManager.reset(preserveSettings: false);
-      _closePage();
+      final session = GlobalState.instance.groupCallSession;
+      session.end(callId, reason,
+          isCaller: session.value?.inviterId ==
+              LoginStore.shared.loginState.loginUserInfo?.userID);
+      // 个人记录发送失败不能阻断 SDK 清理；迟到异常不显示到另一个登录账号。
+      final reporter = LoginStore.shared.loginState.loginUserInfo?.userID;
+      unawaited(_groupCallResultTracker
+          .onEnded(callId, reason)
+          .catchError((Object error, StackTrace stack) {
+        appLogger.error('通话结果记录失败', error: error, stackTrace: stack);
+        if (reporter == LoginStore.shared.loginState.loginUserInfo?.userID) {
+          AppToast.show('通话已结束，结果记录保存失败');
+        }
+      }));
+      if (session.value?.canRetry == true) {
+        // 只留下结果页；SDK 继续执行结束及设备回收，重呼会生成新场次。
+        pageRouter.showCallingPage();
+      } else {
+        _closePage();
+      }
       ForegroundService.stop();
       if (_durationLimit.isEnding(callId)) return;
       final call = CallStore.shared.state.activeCall.value;
@@ -96,6 +216,15 @@ class TUICallKitImpl implements TUICallKit {
 
   TUICallKitImpl() {
     CallStore.shared;
+    _groupControlLifecycle = GroupControlLifecycle();
+    _groupCallResultTracker = GroupCallResultTracker(
+        session: GlobalState.instance.groupCallSession,
+        accountId: () =>
+            LoginStore.shared.loginState.loginUserInfo?.userID ?? '');
+    _memberSubtitleCache = GroupMemberSubtitleCache(
+        session: GlobalState.instance.groupCallSession,
+        accountId: () =>
+            LoginStore.shared.loginState.loginUserInfo?.userID ?? '');
     voIPDataSyncHandler = VoIPDataSyncHandler();
     fcmDataSyncHandler = FcmDataSyncHandler();
     pageRouter = CallPageRouter(
@@ -177,25 +306,34 @@ class TUICallKitImpl implements TUICallKit {
         () async {
       final handler =
           await CallManager.instance.calls(userIdList, callMediaType, params);
-      if (handler.errorCode != -1101) handleErrorCode(handler.errorCode);
-      if (handler.errorCode != 0 &&
-          handler.errorCode != -1101 &&
-          ErrorParser.getErrorMessage(
-                  handler.errorCode, AppLocalization.of(Global.appContext())) ==
-              null) {
-        AppToast.show(
-            AppLocalization.of(Global.appContext())
-                .callFailedToInitiateOrJoinCall,
-            duration: const Duration(seconds: 3));
-      }
+      _showAdmissionError(handler);
       return handler;
     });
   }
 
   @override
-  Future<void> join(String callId) async {
-    final handler = await CallManager.instance.join(callId);
-    handleErrorCode(handler.errorCode);
+  Future<void> join(String callId) => AppServiceLocator.get<ActionGuard>()
+          .singleFlight('tim.call.join', () async {
+        // 同场已接通只恢复；提示与路由必须留在防重过程内，避免多个调用者重复提示。
+        if (callId.isNotEmpty &&
+            CallStore.shared.state.activeCall.value.callId == callId &&
+            CallStore.shared.state.selfInfo.value.status ==
+                CallParticipantStatus.accept) {
+          pageRouter.showCallingPage();
+          return;
+        }
+        final handler = await CallManager.instance.join(callId);
+        _showAdmissionError(handler);
+      });
+
+  /// 发起和加入共用错误提示，未知 SDK 错误也给出失败反馈。
+  void _showAdmissionError(CompletionHandler handler) {
+    if (handler.errorCode == 0 || handler.errorCode == -1101) return;
+    final text = AppLocalization.of(Global.appContext());
+    AppToast.show(
+        ErrorParser.getErrorMessage(handler.errorCode, text) ??
+            text.callFailedToInitiateOrJoinCall,
+        duration: const Duration(seconds: 3));
   }
 
   @override
@@ -206,6 +344,34 @@ class TUICallKitImpl implements TUICallKit {
   @override
   void enableIncomingBanner(bool enable) {
     GlobalState.instance.setEnableIncomingBanner(enable);
+  }
+
+  @override
+  void setGroupMemberPicker(GroupMemberPicker? picker) {
+    GlobalState.instance.groupMemberPicker = picker;
+  }
+
+  @override
+  void setGroupMemberSubtitleLoader(GroupMemberSubtitleLoader? loader) {
+    _memberSubtitleCache.setLoader(loader);
+  }
+
+  @override
+  void setGroupControlTransport(GroupControlTransport? transport) {
+    _groupControlLifecycle.setTransport(transport);
+  }
+
+  @override
+  void syncGroupControlPolicy() => _groupControlLifecycle.syncPolicy();
+
+  @override
+  void setGroupCallResultHandler(GroupCallResultHandler? handler) {
+    _groupCallResultTracker.setHandler(handler);
+  }
+
+  @override
+  void setGroupCallTitle(String groupId, String title) {
+    GlobalState.instance.setGroupCallTitle(groupId, title);
   }
 
   @override
@@ -234,6 +400,7 @@ class TUICallKitImpl implements TUICallKit {
     return Future.value();
   }
 
+  /// 登录后绑定本端通话和成员观察者，重复登录先移除旧注册以避免重复通知。
   void handleLoginSuccess(int sdkAppID, String userId, String userSig) {
     TUICallEngine.instance.init(sdkAppID, userId, userSig);
     LoginStore.shared.login(
@@ -241,18 +408,35 @@ class TUICallKitImpl implements TUICallKit {
       userID: userId,
       userSig: userSig,
     );
+    CallStore.shared.removeListener(callEventListener);
     CallStore.shared.addListener(callEventListener);
+    TUICallEngine.instance.removeObserver(_groupObserver);
+    TUICallEngine.instance.addObserver(_groupObserver);
     CallingBellFeature.instance.init();
     CallStore.shared.state.activeCall.removeListener(_checkDurationLimit);
     CallStore.shared.state.activeCall.addListener(_checkDurationLimit);
+    GlobalState.instance.groupControl.removeListener(_checkDurationLimit);
+    GlobalState.instance.groupControl.addListener(_checkDurationLimit);
+    AppLifecycle.instance.currentState.removeListener(_onDurationLifecycle);
+    AppLifecycle.instance.currentState.addListener(_onDurationLifecycle);
     if (Platform.isIOS) {
       pictureInPictureFeature = IosPipFeature();
     }
   }
 
+  /// 先使异步操作失效并清理展示资料，再释放 SDK 与平台资源。
   void handleLogoutSuccess() async {
+    _groupControlLifecycle.clear(clearAuthority: true);
+    _groupCallResultTracker.clear();
     CallManager.instance.invalidateDevicePreparation();
+    CallManager.instance.clearGroupRequest();
+    _memberSubtitleCache.clear();
+    GlobalState.instance.clearGroupCall();
+    _closePage();
+    TUICallEngine.instance.removeObserver(_groupObserver);
     CallStore.shared.state.activeCall.removeListener(_checkDurationLimit);
+    GlobalState.instance.groupControl.removeListener(_checkDurationLimit);
+    AppLifecycle.instance.currentState.removeListener(_onDurationLifecycle);
     _durationLimit.reset();
     TUICallEngine.instance.unInit();
     CallStore.shared.removeListener(callEventListener);
@@ -267,20 +451,30 @@ class TUICallKitImpl implements TUICallKit {
   /// SDK 每次更新时长时检查限制，挂断失败记录日志并等待下一次状态更新重试。
   void _checkDurationLimit() {
     final call = CallStore.shared.state.activeCall.value;
+    final control = GlobalState.instance.groupControl.value;
     unawaited(_durationLimit
         .update(
       callId: call.callId,
       seconds: call.duration.toInt(),
       connected: CallStore.shared.state.selfInfo.value.status ==
           CallParticipantStatus.accept,
-      singleCall: call.chatGroupId.isEmpty && call.inviteeIds.length == 1,
+      deadlineMs: control?.callId == call.callId ? control?.deadlineMs : null,
+      sessionId: control?.callId == call.callId ? control?.sessionId : null,
     )
         .catchError((Object error, StackTrace stack) {
       appLogger.error('达到通话时长上限后结束失败', error: error, stackTrace: stack);
     }));
   }
 
+  /// 系统暂停 Dart 计时回调时仍保留绝对截止，恢复前台后立即复核，不补一轮新会期。
+  void _onDurationLifecycle() {
+    if (AppLifecycle.instance.isForeground) _checkDurationLimit();
+  }
+
+  /// 随共享 Store 更新界面与成员展示，SDK 清理状态时仅保留允许重呼的独立结果页。
   void _subscribeState() {
+    CallStore.shared.state.activeCall.addListener(_syncGroupCall);
+    CallStore.shared.state.allParticipants.addListener(_syncGroupCall);
     CallStore.shared.state.selfInfo.addListener(() async {
       final activeCall = CallStore.shared.state.activeCall.value;
       if (activeCall.mediaType == null) {
@@ -293,20 +487,45 @@ class TUICallKitImpl implements TUICallKit {
         _showPage();
       } else if (callStatus == CallParticipantStatus.accept) {
         _showPage();
-      } else if (callStatus == CallParticipantStatus.none) {
+      } else if (callStatus == CallParticipantStatus.none &&
+          GlobalState.instance.groupCall.value?.canRetry != true) {
         _closePage();
       }
     });
   }
 
+  /// 首次展示遵循统一来电横幅配置，异步资料迟到不能恢复已经结束的来电。
   void _showPage() async {
     if (pageRouter.getCurrentPageRoute() != CallPageType.none) return;
 
     final activeCall = CallStore.shared.state.activeCall.value;
-    if (AppLifecycle.instance.isBackground && activeCall.inviterId.isNotEmpty) {
+    final self = CallStore.shared.state.selfInfo.value;
+    if (activeCall.mediaType == null ||
+        self.status == CallParticipantStatus.none) {
+      return;
+    }
+    final incoming = activeCall.inviterId != self.id &&
+        self.status == CallParticipantStatus.waiting;
+    final epoch = CallManager.instance.sessionEpoch;
+    bool isCurrent() =>
+        epoch == CallManager.instance.sessionEpoch &&
+        CallStore.shared.state.activeCall.value.callId == activeCall.callId &&
+        CallStore.shared.state.selfInfo.value.id == self.id &&
+        CallStore.shared.state.selfInfo.value.status !=
+            CallParticipantStatus.none;
+
+    // 只有后台被叫需要通知资料；等待期间可能拒绝、接听或收到另一场来电。
+    if (AppLifecycle.instance.isBackground &&
+        incoming &&
+        activeCall.inviterId.isNotEmpty) {
       final handler = await contactStore.getContactInfo(
         userIDList: [activeCall.inviterId],
       );
+      if (!isCurrent() ||
+          CallStore.shared.state.selfInfo.value.status !=
+              CallParticipantStatus.waiting) {
+        return;
+      }
       if (handler.isSuccess && handler.contactInfoList.isNotEmpty) {
         final selfInfo = CallStore.shared.state.selfInfo.value;
         final contactInfo = handler.contactInfoList.first;
@@ -322,9 +541,12 @@ class TUICallKitImpl implements TUICallKit {
       isNotificationPreparing = true;
     }
 
+    // 群与临时多人共用 G21 横幅；已由用户展开的界面不会被资料更新覆盖。
+    if (!isCurrent() || pageRouter.getCurrentPageRoute() != CallPageType.none) {
+      return;
+    }
     if (GlobalState.instance.enableIncomingBanner &&
-        CallStore.shared.state.selfInfo.value.id !=
-            CallStore.shared.state.activeCall.value.inviterId &&
+        incoming &&
         CallStore.shared.state.selfInfo.value.status ==
             CallParticipantStatus.waiting) {
       pageRouter.showIncomingBanner();

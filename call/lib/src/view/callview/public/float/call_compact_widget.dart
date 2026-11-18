@@ -7,21 +7,24 @@ import '../hint/timer_widget.dart';
 import '../participant/call_participant_pane.dart';
 import '../participant/call_video_view.dart';
 
-/// 浮窗操作只在原浮层有效。单聊语音主叫允许使用尚未分配标识的当前通话。
+/// 浮窗操作只在原浮层有效；语音或多人主叫允许使用尚未分配标识的当前通话。
 bool matchesFloatingCall({
   required String expectedId,
   required CallInfo call,
   required CallParticipantInfo self,
   required bool isCurrentPresentation,
+  bool isGroup = false,
 }) {
   if (!isCurrentPresentation || self.status == CallParticipantStatus.none) {
     return false;
   }
   if (expectedId.isNotEmpty) return call.callId == expectedId;
   // SDK 可能在对方接听时才填充 callId，主叫在此之前也能收起或取消。
-  return call.mediaType == CallMediaType.audio &&
-      call.chatGroupId.isEmpty &&
-      call.inviteeIds.length == 1 &&
+  final group =
+      isGroup || call.chatGroupId.isNotEmpty || call.inviteeIds.length > 1;
+  return (group || call.mediaType == CallMediaType.audio) &&
+      call.mediaType != null &&
+      call.inviteeIds.isNotEmpty &&
       self.id.isNotEmpty &&
       call.inviterId == self.id;
 }

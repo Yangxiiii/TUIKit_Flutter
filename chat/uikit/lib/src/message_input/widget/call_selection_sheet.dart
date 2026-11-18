@@ -2,12 +2,15 @@ import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
 
-/// 单聊通话菜单只返回媒体类型，关闭浮层后由原聊天入口执行权限与呼叫流程。
+/// 通话菜单只返回媒体类型，关闭浮层后由原入口执行权限与呼叫流程。
 class CallSelectionSheet extends StatelessWidget {
-  const CallSelectionSheet({super.key, required this.name});
+  const CallSelectionSheet({super.key, required this.name, this.title});
 
   /// 当前单聊的独立展示名称，不拼接机构字段。
   final String name;
+
+  /// 群聊或多人入口的独立标题；null 沿用单聊名称，空字符串隐藏标题区。
+  final String? title;
 
   @override
   Widget build(BuildContext context) {
@@ -16,32 +19,35 @@ class CallSelectionSheet extends StatelessWidget {
     return Material(
       color: colors.surface,
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-        // 标题为左侧辅助说明，与下方两个可点击的通话操作分层。
-        SizedBox(
-          height: 44,
-          width: double.infinity,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                text.resolve('chat.uikit.callPeerTitle', '呼叫{name}',
-                    namedArgs: {'name': name}),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 13,
-                    height: 20 / 13,
-                    fontWeight: FontWeight.w400,
-                    color: colors.sheetCaption),
+        // 临时多人没有固定呼叫对象，空标题同时移除辅助说明及其分隔线。
+        if (title != '') ...[
+          SizedBox(
+            height: 44,
+            width: double.infinity,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  title ??
+                      text.resolve('chat.uikit.callPeerTitle', '呼叫{name}',
+                          namedArgs: {'name': name}),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 13,
+                      height: 20 / 13,
+                      fontWeight: FontWeight.w400,
+                      color: colors.sheetCaption),
+                ),
               ),
             ),
           ),
-        ),
-        Divider(
-            height: 1,
-            thickness: 1,
-            color: colors.outline.withValues(alpha: .5)),
+          Divider(
+              height: 1,
+              thickness: 1,
+              color: colors.outline.withValues(alpha: .5)),
+        ],
         _option(context, 'audio', text.audioCall, AppIcons.phone3,
             CallMediaType.audio),
         _option(context, 'video', text.videoCall, AppIcons.cameraOn,

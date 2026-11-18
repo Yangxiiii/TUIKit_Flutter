@@ -2217,11 +2217,16 @@ class MessageInputState extends State<MessageInput>
     }
   }
 
-  /// 单聊工具栏先选择媒体；群聊继续沿用既有成员选择，不引入第二套呼叫入口。
+  /// 宿主可接管群通话，其他会话保留已有媒体选择流程。
   Future<void> _selectCallType() =>
       _textSendGuard.singleFlight('tim.call.select', () async {
         // 通话选择使用整页底部浮板，先收起输入法及光标手柄，避免键盘占据浮板区域。
         FocusScope.of(context).unfocus();
+        final launcher = widget.config.callLauncher;
+        if (launcher != null) {
+          await launcher(context, null);
+          return;
+        }
         if (ChatUtil.getGroupID(widget.conversationID).isNotEmpty) {
           await _onVideoCallTap();
           return;
@@ -2255,6 +2260,11 @@ class MessageInputState extends State<MessageInput>
 
   /// 保留单聊直接呼叫与群聊选人入口；单聊振铃上限由统一 Manager 校验。
   Future<void> _startCall(CallMediaType mediaType) async {
+    final launcher = widget.config.callLauncher;
+    if (launcher != null) {
+      await launcher(context, mediaType);
+      return;
+    }
     final groupID = ChatUtil.getGroupID(widget.conversationID);
     final isGroup = groupID.isNotEmpty;
 
@@ -2287,7 +2297,7 @@ class MessageInputState extends State<MessageInput>
         "participantIds": participantIds,
         "mediaType": mediaType,
         "chatGroupId": chatGroupId,
-        "timeout": isGroup ? 30 : 45,
+        "timeout": 45,
       };
     TUIEventBus.shared.publish("call.startCall", null, params);
     UIKitUtil.reportChatInvokeCall();

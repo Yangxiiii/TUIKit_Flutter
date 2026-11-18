@@ -7,6 +7,7 @@ import 'package:tencent_chat_uikit/src/message_list/message_list.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/asr_display_manager.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/big_file_message.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/calling_message_data_provider.dart';
+import 'package:tencent_chat_uikit/src/message_list/utils/group_call_record_message.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_resender.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_utils.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/translation_display_manager.dart';
@@ -163,6 +164,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
 
   @override
   Widget build(BuildContext context) {
+    // isSelf 只决定气泡方向；个人通话报告的实际发送者可能是显示在左侧的被叫。
     bool isSelf = message.isSentBySelf;
     // SDK 创建及发送回调中的 faceUrl 可能为空或滞后，不能覆盖已填充的发送者头像。
     final senderAvatarURL = message.from.avatarURL;
@@ -173,7 +175,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         : message.rawMessage?.faceUrl;
     // 群聊宿主可以按群策略显示名称，标题与文字头像沿用同一份结果。
     final groupName = isGroup ? config.groupSenderName?.call(message) : null;
-    final senderName = groupName ??
+    var senderName = groupName ??
         [
           message.from.nameCard,
           message.from.friendRemark,
@@ -184,7 +186,17 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
             .whereType<String>()
             .firstWhere((name) => name.isNotEmpty, orElse: () => '');
     final provider = CallingMessageDataProvider(message, context);
-    final isOutgoingCall = provider.isOutgoingC2c;
+    if (provider.isCallingSignal && provider.excludeFromHistory) {
+      return const SizedBox.shrink();
+    }
+    final isOutgoingCall = provider.isOutgoingCall;
+    final record = provider.personalRecord;
+    if (record != null) {
+      // 报告由本人发送，但气泡代表原始来电；不能把被叫本人的头像当作发起人。
+      avatarURL = record.callerAvatarURL;
+      senderName =
+          record.callerName.isEmpty ? record.callerId : record.callerName;
+    }
 
     // 通话方向跟随发起人，建群草稿沿用消息头像以保留整行勾选。
     if (isOutgoingCall != null) {
@@ -193,7 +205,11 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
       }
 
       isSelf = isOutgoingCall;
-      if (!isSelf && messageListStore != null && !selectionOnly) {
+      if (!isSelf &&
+          !isGroup &&
+          record == null &&
+          messageListStore != null &&
+          !selectionOnly) {
         return _buildWithConversationInfo(isSelf, avatarURL, senderName);
       }
     }
@@ -300,20 +316,30 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     );
   }
 
-  /// 现有失败图标只打开确认，确认前后均复核状态，不启用失败长按菜单。
+  /// 重发只允许 SDK 标记为本人发送的失败消息，展示方向和头像不能授予发送权限。
+  bool get _canResend =>
+      message.isSentBySelf &&
+      message.status == MessageStatus.sendFail &&
+      messageListStore != null &&
+      !isInMergedDetailView &&
+      !isMultiSelectMode &&
+      !selectionOnly;
+
+  /// 现有失败图标只打开确认，确认前后均复核所有权和状态，不启用失败长按菜单。
   void _showResendConfirmDialog(BuildContext context) async {
-    if (messageListStore == null) return;
+    if (!_canResend) return;
     await confirmMessageAction(
       context,
       messageId: message.msgID,
       isDelete: false,
-      isEligible: () => message.status == MessageStatus.sendFail,
+      isEligible: () => _canResend,
       execute: _handleResendMessage,
     );
   }
 
   /// 本地上传失败恢复同一任务，SDK失败消息校验后由重发器替换旧行。
   Future<void> _handleResendMessage() async {
+    if (!_canResend) return;
     // 上传前的失败行没有SDK消息ID，先恢复宿主任务，不能调用SDK删除或重发。
     final transfer = config.fileTransfers[message.msgID];
     if (transfer != null) {
@@ -324,6 +350,16 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         message: message,
         conversationID: conversationID,
         mediaSender: config.mediaSender);
+  }
+
+  /// 发送状态按 SDK 真实所有权显示；通话来去方向只影响此指示器放在气泡哪一侧。
+  Widget? _buildSendStatus(BuildContext context, SemanticColorScheme colors) {
+    if (!message.isSentBySelf || isInMergedDetailView) return null;
+    return buildOutsideBubbleStatusIndicator(
+        message: message,
+        colorsTheme: colors,
+        onResendTap:
+            _canResend ? () => _showResendConfirmDialog(context) : null);
   }
 
   /// Show read receipt detail page (group messages only)
@@ -534,6 +570,13 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     );
   }
 
+  /// 个人记录的头像操作仍指向原始发起人，不能误打开本端报告者的名片。
+  String get _displaySenderId =>
+      GroupCallRecordMessage.fromMessage(
+              message, LoginStore.shared.loginState.loginUserInfo?.userID ?? '')
+          ?.callerId ??
+      message.from.userID;
+
   Widget _buildLeftAlignedLayout(
       BuildContext context, Widget messageBubble, bool isSelf,
       [String? avatarUrl, String? senderName]) {
@@ -547,16 +590,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     final shouldShowAvatar = config.isShowLeftAvatar;
     final shouldShowNickname = config.isShowLeftNickname;
 
-    // 只读记录不显示发送进度或失败重发入口。
-    final statusIndicator = isSelf && !isInMergedDetailView
-        ? buildOutsideBubbleStatusIndicator(
-            message: message,
-            colorsTheme: colors,
-            onResendTap: message.status == MessageStatus.sendFail
-                ? () => _showResendConfirmDialog(context)
-                : null,
-          )
-        : null;
+    final statusIndicator = _buildSendStatus(context, colors);
 
     // 己方气泡才有回执，发送提示仍占用独立的位置。
     final readReceiptIndicator =
@@ -587,7 +621,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                         return;
                       }
                       if (!isSelf && onUserClick != null) {
-                        onUserClick!(message.from.userID);
+                        onUserClick!(_displaySenderId);
                       }
                     },
               onLongPress: isInMergedDetailView || isSelf
@@ -601,12 +635,11 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                       //
                       // 触发@提及回调
                       if (onUserLongPress != null) {
-                        onUserLongPress!(
-                            message.from.userID, displaySenderName);
+                        onUserLongPress!(_displaySenderId, displaySenderName);
                       }
                     },
               child: _groupAvatar(Avatar(
-                userID: message.from.userID,
+                userID: _displaySenderId,
                 content: AvatarImageContent(
                     url: displayAvatarUrl, name: displaySenderName),
               )),
@@ -674,16 +707,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     final colors = SemanticColorScheme.of(context);
     final locale = AppLocalization.of(context);
 
-    // 只读记录不显示发送进度或失败重发入口。
-    final statusIndicator = isSelf && !isInMergedDetailView
-        ? buildOutsideBubbleStatusIndicator(
-            message: message,
-            colorsTheme: colors,
-            onResendTap: message.status == MessageStatus.sendFail
-                ? () => _showResendConfirmDialog(context)
-                : null,
-          )
-        : null;
+    final statusIndicator = _buildSendStatus(context, colors);
 
     // 己方气泡才有回执，发送提示仍占用独立的位置。
     final readReceiptIndicator =
@@ -758,11 +782,11 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                   return;
                 }
                 if (!isSelf && onUserClick != null) {
-                  onUserClick!(message.from.userID);
+                  onUserClick!(_displaySenderId);
                 }
               },
               child: _groupAvatar(Avatar(
-                userID: message.from.userID,
+                userID: _displaySenderId,
                 content: AvatarImageContent(
                     url: displayAvatarUrl, name: displaySenderName),
               )),
@@ -780,16 +804,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     final colors = SemanticColorScheme.of(context);
     final locale = AppLocalization.of(context);
 
-    // 只读记录不显示发送进度或失败重发入口。
-    final statusIndicator = isInMergedDetailView
-        ? null
-        : buildOutsideBubbleStatusIndicator(
-            message: message,
-            colorsTheme: colors,
-            onResendTap: message.status == MessageStatus.sendFail
-                ? () => _showResendConfirmDialog(context)
-                : null,
-          );
+    final statusIndicator = _buildSendStatus(context, colors);
 
     // 阅读回执显示在己方气泡左侧，与发送进度和失败提示分别处理。
     final readReceiptIndicator = _buildReadReceipt(context, colors, locale);
@@ -848,7 +863,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
       if (config.isShowRightAvatar) SizedBox(width: config.avatarSpacing),
       if (config.isShowRightAvatar)
         _groupAvatar(Avatar(
-          userID: message.from.userID,
+          userID: _displaySenderId,
           content: AvatarImageContent(
               url: displayAvatarUrl, name: displaySenderName),
         )),
@@ -861,6 +876,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     final displaySenderName =
         senderName ?? ChatUtil.getMessageSenderName(message);
     final attachment = _buildAttachmentIfAny(false);
+    final statusIndicator =
+        _buildSendStatus(context, SemanticColorScheme.of(context));
 
     return [
       if (config.isShowLeftAvatar)
@@ -874,7 +891,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                     return;
                   }
                   if (onUserClick != null) {
-                    onUserClick!(message.from.userID);
+                    onUserClick!(_displaySenderId);
                   }
                 },
           onLongPress: isInMergedDetailView
@@ -883,11 +900,11 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                   // 多选期间头像长按不能向输入栏插入提及。
                   if (isMultiSelectMode) return;
                   if (onUserLongPress != null) {
-                    onUserLongPress!(message.from.userID, displaySenderName);
+                    onUserLongPress!(_displaySenderId, displaySenderName);
                   }
                 },
           child: _groupAvatar(Avatar(
-            userID: message.from.userID,
+            userID: _displaySenderId,
             content: AvatarImageContent(
                 url: displayAvatarUrl, name: displaySenderName),
           )),
@@ -899,7 +916,19 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
           children: [
             if (config.isShowLeftNickname && displaySenderName.isNotEmpty)
               _buildSenderLabel(context, displaySenderName, isSelf: false),
-            messageBubble,
+            // 被叫本人发送的个人报告保持左侧头像和气泡，发送失败仍在气泡外提供恢复。
+            if (statusIndicator == null)
+              messageBubble
+            else
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Flexible(child: messageBubble),
+                  const SizedBox(width: 6),
+                  statusIndicator,
+                ],
+              ),
             if (replyIndicator != null) replyIndicator!,
             if (attachment != null) attachment,
             // Violation hint text below the bubble

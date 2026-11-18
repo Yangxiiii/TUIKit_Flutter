@@ -6,6 +6,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_chat_uikit/src/message_input/widget/call_selection_sheet.dart';
 
 void main() {
+  testWidgets('多人方式选择不增加标题或标题分隔，保留三项操作', (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(body: CallSelectionSheet(name: '', title: '')),
+    ));
+    expect(find.byType(Divider), findsNothing);
+    expect(find.text('语音通话'), findsOneWidget);
+    expect(find.text('视频通话'), findsOneWidget);
+    expect(find.text('取消'), findsOneWidget);
+    expect(tester.getSize(find.byType(CallSelectionSheet)).height, 152);
+  });
+
   testWidgets('通话选择标题左对齐、两项48高且保留独立取消和三个分隔', (tester) async {
     await tester.pumpWidget(MaterialApp(
       theme: AppThemeFactory.create(

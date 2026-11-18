@@ -1,226 +1,213 @@
 import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tuikit_atomic_x/base_component/utils/tui_event_bus.dart';
 
+/// 按群通话横幅展示真实参与者与加入状态，不发起新场次或修改群属性。
 class JoinInGroupCallWidget extends StatefulWidget {
-  final List<String> userIDs;
-  final String? roomId;
-  final CallMediaType mediaType;
-  final String groupId;
-  final String? callId;
+  const JoinInGroupCallWidget({
+    required this.userIDs,
+    required this.mediaType,
+    required this.groupId,
+    required this.callId,
+    this.callStore,
+    this.loginStore,
+    this.memberNameLoader,
+    super.key,
+  });
 
-  const JoinInGroupCallWidget(
-      {required this.userIDs,
-      required this.roomId,
-      required this.mediaType,
-      required this.groupId,
-      required this.callId,
-      Key? key})
-      : super(key: key);
+  /// 群属性确认的去重参与者，顺序由腾讯数据决定。
+  final List<String> userIDs;
+
+  /// 当前通话的真实媒体类型，决定语音或视频文案。
+  final CallMediaType mediaType;
+
+  /// 用于查询参与者显示资料的群 ID。
+  final String groupId;
+
+  /// 传入既有加入事件链的真实场次 ID。
+  final String callId;
+
+  /// 默认使用共享 Store；宿主或测试可注入相同公开状态契约。
+  final CallStore? callStore;
+
+  /// 当前账号来源；与通话状态一起监听，退出或切换账号后立即收起旧横幅。
+  final LoginStore? loginStore;
+
+  /// 可复用宿主的成员资料缓存；未提供时查询腾讯群成员资料。
+  final Future<String?> Function(String groupId, String userId)?
+      memberNameLoader;
 
   @override
   State<JoinInGroupCallWidget> createState() => _JoinInGroupCallWidgetState();
 }
 
-/// 展示可加入通话的成员资料，个人头像不参与呼叫状态或通话权限处理。
+/// 订阅本端场次与成员状态；异步姓名只应用于仍匹配的群、场次和成员。
 class _JoinInGroupCallWidgetState extends State<JoinInGroupCallWidget> {
-  bool _isExpand = false;
-  final List<String> _userAvatars = [];
-  late AppLocalizedText _atomicLocale;
-  late SemanticColorScheme _colorsTheme;
+  /// 姓名加载失败时仍使用真实用户 ID，不编造发起人身份。
+  String? _memberName;
+
+  /// 区分快速切换群或场次后的迟到资料结果。
+  int _nameGeneration = 0;
+
+  CallStore get _store => widget.callStore ?? CallStore.shared;
+  LoginStore get _loginStore => widget.loginStore ?? LoginStore.shared;
+
+  /// 同场恢复只接受当前账号仍在等待或已接通，结束后残留的场次 ID 不授予资格。
+  bool get _sameLiveCall {
+    final self = _store.state.selfInfo.value;
+    final account = _loginStore.loginState.loginUserInfo?.userID;
+    return account?.isNotEmpty == true &&
+        self.id == account &&
+        _store.state.activeCall.value.callId == widget.callId &&
+        self.status != CallParticipantStatus.none;
+  }
+
+  /// 群属性只证明当前参与者；没有本端同场证据的其他群成员不开放加入入口。
+  /// 拒绝或退出后的受邀历史没有可靠来源，本轮不根据群成员身份推断恢复资格。
+  bool get _canDisplay {
+    final login = _loginStore.loginState;
+    final account = login.loginUserInfo?.userID;
+    return login.loginStatus == LoginStatus.logined &&
+        account?.isNotEmpty == true &&
+        (widget.userIDs.contains(account) || _sameLiveCall);
+  }
 
   @override
   void initState() {
     super.initState();
-    _updateUserAvatars();
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _atomicLocale = AppLocalization.of(context);
-    _colorsTheme = SemanticColorScheme.of(context);
+    _loadMemberName();
   }
 
   @override
   void didUpdateWidget(covariant JoinInGroupCallWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!listEquals(widget.userIDs, oldWidget.userIDs)) {
-      _updateUserAvatars();
+    if (oldWidget.groupId != widget.groupId ||
+        oldWidget.callId != widget.callId ||
+        oldWidget.userIDs.firstOrNull != widget.userIDs.firstOrNull ||
+        oldWidget.memberNameLoader != widget.memberNameLoader) {
+      _memberName = null;
+      _loadMemberName();
     }
+  }
+
+  /// 仅查询首个真实参与者的名称；其他参与者由人数表达，不再加载头像列表。
+  Future<void> _loadMemberName() async {
+    final generation = ++_nameGeneration;
+    final userId = widget.userIDs.firstOrNull;
+    if (userId == null) return;
+    try {
+      // 查询只携带当前群及目标成员，返回后再核对本次请求代次。
+      final name = await (widget.memberNameLoader ?? _queryMemberName)(
+          widget.groupId, userId);
+      if (!mounted || generation != _nameGeneration) return;
+      setState(
+          () => _memberName = name?.trim().isNotEmpty == true ? name : null);
+    } on Object {
+      // 资料失败只影响名称，不把仍有效的 callId 或当前加入状态抹掉。
+      if (mounted && generation == _nameGeneration) {
+        setState(() => _memberName = null);
+      }
+    }
+  }
+
+  /// 使用 SDK 的公开群成员查询，返回同一个目标用户的群名片、备注或昵称。
+  Future<String?> _queryMemberName(String groupId, String userId) async {
+    final result = await GroupMemberStore.create(groupID: groupId)
+        .getMemberInfo(userIDList: [userId]);
+    if (!result.isSuccess) return null;
+    final member = result.memberInfoList
+        .where((item) => item.userID == userId)
+        .firstOrNull;
+    return [member?.nameCard, member?.friendRemark, member?.nickname]
+        .whereType<String>()
+        .where((name) => name.trim().isNotEmpty)
+        .firstOrNull;
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: Listenable.merge(
+            [_store.state.activeCall, _store.state.selfInfo, _loginStore]),
+        builder: (context, _) {
+          if (widget.callId.isEmpty ||
+              widget.userIDs.length < 2 ||
+              !_canDisplay) {
+            return const SizedBox.shrink();
+          }
+          // 只凭本端 SDK 已接通状态显示“已加入”，不能凭群属性里存在本人推断。
+          final joined = _sameLiveCall &&
+              _store.state.selfInfo.value.status ==
+                  CallParticipantStatus.accept;
+          return _banner(context, joined);
+        },
+      );
+
+  /// 固定单行横幅只展示通话摘要与加入动作，超长姓名不挤压操作按钮。
+  Widget _banner(BuildContext context, bool joined) {
+    final colors = context.appColors;
+    final name = _memberName ?? widget.userIDs.first;
+    final people =
+        widget.userIDs.length > 1 ? '$name等${widget.userIDs.length}人' : name;
+    final media = widget.mediaType == CallMediaType.audio ? '语音' : '视频';
     return Container(
-        decoration: BoxDecoration(
-          color: _colorsTheme.bgColorOperate,
-          borderRadius: BorderRadius.circular(10),
-          boxShadow: [
-            BoxShadow(
-              color: _colorsTheme.bgColorInput,
-              spreadRadius: 5,
-              blurRadius: 7,
-              offset: const Offset(0, 3),
-            ),
-          ],
+      height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+              color: colors.scrim.withValues(alpha: .2),
+              blurRadius: 10,
+              offset: const Offset(0, 4))
+        ],
+      ),
+      child: Row(children: [
+        // 固定通话图标与右侧按钮优先保留宽度，长名称只在正文区域省略。
+        Icon(AppIcons.phone3, size: 24, color: colors.success),
+        const SizedBox(width: 8),
+        // 姓名与媒体独立绑定，人数来自已去重的腾讯群属性。
+        Expanded(
+            child: Text('$people正在$media通话',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 14, height: 20 / 14, color: colors.textPrimary))),
+        const SizedBox(width: 8),
+        // 已加入仍可恢复通话，不作为禁用按钮处理。
+        Semantics(
+          identifier: 'tim.groupCallBanner.action',
+          label: joined ? '已加入，返回通话' : '立即加入通话',
+          child: joined
+              ? TextButton(
+                  onPressed: _join,
+                  style: TextButton.styleFrom(
+                      foregroundColor: colors.textSecondary),
+                  child: const Text('已加入'))
+              : FilledButton(
+                  onPressed: _join,
+                  style: FilledButton.styleFrom(
+                      backgroundColor: colors.primary,
+                      foregroundColor: colors.onPrimary,
+                      minimumSize: const Size(64, 28),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6)),
+                      textStyle: const TextStyle(fontSize: 12)),
+                  child: const Text('立即加入')),
         ),
-        child: GestureDetector(
-            onTap: () => _changeExpand(),
-            child: Container(
-                width: MediaQuery.of(context).size.width - 10,
-                height: _isExpand ? 260 : 40,
-                child: Column(
-                  children: [
-                    const Padding(padding: EdgeInsets.only(top: 5)),
-                    Row(
-                      children: [
-                        const Padding(padding: EdgeInsets.only(left: 15)),
-                        Image.asset(
-                          'chat_assets/icon/join_group_call.png',
-                          package: 'tencent_chat_uikit',
-                          width: 20,
-                          height: 20,
-                        ),
-                        const Padding(padding: EdgeInsets.only(left: 15)),
-                        Text(
-                          _atomicLocale.peopleOnCall(widget.userIDs.length),
-                          textScaleFactor: 1.0,
-                        ),
-                        const Spacer(),
-                        Image.asset(
-                          _isExpand
-                              ? 'chat_assets/icon/join_group_compress.png'
-                              : 'chat_assets/icon/join_group_expand.png',
-                          package: 'tencent_chat_uikit',
-                        ),
-                        const Padding(padding: EdgeInsets.only(left: 15)),
-                      ],
-                    ),
-                    _isExpand
-                        ? const Padding(padding: EdgeInsets.only(top: 10))
-                        : const SizedBox(),
-                    _isExpand
-                        ? Container(
-                            width: MediaQuery.of(context).size.width - 30,
-                            height: 200,
-                            decoration: BoxDecoration(
-                              color: _colorsTheme.bgColorEntryCard,
-                              borderRadius: BorderRadius.circular(
-                                  5), // Set the corner radius
-                            ),
-                            child: Column(
-                              children: [
-                                SizedBox(
-                                    width:
-                                        MediaQuery.of(context).size.width - 40,
-                                    height: 150,
-                                    child: Center(
-                                        child: ListView.builder(
-                                      itemCount: _userAvatars.length,
-                                      scrollDirection: Axis.horizontal,
-                                      itemBuilder:
-                                          (BuildContext context, int index) {
-                                        return Padding(
-                                            padding: const EdgeInsets.only(
-                                                left: 2.5,
-                                                right: 2.5,
-                                                top: 35,
-                                                bottom: 35),
-                                            child: Container(
-                                              height: 80,
-                                              width: 80,
-                                              clipBehavior: Clip.hardEdge,
-                                              decoration: const BoxDecoration(
-                                                borderRadius: BorderRadius.all(
-                                                    Radius.circular(5)),
-                                              ),
-                                              child: Avatar.image(
-                                                userID: widget.userIDs[index],
-                                                name: widget.userIDs[index],
-                                                url: _userAvatars[index],
-                                                size: AvatarSize.xl,
-                                              ),
-                                            ));
-                                      },
-                                      padding: EdgeInsets.only(
-                                          left: _computeEdge(
-                                              MediaQuery.of(context)
-                                                      .size
-                                                      .width -
-                                                  40,
-                                              85,
-                                              _userAvatars.length),
-                                          right: _computeEdge(
-                                              MediaQuery.of(context)
-                                                      .size
-                                                      .width -
-                                                  40,
-                                              85,
-                                              _userAvatars.length)),
-                                    ))),
-                                Container(
-                                  height: 1,
-                                  decoration: BoxDecoration(
-                                    color: _colorsTheme.strokeColorPrimary,
-                                  ),
-                                ),
-                                InkWell(
-                                    onTap: () => _joinInGroupCallAction(),
-                                    child: Container(
-                                      height: 49,
-                                      alignment: Alignment.center,
-                                      child: Text(
-                                        _atomicLocale.join,
-                                        textScaleFactor: 1.0,
-                                        style: FontScheme.caption1Medium,
-                                      ),
-                                    ))
-                              ],
-                            ),
-                          )
-                        : const SizedBox(),
-                  ],
-                ))));
+      ]),
+    );
   }
 
-  _computeEdge(double maxWidth, int imageWidth, int count) {
-    int maxNeedCompute = maxWidth ~/ imageWidth;
-    if (maxNeedCompute >= count) {
-      return (maxWidth - imageWidth * count) / 2;
-    } else {
-      return 0.0;
-    }
-  }
-
-  _changeExpand() {
-    _isExpand = !_isExpand;
-    setState(() {});
-  }
-
-  _joinInGroupCallAction() {
-    PublishParams params = PublishParams();
-    params.isSticky = false;
-    params.data = {"callId": widget.callId};
-    TUIEventBus.shared.publish("call.startJoin", null, params);
-  }
-
-  _updateUserAvatars() async {
-    _userAvatars.clear();
-    final memberStore = GroupMemberStore.create(groupID: widget.groupId);
-    final result = await memberStore.getMemberInfo(userIDList: widget.userIDs);
-    if (result.isSuccess) {
-      for (var memberInfo in result.memberInfoList) {
-        if (memberInfo.avatarURL == null || memberInfo.avatarURL!.isEmpty) {
-          _userAvatars.add('');
-        } else {
-          _userAvatars.add(memberInfo.avatarURL!);
-        }
-      }
-      setState(() {});
-    }
+  /// 沿用既有事件入口；生命周期层决定加入新场次或恢复同场的通话浮层。
+  void _join() {
+    // 账号或 SDK 状态可能先于重绘变化，点击时也不能使用上一帧的加入资格。
+    if (!_canDisplay) return;
+    final params = PublishParams()..isSticky = false;
+    // 媒体沿用已验证的群属性枚举，原生入口据此申请麦克风或摄像头权限。
+    params.data = {'callId': widget.callId, 'mediaType': widget.mediaType};
+    TUIEventBus.shared.publish('call.startJoin', null, params);
   }
 }

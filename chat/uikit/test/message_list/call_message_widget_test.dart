@@ -7,6 +7,36 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/call_m
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/text_message_widget.dart';
 
 void main() {
+  testWidgets('多人记录不能误回拨单一收发方', (tester) async {
+    var callbacks = 0;
+    final message = MessageInfo(
+      msgID: 'multi',
+      from: MessageSenderInfo(userID: 'peer'),
+      to: 'self',
+      messageType: MessageType.custom,
+      messagePayload: CustomMessagePayload(
+          customData: jsonEncode({
+        'actionType': 1,
+        'groupID': '',
+        'inviteeList': ['self', 'another'],
+        'data': jsonEncode({'businessID': 'av_call', 'call_type': 1}),
+      })),
+    );
+    await tester.pumpWidget(MaterialApp(
+      theme: AppThemeFactory.create(
+          const AppNormalColorScheme(), Brightness.light),
+      home: CallMessageWidget(
+          message: message,
+          isSelf: false,
+          maxWidth: 390,
+          config: const ChatMessageListConfig(),
+          onCallMessageClick: (_, __) {
+            callbacks++;
+          }),
+    ));
+    await tester.tap(find.bySemanticsIdentifier('tim.message.call.multi'));
+    expect(callbacks, 0);
+  });
   testWidgets('语音和视频记录复用普通气泡，离线消息仍按原媒体回拨', (tester) async {
     for (final self in [false, true]) {
       for (final video in [false, true]) {

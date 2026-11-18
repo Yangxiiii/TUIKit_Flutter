@@ -1,6 +1,8 @@
 import 'package:app_ui/app_ui.dart';
 import 'dart:async';
 import 'utils/conversation_notice.dart';
+import 'utils/group_call_control_message.dart';
+import 'utils/group_call_record_message.dart';
 import 'utils/sticky_message_event.dart';
 import 'utils/local_message_window.dart';
 import 'utils/upload_message_order.dart';
@@ -424,7 +426,9 @@ class _MessageListState extends State<MessageList>
     final visible = <MessageInfo>[];
     final seen = <String>{};
     for (final message in messages) {
-      if (widget.config.hiddenMessageIDs.contains(message.msgID) ||
+      // 在线控制不属于聊天内容；历史恢复与离线输入也遵守相同边界。
+      if (GroupCallControlMessage.isMessage(message) ||
+          widget.config.hiddenMessageIDs.contains(message.msgID) ||
           (widget.offlineMessages != null &&
               message.status == MessageStatus.deleted)) {
         continue;
@@ -435,7 +439,8 @@ class _MessageListState extends State<MessageList>
     }
     _localWindow.reconcileRevocations(visible);
     return ConversationNotice.visibleMessages(
-        _uploadMessageOrder.apply(visible));
+        GroupCallRecordMessage.visibleMessages(_uploadMessageOrder.apply(visible),
+            LoginStore.shared.loginState.loginUserInfo?.userID ?? ''));
   }
 
   /// SDK异常不能成为未处理Future；定位或刷新失败保留列表并给出可重试反馈。

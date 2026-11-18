@@ -14,7 +14,7 @@ import { common } from '@kit.AbilityKit';
 import window from '@ohos.window';
 import {
   CallStore, LoginStore, DeviceStore, CallMediaType, CallParams, CallEventListener,
-  CallEndReason, UserProfile, CallParticipantStatus, ErrorInfo,
+  CallEndReason, UserProfile, CallParticipantStatus,
 } from '@tencentcloud/atomicxcore';
 import { GlobalState, CallOrientation } from './state/GlobalState';
 import { ViewState } from './state/ViewState';
@@ -68,7 +68,8 @@ export abstract class TUICallKit {
     params?: CallParams,
   ): Promise<void>;
 
-  abstract join(callId: string): Promise<void>;
+  /** 加入腾讯已有场次；媒体类型只用于权限，省略时要求完整音视频权限。 */
+  abstract join(callId: string, mediaType?: CallMediaType): Promise<void>;
 
   abstract setCallingBell(filePath: string): void;
 
@@ -91,31 +92,6 @@ export abstract class TUICallKit {
 
   /** 0 = portrait, 1 = landscapeLeft, 2 = landscapeRight. */
   abstract setScreenOrientation(orientation: number): Promise<void>;
-}
-
-/**
- * Render an exception thrown by the atomicxcore engine into a single readable
- * line. `Logger.error('...', e)` on a JSON-serialised `ErrorInfo` only shows
- * `{"code":...,"name":"ErrorInfo"}` because Error.message is non-enumerable
- * (skipped by JSON.stringify).
- *
- * 将 atomicxcore 引擎抛出的异常渲染成一行可读文本。对 JSON 序列化的 `ErrorInfo` 调用 `Logger.error('...', e)` 时，
- * 只会显示 `{"code":...,"name":"ErrorInfo"}`，因为 `Error.message` 不可枚举，会被 `JSON.stringify` 跳过。
- */
-function formatError(e: object | Error | ErrorInfo | null | undefined): string {
-  if (!e) {
-    return 'unknown error';
-  }
-  if (e instanceof Error) {
-    const code = (e as ErrorInfo).code;
-    const codeStr = (code !== undefined && code !== null) ? `code=${code}, ` : '';
-    return `${codeStr}message=${e.message}`;
-  }
-  try {
-    return JSON.stringify(e);
-  } catch (_) {
-    return String(e);
-  }
 }
 
 class PendingNotificationAction {
@@ -175,38 +151,69 @@ class TUICallKitImpl extends TUICallKit {
     await LoginStore.shared().setSelfInfo(profile);
   }
 
+  /** 权限确认前后都校验账号和占用状态，失败向 Flutter 返回而不伪装为成功。 */
   async calls(userIdList: string[], mediaType: CallMediaType, params?: CallParams): Promise<void> {
     const selfId = LoginStore.shared().state.loginUserInfo?.userID ?? '';
-    if (userIdList.length === 1 && userIdList[0] === selfId) {
-      Toast.showError(TUICallKitLocalize('TUICallKit.calNotCallYourself'));
-      return;
+    const ids = Array.from(new Set<string>(userIdList));
+    if (selfId.length === 0 || ids.length === 0 ||
+      ids.some((id: string): boolean => id.trim().length === 0 || id !== id.trim() || id === selfId)) {
+      throw new Error('通话成员或登录状态无效');
     }
-    if (userIdList.length + 1 > Constants.MAX_USER) {
-      Toast.showError(TUICallKitLocalize('TUICallKit.User.Exceed.Limit'));
-      return;
+    if (ids.length + 1 > Constants.MAX_USER) {
+      throw new Error('通话最多支持 9 人');
     }
     if (CallStore.shared().state.activeCall.callId.length > 0
         && CallStore.shared().state.selfInfo.status !== CallParticipantStatus.none) {
-      Toast.showError(TUICallKitLocalize('TUICallKit.youHaveMissedCalls'));
-      return;
+      throw new Error('当前正在通话中');
     }
     const ok = await Permission.hasPermission(this.context, mediaType);
     if (!ok) {
-      return;
+      throw new Error('未获得通话所需权限');
     }
-    try {
-      await CallStore.shared().calls(userIdList, mediaType, params);
-    } catch (e) {
-      Logger.error('TUICallKitImpl.calls failed,', formatError(e));
+    // 系统权限弹窗停留期间可能切号或收到来电，禁止覆盖新会话。
+    if (LoginStore.shared().state.loginUserInfo?.userID !== selfId ||
+      (CallStore.shared().state.activeCall.callId.length > 0 &&
+        CallStore.shared().state.selfInfo.status !== CallParticipantStatus.none)) {
+      throw new Error('通话状态已变更，请重试');
     }
+    const callParams = params ?? new CallParams();
+    callParams.timeout = 45;
+    await CallStore.shared().calls(ids, mediaType, callParams);
   }
 
-  async join(callId: string): Promise<void> {
-    try {
-      await CallStore.shared().join(callId);
-    } catch (e) {
-      Logger.error('TUICallKitImpl.join failed,', formatError(e));
+  /** 已加入同场只恢复窗口；新加入必须在权限前后核对账号和当前通话占用。 */
+  async join(callId: string, mediaType: CallMediaType = CallMediaType.video): Promise<void> {
+    const selfId = LoginStore.shared().state.loginUserInfo?.userID ?? '';
+    if (selfId.length === 0 || callId.length === 0 || callId !== callId.trim()) {
+      throw new Error('通话场次或登录状态无效');
     }
+    const state = CallStore.shared().state;
+    if (state.activeCall.callId === callId && state.selfInfo.status === CallParticipantStatus.accept) {
+      RouterManager.showCallingView();
+      return;
+    }
+    if (state.selfInfo.status !== CallParticipantStatus.none) {
+      throw new Error('当前正在通话中');
+    }
+    // 群属性中的媒体类型只决定要申请的本端权限，不能替代 SDK 的入会校验。
+    const allowed = await Permission.hasPermission(this.context, mediaType);
+    if (!allowed) throw new Error('未获得通话所需权限');
+    if (LoginStore.shared().state.loginUserInfo?.userID !== selfId ||
+      CallStore.shared().state.selfInfo.status !== CallParticipantStatus.none) {
+      throw new Error('通话状态已变更，请重试');
+    }
+    await CallStore.shared().join(callId);
+    // 只为 SDK 确认的同场恢复窗口，迟到成功不能覆盖随后到达的新场次。
+    if (LoginStore.shared().state.loginUserInfo?.userID !== selfId ||
+      CallStore.shared().state.activeCall.callId !== callId) {
+      throw new Error('通话状态已变更，请重试');
+    }
+    CallEndedFlag().clear();
+    void ScreenStateManager().beginCall();
+    void this.avSessionManager.start();
+    NetworkQualityToastManager.start();
+    RouterManager.showCallingView();
+    this.setFramework();
   }
 
   setCallingBell(filePath: string): void {

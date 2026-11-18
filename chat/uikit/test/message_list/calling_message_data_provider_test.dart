@@ -38,6 +38,13 @@ void main() {
       expect(CallingMessageDataProvider(message(raw), page).isCallingSignal,
           isFalse);
     }
+    final multi = message(jsonEncode({
+      'actionType': 1,
+      'groupID': '',
+      'inviteeList': ['peer', 'another'],
+      'data': jsonEncode({'businessID': 'av_call', 'call_type': 1}),
+    }));
+    expect(CallingMessageDataProvider(multi, page).isTemporaryMultiParty, isTrue);
   });
 
   testWidgets('异常时长不伪造通话时长，取消与超时仍保持不同事件', (tester) async {

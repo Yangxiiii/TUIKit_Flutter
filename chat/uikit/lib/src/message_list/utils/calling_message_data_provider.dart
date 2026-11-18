@@ -3,6 +3,9 @@ import 'dart:convert';
 
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:app_api/app_api_models.dart';
+
+import 'group_call_record_message.dart';
 
 enum CallProtocolType {
   unknown,
@@ -44,6 +47,9 @@ class CallingMessageDataProvider {
   String _content = '';
   bool _isCallingSignal = false;
 
+  /// 自有终态报告有完整多人身份；不能把两人临时通话误识别为普通单聊。
+  GroupCallRecordData? _personalRecord;
+
   CallProtocolType get protocolType => _protocolType;
 
   // 媒体类型
@@ -64,6 +70,14 @@ class CallingMessageDataProvider {
           ? direction == CallMessageDirection.outcoming
           : null;
 
+  /// 群个人结果也使用普通气泡，方向跟随发起人而非报告消息的真实发送端。
+  bool? get isOutgoingCall => _personalRecord != null
+      ? direction == CallMessageDirection.outcoming
+      : isOutgoingC2c;
+
+  /// 经发送身份与会话校验的个人报告，展示资料不能作为权限依据。
+  GroupCallRecordData? get personalRecord => _personalRecord;
+
   // 是否需要上屏
   bool get excludeFromHistory => _excludeFromHistory;
 
@@ -76,11 +90,53 @@ class CallingMessageDataProvider {
   // 是否Call信令
   bool get isCallingSignal => _isCallingSignal;
 
+  /// 腾讯历史载荷明确包含多位受邀者时，禁止将多人记录当作单聊回拨。
+  /// 两人临时场次的 userData 不进入历史记录，不能据此虚构多人身份。
+  bool get isTemporaryMultiParty =>
+      isCallingSignal &&
+      _groupID.isEmpty &&
+      (_personalRecord != null || _inviteeList.toSet().length > 1);
+
   late MessageInfo messageInfo;
   late AppLocalizedText atomicLocale;
 
-  CallingMessageDataProvider(this.messageInfo, BuildContext context) {
+  CallingMessageDataProvider(this.messageInfo, BuildContext context,
+      {String? viewerId}) {
     atomicLocale = AppLocalization.of(context);
+    final account =
+        viewerId ?? LoginStore.shared.loginState.loginUserInfo?.userID ?? '';
+    if (GroupCallRecordMessage.isMessage(messageInfo)) {
+      _isCallingSignal = true;
+      final record = GroupCallRecordMessage.fromMessage(messageInfo, account);
+      if (record == null) {
+        _excludeFromHistory = true;
+        return;
+      }
+      _personalRecord = record;
+      _groupID = record.groupId;
+      _callerId = record.callerId;
+      _streamMediaType = record.mediaType == 'video'
+          ? CallStreamMediaType.video
+          : CallStreamMediaType.audio;
+      _participantType = _groupID.isEmpty
+          ? CallParticipantType.c2c
+          : CallParticipantType.group;
+      _participantRole = account == record.callerId
+          ? CallParticipantRole.caller
+          : CallParticipantRole.callee;
+      _setDirection();
+      _protocolType = switch (record.outcome) {
+        GroupCallRecordOutcome.cancelled => CallProtocolType.cancel,
+        GroupCallRecordOutcome.unanswered => CallProtocolType.timeout,
+        GroupCallRecordOutcome.rejected => CallProtocolType.reject,
+        GroupCallRecordOutcome.busy => CallProtocolType.lineBusy,
+        GroupCallRecordOutcome.completed ||
+        GroupCallRecordOutcome.interrupted =>
+          CallProtocolType.hangup,
+      };
+      _content = GroupCallRecordMessage.content(record, account);
+      return;
+    }
     _isExcludedFromLastMessage =
         messageInfo.rawMessage?.isExcludedFromLastMessage ?? false;
     _isExcludedFromUnreadCount =
@@ -118,6 +174,12 @@ class CallingMessageDataProvider {
     _setParticipantRole();
     _setDirection();
     _setExcludeFromHistory();
+    // 群信令可能广播给整个群；只有真实发起人与受邀者可看到个人通话提示。
+    if (_groupID.isNotEmpty &&
+        (account.isEmpty ||
+            (account != _callerId && !_inviteeList.contains(account)))) {
+      _excludeFromHistory = true;
+    }
     _setContent();
   }
 
@@ -258,7 +320,12 @@ class CallingMessageDataProvider {
     }
 
     if (_callerId.isEmpty) {
-      _callerId = LoginStore.shared.loginState.loginUserInfo?.userID ?? '';
+      // 缺少发起人时不可把当前查看者当作发起人，避免群全员获得记录可见资格。
+      _callerId = _groupID.isEmpty
+          ? LoginStore.shared.loginState.loginUserInfo?.userID ?? ''
+          : _protocolType == CallProtocolType.send
+              ? messageInfo.from.userID
+              : '';
     }
   }
 

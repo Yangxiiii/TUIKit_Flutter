@@ -2,7 +2,18 @@ import 'package:flutter/cupertino.dart';
 import 'package:tuikit_atomic_x/atomicx.dart';
 import 'package:tencent_calls_uikit/src/tui_call_kit_impl.dart';
 import 'bridge/bootloader/bootloader.dart';
+import 'control/group_control_transport.dart';
+import 'manager/group_call_result_tracker.dart' show GroupCallResultHandler;
 
+/// 宿主选人入口；groupId 为空表示独立多人，excludedUserIds 含已占名额成员和本人。
+typedef GroupMemberPicker = Future<List<String>?> Function(BuildContext context,
+    String? groupId, Set<String> excludedUserIds, int maxInvitees);
+
+/// 宿主按当前登录账号查询真实机构岗位副标题；返回键必须是请求中的腾讯用户 ID。
+typedef GroupMemberSubtitleLoader = Future<Map<String, String>> Function(
+    String accountId, List<String> userIds);
+
+/// 向宿主提供通话及外观接入点，媒体和信令由腾讯 SDK 管理。
 abstract class TUICallKit {
   static final TUICallKit _instance = TUICallKitImpl.instance;
   static TUICallKit get instance => _instance;
@@ -149,6 +160,24 @@ abstract class TUICallKit {
   }
 
   void enableIncomingBanner(bool enable);
+
+  /// 注册群与独立多人通话的追加选人入口；返回 null 表示取消。
+  void setGroupMemberPicker(GroupMemberPicker? picker);
+
+  /// 注册只读成员资料来源；传 null 清除已缓存的机构岗位，不影响邀请或会控权限。
+  void setGroupMemberSubtitleLoader(GroupMemberSubtitleLoader? loader);
+
+  /// 注册已登录 IM 的在线会控通道；null 立即撤销旧 session 并清理待执行命令。
+  void setGroupControlTransport(GroupControlTransport? transport);
+
+  /// IM 重连成功后请求当前策略，不从聊天历史重放旧设备命令。
+  void syncGroupControlPolicy();
+
+  /// 注册本人通话结果发布器，发送失败传播为记录失败，不影响 SDK 媒体清理。
+  void setGroupCallResultHandler(GroupCallResultHandler? handler);
+
+  /// 设置已由宿主读取的群名称，供群通话标题展示。
+  void setGroupCallTitle(String groupId, String title);
 
   /// Call experimental interface
   ///

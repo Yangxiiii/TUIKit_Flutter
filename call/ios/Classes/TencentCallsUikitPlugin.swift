@@ -1,7 +1,9 @@
 import Flutter
 import UIKit
 import RTCRoomEngine
+import AVFoundation
 
+/// 提供通话振动、系统来电同步及可翻转摄像头能力查询。
 public class TencentCallsUikitPlugin: NSObject, FlutterPlugin, VoIPDataSyncHandlerDelegate {
     let voIPDataSyncHandler: VoIPDataSyncHandler
     let channel: FlutterMethodChannel
@@ -22,6 +24,15 @@ public class TencentCallsUikitPlugin: NSObject, FlutterPlugin, VoIPDataSyncHandl
 
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
+        case "getCameraCount":
+            // 按前后朝向去重，多枚后置镜头不能表示支持前后翻转。
+            let devices = AVCaptureDevice.DiscoverySession(
+                deviceTypes: [.builtInWideAngleCamera], mediaType: .video, position: .unspecified
+            ).devices
+            let positions = Set(devices.filter {
+                $0.position == .front || $0.position == .back
+            }.map { $0.position.rawValue })
+            result(positions.count)
         case "startVibration":
             startVibration(call, result: result)
         case "stopVibration":

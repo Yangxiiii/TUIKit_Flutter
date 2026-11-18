@@ -1,4 +1,5 @@
 import 'conversation_notice.dart';
+import 'group_call_control_message.dart';
 import 'sticky_message_event.dart';
 import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
@@ -55,12 +56,12 @@ class MessageUtil {
       MessageInfo message, BuildContext context) {
     if (message.messageType == MessageType.custom) {
       final call = CallingMessageDataProvider(message, context);
-      final isOutgoing = call.isOutgoingC2c;
+      final isOutgoing = call.isOutgoingCall;
       if (isOutgoing != null && isOutgoing != message.isSentBySelf) {
         // 单聊的 to 始终记录会话对端，己方发起的通话从信令取发起人。
         return (
           isSelf: isOutgoing,
-          userId: isOutgoing ? call.callerId : message.to
+          userId: call.personalRecord != null || isOutgoing ? call.callerId : message.to
         );
       }
     }
@@ -281,6 +282,8 @@ class MessageUtil {
       MessageInfo? messageInfo, BuildContext context,
       {bool showMergedTitle = false}) {
     if (messageInfo == null) return '';
+    // 通话控制由专用接收链处理，不能变成会话摘要或通知正文。
+    if (GroupCallControlMessage.isMessage(messageInfo)) return '';
 
     if (!context.mounted) {
       return '';
@@ -453,6 +456,7 @@ class MessageUtil {
 
           final callingProvider = CallingMessageDataProvider(message, context);
           if (callingProvider.isCallingSignal &&
+              callingProvider.personalRecord == null &&
               callingProvider.participantType == CallParticipantType.group) {
             return true;
           }

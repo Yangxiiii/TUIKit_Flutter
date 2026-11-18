@@ -2,6 +2,11 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:io';
 import 'package:app_ui/app_ui.dart';
+import 'package:app_core/app_core.dart';
+import 'package:app_service/app_service.dart';
+import '../state/global_state.dart';
+import '../common/utils/error_parser.dart';
+import 'call_manager.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -77,13 +82,14 @@ class CallPageRouter {
   /// 应用内小窗遵循当前媒体尺寸，不缩放整个通话页导致文字不可读。
   double get _floatWindowWidth => _isSingleCall
       ? (_isVideoCall ? 98 : CallCompactAudioContent.dimension)
-      : 120;
+      : 80;
   double get _floatWindowHeight => _isSingleCall
       ? (_isVideoCall ? 211 : CallCompactAudioContent.dimension)
-      : 180;
+      : 80;
 
-  /// 群聊保留 SDK 原有悬浮尺寸，定制布局仅作用于单聊。
+  /// 群及临时多人统一显示 80 像素头像浮窗，两人临时多人以展示快照区分。
   bool get _isSingleCall =>
+      GlobalState.instance.groupCall.value == null &&
       CallStore.shared.state.activeCall.value.chatGroupId.isEmpty &&
       CallStore.shared.state.activeCall.value.inviteeIds.length <= 1;
   bool get _isVideoCall =>
@@ -129,8 +135,81 @@ class CallPageRouter {
   void showFloatingPage() =>
       _showPage(CallPageType.floating, isManualSwitch: true);
   void showPipPage() => _showPage(CallPageType.pip, isManualSwitch: true);
+
+  /// 宿主选人与群默认选人共用当前场次，返回时再次验证账号、代次和容量。
   void showInvitePage() {
-    _showPage(CallPageType.invite, isManualSwitch: true);
+    final callId = CallStore.shared.state.activeCall.value.callId;
+    final epoch = CallManager.instance.sessionEpoch;
+    unawaited(AppServiceLocator.get<ActionGuard>().singleFlight(
+        ('tim.call.picker', epoch, callId),
+        () => _pickInvitees(callId, epoch)));
+  }
+
+  /// 临时多人必须由宿主提供组织选人；缺少入口时明确提示，不查询空群 ID。
+  Future<void> _pickInvitees(String callId, int epoch) async {
+    final call = CallStore.shared.state.activeCall.value;
+    final accountId = LoginStore.shared.loginState.loginUserInfo?.userID;
+    final context = _callNavigatorKey.currentContext;
+    final presentation = _callOverlayEntry;
+    if (context == null ||
+        callId.isEmpty ||
+        call.mediaType == null ||
+        CallStore.shared.state.selfInfo.value.status !=
+            CallParticipantStatus.accept) {
+      return;
+    }
+    // 宿主可提供完整组织选人；只有明确群来源才允许退回 SDK 群成员列表。
+    final picker = GlobalState.instance.groupMemberPicker;
+    if (picker == null) {
+      if (call.chatGroupId.isNotEmpty) {
+        _pageTypeBeforeInvite = _currentPageType;
+        _showPage(CallPageType.invite, isManualSwitch: true);
+      } else {
+        AppToast.show(AppLocalization.of(context).resolve(
+            'chat.uikit.groupCallPickerUnavailable', '暂时无法添加成员，请稍后重试'));
+      }
+      return;
+    }
+    // 等待中的邀请同样占名额，传给宿主的是只读集合，提交仍会再次校验。
+    final excluded =
+        Set<String>.unmodifiable(CallManager.instance.occupiedUserIds);
+    final remaining = CallManager.maxParticipants - excluded.length;
+    if (remaining <= 0) {
+      AppToast.show(AppLocalization.of(context)
+          .resolve('chat.uikit.groupCallFull', '通话人数已达9人上限'));
+      return;
+    }
+    bool isCurrent() =>
+        context.mounted &&
+        identical(presentation, _callOverlayEntry) &&
+        epoch == CallManager.instance.sessionEpoch &&
+        accountId == LoginStore.shared.loginState.loginUserInfo?.userID &&
+        callId == CallStore.shared.state.activeCall.value.callId;
+    try {
+      // 选人完成不能直接邀请：原浮层、账号、场次及代次必须都还有效。
+      final selected = await picker(
+          context,
+          call.chatGroupId.isEmpty ? null : call.chatGroupId,
+          excluded,
+          remaining);
+      if (!context.mounted ||
+          !isCurrent() ||
+          selected == null ||
+          selected.isEmpty) {
+        return;
+      }
+      final result =
+          await CallManager.instance.invite(selected, expectedCallId: callId);
+      if (!context.mounted || !isCurrent() || result.errorCode == 0) return;
+      final text = AppLocalization.of(context);
+      AppToast.show(ErrorParser.getErrorMessage(result.errorCode, text) ??
+          text.callFailedToInitiateOrJoinCall);
+    } catch (_) {
+      if (context.mounted && isCurrent()) {
+        AppToast.show(
+            AppLocalization.of(context).callFailedToInitiateOrJoinCall);
+      }
+    }
   }
 
   void showIncomingBanner() {
@@ -272,7 +351,6 @@ class CallPageRouter {
     final routeName = _getRouteName(pageType);
 
     if (pageType == CallPageType.invite) {
-      _pageTypeBeforeInvite = _currentPageType;
       navigator.pushNamed(routeName);
     } else {
       if (!navigator.canPop()) {

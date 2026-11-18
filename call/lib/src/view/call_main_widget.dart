@@ -6,6 +6,8 @@ import 'package:tuikit_atomic_x/permission/permission.dart';
 import 'package:app_ui/app_ui.dart';
 import 'callview/public/float/call_compact_widget.dart';
 import 'callview/public/float/call_minimize_button.dart';
+import 'callview/public/multi/group_call_compact_widget.dart';
+import 'callview/public/multi/group_call_header_actions.dart';
 
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
@@ -188,30 +190,22 @@ class _CallMainWidgetState extends State<CallMainWidget>
         ),
       );
 
-  /// 单聊直接展示可读小窗；群聊沿用原 SDK 的缩放通话视图。
+  /// 群和临时多人使用可读的白卡，避免将整页控件缩成不可点的小图。
   Widget _buildCompactContent() {
     final call = CallStore.shared.state.activeCall.value;
-    if (call.chatGroupId.isEmpty && call.inviteeIds.length <= 1) {
-      return CallCompactWidget(
+    final group = GlobalState.instance.groupCall.value != null ||
+        call.chatGroupId.isNotEmpty ||
+        call.inviteeIds.length > 1;
+    if (group) {
+      return GroupCallCompactWidget(
+          onRestore: _openCallingPage,
+          isCurrentPresentation: () =>
+              widget.callbacks?.isCurrentPresentation?.call() ?? false);
+    }
+    return CallCompactWidget(
         onRestore: _openCallingPage,
         isCurrentPresentation: () =>
-            widget.callbacks?.isCurrentPresentation?.call() ?? false,
-      );
-    }
-    final screenWidth = MediaQuery.sizeOf(context).width;
-    final scale = 120 / screenWidth;
-    return Transform.scale(
-      scale: scale,
-      alignment: Alignment.center,
-      child: OverflowBox(
-        maxWidth: screenWidth,
-        maxHeight: 180 / scale,
-        child: CallView(
-            key: _callViewKey,
-            isPipMode: true,
-            enableAITranscriber: GlobalState.instance.enableAITranscriber),
-      ),
-    );
+            widget.callbacks?.isCurrentPresentation?.call() ?? false);
   }
 
   Widget _buildCallingPageWidget() {
@@ -227,8 +221,7 @@ class _CallMainWidgetState extends State<CallMainWidget>
             child: Stack(
               children: [
                 _buildCallView(),
-                _buildFloatingWindowBtnWidget(),
-                _buildInviterUserBtnWidget(),
+                _buildHeaderActions(),
               ],
             ),
           ),
@@ -242,6 +235,7 @@ class _CallMainWidgetState extends State<CallMainWidget>
       child: CallView(
         key: _callViewKey,
         enableAITranscriber: GlobalState.instance.enableAITranscriber,
+        isCurrentPresentation: widget.callbacks?.isCurrentPresentation,
       ),
     );
   }
@@ -252,30 +246,32 @@ class _CallMainWidgetState extends State<CallMainWidget>
         : const SizedBox();
   }
 
-  Widget _buildInviterUserBtnWidget() {
-    return CallStore.shared.state.activeCall.value.chatGroupId.isNotEmpty
-        ? Positioned(
-            right: 12,
-            top: 52,
-            width: 40,
-            height: 40,
-            child: InkWell(
-              onTap: () => _openInviteUser(),
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: Image.asset(
-                    'assets/images/add_user.png',
-                    package: 'tencent_calls_uikit',
-                  ),
-                ),
-              ),
-            ),
-          )
-        : const SizedBox();
-  }
+  /// 群与临时多人使用共享页头，单聊保留原浮窗入口及布局。
+  Widget _buildHeaderActions() => ListenableBuilder(
+        listenable: Listenable.merge([
+          CallStore.shared.state.activeCall,
+          CallStore.shared.state.selfInfo,
+          GlobalState.instance.groupCall
+        ]),
+        builder: (context, _) {
+          final call = CallStore.shared.state.activeCall.value;
+          final self = CallStore.shared.state.selfInfo.value;
+          final group = GlobalState.instance.groupCall.value != null ||
+              call.chatGroupId.isNotEmpty ||
+              call.inviteeIds.length > 1;
+          if (!group) return Stack(children: [_buildFloatingWindowBtnWidget()]);
+          final incoming = call.inviterId != self.id &&
+              self.status == CallParticipantStatus.waiting;
+          final ended = GlobalState.instance.groupCall.value?.ended == true;
+          return GroupCallHeaderActions(
+              incoming: incoming,
+              showMinimize: GlobalState.instance.enableFloatWindow && !ended,
+              showInvite: !incoming && !ended,
+              inviteEnabled: call.callId.isNotEmpty,
+              onMinimize: _openFloatWindow,
+              onInvite: _openInviteUser);
+        },
+      );
 
   /// 安卓在系统授权后继续当前通话的最小化流程，其他平台直接切换。
   Future<void> _openFloatWindow() => AppServiceLocator.get<ActionGuard>()
@@ -318,6 +314,7 @@ class _CallMainWidgetState extends State<CallMainWidget>
           expectedId: callId,
           call: state.activeCall.value,
           self: state.selfInfo.value,
+          isGroup: GlobalState.instance.groupCall.value != null,
           isCurrentPresentation:
               widget.callbacks?.isCurrentPresentation?.call() ?? false,
         );

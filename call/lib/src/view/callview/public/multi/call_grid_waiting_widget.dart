@@ -1,170 +1,103 @@
-import 'package:atomic_x_core/atomicxcore.dart';
-import 'package:flutter/cupertino.dart';
+import 'package:app_ui/app_ui.dart';
+import 'package:flutter/material.dart';
 
-import '../../core/common/call_colors.dart';
-import '../../core/common/constants.dart';
-import 'package:tuikit_atomic_x/base_component/base_component.dart'
-    show AppChatLocalizedText, AppLocalization, AppLocalizedText;
-import '../../core/common/utils/utils.dart';
+import 'group_call_dots.dart';
+import 'group_call_member.dart';
 
-// ignore_for_file: unused_import
-
+/// 被叫全屏等待页，只展示邀请资料与成员预览，不提前显示设备控制。
 class CallGridWaitingWidget extends StatelessWidget {
-  const CallGridWaitingWidget({super.key});
+  const CallGridWaitingWidget(
+      {super.key,
+      required this.inviter,
+      required this.members,
+      required this.video});
+
+  /// 来自本场邀请资料的发起人。
+  final GroupCallMember inviter;
+
+  /// 除本人之外的通话成员，按当前场次顺序预览前三名，余下显示真实数量。
+  final List<GroupCallMember> members;
+
+  /// SDK 媒体类型决定邀请文案。
+  final bool video;
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalization.of(context);
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.start,
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        _getCallerInfoDisplay(),
-        Text(
-          l10n.callInvitedToGroupCall,
-          textScaleFactor: 1.0,
-          style: const TextStyle(fontSize: 16, color: CallColors.colorG5),
-        ),
-        const SizedBox(height: 50),
-        _getInviteeListView(),
-      ],
-    );
-  }
-
-  _getCallerInfoDisplay() {
-    return ValueListenableBuilder(
-      valueListenable: CallStore.shared.state.activeCall,
-      builder: (context, activeCall, child) {
-        return _CallerInfoWidget(userId: activeCall.inviterId);
-      },
-    );
-  }
-
-  _getInviteeListView() {
-    return ValueListenableBuilder(
-      valueListenable: CallStore.shared.state.allParticipants,
-      builder: (context, allParticipants, child) {
-        List<String> inviteeAvatarList = [];
-        for (var participant in allParticipants) {
-          if (participant.id != CallStore.shared.state.selfInfo.value.id &&
-              participant.id !=
-                  CallStore.shared.state.activeCall.value.inviterId) {
-            inviteeAvatarList.add(participant.avatarURL);
-          }
-        }
-        if (inviteeAvatarList.isNotEmpty) {
-          return Column(
-            mainAxisAlignment: MainAxisAlignment.start,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Text(
-                AppLocalization.of(context).callTheyAreAlsoThere,
-                textScaleFactor: 1.0,
-                style: const TextStyle(fontSize: 15, color: CallColors.colorG5),
-              ),
-              Container(
-                margin: const EdgeInsets.only(top: 10),
-                child: Wrap(
-                  spacing: 5,
-                  runSpacing: 5,
-                  children: List.generate(inviteeAvatarList.length, ((index) {
-                    return Container(
-                      height: 30,
-                      width: 30,
-                      clipBehavior: Clip.hardEdge,
-                      decoration: const BoxDecoration(
-                        borderRadius: BorderRadius.all(Radius.circular(5)),
-                      ),
-                      child: Image(
-                        image: NetworkImage(
-                          StringStream.makeNull(
-                            inviteeAvatarList[index],
-                            Constants.defaultAvatar,
-                          ),
-                        ),
-                        fit: BoxFit.cover,
-                        errorBuilder: (ctx, err, stackTrace) => Image.asset(
-                          'call_assets/user_icon.png',
-                          package: 'tuikit_atomic_x',
-                        ),
-                      ),
-                    );
-                  })),
-                ),
-              ),
-            ],
-          );
-        }
-        return const SizedBox();
-      },
-    );
-  }
-}
-
-class _CallerInfoWidget extends StatefulWidget {
-  final String userId;
-
-  const _CallerInfoWidget({super.key, required this.userId});
-
-  @override
-  State<_CallerInfoWidget> createState() => _CallerInfoWidgetState();
-}
-
-class _CallerInfoWidgetState extends State<_CallerInfoWidget> {
-  ContactInfo? _contactInfo;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadContactInfo();
-  }
-
-  Future<void> _loadContactInfo() async {
-    final handler = await ContactStore.shared.getContactInfo(
-      userIDList: [widget.userId],
-    );
-    if (handler.isSuccess && handler.contactInfoList.isNotEmpty && mounted) {
-      setState(() {
-        _contactInfo = handler.contactInfoList.first;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final displayName = _contactInfo?.nickname ?? "";
-    final avatarUrl = _contactInfo?.avatarURL ?? Constants.defaultAvatar;
-
-    return Column(
-      children: [
-        Container(
-          margin: const EdgeInsets.only(top: 150),
-          height: 120,
-          width: 120,
-          clipBehavior: Clip.hardEdge,
-          decoration: const BoxDecoration(
-            borderRadius: BorderRadius.all(Radius.circular(15)),
-          ),
-          child: Image(
-            image: NetworkImage(
-              StringStream.makeNull(avatarUrl, Constants.defaultAvatar),
-            ),
-            fit: BoxFit.cover,
-            errorBuilder: (ctx, err, stackTrace) => Image.asset(
-              'call_assets/user_icon.png',
-              package: 'tuikit_atomic_x',
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Text(
-            displayName,
-            textScaleFactor: 1.0,
-            style: const TextStyle(fontSize: 24, color: CallColors.colorG7),
-          ),
-        ),
-      ],
-    );
+    final colors = context.appColors;
+    return LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+              child: SizedBox(
+                  width: constraints.maxWidth,
+                  child: Column(children: [
+                    SizedBox(height: constraints.maxHeight > 440 ? 69 : 12),
+                    AppUserAvatar(
+                        userId: inviter.id,
+                        name: inviter.name,
+                        url: inviter.avatarUrl,
+                        size: 96),
+                    const SizedBox(height: 20),
+                    Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 40),
+                        child: Text(inviter.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                color: colors.onScrim,
+                                fontSize: 20,
+                                height: 28 / 20))),
+                    if (inviter.subtitle.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(inviter.subtitle,
+                          style: TextStyle(
+                              color: colors.onScrimSecondary,
+                              fontSize: 16,
+                              height: 22 / 16,
+                              letterSpacing: 0)),
+                    ],
+                    const SizedBox(height: 48),
+                    Text('邀请你${video ? '视频' : '语音'}通话',
+                        style: TextStyle(
+                            color: colors.onScrim,
+                            fontSize: 16,
+                            height: 20 / 16,
+                            letterSpacing: 0)),
+                    const SizedBox(height: 24),
+                    const GroupCallDots(),
+                    if (members.isNotEmpty) ...[
+                      const SizedBox(height: 60),
+                      Text('通话成员',
+                          style: TextStyle(
+                              color: colors.onScrim,
+                              fontSize: 16,
+                              height: 20 / 16,
+                              letterSpacing: 0)),
+                      const SizedBox(height: 16),
+                      Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          spacing: 9,
+                          children: [
+                            for (final member in members.take(3))
+                              AppUserAvatar(
+                                  userId: member.id,
+                                  name: member.name,
+                                  url: member.avatarUrl,
+                                  size: 40),
+                            if (members.length > 3)
+                              Container(
+                                  width: 40,
+                                  height: 40,
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                      color: colors.scrim.withValues(alpha: .4),
+                                      shape: BoxShape.circle),
+                                  child: Text('+${members.length - 3}',
+                                      style: TextStyle(
+                                          color: colors.onScrim,
+                                          fontSize: 14))),
+                          ]),
+                    ],
+                    const SizedBox(height: 16),
+                  ])),
+            ));
   }
 }

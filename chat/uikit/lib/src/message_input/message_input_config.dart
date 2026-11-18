@@ -10,6 +10,10 @@ import 'chat_media_sender.dart';
 typedef ChatMentionPicker = Future<List<MentionInfo>?> Function(
     BuildContext context);
 
+/// 宿主接管通话流程；媒体为空时先选择语音或视频，再执行选人及权限校验。
+typedef ChatCallLauncher = Future<void> Function(
+    BuildContext context, CallMediaType? mediaType);
+
 /// 业务代发返回 SDK 中实际存在的消息，供原会话列表按消息 ID 合并。
 typedef ChatRichMentionSender = Future<MessageInfo> Function(
     CustomMessagePayload payload,
@@ -96,6 +100,9 @@ abstract class MessageInputConfigProtocol {
   /// 宿主注册的全局异步操作守卫；未注入时输入组件使用独立的同类型守卫。
   ActionGuard? get actionGuard;
 
+  /// 群通话使用宿主目录和权限；缺省时保留 UIKit 的原有入口。
+  ChatCallLauncher? get callLauncher;
+
   bool get isShowAudioRecorder;
   bool get isShowMore;
   bool get enableReadReceipt;
@@ -141,6 +148,9 @@ class ChatMessageInputConfig implements MessageInputConfigProtocol {
   /// 保持与宿主其他文字发送入口共用同一并发边界。
   @override
   final ActionGuard? actionGuard;
+
+  @override
+  final ChatCallLauncher? callLauncher;
 
   /// 仅由宿主对本次语音预览范围开启，避免改变其他会话的发送行为。
   @override
@@ -217,6 +227,7 @@ class ChatMessageInputConfig implements MessageInputConfigProtocol {
     this.mediaSender,
     this.fileSelector,
     this.actionGuard,
+    this.callLauncher,
     this.previewVoiceBeforeSend = false,
     this.mentionPicker,
     this.richMentionSender,

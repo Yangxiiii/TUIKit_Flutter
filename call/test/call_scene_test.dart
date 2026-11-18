@@ -4,6 +4,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_calls_uikit/src/view/callview/public/controls/single_call_controls.dart';
 import 'package:tencent_calls_uikit/src/view/callview/public/float/call_scene.dart';
+import 'support/repository_assets.dart';
 
 void main() {
   testWidgets('网络不佳仍保留全部设备操作且提示位于按钮上方', (tester) async {
@@ -12,42 +13,44 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(MaterialApp(
+        builder: (_, child) =>
+            DefaultAssetBundle(bundle: RepositoryAssets(), child: child!),
         home: CallScene(
-      self: (
-        id: 'self',
-        name: '本人',
-        avatarUrl: '',
-        subtitle: '',
-        cameraOn: false
-      ),
-      remote: (
-        id: 'peer',
-        name: '对端',
-        avatarUrl: '',
-        subtitle: '',
-        cameraOn: true
-      ),
-      video: true,
-      accepted: true,
-      localInMainView: false,
-      onSwap: () {},
-      videoBuilder: (_) => const SizedBox.shrink(),
-      hint: const Text('当前通话你的网络不佳\n当前通话对方网络不佳'),
-      timer: const Text('02:09'),
-      controls: SingleCallControls(
+          self: (
+            id: 'self',
+            name: '本人',
+            avatarUrl: '',
+            subtitle: '',
+            cameraOn: false
+          ),
+          remote: (
+            id: 'peer',
+            name: '对端',
+            avatarUrl: '',
+            subtitle: '',
+            cameraOn: true
+          ),
           video: true,
-          incoming: false,
           accepted: true,
-          microphoneOn: true,
-          speakerOn: true,
-          cameraOn: false,
-          onEnd: () {},
-          onAccept: () {},
-          onMicrophone: () {},
-          onSpeaker: () {},
-          onCamera: () {},
-          onFlip: () {}),
-    )));
+          localInMainView: false,
+          onSwap: () {},
+          videoBuilder: (_) => const SizedBox.shrink(),
+          hint: const Text('当前通话你的网络不佳\n当前通话对方网络不佳'),
+          timer: const Text('02:09'),
+          controls: SingleCallControls(
+              video: true,
+              incoming: false,
+              accepted: true,
+              microphoneOn: true,
+              speakerOn: true,
+              cameraOn: false,
+              onEnd: () {},
+              onAccept: () {},
+              onMicrophone: () {},
+              onSpeaker: () {},
+              onCamera: () {},
+              onFlip: () {}),
+        )));
     await tester.pump();
     for (final id in ['microphone', 'speaker', 'camera', 'end', 'flip']) {
       expect(find.bySemanticsIdentifier('call.$id'), findsOneWidget);
@@ -75,6 +78,8 @@ void main() {
         var end = 0;
         var accept = 0;
         await tester.pumpWidget(MaterialApp(
+          builder: (_, child) =>
+              DefaultAssetBundle(bundle: RepositoryAssets(), child: child!),
           theme: AppThemeFactory.create(
               const AppNormalColorScheme(), Brightness.light),
           home: CallScene(

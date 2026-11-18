@@ -1,4 +1,5 @@
 import { common } from '@kit.AbilityKit';
+import { camera } from '@kit.CameraKit';
 import {
   AbilityAware,
   AbilityPluginBinding,
@@ -9,7 +10,7 @@ import {
   MethodChannel,
   MethodResult,
 } from '@ohos/flutter_ohos';
-import { CallMediaType, LoginStore } from '@tencentcloud/atomicxcore';
+import { CallMediaType, CallParams, LoginStore } from '@tencentcloud/atomicxcore';
 import { TUICallKit } from '../../TUICallKit';
 import { RouterManager } from '../../manager/RouterManager';
 import { Logger } from '../../common/utils/Logger';
@@ -62,6 +63,23 @@ export default class TencentCallsUikitPlugin implements FlutterPlugin, MethodCal
     }
 
     switch (call.method) {
+      case 'getCameraCount': {
+        try {
+          // 仅统计前后朝向，不能把同侧多枚摄像头当作支持翻转。
+          const devices = camera.getCameraManager(context).getSupportedCameras();
+          const positions = new Set<camera.CameraPosition>();
+          devices.forEach((device: camera.CameraDevice): void => {
+            if (device.cameraPosition === camera.CameraPosition.CAMERA_POSITION_FRONT ||
+              device.cameraPosition === camera.CameraPosition.CAMERA_POSITION_BACK) {
+              positions.add(device.cameraPosition);
+            }
+          });
+          result.success(positions.size);
+        } catch (_) {
+          result.error('CAMERA_QUERY_FAILED', '无法读取摄像头能力', null);
+        }
+        return;
+      }
       case 'harmonyPresentationReady': {
         const channel = this.presentationChannel;
         if (channel === null) {
@@ -106,6 +124,9 @@ export default class TencentCallsUikitPlugin implements FlutterPlugin, MethodCal
       case 'harmonyCalls':
         this.calls(call, context, result);
         return;
+      case 'harmonyJoin':
+        this.join(call, context, result);
+        return;
       default:
         result.notImplemented();
     }
@@ -129,13 +150,32 @@ export default class TencentCallsUikitPlugin implements FlutterPlugin, MethodCal
       .catch((error: Error): void => result.error('LOGIN_FAILED', error.message, null));
   }
 
+  /** 保留群归属和邀请时限，避免群通话被原生层降为临时多人通话。 */
   private calls(call: MethodCall, context: common.UIAbilityContext, result: MethodResult): void {
     const userIds = call.argument('userIds') as string[];
     const mediaType = call.argument('mediaType') === 'video'
       ? CallMediaType.video
       : CallMediaType.audio;
-    TUICallKit.createInstance(context).calls(userIds, mediaType)
+    const groupId = call.argument('chatGroupId') as string | null;
+    const params = new CallParams();
+    params.chatGroupId = groupId ?? '';
+    params.timeout = 45;
+    TUICallKit.createInstance(context).calls(userIds, mediaType, params)
       .then((): void => result.success(null))
       .catch((error: Error): void => result.error('CALL_FAILED', error.message, null));
+  }
+
+  /** 仅转发真实 callId，原生 SDK 决定加入资格；错误必须返回 Flutter 供用户重试。 */
+  private join(call: MethodCall, context: common.UIAbilityContext, result: MethodResult): void {
+    const callId = call.argument('callId') as string;
+    const media = call.argument('mediaType') as string;
+    if (typeof callId !== 'string' || (media !== 'audio' && media !== 'video')) {
+      result.error('INVALID_ARGUMENT', '通话场次或媒体类型无效', null);
+      return;
+    }
+    const mediaType = media === 'video' ? CallMediaType.video : CallMediaType.audio;
+    TUICallKit.createInstance(context).join(callId, mediaType)
+      .then((): void => result.success(null))
+      .catch((error: Error): void => result.error('JOIN_FAILED', error.message, null));
   }
 }
