@@ -5,7 +5,9 @@ import '../utils/voice_message_media.dart';
 import 'package:app_ui/app_ui.dart';
 import '../utils/conversation_notice.dart';
 import '../utils/group_announcement_message.dart';
+import '../utils/oa_announcement_message.dart';
 import 'message_types/group_announcement_message_card.dart';
+import 'message_types/oa_announcement_message_card.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart' hide AlertDialog;
 import 'super_tooltip.dart';
@@ -457,6 +459,7 @@ class _MessageBubbleState extends State<MessageBubble>
     }
 
     final announcement = _groupAnnouncement;
+    final notification = _oaAnnouncement;
     Widget messageWidget;
 
     switch (widget.message.messageType) {
@@ -597,6 +600,30 @@ class _MessageBubbleState extends State<MessageBubble>
         break;
 
       case MessageType.custom:
+        if (notification != null) {
+          // 通知卡复用定位高亮，详情只传业务 ID，不把点击当成业务已读。
+          messageWidget = _wrapMediaHighlight(
+            OaAnnouncementMessageCard(
+              key: _messageKey,
+              announcement: notification,
+              maxWidth: widget.maxWidth,
+              isRead: _readAnnouncementStatus(notification.id),
+              // SDK 尚无消息 ID 时沿用公告业务 ID；正式重复通知仍由 IM 消息 ID 区分。
+              detailIdentifier:
+                  'tim.assistant.detail.${Uri.encodeComponent(widget.message.msgID.isEmpty ? notification.id : widget.message.msgID)}',
+              onOpen: () {
+                final onOpen = widget.config.onOaAnnouncementTap;
+                if (onOpen != null) {
+                  onOpen(context, notification.id);
+                } else {
+                  Toast.info(context, '公告详情暂未开放');
+                }
+              },
+            ),
+            colorsTheme,
+          );
+          break;
+        }
         if (announcement != null) {
           // 群归属已校验，点击只传公告引用，详情正文交给宿主读取。
           final onOpen = widget.config.onGroupAnnouncementTap;
@@ -688,6 +715,7 @@ class _MessageBubbleState extends State<MessageBubble>
     // 公告详情走业务接口，缓存卡片也可打开；其他依赖 SDK 的卡片操作在联网后恢复。
     if (widget.messageListStore == null &&
         announcement == null &&
+        notification == null &&
         const {MessageType.file, MessageType.audio, MessageType.custom}
             .contains(widget.message.messageType)) {
       messageWidget = IgnorePointer(child: messageWidget);
@@ -788,9 +816,10 @@ class _MessageBubbleState extends State<MessageBubble>
     _onOpenToolTip();
   }
 
-  /// 合并详情和后端系统提示只读，不能通过长按打开操作菜单。
+  /// 合并详情、系统提示和公告通知只读，不能通过长按打开操作菜单。
   VoidCallback? get _longPressCallback => widget.isInMergedDetailView ||
           ConversationNotice.fromMessage(widget.message) != null ||
+          _oaAnnouncement != null ||
           (widget.messageListStore == null && !_canCopy)
       ? null
       : _handleLongPress;
@@ -799,6 +828,20 @@ class _MessageBubbleState extends State<MessageBubble>
   GroupAnnouncementMessage? get _groupAnnouncement =>
       GroupAnnouncementMessage.fromConversation(
           widget.message, widget.conversationID);
+
+  /// 单聊公告使用独立协议，不影响群公告或普通自定义消息的处理。
+  OaAnnouncementMessage? get _oaAnnouncement =>
+      OaAnnouncementMessage.fromConversation(
+          widget.message, widget.conversationID);
+
+  /// 可选业务状态读取失败时保持未知，避免影响消息历史展示。
+  bool? _readAnnouncementStatus(String id) {
+    try {
+      return widget.config.oaAnnouncementReadStatus?.call(id);
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// 消息复制只读取当前气泡，离线可沿用同一菜单动作。
   bool get _canCopy =>

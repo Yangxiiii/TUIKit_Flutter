@@ -35,6 +35,9 @@ export 'src/message_list/utils/group_announcement_message.dart';
 export 'src/message_list/utils/group_call_control_message.dart';
 export 'src/message_list/utils/group_call_record_message.dart'
     show GroupCallRecordMessage;
+export 'src/message_list/utils/oa_announcement_message.dart';
+export 'src/message_list/widgets/message_types/oa_announcement_message_card.dart'
+    show OaAnnouncementAvatar;
 export 'src/message_list/utils/rich_content_message.dart'
     show RichContentMessage, RichContentBlock, RichImageBlock, RichFileBlock;
 export 'src/message_list/widgets/message_types/custom_message_widget.dart'
@@ -42,9 +45,7 @@ export 'src/message_list/widgets/message_types/custom_message_widget.dart'
 export 'src/message_list/utils/message_utils.dart' show MessageUtil;
 export 'src/message_list/message_list.dart';
 export 'src/message_list/utils/message_viewport_anchor.dart'
-    show
-        MessageViewportSnapshot,
-        createMessageViewportSnapshot;
+    show MessageViewportSnapshot, createMessageViewportSnapshot;
 export 'src/third_party/scrollable_positioned_list/scrollable_positioned_list.dart'
     show ScrollablePositionedList;
 export 'src/message_list/widgets/merged_message_detail_page.dart'
@@ -64,7 +65,8 @@ export 'src/message_list/message_reply_config.dart';
 export 'src/message_list/widgets/message_reply_count.dart';
 export 'src/message_list/message_sticky_config.dart';
 export 'src/message_list/utils/sticky_message_event.dart';
-export 'src/message_list/utils/conversation_notice.dart' show ConversationNotice;
+export 'src/message_list/utils/conversation_notice.dart'
+    show ConversationNotice;
 export 'src/message_list/widgets/message_types/image_message_widget.dart';
 
 export 'src/message_input/src/chat_special_text_span_builder.dart'

@@ -1,4 +1,5 @@
 import 'message_confirmation.dart';
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart' hide AlertDialog;
 import 'package:tencent_chat_uikit/src/navigation/chat_uikit_navigation.dart';
@@ -10,11 +11,13 @@ import 'package:tencent_chat_uikit/src/message_list/utils/calling_message_data_p
 import 'package:tencent_chat_uikit/src/message_list/utils/group_call_record_message.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_resender.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_utils.dart';
+import 'package:tencent_chat_uikit/src/message_list/utils/oa_announcement_message.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/translation_display_manager.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_attachments.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_status_mixin.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_read_receipt_view.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_tooltip.dart';
+import 'message_types/oa_announcement_message_card.dart';
 
 /// 组合消息头像、正文与回执；多选切换保留气泡锚点，消息项间距由列表负责。
 class MessageItem extends StatelessWidget with MessageStatusMixin {
@@ -247,6 +250,12 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
       return IgnorePointer(ignoring: selectionOnly, child: messageBubble);
     }
 
+    // 公告身份来自已校验的消息类型，不显示后台账号的员工头像和资料入口。
+    if (OaAnnouncementMessage.fromConversation(message, conversationID) !=
+        null) {
+      return _buildSelectableRow(_buildAnnouncementRow(context, messageBubble));
+    }
+
     Widget messageRow;
     switch (config.alignment) {
       case AppBuilder.MESSAGE_ALIGNMENT_TWO_SIDED:
@@ -269,6 +278,34 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     // 模式切换保持相同父级结构，防止气泡重建后丢失弹窗避让所用的锚点。
     return _buildSelectableRow(messageRow);
   }
+
+  /// 固定通知头像与类型名，卡片在剩余消息列内适配窄屏和多选布局。
+  Widget _buildAnnouncementRow(BuildContext context, Widget messageBubble) =>
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const OaAnnouncementAvatar(),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '公告',
+                  style: TextStyle(
+                    color: context.appColors.textSecondary,
+                    fontSize: 14,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                messageBubble,
+              ],
+            ),
+          ),
+        ],
+      );
 
   /// 多选只增加复选框及点击行为，正文使用稳定键保留气泡状态和定位锚点。
   Widget _buildSelectableRow(Widget messageRow) {

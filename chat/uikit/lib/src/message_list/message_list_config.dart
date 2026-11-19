@@ -55,6 +55,12 @@ abstract class MessageListConfigProtocol {
   void Function(BuildContext, GroupAnnouncementMessage)?
       get onGroupAnnouncementTap;
 
+  /// 通知详情入口只传公告业务 ID，由宿主在接口可用时查询详情。
+  void Function(BuildContext, String id)? get onOaAnnouncementTap;
+
+  /// 宿主提供公告业务阅读状态；为空或返回 null 表示尚无状态，不能用会话未读推断。
+  bool? Function(String id)? get oaAnnouncementReadStatus;
+
   /// 本账号已确认的本机删除标识，阻止SDK窗口与进程快照重新呈现旧记录。
   Set<String> get hiddenMessageIDs;
 
@@ -171,6 +177,14 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
   @override
   final void Function(BuildContext, GroupAnnouncementMessage)?
       onGroupAnnouncementTap;
+
+  /// 接口未就绪时宿主可只展示暂不可用反馈，不能伪造详情请求成功。
+  @override
+  final void Function(BuildContext, String id)? onOaAnnouncementTap;
+
+  /// 仅消费宿主已获取的阅读状态，UIKit 不发起业务请求或保存第二份状态。
+  @override
+  final bool? Function(String id)? oaAnnouncementReadStatus;
   @override
   final Set<String> hiddenMessageIDs;
 
@@ -342,6 +356,8 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
     this.onGroupAnnouncementTap,
     this.acceptedCallAttempt,
     this.onGroupCallBubbleTap,
+    this.onOaAnnouncementTap,
+    this.oaAnnouncementReadStatus,
     this.hiddenMessageIDs = const {},
     this.videoPlayIcon,
     this.imageLoadingPlaceholder,

@@ -59,6 +59,9 @@ class ChatPage extends AppBaseStatefulPage {
   /// 当前账号在群内被禁言时，关闭底部输入操作并保留草稿。
   final bool sendMuted;
 
+  /// 通知会话关闭输入组件及发送手势，普通聊天默认保留输入与草稿生命周期。
+  final bool showMessageInput;
+
   /// 宿主提供 SDK 历史加载完毕后的归档消息入口。
   final ChatMessageHistoryConfig? messageHistoryConfig;
 
@@ -122,6 +125,7 @@ class ChatPage extends AppBaseStatefulPage {
     this.offlineFooter,
     this.connectionUnavailable = false,
     this.sendMuted = false,
+    this.showMessageInput = true,
     this.messageHistoryConfig,
     this.aggregateMessages = false,
     this.enableSuccessfulDelete = false,
@@ -198,8 +202,10 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
           _selectionAtWindowChange;
       _multiSelectState = null;
     }
-    // 切入离线后，旧列表的多选和编辑回调已失效。
-    if (oldWidget.offlineMessages == null && widget.offlineMessages != null) {
+    // 切入离线或通知场景后，旧列表的多选和编辑回调已失效。
+    if ((oldWidget.offlineMessages == null && widget.offlineMessages != null) ||
+        (oldWidget.showMessageInput && !widget.showMessageInput)) {
+      if (!widget.showMessageInput) _multiSelectState?.onCancel();
       _multiSelectState = null;
       _editingMessage = null;
       _editingBubble = null;
@@ -634,7 +640,8 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
   bool get safeAreaTop => false;
 
   @override
-  bool get safeAreaBottom => widget.historySelection != null;
+  bool get safeAreaBottom =>
+      widget.historySelection != null || !widget.showMessageInput;
 
   @override
   bool get dismissKeyboardOnTap => false;
@@ -803,7 +810,8 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
         ),
       ];
     }
-    return widget.isShowAppBarActions && widget.offlineMessages == null
+    return widget.isShowAppBarActions &&
+            (widget.offlineMessages == null || widget.onOpenSettings != null)
         ? [
             Semantics(
               identifier: 'tim.chat.settings',
@@ -822,7 +830,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
         : null;
   }
 
-  /// 原列表与普通输入始终保持挂载，临时编辑区不替换草稿控制器。
+  /// 普通聊天保持输入挂载以保留草稿，通知窗口仅复用消息列表与设置导航。
   Widget _buildConversation() => GestureDetector(
         onTap: () {
           FocusScope.of(context).unfocus();
@@ -861,8 +869,13 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
                 widget.onInitialLoadFinished?.call();
                 widget.messageStickyConfig?.onInitialLoadFinished?.call();
               },
-              onUserClick: widget.offlineMessages == null ? _onUserClick : null,
+              onUserClick:
+                  widget.offlineMessages == null && widget.showMessageInput
+                      ? _onUserClick
+                      : null,
+              // 头像长按只在正常输入窗口插入提及，避免干扰编辑、选消息或通知浏览。
               onUserLongPress: widget.offlineMessages != null ||
+                      !widget.showMessageInput ||
                       _editingMessage != null ||
                       widget.historySelection != null
                   ? null
@@ -873,7 +886,9 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
                       );
                     },
               onCallMessageClick:
-                  widget.offlineMessages == null ? _onCallMessageClick : null,
+                  widget.offlineMessages == null && widget.showMessageInput
+                      ? _onCallMessageClick
+                      : null,
               onQuoteMessage: (MessageInfo message) {
                 _messageInputKey.currentState?.setQuotedMessage(message);
               },
@@ -907,7 +922,8 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
                 width: double.infinity,
                 child: widget.offlineFooter,
               ),
-            if (widget.historySelection == null)
+            // 通知窗口不挂载输入组件，避免只隐藏外观却继续初始化发送能力。
+            if (widget.historySelection == null && widget.showMessageInput)
               Visibility(
                 key: const ValueKey('normal-chat-input'),
                 visible: _multiSelectState?.isActive != true &&

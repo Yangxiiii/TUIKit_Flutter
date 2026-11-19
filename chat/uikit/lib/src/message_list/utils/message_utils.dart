@@ -1,5 +1,6 @@
 import 'conversation_notice.dart';
 import 'group_call_control_message.dart';
+import 'oa_announcement_message.dart';
 import 'sticky_message_event.dart';
 import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
@@ -61,7 +62,9 @@ class MessageUtil {
         // 单聊的 to 始终记录会话对端，己方发起的通话从信令取发起人。
         return (
           isSelf: isOutgoing,
-          userId: call.personalRecord != null || isOutgoing ? call.callerId : message.to
+          userId: call.personalRecord != null || isOutgoing
+              ? call.callerId
+              : message.to
         );
       }
     }
@@ -326,6 +329,8 @@ class MessageUtil {
         }
         final notice = ConversationNotice.fromMessage(messageInfo);
         if (notice != null) return conversationNoticeText(notice);
+        final announcement = OaAnnouncementMessage.fromMessage(messageInfo);
+        if (announcement != null) return announcement.preview;
 
         CallingMessageDataProvider provider =
             CallingMessageDataProvider(messageInfo, context);
