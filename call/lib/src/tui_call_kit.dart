@@ -4,8 +4,11 @@ import 'package:tuikit_atomic_x/atomicx.dart';
 import 'package:tencent_calls_uikit/src/tui_call_kit_impl.dart';
 import 'bridge/bootloader/bootloader.dart';
 import 'control/group_control_transport.dart';
+import 'manager/group_call_recording.dart' show GroupCallRecordingHandler;
 import 'manager/group_call_result_tracker.dart' show GroupCallResultHandler;
 import 'state/group_call_metadata.dart' show GroupCallStartedHandler;
+
+export 'manager/group_call_recording.dart' show GroupCallRecordingHandler;
 
 /// 宿主选人入口；groupId 为空表示独立多人，excludedUserIds 含已占名额成员和本人。
 typedef GroupMemberPicker = Future<List<String>?> Function(BuildContext context,
@@ -180,6 +183,9 @@ abstract class TUICallKit {
 
   /// 注册群通话和临时多人发起通知发布器，随宿主登录装配和清除。
   void setGroupCallStartedHandler(GroupCallStartedHandler? handler);
+
+  /// 绑定已登录宿主的云端录制时间接口，传 null 禁用入口并清理本端片段状态。
+  void setGroupCallRecordingHandler(GroupCallRecordingHandler? handler);
 
   /// 当前已由 SDK 确认接通的 OA 群或多人呼叫，用于更新原发起气泡。
   ValueListenable<String?> get acceptedCallAttempt;

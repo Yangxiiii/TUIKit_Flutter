@@ -3,6 +3,7 @@ import '../tui_call_kit.dart' show GroupMemberPicker;
 import 'group_call_snapshot.dart';
 import 'group_control_state.dart';
 import '../manager/group_control_controller.dart';
+import '../manager/group_call_recording.dart';
 
 export 'group_call_snapshot.dart';
 
@@ -37,6 +38,9 @@ class GlobalState {
 
   /// 仅保留当前群场次的显示状态，由 CallKit 监听真实 SDK 事件更新。
   final GroupCallSession groupCallSession = GroupCallSession();
+
+  /// 云端录制片段随 SDK 通话生命周期收尾，浮窗和全屏共享。
+  final groupCallRecording = GroupCallRecording();
 
   /// 本次真实入会的会控入口，SDK 生命周期层创建/清理，UI 不另存主持权限。
   GroupControlController? groupControlController;

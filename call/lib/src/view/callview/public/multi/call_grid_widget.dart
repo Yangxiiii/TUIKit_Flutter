@@ -1,3 +1,5 @@
+import 'package:app_core/app_core.dart';
+import 'package:app_service/app_service.dart';
 import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
@@ -61,6 +63,7 @@ class _CallGridWidgetState extends State<CallGridWidget> {
         DeviceStore.shared.state.currentAudioRoute,
         GlobalState.instance.groupCall,
         GlobalState.instance.groupControl,
+        GlobalState.instance.groupCallRecording,
       ]);
 
   @override
@@ -108,6 +111,13 @@ class _CallGridWidgetState extends State<CallGridWidget> {
           final ended = snapshot?.ended ?? false;
           final connected =
               !ended && self.status == CallParticipantStatus.accept;
+          // 被叫本地 SDK 时钟可能从重入重新开始，录像偏移必须使用整场通话的起点。
+          final recording = GlobalState.instance.groupCallRecording;
+          final recordingStart = control?.connectedAtMs;
+          final isRecording = recording.isRecording(call.callId);
+          final canRecord = recording.available &&
+              call.callId.isNotEmpty &&
+              (isRecording || recordingStart != null);
           final incoming = !ended &&
               call.inviterId != self.id &&
               self.status == CallParticipantStatus.waiting;
@@ -168,6 +178,11 @@ class _CallGridWidgetState extends State<CallGridWidget> {
                       control, self.id, GroupControlDevice.microphone),
                   cameraHint: groupDeviceHint(
                       control, self.id, GroupControlDevice.camera),
+                  recording: isRecording,
+                  recordingPending: recording.isPending(call.callId),
+                  onRecord: canRecord
+                      ? () => _toggleRecording(call.callId, recordingStart)
+                      : null,
                   canFlip: connected && cameraOn && (_cameraCount ?? 0) > 1,
                   onEnd: () => _end(incoming: incoming, connected: connected),
                   onAccept: CallManager.instance.accept,
@@ -181,6 +196,38 @@ class _CallGridWidgetState extends State<CallGridWidget> {
                   onRetry: _retry));
         },
       );
+
+  /// 保存云端录制片段，换场或旧页面离开时不再显示关联提示。
+  Future<void> _toggleRecording(String callId, int? connectedAtMs) {
+    final epoch = CallManager.instance.sessionEpoch;
+    bool isCurrent() =>
+        mounted &&
+        epoch == CallManager.instance.sessionEpoch &&
+        (widget.isCurrentPresentation?.call() ?? true) &&
+        GlobalState.instance.groupCall.value?.ended != true &&
+        CallStore.shared.state.activeCall.value.callId == callId &&
+        CallStore.shared.state.selfInfo.value.status ==
+            CallParticipantStatus.accept;
+    return AppServiceLocator.get<ActionGuard>()
+        .singleFlight(('tim.call.recording', epoch, callId), () async {
+      // 请求和结果提示共用守卫，快速重复点击也只产生一次提示。
+      if (!isCurrent()) return;
+      final recording = GlobalState.instance.groupCallRecording;
+      final stopping = recording.isRecording(callId);
+      try {
+        final finished = await recording.toggle(
+          callId: callId,
+          connectedAtMs: connectedAtMs,
+        );
+        if (finished && isCurrent()) AppToast.show('录制完成');
+      } catch (error, stack) {
+        appLogger.error('保存云端录制片段失败', error: error, stackTrace: stack);
+        if (isCurrent()) {
+          AppToast.show(stopping ? '结束录制失败，请重试' : '开始录制失败，请重试');
+        }
+      }
+    });
+  }
 
   /// 导航和会控交互统一绑定当前浮层，确认返回后仍由编排层复核代次与策略。
   GroupCallManagementFlow _management() => GroupCallManagementFlow(

@@ -498,11 +498,29 @@ class CallManager {
         }
         // 主持交接未确认不能困住用户，SDK 挂断始终优先释放本端媒体。
         final success = _checkResult(await _sdkResult(_store.hangup));
+        // SDK 回包可能先清空通话快照，仍使用挂断前的场次标识收尾。
+        if (success && account == _accountId && epoch == _deviceEpoch) {
+          finishGroupRecording(callId);
+        }
         if (success && transfer?.success == false) {
           AppToast.show('已离开通话，主持交接尚未全部确认');
         }
         return success;
       });
+
+  /// 以 SDK 的结束事件或挂断成功锁定偏移，录制收尾独立于媒体释放。
+  void finishGroupRecording(String callId) {
+    final account = _accountId;
+    final epoch = _deviceEpoch;
+    unawaited(GlobalState.instance.groupCallRecording
+        .end(callId)
+        .catchError((Object error, StackTrace stack) {
+      appLogger.error('通话结束保存云端录制片段失败', error: error, stackTrace: stack);
+      if (account.isNotEmpty && account == _accountId && epoch == _deviceEpoch) {
+        AppToast.show('通话已结束，录制保存失败');
+      }
+    }));
+  }
 
   /// 权限及 SDK 返回成功后才视为麦克风开启，失败不更改界面状态。
   Future<bool> openLocalMicrophone() async {

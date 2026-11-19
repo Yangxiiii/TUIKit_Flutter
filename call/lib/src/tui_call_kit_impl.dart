@@ -178,6 +178,7 @@ class TUICallKitImpl implements TUICallKit {
       }
     },
     onCallEnded: (callId, mediaType, reason, userId) {
+      CallManager.instance.finishGroupRecording(callId);
       _groupControlLifecycle.clear();
       CallManager.instance.invalidateDevicePreparation();
       unawaited(CallManager.instance
@@ -395,6 +396,11 @@ class TUICallKitImpl implements TUICallKit {
   }
 
   @override
+  void setGroupCallRecordingHandler(GroupCallRecordingHandler? handler) {
+    GlobalState.instance.groupCallRecording.setHandler(handler);
+  }
+
+  @override
   void setGroupCallTitle(String groupId, String title) {
     GlobalState.instance.setGroupCallTitle(groupId, title);
   }
@@ -452,6 +458,7 @@ class TUICallKitImpl implements TUICallKit {
   /// 先使异步操作失效并清理展示资料，再释放 SDK 与平台资源。
   void handleLogoutSuccess() async {
     _acceptedCallAttempt.value = null;
+    setGroupCallRecordingHandler(null);
     _groupControlLifecycle.clear(clearAuthority: true);
     _groupCallResultTracker.clear();
     CallManager.instance.invalidateDevicePreparation();

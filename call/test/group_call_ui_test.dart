@@ -322,7 +322,7 @@ void main() {
     expect(switches, 2);
   });
 
-  testWidgets('接通后支持翻转已开启的摄像头，录制保持禁用', (tester) async {
+  testWidgets('接通后支持翻转已开启的摄像头，无录制接口时按钮禁用', (tester) async {
     final semantics = tester.ensureSemantics();
     var flips = 0;
     for (final (incoming, cameraPending) in [
@@ -365,6 +365,53 @@ void main() {
       expect(tester.takeException(), isNull);
     }
     semantics.dispose();
+  });
+
+  testWidgets('录制入口只在接通后响应，服务器确认开始后显示结束录制',
+      (tester) async {
+    var taps = 0;
+    Future<void> show({
+      bool connected = true,
+      bool recording = false,
+      bool pending = false,
+    }) async {
+      await tester.pumpWidget(_app(GroupCallControls(
+        incoming: false,
+        connected: connected,
+        ended: false,
+        retryable: false,
+        microphoneOn: false,
+        cameraOn: false,
+        canFlip: false,
+        onEnd: () {},
+        onAccept: () {},
+        onMicrophone: () {},
+        onCamera: () {},
+        onFlip: null,
+        onRetry: () {},
+        recording: recording,
+        recordingPending: pending,
+        onRecord: () => taps++,
+      )));
+      await tester.pump();
+    }
+
+    final record = find.bySemanticsIdentifier('call.group.record');
+    await show(connected: false);
+    await tester.tap(record);
+    expect(taps, 0);
+    await show();
+    await tester.tap(record);
+    expect(taps, 1);
+    await show(pending: true);
+    expect(find.text('录制通话'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    await tester.tap(record);
+    expect(taps, 1);
+    await show(recording: true);
+    expect(find.text('结束录制'), findsOneWidget);
+    await tester.tap(record);
+    expect(taps, 2);
   });
 
   testWidgets('管理成员仅本人设备可操作，搜索防抖，未知会控不显示伪权限', (tester) async {

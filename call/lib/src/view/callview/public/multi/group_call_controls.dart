@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/common/widget/controls_button.dart';
 
-/// 群/多人通话的两排操作区；只接收真实设备与生命周期，不模拟录制成功。
+/// 群/多人通话的两排操作区，录制按服务器确认的阶段展示。
 class GroupCallControls extends StatelessWidget {
   const GroupCallControls({
     super.key,
@@ -19,7 +19,7 @@ class GroupCallControls extends StatelessWidget {
     required this.onMicrophone,
     required this.onCamera,
     required this.onFlip,
-    required this.onRetry,
+    this.onRetry,
     this.speakerOn = false,
     this.onSpeaker,
     this.canOpenMicrophone = true,
@@ -28,6 +28,10 @@ class GroupCallControls extends StatelessWidget {
     this.cameraPending = false,
     this.microphoneHint,
     this.cameraHint,
+    this.showRecording = true,
+    this.recording = false,
+    this.recordingPending = false,
+    this.onRecord,
   });
 
   /// 尚未接听的被叫只显示拒绝与接听。
@@ -75,8 +79,20 @@ class GroupCallControls extends StatelessWidget {
   /// 请求 SDK 切换前后摄像头，无媒体执行入口的预览可传空。
   final VoidCallback? onFlip;
 
-  /// 创建新通话，不能恢复旧callId。
-  final VoidCallback onRetry;
+  /// 可选的重新呼叫入口，创建新通话而不恢复旧场次。
+  final VoidCallback? onRetry;
+
+  /// 平台提供录制界面时才显示入口，隐藏时保留挂断按钮居中。
+  final bool showRecording;
+
+  /// 服务器已确认当前片段开始，按钮用于结束这个片段。
+  final bool recording;
+
+  /// 保存片段期间保留服务器最近确认的状态并禁止重复操作。
+  final bool recordingPending;
+
+  /// 当前场次具备录像偏移和云端接口时，开始或结束一个片段。
+  final VoidCallback? onRecord;
 
   @override
   Widget build(BuildContext context) {
@@ -127,9 +143,21 @@ class GroupCallControls extends StatelessWidget {
             hint: cameraHint),
       ]),
       const SizedBox(height: 40),
-      // 下排保留禁用的云端录制入口，挂断始终居中。
+      // 下排展示录制阶段，挂断始终居中。
       _row([
-        _recordUnavailable(context),
+        if (showRecording)
+          _button(
+            context,
+            'record',
+            Icons.adjust,
+            recording ? '结束录制' : '录制通话',
+            connected && !ended && !recordingPending ? onRecord : null,
+            background: recording ? context.appColors.danger : null,
+            pending: recordingPending,
+            pendingLabel: '正在保存录制',
+          )
+        else
+          const SizedBox(width: 60),
         _button(
           context,
           retryable ? 'retry' : 'end',
@@ -182,6 +210,7 @@ class GroupCallControls extends StatelessWidget {
       {bool active = false,
       Color? background,
       bool pending = false,
+      String pendingLabel = '正在等待设备确认',
       String? hint}) {
     final colors = context.appColors;
     final button = Opacity(
@@ -202,14 +231,14 @@ class GroupCallControls extends StatelessWidget {
       ),
     );
     return Tooltip(
-        message: hint ?? (pending ? '正在等待设备确认' : label),
+        message: hint ?? (pending ? pendingLabel : label),
         child: Stack(alignment: Alignment.topCenter, children: [
           button,
           if (pending)
             Positioned(
                 top: 18,
                 child: Semantics(
-                    label: '正在等待设备确认',
+                    label: pendingLabel,
                     liveRegion: true,
                     child: SizedBox.square(
                         dimension: 24,
@@ -217,33 +246,4 @@ class GroupCallControls extends StatelessWidget {
                             strokeWidth: 2, color: colors.onScrim)))),
         ]));
   }
-
-  Widget _recordUnavailable(BuildContext context) => Semantics(
-        identifier: 'call.group.record',
-        button: true,
-        enabled: false,
-        label: '录制通话，云端录制接口尚未接入',
-        child: Tooltip(
-          message: '云端录制接口尚未接入，暂不可用',
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Container(
-              width: 60,
-              height: 60,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: context.appColors.groupCallControlBackground),
-              child: Text('暂不可用',
-                  style: TextStyle(
-                      color: context.appColors.onScrimSecondary, fontSize: 10)),
-            ),
-            const SizedBox(height: 8),
-            Text('录制通话',
-                style: TextStyle(
-                    color: context.appColors.onScrimSecondary,
-                    fontSize: 14,
-                    height: 20 / 14)),
-          ]),
-        ),
-      );
 }
