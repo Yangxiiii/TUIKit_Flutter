@@ -10,7 +10,7 @@ import {
   MethodChannel,
   MethodResult,
 } from '@ohos/flutter_ohos';
-import { CallMediaType, CallParams, LoginStore } from '@tencentcloud/atomicxcore';
+import { CallMediaType, CallParams, CloudRecordPolicy, LoginStore } from '@tencentcloud/atomicxcore';
 import { TUICallKit } from '../../TUICallKit';
 import { RouterManager } from '../../manager/RouterManager';
 import { Logger } from '../../common/utils/Logger';
@@ -23,7 +23,7 @@ export default class TencentCallsUikitPlugin implements FlutterPlugin, MethodCal
   /** 独立于腾讯通用方法通道，避免 Flutter 侧通话事件监听被覆盖。 */
   private presentationChannel: MethodChannel | null = null;
   private context: common.UIAbilityContext | null = null;
-  /** Flutter 可展示单聊后才接管，卸载引擎时释放对窗口的引用。 */
+  /** Flutter 可展示通话后才接管，卸载引擎时释放对窗口的引用。 */
   private presentation: FlutterCallPresentation | null = null;
 
   getUniqueClassName(): string {
@@ -87,7 +87,8 @@ export default class TencentCallsUikitPlugin implements FlutterPlugin, MethodCal
           return;
         }
         if (this.presentation === null) {
-          const presentation = new FlutterCallPresentation(channel, context);
+          // 缺省值兼容尚未传入显示模式的旧宿主，保留已验证的原生窗口。
+          const presentation = new FlutterCallPresentation(channel, context, call.argument('nativeVideo') !== false);
           this.presentation = presentation;
           RouterManager.bindFlutterPresenter((route): boolean => presentation.present(route));
         }
@@ -113,6 +114,23 @@ export default class TencentCallsUikitPlugin implements FlutterPlugin, MethodCal
           });
         return;
       }
+      case 'harmonyPresentationGroupDevice': {
+        const presentation = this.presentation;
+        const id = call.argument('id') as string;
+        const callId = call.argument('callId') as string;
+        const device = call.argument('device') as string;
+        const enabled = call.argument('enabled') as boolean | null;
+        // 省略目标状态时只申请权限，申请失败或参数异常都不会开启设备。
+        if (presentation === null || typeof id !== 'string' || typeof callId !== 'string' ||
+          (device !== 'microphone' && device !== 'camera') || (enabled != null && typeof enabled !== 'boolean')) {
+          result.error('CALL_ACTION_UNAVAILABLE', '当前通话操作不可用', null);
+          return;
+        }
+        void presentation.groupDevice(id, callId, device, enabled ?? null)
+          .then((submitted: boolean): void => result.success(submitted))
+          .catch((error: Error): void => result.error('CALL_ACTION_FAILED', error.message, null));
+        return;
+      }
       case 'harmonyLogin':
         this.login(call, context, result);
         return;
@@ -132,7 +150,7 @@ export default class TencentCallsUikitPlugin implements FlutterPlugin, MethodCal
     }
   }
 
-  /** 引擎或 Ability 离开后清除单聊接管，原生窗口仍可处理后续通话。 */
+  /** 引擎或 Ability 离开后清除 Flutter 接管，后续由原生窗口处理通话。 */
   private detachPresentation(): void {
     if (this.presentation !== null) {
       RouterManager.bindFlutterPresenter(null);
@@ -150,7 +168,7 @@ export default class TencentCallsUikitPlugin implements FlutterPlugin, MethodCal
       .catch((error: Error): void => result.error('LOGIN_FAILED', error.message, null));
   }
 
-  /** 保留群归属和邀请时限，避免群通话被原生层降为临时多人通话。 */
+  /** 把 Flutter 通话参数交给原生 CallKit，群归属必须在第一次呼叫时设置。 */
   private calls(call: MethodCall, context: common.UIAbilityContext, result: MethodResult): void {
     const userIds = call.argument('userIds') as string[];
     const mediaType = call.argument('mediaType') === 'video'
@@ -160,6 +178,18 @@ export default class TencentCallsUikitPlugin implements FlutterPlugin, MethodCal
     const params = new CallParams();
     params.chatGroupId = groupId ?? '';
     params.timeout = 45;
+    // 缺省参数使用原生默认值，兼容仍只传群标识的 Flutter 调用。
+    params.roomId = (call.argument('roomId') as string | null) ?? '';
+    params.userData = (call.argument('userData') as string | null) ?? '';
+    params.isEphemeralCall = call.argument('isEphemeralCall') === true;
+    params.offlinePushTitle = (call.argument('offlinePushTitle') as string | null) ?? '';
+    params.offlinePushDescription = (call.argument('offlinePushDescription') as string | null) ?? '';
+    const policy = call.argument('cloudRecordPolicy') as string | null;
+    if (policy === 'enable') {
+      params.cloudRecordPolicy = CloudRecordPolicy.enable;
+    } else if (policy === 'disable') {
+      params.cloudRecordPolicy = CloudRecordPolicy.disable;
+    }
     TUICallKit.createInstance(context).calls(userIds, mediaType, params)
       .then((): void => result.success(null))
       .catch((error: Error): void => result.error('CALL_FAILED', error.message, null));
@@ -169,10 +199,11 @@ export default class TencentCallsUikitPlugin implements FlutterPlugin, MethodCal
   private join(call: MethodCall, context: common.UIAbilityContext, result: MethodResult): void {
     const callId = call.argument('callId') as string;
     const media = call.argument('mediaType') as string;
-    if (typeof callId !== 'string' || (media !== 'audio' && media !== 'video')) {
+    if (typeof callId !== 'string' || (media != null && media !== 'audio' && media !== 'video')) {
       result.error('INVALID_ARGUMENT', '通话场次或媒体类型无效', null);
       return;
     }
+    // 兼容只传 callId 的调用。未知媒体时先申请麦克风，摄像头按原生页面读到的实际类型申请。
     const mediaType = media === 'video' ? CallMediaType.video : CallMediaType.audio;
     TUICallKit.createInstance(context).join(callId, mediaType)
       .then((): void => result.success(null))

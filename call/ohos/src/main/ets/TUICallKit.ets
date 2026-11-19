@@ -40,6 +40,12 @@ import { Constants, FrameworkConstants } from './common/Constants';
 import { AppStateObserver } from './feature/AppStateObserver';
 import { CallEndedFlag } from './state/CallEndedFlag';
 
+/** Flutter 群通话透传的场景和版本，只用于选择展示。 */
+interface TemporaryMultiMetadata {
+  zdoaCallScene?: string;
+  version?: number;
+}
+
 export abstract class TUICallKit {
   private static _instance: TUICallKit | null = null;
 
@@ -178,7 +184,18 @@ class TUICallKitImpl extends TUICallKit {
     }
     const callParams = params ?? new CallParams();
     callParams.timeout = 45;
-    await CallStore.shared().calls(ids, mediaType, callParams);
+    // SDK 的回调可能早于呼叫返回，先登记仅影响界面的临时多人标识。
+    ViewState().temporaryMulti = TUICallKitImpl.isTemporaryMulti(callParams.userData);
+    let submitted = false;
+    try {
+      await CallStore.shared().calls(ids, mediaType, callParams);
+      submitted = true;
+    } finally {
+      // 请求失败且 SDK 仍空闲时清除标识，避免影响随后收到的通话。
+      if (!submitted && CallStore.shared().state.selfInfo.status === CallParticipantStatus.none) {
+        ViewState().temporaryMulti = false;
+      }
+    }
   }
 
   /** 已加入同场只恢复窗口；新加入必须在权限前后核对账号和当前通话占用。 */
@@ -333,7 +350,8 @@ class TUICallKitImpl extends TUICallKit {
     this.setFramework();
   }
 
-  private handleCallReceived(callId: string, _mediaType: CallMediaType, _userData: string): void {
+  /** 单聊和多人共用来电横幅，展示元数据不会授予入会或主持权限。 */
+  private handleCallReceived(callId: string, _mediaType: CallMediaType, userData: string): void {
     Logger.info('onCallReceived', callId);
     CallEndedFlag().clear();
     void ScreenStateManager().beginCall();
@@ -345,11 +363,8 @@ class TUICallKitImpl extends TUICallKit {
     //
     // 前台 vs 后台的决定在功能内部做。
     void IncomingNotificationFeature.shared().publish();
-    // Flutter 只接管单聊，群聊来电继续遵循原生横幅开关。
-    const call = CallStore.shared().state.activeCall;
-    const useFlutterBanner = RouterManager.hasFlutterPresenter() &&
-      call.chatGroupId.length === 0 && call.inviteeIds.length <= 1;
-    RouterManager.showBannerView(useFlutterBanner);
+    ViewState().temporaryMulti = TUICallKitImpl.isTemporaryMulti(userData);
+    RouterManager.showBannerView(RouterManager.hasFlutterPresenter());
     this.setFramework();
 
     const pending = this.pendingNotificationAction;
@@ -385,7 +400,7 @@ class TUICallKitImpl extends TUICallKit {
         || selfId.length === 0
         || userId === selfId;
     const isGroupCall = (activeCall.chatGroupId?.length ?? 0) > 0
-        || activeCall.inviteeIds.length > 1;
+        || activeCall.inviteeIds.length > 1 || ViewState().temporaryMulti;
     if (!isSelfEnded && !isGroupCall) {
       const msgKey = TUICallKitImpl.endReasonToastKey(reason);
       if (msgKey.length > 0) {
@@ -393,6 +408,17 @@ class TUICallKitImpl extends TUICallKit {
       }
     }
     RouterManager.closeView();
+  }
+
+  /** 只识别 Flutter 发出的已知展示标识；其他业务传入的透传内容保持原语义。 */
+  private static isTemporaryMulti(userData: string): boolean {
+    if (!userData) return false;
+    try {
+      const data = JSON.parse(userData) as TemporaryMultiMetadata | null;
+      return data?.zdoaCallScene === 'multi' && data.version === 1;
+    } catch (_) {
+      return false;
+    }
   }
 
   /** 校验已由统一入口完成；动作失败只记录日志，不阻塞 Ability 恢复。 */

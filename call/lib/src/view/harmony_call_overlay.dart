@@ -4,6 +4,14 @@ import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show PlatformViewHitTestBehavior;
 import 'package:flutter/services.dart';
+import 'package:tuikit_atomic_x/atomicx.dart' show LoginStore;
+
+import '../control/harmony_group_control_media.dart';
+import '../manager/group_control_lifecycle.dart';
+import '../state/global_state.dart';
+import '../state/group_control_state.dart';
+import '../tui_call_kit.dart';
+import '../tui_call_kit_impl.dart';
 
 import 'callview/public/controls/single_call_controls.dart';
 import 'callview/public/float/call_compact_widget.dart';
@@ -11,10 +19,13 @@ import 'callview/public/float/call_minimize_button.dart';
 import 'callview/public/float/call_scene.dart';
 import 'callview/public/hint/call_hint_messages.dart';
 import 'callview/public/hint/timer_widget.dart';
+import 'callview/public/multi/group_call_header_actions.dart';
+import 'callview/public/multi/group_device_open_dialog.dart';
 import 'callview/public/participant/call_participant_pane.dart';
 import 'component/incoming_banner/incoming_banner_widget.dart';
+import 'harmony_group_call_view.dart';
 
-/// 在鸿蒙宿主上用与安卓相同的 Flutter 组件呈现单聊，原生插件拥有通话状态。
+/// 在鸿蒙宿主上用共享 Flutter 组件呈现单聊和多人通话，原生插件持有通话状态。
 class HarmonyCallOverlay extends StatefulWidget {
   const HarmonyCallOverlay({super.key, required this.child});
 
@@ -29,8 +40,14 @@ class HarmonyCallOverlay extends StatefulWidget {
 class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
     with WidgetsBindingObserver {
   // 独立通道避免腾讯 Flutter CallKit 后续初始化时覆盖鸿蒙事件监听。
-  static const _channel =
-      MethodChannel('tencent_calls_uikit/harmony_presentation');
+  static const _channel = MethodChannel(
+    'tencent_calls_uikit/harmony_presentation',
+  );
+
+  /// 无法显示 Flutter 纹理的构建可以切回原生视频窗口。
+  static const _useNativeVideo = bool.fromEnvironment(
+    'OA_HARMONY_NATIVE_VIDEO',
+  );
 
   /// 最新原生快照。会话标识变化时重置小窗状态。
   _HarmonyCallSnapshot? _call;
@@ -46,10 +63,8 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
   bool _compact = false;
   Offset _drag = Offset.zero;
 
-  /// 全屏和悬浮窗分别复用本端与对端纹理。等待预览使用单独的组合视图。
-  GlobalKey _combinedVideoKey = GlobalKey();
-  GlobalKey _localVideoKey = GlobalKey();
-  GlobalKey _remoteVideoKey = GlobalKey();
+  /// 单聊与多人布局均按场次和用户复用纹理，避免切换宫格时重新订阅。
+  final Map<String, GlobalKey> _videoKeys = {};
 
   /// 接通后只在用户主动点击时交换主次画面。
   bool _localInMainView = false;
@@ -57,9 +72,21 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
   /// 同一通话的一次设备操作完成前，不重复弹权限或发送动作。
   final Set<String> _pending = {};
 
+  /// 共享会控只在鸿蒙宿主注册，测试展示层无需初始化其他平台的通话引擎。
+  GroupControlLifecycle? _groupControl;
+
+  /// 当前展示代次和 SDK 信令标识共同绑定本机设备适配。
+  HarmonyGroupControlMedia? _groupMedia;
+
+  /// 当前通话中仅显示一个开启确认，超时或换场自动拒绝。
+  ({GroupControlDevice device, Completer<bool> response})? _deviceRequest;
+
   @override
   void initState() {
     super.initState();
+    if (TUICallKit.usesNativeHarmonyCallKit) {
+      _groupControl = TUICallKitImpl.instance.harmonyGroupControl;
+    }
     WidgetsBinding.instance.addObserver(this);
     _channel.setMethodCallHandler(_onNativeEvent);
     unawaited(_read(ready: true));
@@ -70,6 +97,7 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
     WidgetsBinding.instance.removeObserver(this);
     _channel.setMethodCallHandler(null);
     _poll?.cancel();
+    _clearGroupControl();
     super.dispose();
   }
 
@@ -99,6 +127,7 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
     _generation++;
     _poll?.cancel();
     _poll = null;
+    _clearGroupControl();
     if (mounted && _call != null) {
       setState(() {
         _call = null;
@@ -120,6 +149,7 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
     try {
       final data = await _channel.invokeMapMethod<String, Object?>(
         ready ? 'harmonyPresentationReady' : 'harmonyPresentationSnapshot',
+        ready ? {'nativeVideo': _useNativeVideo} : null,
       );
       if (!mounted || generation != _generation) return;
       if (data == null) {
@@ -127,19 +157,18 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
         if (_call != null) _clearCall();
         return;
       }
-      final next = _HarmonyCallSnapshotCodec.fromMap(data);
+      final next = _HarmonyCallSnapshotCodec.fromMap(data, _call?.group);
       _startPolling();
+      _syncGroupControl(next);
       if (next == _call) return;
       setState(() {
         if (_call?.id != next.id) {
           _compact = false;
           _drag = Offset.zero;
           _localInMainView = false;
-          _combinedVideoKey = GlobalKey();
-          _localVideoKey = GlobalKey();
-          _remoteVideoKey = GlobalKey();
+          _videoKeys.clear();
         } else if (_compact &&
-            !next.video &&
+            (!next.video || next.group != null) &&
             next.incoming &&
             _call?.accepted == false &&
             next.accepted) {
@@ -157,6 +186,110 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
     }
   }
 
+  /// 只用与当前 IM 登录一致的已接通快照注册会控，通话结束立即撤销。
+  void _syncGroupControl(_HarmonyCallSnapshot call) {
+    final lifecycle = _groupControl;
+    if (lifecycle == null) return;
+    final group = call.group;
+    if (group == null ||
+        !call.accepted ||
+        call.sdkCallId.isEmpty ||
+        LoginStore.shared.loginState.loginUserInfo?.userID != call.self.id) {
+      _clearGroupControl();
+      return;
+    }
+    var media = _groupMedia;
+    if (media == null ||
+        media.presentationId != call.id ||
+        media.callId != call.sdkCallId) {
+      _clearGroupControl();
+      _groupMedia = media = HarmonyGroupControlMedia(
+        presentationId: call.id,
+        callId: call.sdkCallId,
+        channel: _channel,
+      );
+    }
+    media.update(microphone: call.microphone, camera: call.self.cameraOn);
+    lifecycle.updateHarmony(
+      callId: call.sdkCallId,
+      selfId: call.self.id,
+      inviterId: group.inviterId,
+      groupId: call.groupId,
+      video: call.video,
+      connectedAtMs: call.connectedAtMs,
+      joinedIds: [
+        call.self.id,
+        for (final member in group.members)
+          if (member.joined && member.id != call.self.id) member.id,
+      ],
+      media: media,
+      confirm: _confirmDeviceOpen,
+    );
+  }
+
+  /// 先废弃控制器和同意，再释放媒体观察，迟到回包无法作用于新通话。
+  void _clearGroupControl() {
+    if (_groupControl?.controller != null) _groupControl!.clear();
+    _groupMedia?.dispose();
+    _groupMedia = null;
+    final response = _deviceRequest?.response;
+    if (response != null && !response.isCompleted) response.complete(false);
+  }
+
+  /// 只在当前多人全屏或小窗询问本人；小窗收到请求时恢复通话页。
+  Future<bool> _confirmDeviceOpen(
+    GroupControlDevice device,
+    Duration remaining,
+  ) async {
+    if (!mounted || _call?.accepted != true || _deviceRequest != null) {
+      return false;
+    }
+    final response = Completer<bool>();
+    setState(() {
+      _compact = false;
+      _deviceRequest = (device: device, response: response);
+    });
+    try {
+      return await response.future.timeout(remaining, onTimeout: () => false);
+    } finally {
+      if (mounted) setState(() => _deviceRequest = null);
+    }
+  }
+
+  /// 宿主导航在通话浮层下方，确认层需遮挡通话本身才能只响应确认和拒绝。
+  Widget _buildDeviceRequest(
+    BuildContext context,
+    GroupControlDevice device,
+    Completer<bool> response,
+  ) => Positioned.fill(
+    child: BlockSemantics(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ModalBarrier(dismissible: false, color: context.appColors.scrim),
+          buildGroupDeviceOpenDialog(context, device, (agreed) {
+            if (!response.isCompleted) response.complete(agreed);
+          }),
+        ],
+      ),
+    ),
+  );
+
+  /// 多人本人操作与远端命令共用权限、原生执行及实际结果。
+  Future<void> _groupAction(String action) async {
+    final controller = _groupControl?.controller;
+    if (controller == null || (action != 'microphone' && action != 'camera')) {
+      await _act(action);
+      return;
+    }
+    final media = _groupMedia!;
+    final microphone = action == 'microphone';
+    await controller.setSelfDevice(
+      microphone ? GroupControlDevice.microphone : GroupControlDevice.camera,
+      microphone ? !media.microphoneOn : !media.cameraOn,
+    );
+  }
+
   /// 操作携带原生展示会话标识，界面从回读的真实结果更新。
   Future<void> _act(String action) async {
     final id = _call?.id;
@@ -172,7 +305,8 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
       if (mounted) await _read();
     } on MissingPluginException {
       debugPrint(
-          'Harmony call action $action: presentation channel unavailable');
+        'Harmony call action $action: presentation channel unavailable',
+      );
     } finally {
       _pending.remove('$id:$action');
     }
@@ -182,29 +316,36 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
   Widget build(BuildContext context) {
     final call = _call;
     // 浮层顺序与安卓一致，横幅和小窗保留底层聊天的交互区域。
-    return Stack(fit: StackFit.expand, children: [
-      widget.child,
-      if (call != null && call.banner)
-        Positioned(
-          left: IncomingBannerContent.horizontalInset,
-          right: IncomingBannerContent.horizontalInset,
-          top: MediaQuery.viewPaddingOf(context).top +
-              IncomingBannerContent.topGap,
-          child: IncomingBannerContent(
-            userId: call.peer.id,
-            name: call.peer.name,
-            avatarUrl: call.peer.avatarUrl,
-            video: call.video,
-            onShowCalling: () => _act('expand'),
-            onReject: () => _act('end'),
-            onAccept: () => _act('accept'),
-          ),
-        )
-      else if (call != null && _compact)
-        _buildCompact(context, call)
-      else if (call != null)
-        _buildFull(context, call),
-    ]);
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        widget.child,
+        if (call != null && call.banner)
+          Positioned(
+            left: IncomingBannerContent.horizontalInset,
+            right: IncomingBannerContent.horizontalInset,
+            top:
+                MediaQuery.viewPaddingOf(context).top +
+                IncomingBannerContent.topGap,
+            child: IncomingBannerContent(
+              userId: call.peer.id,
+              name: call.peer.name,
+              avatarUrl: call.peer.avatarUrl,
+              video: call.video,
+              multi: call.group != null,
+              onShowCalling: () => _act('expand'),
+              onReject: () => _act('end'),
+              onAccept: () => _act('accept'),
+            ),
+          )
+        else if (call != null && _compact)
+          _buildCompact(context, call)
+        else if (call != null)
+          _buildFull(context, call),
+        if (_deviceRequest case final request? when call != null)
+          _buildDeviceRequest(context, request.device, request.response),
+      ],
+    );
   }
 
   /// 共享全屏布局仅注入原生状态和腾讯视频层。
@@ -213,47 +354,84 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
       value: SystemUiOverlayStyle.light,
       child: Material(
         color: context.appColors.scrim,
-        child: Stack(fit: StackFit.expand, children: [
-          CallScene(
-            key: ValueKey(call.id),
-            self: call.self,
-            remote: call.peer,
-            video: call.video,
-            accepted: call.accepted,
-            localInMainView: _localInMainView,
-            onSwap: () => setState(() => _localInMainView = !_localInMainView),
-            videoBuilder: (id) => _participantVideo(call, id),
-            combinedVideo: _usesVideoPreview(call)
-                ? _HarmonyVideo(key: _combinedVideoKey)
-                : null,
-            controls: SingleCallControls(
-              video: call.video,
-              incoming: call.incoming,
-              accepted: call.accepted,
-              microphoneOn: call.microphone,
-              speakerOn: call.speaker,
-              cameraOn: call.self.cameraOn,
-              onEnd: () => _act('end'),
-              onAccept: () => _act('accept'),
-              onMicrophone: () => _act('microphone'),
-              onSpeaker: () => _act('speaker'),
-              onCamera: () => _act('camera'),
-              onFlip: () => _act('flip'),
-            ),
-            hint: _buildHint(context, call),
-            timer: call.accepted
-                ? Text(
-                    const TimerWidget().formatDuration(call.duration),
-                    style: TextStyle(
-                        fontSize: 16,
-                        height: 1.25,
-                        fontWeight: FontWeight.w600,
-                        color: context.appColors.onScrim),
-                  )
-                : const SizedBox.shrink(),
-          ),
-          CallMinimizeButton(onPressed: () => setState(() => _compact = true)),
-        ]),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // 多人继续使用宫格、主画面和共享按钮，媒体由鸿蒙纹理提供。
+            if (call.group case final group?)
+              ListenableBuilder(
+                listenable: GlobalState.instance.groupControl,
+                builder: (context, _) {
+                  final control = GlobalState.instance.groupControl.value;
+                  return HarmonyGroupCallView(
+                    key: ValueKey(call.id),
+                    group: group,
+                    selfId: call.self.id,
+                    duration: call.duration,
+                    incoming: call.incoming,
+                    accepted: call.accepted,
+                    video: call.video,
+                    microphone: call.microphone,
+                    speaker: call.speaker,
+                    camera: call.self.cameraOn,
+                    videoBuilder: (id) => _participantVideo(call, id),
+                    onAction: _groupAction,
+                    control: control?.callId == call.sdkCallId ? control : null,
+                  );
+                },
+              )
+            else
+              CallScene(
+                key: ValueKey(call.id),
+                self: call.self,
+                remote: call.peer,
+                video: call.video,
+                accepted: call.accepted,
+                localInMainView: _localInMainView,
+                onSwap: () =>
+                    setState(() => _localInMainView = !_localInMainView),
+                videoBuilder: (id) => _participantVideo(call, id),
+                controls: SingleCallControls(
+                  video: call.video,
+                  incoming: call.incoming,
+                  accepted: call.accepted,
+                  microphoneOn: call.microphone,
+                  speakerOn: call.speaker,
+                  cameraOn: call.self.cameraOn,
+                  onEnd: () => _act('end'),
+                  onAccept: () => _act('accept'),
+                  onMicrophone: () => _act('microphone'),
+                  onSpeaker: () => _act('speaker'),
+                  onCamera: () => _act('camera'),
+                  onFlip: () => _act('flip'),
+                ),
+                hint: _buildHint(context, call),
+                timer: call.accepted
+                    ? Text(
+                        const TimerWidget().formatDuration(call.duration),
+                        style: TextStyle(
+                          fontSize: 16,
+                          height: 1.25,
+                          fontWeight: FontWeight.w600,
+                          color: context.appColors.onScrim,
+                        ),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            if (call.group != null)
+              GroupCallHeaderActions(
+                incoming: call.incoming,
+                showMinimize: true,
+                showInvite: false,
+                inviteEnabled: false,
+                onMinimize: () => setState(() => _compact = true),
+              )
+            else
+              CallMinimizeButton(
+                onPressed: () => setState(() => _compact = true),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -262,12 +440,16 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
   Widget _buildCompact(BuildContext context, _HarmonyCallSnapshot call) {
     final size = MediaQuery.sizeOf(context);
     final padding = MediaQuery.paddingOf(context);
-    final width = call.video ? 98.0 : CallCompactAudioContent.dimension;
-    final height = call.video ? 211.0 : CallCompactAudioContent.dimension;
-    final topGap = call.video ? 62.0 : CallCompactAudioContent.topGap;
+    // 多人和其他 Flutter 端一样用状态小卡，恢复全屏后显示多人视频。
+    final compactVideo = call.video && call.group == null;
+    final width = compactVideo ? 98.0 : CallCompactAudioContent.dimension;
+    final height = compactVideo ? 211.0 : CallCompactAudioContent.dimension;
+    final topGap = compactVideo ? 62.0 : CallCompactAudioContent.topGap;
     final maxLeft = (size.width - width).clamp(0.0, size.width);
-    final maxTop =
-        (size.height - padding.bottom - height).clamp(padding.top, size.height);
+    final maxTop = (size.height - padding.bottom - height).clamp(
+      padding.top,
+      size.height,
+    );
     final left = (size.width - width - 8 + _drag.dx).clamp(0.0, maxLeft);
     final top = (padding.top + topGap + _drag.dy).clamp(padding.top, maxTop);
     void restore() => setState(() => _compact = false);
@@ -279,23 +461,27 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
       child: Semantics(
         identifier: 'call.restore',
         button: true,
-        label: AppLocalization.of(context)
-            .resolve('chat.uikit.callRestore', '返回通话'),
+        label: AppLocalization.of(
+          context,
+        ).resolve('chat.uikit.callRestore', '返回通话'),
         onTap: restore,
         child: GestureDetector(
           // 原生画面只负责渲染，小窗整块区域都由 Flutter 接收点击和拖动。
           behavior: HitTestBehavior.opaque,
           onTap: restore,
           onPanUpdate: (details) => setState(() {
-            _drag = Offset(
-                    left - size.width + width + 8, top - padding.top - topGap) +
+            _drag =
+                Offset(
+                  left - size.width + width + 8,
+                  top - padding.top - topGap,
+                ) +
                 details.delta;
           }),
           // 视频需要裁剪纹理，语音浮窗的阴影绘制在卡片边界之外。
-          child: call.video
+          child: compactVideo
               ? ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: _buildCompactVideo(size, call),
+                  child: _buildCompactVideo(call),
                 )
               : CallCompactAudioSurface(
                   child: CallCompactAudioContent(
@@ -317,33 +503,25 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
     );
   }
 
-  /// 保持主次画面顺序，等待接听时单独缩放腾讯本机预览。
-  Widget _buildCompactVideo(Size size, _HarmonyCallSnapshot call) {
+  /// 等待接听时只显示本机，接通后保留当前主次画面顺序。
+  Widget _buildCompactVideo(_HarmonyCallSnapshot call) {
     if (!_usesVideoPreview(call)) {
       return CallCompactVideoContent(
         main: _compactPane(call, _localInMainView ? call.self : call.peer),
         small: _compactPane(call, _localInMainView ? call.peer : call.self),
       );
     }
-    return IgnorePointer(
-      child: FittedBox(
-        fit: BoxFit.cover,
-        alignment: Alignment.topRight,
-        child: SizedBox(
-          width: size.width,
-          height: size.height,
-          child: _HarmonyVideo(key: _combinedVideoKey),
-        ),
-      ),
-    );
+    return _participantVideo(call, call.self.id);
   }
 
-  /// 接通后按用户保留原生纹理，摄像头关闭时由画面组件隐藏纹理。
+  /// 接通前仅显示本机预览，接通后沿用同一纹理并补上对端。
   Widget _participantVideo(_HarmonyCallSnapshot call, String id) {
-    if (!call.accepted || id.isEmpty) return const SizedBox.shrink();
+    if (!call.video || id.isEmpty || (!call.accepted && id != call.self.id)) {
+      return const SizedBox.shrink();
+    }
     return IgnorePointer(
       child: _HarmonyVideo(
-        key: id == call.self.id ? _localVideoKey : _remoteVideoKey,
+        key: _videoKeys.putIfAbsent(id, GlobalKey.new),
         userId: id,
       ),
     );
@@ -386,24 +564,41 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
 
 /// Flutter OHOS 的纹理平台视图通道与 AndroidView 使用相同的创建、尺寸及释放协议。
 class _HarmonyVideo extends StatelessWidget {
-  const _HarmonyVideo({super.key, this.userId});
+  const _HarmonyVideo({super.key, required this.userId});
 
-  /// 指定单路视频，空值由鸿蒙端使用腾讯组合视图。
-  final String? userId;
+  /// 与当前竖屏通话输出一致的纹理像素尺寸，主小画面互换时保持此尺寸。
+  static const _portraitPixels = Size(720, 1280);
+
+  /// 指定鸿蒙纹理要绑定的单路视频。
+  final String userId;
 
   @override
-  Widget build(BuildContext context) => AndroidView(
-        key: ValueKey(userId),
-        viewType: 'oa.harmony.call.video',
-        hitTestBehavior: PlatformViewHitTestBehavior.opaque,
-        creationParams: userId,
-        creationParamsCodec: const StandardMessageCodec(),
-      );
+  Widget build(BuildContext context) {
+    final viewport = _portraitPixels / MediaQuery.devicePixelRatioOf(context);
+    // Flutter 负责等比裁剪，原生纹理不跟随卡片尺寸变化，避免旧帧被拉伸。
+    return FittedBox(
+      fit: BoxFit.cover,
+      clipBehavior: Clip.hardEdge,
+      child: SizedBox.fromSize(
+        size: viewport,
+        child: AndroidView(
+          key: ValueKey(userId),
+          viewType: 'oa.harmony.call.video',
+          hitTestBehavior: PlatformViewHitTestBehavior.opaque,
+          creationParams: userId,
+          creationParamsCodec: const StandardMessageCodec(),
+        ),
+      ),
+    );
+  }
 }
 
 /// 原生只读快照使用值类型，相同状态的轮询结果不重建视频或头像。
 typedef _HarmonyCallSnapshot = ({
   String id,
+  String sdkCallId,
+  String groupId,
+  int connectedAtMs,
   bool banner,
   bool video,
   bool accepted,
@@ -415,30 +610,38 @@ typedef _HarmonyCallSnapshot = ({
   bool peerPoor,
   CallSceneUser self,
   CallSceneUser peer,
+  HarmonyGroupCall? group,
 });
 
 extension _HarmonyCallSnapshotCodec on _HarmonyCallSnapshot {
   /// 平台通道只传输基本值，转换后交给共享界面。
-  static _HarmonyCallSnapshot fromMap(Map<String, Object?> map) => (
-        id: map['id'] as String,
-        banner: map['banner'] == true,
-        video: map['video'] == true,
-        accepted: map['accepted'] == true,
-        incoming: map['incoming'] == true,
-        microphone: map['microphone'] == true,
-        speaker: map['speaker'] == true,
-        duration: (map['duration'] as num).toInt(),
-        selfPoor: map['selfPoor'] == true,
-        peerPoor: map['peerPoor'] == true,
-        self: _user(map['self'] as Map<Object?, Object?>),
-        peer: _user(map['peer'] as Map<Object?, Object?>),
-      );
+  static _HarmonyCallSnapshot fromMap(
+    Map<String, Object?> map,
+    HarmonyGroupCall? previousGroup,
+  ) => (
+    id: map['id'] as String,
+    sdkCallId: map['callId'] as String? ?? '',
+    groupId: map['groupId'] as String? ?? '',
+    connectedAtMs: (map['connectedAtMs'] as num?)?.toInt() ?? 0,
+    banner: map['banner'] == true,
+    video: map['video'] == true,
+    accepted: map['accepted'] == true,
+    incoming: map['incoming'] == true,
+    microphone: map['microphone'] == true,
+    speaker: map['speaker'] == true,
+    duration: (map['duration'] as num).toInt(),
+    selfPoor: map['selfPoor'] == true,
+    peerPoor: map['peerPoor'] == true,
+    self: _user(map['self'] as Map<Object?, Object?>),
+    peer: _user(map['peer'] as Map<Object?, Object?>),
+    group: decodeHarmonyGroup(map, previousGroup),
+  );
 
   static CallSceneUser _user(Map<Object?, Object?> map) => (
-        id: map['id'] as String,
-        name: map['name'] as String,
-        avatarUrl: map['avatar'] as String,
-        subtitle: '',
-        cameraOn: map['camera'] == true,
-      );
+    id: map['id'] as String,
+    name: map['name'] as String,
+    avatarUrl: map['avatar'] as String,
+    subtitle: '',
+    cameraOn: map['camera'] == true,
+  );
 }

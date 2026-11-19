@@ -1,5 +1,6 @@
 import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:tuikit_atomic_x/base_component/utils/tui_event_bus.dart';
 
@@ -28,7 +29,7 @@ class JoinInGroupCallWidget extends StatefulWidget {
   /// 传入既有加入事件链的真实场次 ID。
   final String callId;
 
-  /// 默认使用共享 Store；宿主或测试可注入相同公开状态契约。
+  /// Flutter 通话默认使用共享 Store，宿主或测试可注入相同公开状态契约。
   final CallStore? callStore;
 
   /// 当前账号来源；与通话状态一起监听，退出或切换账号后立即收起旧横幅。
@@ -50,16 +51,20 @@ class _JoinInGroupCallWidgetState extends State<JoinInGroupCallWidget> {
   /// 区分快速切换群或场次后的迟到资料结果。
   int _nameGeneration = 0;
 
-  CallStore get _store => widget.callStore ?? CallStore.shared;
+  /// 鸿蒙由原生通话引擎维护场次，横幅仅使用群属性确认加入资格。
+  CallStore? get _store => widget.callStore ??
+      (defaultTargetPlatform == TargetPlatform.ohos ? null : CallStore.shared);
   LoginStore get _loginStore => widget.loginStore ?? LoginStore.shared;
 
   /// 同场恢复只接受当前账号仍在等待或已接通，结束后残留的场次 ID 不授予资格。
   bool get _sameLiveCall {
-    final self = _store.state.selfInfo.value;
+    final store = _store;
+    if (store == null) return false;
+    final self = store.state.selfInfo.value;
     final account = _loginStore.loginState.loginUserInfo?.userID;
     return account?.isNotEmpty == true &&
         self.id == account &&
-        _store.state.activeCall.value.callId == widget.callId &&
+        store.state.activeCall.value.callId == widget.callId &&
         self.status != CallParticipantStatus.none;
   }
 
@@ -126,22 +131,24 @@ class _JoinInGroupCallWidgetState extends State<JoinInGroupCallWidget> {
   }
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-        listenable: Listenable.merge(
-            [_store.state.activeCall, _store.state.selfInfo, _loginStore]),
-        builder: (context, _) {
-          if (widget.callId.isEmpty ||
-              widget.userIDs.length < 2 ||
-              !_canDisplay) {
-            return const SizedBox.shrink();
-          }
-          // 只凭本端 SDK 已接通状态显示“已加入”，不能凭群属性里存在本人推断。
-          final joined = _sameLiveCall &&
-              _store.state.selfInfo.value.status ==
-                  CallParticipantStatus.accept;
-          return _banner(context, joined);
-        },
-      );
+  Widget build(BuildContext context) {
+    final store = _store;
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        if (store != null) ...[store.state.activeCall, store.state.selfInfo],
+        _loginStore,
+      ]),
+      builder: (context, _) {
+        if (widget.callId.isEmpty || widget.userIDs.length < 2 || !_canDisplay) {
+          return const SizedBox.shrink();
+        }
+        // 只凭本端 SDK 已接通状态显示“已加入”，不能凭群属性里存在本人推断。
+        final joined = _sameLiveCall &&
+            store?.state.selfInfo.value.status == CallParticipantStatus.accept;
+        return _banner(context, joined);
+      },
+    );
+  }
 
   /// 固定单行横幅只展示通话摘要与加入动作，超长姓名不挤压操作按钮。
   Widget _banner(BuildContext context, bool joined) {

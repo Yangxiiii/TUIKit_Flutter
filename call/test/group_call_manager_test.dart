@@ -115,6 +115,25 @@ void main() {
     expect(store.hangups, 1);
   });
 
+  test('SDK 挂断成功后结束录制，迟到的结束事件不会重复保存', () async {
+    final recording = GlobalState.instance.groupCallRecording;
+    final requests = <(String, String?)>[];
+    recording.setHandler((callId, seconds, recordId) async {
+      requests.add((callId, recordId));
+      return recordId ?? 'record';
+    });
+    addTearDown(() => recording.setHandler(null));
+    await recording.toggle(
+      callId: 'call',
+      connectedAtMs: DateTime.now().millisecondsSinceEpoch,
+    );
+    store.state.activeCall.value = FakeCallInfo(callId: 'call');
+
+    expect(await manager.hangup(), isTrue);
+    manager.finishGroupRecording('call');
+    expect(requests, [('call', null), ('call', 'record')]);
+  });
+
   test('空名单、空白 ID、本人及超过九人不会请求 SDK，重复 ID 只占一个名额', () async {
     for (final ids in <List<String>>[
       [],

@@ -9,7 +9,7 @@ let flutterPresenter: ((route: CallRoute) => boolean) | null = null;
 
 /** 统一分发通话路由，由宿主选择 Flutter 或原生窗口承载。 */
 export class RouterManager {
-  /** Flutter 宿主就绪后注册单聊接管回调，销毁时解除绑定。 */
+  /** Flutter 宿主就绪后注册通话接管回调，销毁时解除绑定。 */
   static bindFlutterPresenter(presenter: ((route: CallRoute) => boolean) | null): void {
     flutterPresenter = presenter;
     const route = ViewState().router;
@@ -21,7 +21,7 @@ export class RouterManager {
     return flutterPresenter?.(route) ?? false;
   }
 
-  /** 单聊可使用 Flutter 横幅，群聊继续遵循原生配置。 */
+  /** 宿主已就绪时可使用共享的 Flutter 来电横幅。 */
   static hasFlutterPresenter(): boolean {
     return flutterPresenter !== null;
   }
@@ -34,7 +34,7 @@ export class RouterManager {
     }
   }
 
-  /** Flutter 单聊使用共享横幅，原生路径在横幅被禁用时直接进入全屏。 */
+  /** Flutter 通话使用共享横幅，原生路径在横幅被禁用时直接进入全屏。 */
   static showBannerView(useFlutterBanner: boolean = false): void {
     if (!useFlutterBanner && !GlobalState().enableIncomingBanner) {
       RouterManager.showCallingView();

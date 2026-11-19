@@ -14,10 +14,13 @@ String groupControlOutcomeText(GroupControlOutcome outcome) =>
       GroupControlStatus.failed => outcome.error ?? '设备执行失败',
     };
 
-/// 当前设备的上一次失败才进入自身提示，另一设备的失败由自己的按钮展示。
+/// 显示对应设备的失败；未同步时仍可开麦，仅摄像头需要提示等待。
 String? groupDeviceHint(
     GroupControlState? state, String userId, GroupControlDevice device) {
-  if (state == null || !state.policyKnown) return '会控权限尚未同步，暂不可开启设备';
+  if (state == null ||
+      (!state.policyKnown && device == GroupControlDevice.camera)) {
+    return '会控权限尚未同步，暂不可开启设备';
+  }
   final result = state.resultsByDevice[(userId, device)];
   return result != null && !result.success ? groupControlOutcomeText(result) : null;
 }
@@ -25,7 +28,7 @@ String? groupDeviceHint(
 /// 汇总当前操作进度与失败目标，空值表示没有需要额外提示的控制状态。
 String? groupControlStatusText(
     GroupControlState? state, List<GroupCallMember> members) {
-  if (state == null || !state.policyKnown) return '会控权限尚未同步，暂不可开启设备';
+  if (state == null || !state.policyKnown) return '会控权限尚未同步';
   if (state.pendingByUserId.isNotEmpty) {
     return '正在等待${state.pendingByUserId.length}位成员确认';
   }

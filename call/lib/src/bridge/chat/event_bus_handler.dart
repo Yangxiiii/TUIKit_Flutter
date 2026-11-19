@@ -4,7 +4,7 @@ import "package:tuikit_atomic_x/atomicx.dart";
 import "package:tuikit_atomic_x/base_component/utils/tui_event_bus.dart";
 import "package:tencent_calls_uikit/src/tui_call_kit_impl.dart";
 
-/// 将聊天事件交给 Flutter 通话引擎；鸿蒙由宿主原生桥独占处理。
+/// 将聊天事件交给 Flutter 通话引擎；鸿蒙由插件内的原生桥处理。
 class EventBusHandler extends TUIObserver {
   static final EventBusHandler _instance = EventBusHandler();
   static EventBusHandler get instance => _instance;

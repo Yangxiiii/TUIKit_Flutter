@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/call_ui_extension.dart';
@@ -185,6 +186,35 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     store.dispose();
     login.dispose();
+  });
+
+  testWidgets('鸿蒙群通话横幅使用群属性加入，无需 Flutter 通话状态', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.ohos;
+    final login = _LoginStore('a');
+    final observer = _JoinObserver();
+    TUIEventBus.shared.subscribe('call.startJoin', null, observer);
+    try {
+      await tester.pumpWidget(_host(JoinInGroupCallWidget(
+        userIDs: const ['a', 'b'],
+        mediaType: CallMediaType.audio,
+        groupId: 'group',
+        callId: 'call-1',
+        loginStore: login,
+        memberNameLoader: (_, __) async => '甲',
+      )));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('立即加入'));
+      expect(observer.calls, ['call-1']);
+      login.account = 'guest';
+      await tester.pump();
+      expect(find.text('立即加入'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(milliseconds: 500));
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+      TUIEventBus.shared.unsubscribe('call.startJoin', null, observer);
+      login.dispose();
+    }
   });
 
   testWidgets('非参与者默认隐藏，当前账号同场有效状态才可恢复，退出后立即失效', (tester) async {

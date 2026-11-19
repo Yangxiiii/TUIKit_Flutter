@@ -16,6 +16,7 @@ import 'package:tencent_calls_uikit/src/common/utils/app_lifecycle.dart';
 import '../common/metrics/key_metrics.dart';
 import '../view/call_main_widget.dart';
 import '../view/callview/public/float/call_compact_widget.dart';
+import '../view/callview/public/multi/group_device_open_dialog.dart';
 import '../view/component/incoming_banner/incoming_banner_widget.dart';
 import '../view/component/inviter/invite_user_widget.dart';
 
@@ -129,10 +130,6 @@ class CallPageRouter {
         _cancelDeviceOpen != null) {
       return false;
     }
-    final text = AppLocalization.of(navigator.context);
-    final title = device == GroupControlDevice.microphone
-        ? text.groupCallRequestMic
-        : text.groupCallRequestCamera;
     late final DialogRoute<bool> route;
     void finish(bool agreed) {
       if (navigator.mounted && route.isActive) {
@@ -143,13 +140,8 @@ class CallPageRouter {
     route = DialogRoute<bool>(
         context: navigator.context,
         barrierDismissible: false,
-        builder: (_) => AppAlertDialog(
-            semanticsIdentifier: 'call.group.requestOpen.${device.name}',
-            title: title,
-            cancelText: text.groupCallDeclineDevice,
-            confirmText: text.groupCallEnableDevice,
-            onCancel: () => finish(false),
-            onConfirm: () => finish(true)));
+        builder: (context) =>
+            buildGroupDeviceOpenDialog(context, device, finish));
     // 关闭当前确认路由，避免进入小窗时替换到弹窗而非通话页。
     void cancel() => finish(false);
     _cancelDeviceOpen = cancel;

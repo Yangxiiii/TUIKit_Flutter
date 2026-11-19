@@ -109,7 +109,7 @@ class GroupCallManagementFlow {
     setDevice(_selfId, device, !on);
   }
 
-  /// 本人关闭不依赖控制链路就绪；开启与远端操作均需当前策略和真实回执。
+  /// 本人按当前设备权限操作，开麦默认允许；远端操作仍需主持权限和真实回执。
   Future<void> setDevice(
           String userId, GroupControlDevice device, bool enabled) =>
       _guard.singleFlight<void>(('call.group.device', _epoch, userId, device),

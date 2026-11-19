@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:app_core/app_core.dart';
 import 'package:app_service/app_service.dart';
 import 'package:app_ui/app_ui.dart';
@@ -27,6 +28,7 @@ import 'bridge/bootloader/bootloader.dart';
 import 'package:rtc_room_engine/rtc_room_engine.dart' hide CallEndReason;
 import 'bridge/voip/fcm_data_sync_handler.dart';
 import 'bridge/voip/voip_data_sync_handler.dart';
+import 'common/platform/harmony_call_bridge.dart';
 import 'common/utils/error_parser.dart';
 import 'feature/ios_pip_feature.dart';
 
@@ -38,8 +40,13 @@ class TUICallKitImpl implements TUICallKit {
   IosPipFeature? pictureInPictureFeature;
   late final VoIPDataSyncHandler voIPDataSyncHandler;
   late final FcmDataSyncHandler fcmDataSyncHandler;
-  final contactStore = ContactStore.shared;
+
+  /// 仅在 Flutter 通话侧加载联系人，初始化鸿蒙桥时无需访问此 Store。
+  late final contactStore = ContactStore.shared;
   bool isNotificationPreparing = false;
+
+  /// 鸿蒙实例由原生桥持有通话状态，其余平台初始化 Flutter 通话引擎。
+  final HarmonyCallBridge? _harmonyBridge;
 
   /// 宿主机构岗位资料只缓存当前账号和当前群场次，登出时清理待返回查询。
   late final GroupMemberSubtitleCache _memberSubtitleCache;
@@ -234,33 +241,59 @@ class TUICallKitImpl implements TUICallKit {
     },
   );
 
-  TUICallKitImpl() {
+  TUICallKitImpl({HarmonyCallBridge? harmonyBridge})
+    : _harmonyBridge =
+          harmonyBridge ??
+          (TUICallKit.usesNativeHarmonyCallKit
+              ? HarmonyCallBridge(
+                  appLogger,
+                  guard: AppServiceLocator.get<ActionGuard>(),
+                )
+              : null) {
+    // 鸿蒙仍使用 Flutter 聊天，但不得初始化 Android 和 iOS 的通话引擎及监听。
+    if (_harmonyBridge != null) {
+      _groupControlLifecycle = GroupControlLifecycle.harmony();
+      return;
+    }
     CallStore.shared;
     _groupCallResultTracker = GroupCallResultTracker(
-        session: GlobalState.instance.groupCallSession,
-        accountId: () =>
-            LoginStore.shared.loginState.loginUserInfo?.userID ?? '');
+      session: GlobalState.instance.groupCallSession,
+      accountId: () => LoginStore.shared.loginState.loginUserInfo?.userID ?? '',
+    );
     _memberSubtitleCache = GroupMemberSubtitleCache(
-        session: GlobalState.instance.groupCallSession,
-        accountId: () =>
-            LoginStore.shared.loginState.loginUserInfo?.userID ?? '');
+      session: GlobalState.instance.groupCallSession,
+      accountId: () => LoginStore.shared.loginState.loginUserInfo?.userID ?? '',
+    );
     voIPDataSyncHandler = VoIPDataSyncHandler();
     fcmDataSyncHandler = FcmDataSyncHandler();
     pageRouter = CallPageRouter(
       navigatorGetter: () => Bootloader.instance.navigator,
     );
     _groupControlLifecycle = GroupControlLifecycle(
-        confirmDeviceOpen: pageRouter.confirmGroupDeviceOpen);
+      confirmDeviceOpen: pageRouter.confirmGroupDeviceOpen,
+    );
     CallManager.instance.bindPageManager(pageRouter);
     _subscribeState();
   }
 
+  /// 登录当前平台的通话组件，并同步聊天所需的 IM 登录态。
   @override
   Future<CompletionHandler> login(
     int sdkAppId,
     String userId,
     String userSig,
   ) async {
+    if (_harmonyBridge case final harmony?) {
+      try {
+        return await harmony.login(
+          sdkAppId: sdkAppId,
+          userId: userId,
+          userSig: userSig,
+        );
+      } on PlatformException catch (error) {
+        return _harmonyFailure(error);
+      }
+    }
     final completer = Completer<CompletionHandler>();
     TUILogin.instance.login(
       sdkAppId,
@@ -285,8 +318,15 @@ class TUICallKitImpl implements TUICallKit {
     return completer.future;
   }
 
+  /// 登出当前平台使用的通话和 IM 会话。
   @override
-  Future<void> logout() => logoutIm();
+  Future<void> logout() {
+    final harmony = _harmonyBridge;
+    if (harmony == null) return logoutIm();
+    _groupControlLifecycle.setTransport(null);
+    _groupControlLifecycle.clear(clearAuthority: true);
+    return harmony.logout();
+  }
 
   /// 等待 IM SDK 登出完成；失败时把错误交给会话清理调用方。
   static Future<void> logoutIm() async {
@@ -316,25 +356,45 @@ class TUICallKitImpl implements TUICallKit {
     return CallManager.instance.setSelfInfo(userInfo);
   }
 
+  /// 按平台发起通话，鸿蒙通过原生 CallKit 处理权限、群归属和通话窗口。
   @override
   Future<CompletionHandler> calls(
     List<String> userIdList,
-    callMediaType, [
+    CallMediaType callMediaType, [
     CallParams? params,
   ]) async {
+    if (_harmonyBridge case final harmony?) {
+      try {
+        await harmony.calls(userIdList, callMediaType, params);
+        return CompletionHandler();
+      } on PlatformException catch (error) {
+        return _harmonyFailure(error);
+      }
+    }
     // 普通入口与消息回拨共享宿主守卫，错误提示也留在同一 action 内只执行一次。
-    return AppServiceLocator.get<ActionGuard>().singleFlight('tim.call.start',
-        () async {
-      final handler =
-          await CallManager.instance.calls(userIdList, callMediaType, params);
-      _showAdmissionError(handler);
-      return handler;
-    });
+    return AppServiceLocator.get<ActionGuard>().singleFlight(
+      'tim.call.start',
+      () async {
+        final handler = await CallManager.instance.calls(
+          userIdList,
+          callMediaType,
+          params,
+        );
+        _showAdmissionError(handler);
+        return handler;
+      },
+    );
   }
 
+  /// 鸿蒙桥使用真实场次及媒体类型，Android 和 iOS 从 SDK 通话状态取得媒体类型。
   @override
-  Future<void> join(String callId) => AppServiceLocator.get<ActionGuard>()
-          .singleFlight('tim.call.join', () async {
+  Future<void> join(String callId, {CallMediaType? mediaType}) {
+    if (_harmonyBridge case final harmony?) {
+      return harmony.join(callId, mediaType);
+    }
+    return AppServiceLocator.get<ActionGuard>().singleFlight(
+      'tim.call.join',
+      () async {
         // 同场已接通只恢复；提示与路由必须留在防重过程内，避免多个调用者重复提示。
         if (callId.isNotEmpty &&
             CallStore.shared.state.activeCall.value.callId == callId &&
@@ -345,7 +405,17 @@ class TUICallKitImpl implements TUICallKit {
         }
         final handler = await CallManager.instance.join(callId);
         _showAdmissionError(handler);
-      });
+      },
+    );
+  }
+
+  /// 转回公开接口的结果类型，保留原生消息和可解析的非零错误码。
+  CompletionHandler _harmonyFailure(PlatformException error) {
+    final code = int.tryParse(error.code);
+    return CompletionHandler()
+      ..errorCode = code == null || code == 0 ? -1 : code
+      ..errorMessage = error.message ?? error.code;
+  }
 
   /// 发起和加入共用错误提示，未知 SDK 错误也给出失败反馈。
   void _showAdmissionError(CompletionHandler handler) {
@@ -377,6 +447,9 @@ class TUICallKitImpl implements TUICallKit {
     _memberSubtitleCache.setLoader(loader);
   }
 
+  /// 鸿蒙展示层以原生接通快照驱动同一会控生命周期。
+  GroupControlLifecycle get harmonyGroupControl => _groupControlLifecycle;
+
   @override
   void setGroupControlTransport(GroupControlTransport? transport) {
     _groupControlLifecycle.setTransport(transport);
@@ -390,9 +463,14 @@ class TUICallKitImpl implements TUICallKit {
     _groupCallResultTracker.setHandler(handler);
   }
 
+  /// 由当前平台在 SDK 接受多人呼叫后通知宿主发布起始消息。
   @override
   void setGroupCallStartedHandler(GroupCallStartedHandler? handler) {
-    CallManager.instance.onGroupCallStarted = handler;
+    if (_harmonyBridge case final harmony?) {
+      harmony.onGroupCallStarted = handler;
+    } else {
+      CallManager.instance.onGroupCallStarted = handler;
+    }
   }
 
   @override

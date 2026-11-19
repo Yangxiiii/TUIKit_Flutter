@@ -3,14 +3,18 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:app_core/app_core.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_calls_uikit/src/control/group_control_media.dart';
 import 'package:tencent_calls_uikit/src/control/group_control_message.dart';
 import 'package:tencent_calls_uikit/src/control/group_control_transport.dart';
+import 'package:tencent_calls_uikit/src/control/harmony_group_control_media.dart';
 import 'package:tencent_calls_uikit/src/manager/group_control_controller.dart';
+import 'package:tencent_calls_uikit/src/manager/group_control_lifecycle.dart';
 import 'package:tencent_calls_uikit/src/state/group_control_state.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   late _Network network;
   late Map<String, GroupControlController> controls;
   late Map<String, _Media> media;
@@ -120,6 +124,50 @@ void main() {
     expect(lateMember.value.cameraOn, isFalse);
   });
 
+  test('首个握手早于主持端成员事件时重试，随后可控制两个设备', () async {
+    final host = create('host')..updateMembers(['host']);
+    await host.start();
+    final member = create('a');
+    await member.start();
+    await flush();
+    expect(member.value.policyKnown, isFalse);
+    expect(member.value.canOpenMicrophone, isTrue);
+    expect(member.value.microphoneOn, isTrue);
+    expect(
+      (await member.setSelfDevice(
+        GroupControlDevice.microphone,
+        false,
+      )).success,
+      isTrue,
+    );
+
+    final synced = Completer<void>();
+    void onPolicy() {
+      if (member.value.policyKnown && !synced.isCompleted) synced.complete();
+    }
+
+    member.addListener(onPolicy);
+    try {
+      host.updateMembers(['host', 'a']);
+      await synced.future.timeout(const Duration(seconds: 3));
+    } finally {
+      member.removeListener(onPolicy);
+    }
+    await flush();
+    expect(media['a']!.microphoneOn, isFalse);
+    expect(media['a']!.cameraOn, isTrue);
+    expect(
+      (await member.setSelfDevice(GroupControlDevice.microphone, true)).success,
+      isTrue,
+    );
+    for (final device in GroupControlDevice.values) {
+      final result = await host.setMemberDevice('a', device, false);
+      expect(result.success, isTrue, reason: device.name);
+    }
+    expect(media['a']!.microphoneOn, isFalse);
+    expect(media['a']!.cameraOn, isFalse);
+  });
+
   test('真实发送者同步策略，全员静音默认禁止自行开，授权不等于立即开麦', () async {
     await joinAll();
     final host = controls['host']!;
@@ -148,8 +196,7 @@ void main() {
         'a',
         GroupControlDevice.microphone,
         true,
-      ))
-          .success,
+      )).success,
       isTrue,
     );
     expect((await host.unmuteAll()).success, isTrue);
@@ -217,10 +264,14 @@ void main() {
     controls.remove('a')!.dispose();
     host.updateMembers(['host', 'b']);
     host.updateMembers(['host', 'a', 'b']);
-    await create('a').start();
+    final mutedMember = create('a');
+    await mutedMember.start();
     await flush();
     expect(media['a']!.microphoneOn, isFalse);
-    expect(controls['a']!.value.canOpenMicrophone, isFalse);
+    expect(mutedMember.value.canOpenMicrophone, isFalse);
+    mutedMember.updateMembers(['a', 'b']);
+    expect(mutedMember.value.policyKnown, isFalse);
+    expect(mutedMember.value.canOpenMicrophone, isFalse);
   });
 
   test('主持交接使用可信管理员，原主持重入不能恢复旧权限', () async {
@@ -291,24 +342,30 @@ void main() {
     expect(denied.success, isFalse);
   });
 
-  test('未知策略关闭设备，本人等待真实结果时提供统一pending', () async {
+  test('未同步时默认开麦且能自行开关，摄像头仍须等授权', () async {
     final member = create('a');
-    media['a']!.microphone = true;
     await member.start();
     await flush();
     expect(member.value.policyKnown, isFalse);
-    expect(member.value.microphoneOn, isFalse);
+    expect(member.value.microphoneOn, isTrue);
+    expect(member.value.canManage, isFalse);
+    expect(member.value.canOpenCamera, isFalse);
+    expect(member.value.cameraOn, isFalse);
     expect(
-      (await member.setSelfDevice(GroupControlDevice.microphone, true)).success,
-      isFalse,
+      (await member.setSelfDevice(
+        GroupControlDevice.microphone,
+        false,
+      )).success,
+      isTrue,
     );
     final pending = Completer<void>();
     media['a']!.delay = pending;
-    final close = member.setSelfDevice(GroupControlDevice.camera, false);
+    final open = member.setSelfDevice(GroupControlDevice.microphone, true);
     await Future<void>.delayed(Duration.zero);
-    expect(member.value.pendingByUserId['a'], {GroupControlDevice.camera});
+    expect(member.value.pendingByUserId['a'], {GroupControlDevice.microphone});
     pending.complete();
-    expect((await close).success, isTrue);
+    expect((await open).success, isTrue);
+    expect(member.value.microphoneOn, isTrue);
     expect(member.value.pendingByUserId, isEmpty);
   });
 
@@ -337,7 +394,9 @@ void main() {
       isTrue,
     );
     expect(
-      host.value.resultsByDevice[('host', GroupControlDevice.microphone)]
+      host
+          .value
+          .resultsByDevice[('host', GroupControlDevice.microphone)]
           ?.success,
       isTrue,
     );
@@ -418,8 +477,7 @@ void main() {
         'a',
         GroupControlDevice.camera,
         true,
-      ))
-          .success,
+      )).success,
       isTrue,
     );
     expect(member.cameraOn, isTrue);
@@ -481,20 +539,162 @@ void main() {
     await joinAll();
     final host = controls['host']!;
     await host.setMemberDevice('a', GroupControlDevice.camera, false);
-    final packet = network.sent.lastWhere((entry) =>
-        entry.$1 == 'host' && entry.$2.kind == GroupControlMessageKind.command).$2;
-    network.deliverTo('a', 'host', withPayload(packet, {
-      'commandId': 'camera-newer',
-      'revision': packet.version + 2,
-    }));
-    network.deliverTo('a', 'host', withPayload(packet, {
-      'commandId': 'microphone-earlier',
-      'device': 'microphone',
-      'revision': packet.version + 1,
-    }));
+    final packet = network.sent
+        .lastWhere(
+          (entry) =>
+              entry.$1 == 'host' &&
+              entry.$2.kind == GroupControlMessageKind.command,
+        )
+        .$2;
+    network.deliverTo(
+      'a',
+      'host',
+      withPayload(packet, {
+        'commandId': 'camera-newer',
+        'revision': packet.version + 2,
+      }),
+    );
+    network.deliverTo(
+      'a',
+      'host',
+      withPayload(packet, {
+        'commandId': 'microphone-earlier',
+        'device': 'microphone',
+        'revision': packet.version + 1,
+      }),
+    );
     await flush();
     expect(media['a']!.cameraOn, isFalse);
     expect(media['a']!.microphoneOn, isFalse);
+  });
+
+  test('鸿蒙接收共用主持策略，设备快照确认后才回执', () async {
+    const channel = MethodChannel('test/harmony_group_control');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final native = HarmonyGroupControlMedia(
+      presentationId: 'native-view',
+      callId: 'call',
+      channel: channel,
+    );
+    final lifecycle = GroupControlLifecycle.harmony(ActionGuard());
+    addTearDown(() {
+      lifecycle.clear(clearAuthority: true);
+      native.dispose();
+      messenger.setMockMethodCallHandler(channel, null);
+    });
+
+    clock = DateTime.now();
+    final host = create('host');
+    await host.start();
+    final permissions = <GroupControlDevice>[];
+    final requests = <GroupControlDevice>[];
+    final actions = <(GroupControlDevice, bool)>[];
+    var holdCameraClose = false;
+    var consent = true;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'harmonyPresentationGroupDevice');
+      final args = call.arguments as Map;
+      expect(args['id'], 'native-view');
+      expect(args['callId'], 'call');
+      final device = GroupControlDevice.values.byName(args['device'] as String);
+      final enabled = args['enabled'] as bool?;
+      if (enabled == null) {
+        permissions.add(device);
+      } else {
+        actions.add((device, enabled));
+        if (!holdCameraClose ||
+            device != GroupControlDevice.camera ||
+            enabled) {
+          native.update(
+            microphone: device == GroupControlDevice.microphone
+                ? enabled
+                : native.microphoneOn,
+            camera: device == GroupControlDevice.camera
+                ? enabled
+                : native.cameraOn,
+          );
+        }
+      }
+      return true;
+    });
+
+    lifecycle.setTransport(network.transport('a'));
+    lifecycle.updateHarmony(
+      callId: 'call',
+      selfId: 'a',
+      inviterId: 'host',
+      groupId: 'group',
+      video: true,
+      connectedAtMs: 0,
+      joinedIds: ['host', 'a'],
+      media: native,
+      confirm: (device, _) async {
+        requests.add(device);
+        return consent;
+      },
+    );
+    expect(lifecycle.controller!.value.canOpenMicrophone, isTrue);
+    await flush();
+    expect(lifecycle.controller!.value.policyKnown, isTrue);
+    expect(native.microphoneOn, isTrue);
+    expect(native.cameraOn, isTrue);
+
+    holdCameraClose = true;
+    final closeCamera = host.setMemberDevice(
+      'a',
+      GroupControlDevice.camera,
+      false,
+    );
+    await flush();
+    expect(actions.last, (GroupControlDevice.camera, false));
+    expect(native.cameraOn, isTrue);
+    expect(
+      network.sent.where(
+        (entry) =>
+            entry.$1 == 'a' && entry.$2.kind == GroupControlMessageKind.ack,
+      ),
+      isEmpty,
+    );
+    native.update(microphone: true, camera: false);
+    expect((await closeCamera).outcomes['a']?.success, isTrue);
+
+    consent = false;
+    permissions.clear();
+    final denied = await host.setMemberDevice(
+      'a',
+      GroupControlDevice.camera,
+      true,
+    );
+    expect(denied.outcomes['a']?.status, GroupControlStatus.denied);
+    expect(native.cameraOn, isFalse);
+    expect(permissions, isEmpty);
+
+    final closeMic = await host.setMemberDevice(
+      'a',
+      GroupControlDevice.microphone,
+      false,
+    );
+    expect(closeMic.outcomes['a']?.success, isTrue);
+    consent = true;
+    final openMic = await host.setMemberDevice(
+      'a',
+      GroupControlDevice.microphone,
+      true,
+    );
+    expect(openMic.outcomes['a']?.success, isTrue);
+    final openCamera = await host.setMemberDevice(
+      'a',
+      GroupControlDevice.camera,
+      true,
+    );
+    expect(openCamera.outcomes['a']?.success, isTrue);
+    expect(requests, [
+      GroupControlDevice.camera,
+      GroupControlDevice.microphone,
+      GroupControlDevice.camera,
+    ]);
+    expect(native.microphoneOn && native.cameraOn, isTrue);
   });
 
   test('协议生成器只接受 OA v1 外层和各消息类型的严格字段', () {
@@ -559,8 +759,9 @@ class _Media extends ChangeNotifier implements GroupControlMedia {
     bool enabled, {
     required bool Function() isCurrent,
   }) async {
-    final blocked =
-        device == GroupControlDevice.camera ? cameraDelay ?? delay : delay;
+    final blocked = device == GroupControlDevice.camera
+        ? cameraDelay ?? delay
+        : delay;
     if (blocked != null) await blocked.future;
     if (!isCurrent()) {
       return const GroupControlOutcome(GroupControlStatus.expired);
@@ -617,8 +818,7 @@ class _Transport implements GroupControlTransport {
   Future<Set<String>> loadAdministrators(
     String groupId,
     List<String> memberIds,
-  ) async =>
-      network.admins;
+  ) async => network.admins;
   @override
   Future<void> send(String targetUserId, String payload) async {
     final packet = GroupControlMessage.decode(payload)!;

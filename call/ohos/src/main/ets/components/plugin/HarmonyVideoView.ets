@@ -3,86 +3,123 @@ import {
 } from '@ohos/flutter_ohos';
 import { Params } from '@ohos/flutter_ohos/src/main/ets/plugin/platform/PlatformView';
 import {
-  CallCoreController, CallCoreView, CallLayoutTemplate, CallParticipantInfo,
-  CallState, CallStore, DeviceState, DeviceStore,
+  CallMediaType, CallParticipantInfo, CallParticipantStatus, CallState, CallStore,
+  DeviceState, DeviceStatus, DeviceStore,
 } from '@tencentcloud/atomicxcore';
-// 当前鸿蒙 SDK 没有公开单路视频槽，从同一 SDK 复用组合视图所用的组件。
-import { CallParticipantView } from '@tencentcloud/atomicxcore/src/main/ets/impl/view/call/CallParticipantView';
+import { CallVideoManager } from '@tencentcloud/atomicxcore/src/main/ets/impl/view/call/CallVideoManager';
+import { EngineBridge } from '@tencentcloud/atomicxcore/src/main/ets/engine/EngineBridge';
+import { Logger } from '../../common/utils/Logger';
 
 export const HARMONY_VIDEO_VIEW: string = 'oa.harmony.call.video';
 
-/** 等待接听时用腾讯视图显示本机预览，资料和操作由 Flutter 绘制。 */
-@Component
-struct HarmonyVideoSurface {
-  private controller: CallCoreController = new CallCoreController();
-
-  aboutToAppear(): void {
-    this.controller.setDefaultAvatar($r('app.media.default_participant_icon'));
-    // 接通时 Flutter 改用两个独立视频槽，预览无需再切换原生布局。
-    this.controller.setLayoutTemplate(CallLayoutTemplate.pip);
-  }
-
-  build() {
-    Stack() {
-      CallCoreView({ controller: this.controller }).width('100%').height('100%');
-    }
-    .width('100%')
-    .height('100%');
-  }
-}
-
 @Builder
 function buildVideo(params: Params) {
-  if ((params.platformView as HarmonyVideoView).userId.length > 0) {
-    HarmonyParticipantSurface({ userId: (params.platformView as HarmonyVideoView).userId });
-  } else {
-    HarmonyVideoSurface();
-  }
+  HarmonyParticipantSurface({
+    userId: (params.platformView as HarmonyVideoView).userId,
+    viewName: (params.platformView as HarmonyVideoView).viewName,
+  });
 }
 
-/** 通话接通后为指定用户保留腾讯视频槽，头像与画面位置由 Flutter 管理。 */
+/** 从当前通话查找真实成员，Flutter 持有视频槽位置和头像。 */
 @Component
 struct HarmonyParticipantSurface {
-  /** 创建参数指定对应的参与者，关闭摄像头时保持同一个槽位。 */
+  /** 创建参数指定绑定的真实参与者。 */
   userId: string = '';
+  /** 每个 Flutter 平台视图独享一个腾讯渲染目标。 */
+  viewName: string = '';
 
+  /** 从 SDK 的当前通话读取成员，避免绑定上一通残留的用户。 */
   @State private callState: CallState = CallStore.shared().state;
-  @State private selfInfo: CallParticipantInfo = CallStore.shared().state.selfInfo;
+  /** 本机镜头开关和朝向由 SDK 提供。 */
   @State private deviceState: DeviceState = DeviceStore.shared().state;
 
   /** 原生订阅绑定 SDK 当前会话中的真实参与者对象。 */
   private findParticipant(): CallParticipantInfo | undefined {
-    if (this.userId === this.selfInfo.id) return this.selfInfo;
+    if (this.userId.length === 0) return undefined;
+    const self = this.callState.selfInfo;
+    if (this.userId === self.id) return self;
     return this.callState.allParticipants.find((participant: CallParticipantInfo) => participant.id === this.userId);
   }
 
   build() {
     Stack() {
-      // 由腾讯视频槽管理原生表面的绑定与释放，避免旧视图释放时取消新订阅。
       if (this.findParticipant() !== undefined) {
-        CallParticipantView({
+        HarmonyCallTexture({
           participant: this.findParticipant()!,
-          callState: this.callState,
-          selfInfo: this.selfInfo,
           deviceState: this.deviceState,
-          isLocal: this.userId === this.selfInfo.id,
-          isShowAvatar: false,
-          showName: false,
-          showStatusIcons: false,
-        }).width('100%').height('100%');
+          isLocal: this.userId === this.callState.selfInfo.id,
+          viewName: this.viewName,
+        });
       }
     }.width('100%').height('100%');
   }
 }
 
-/** 将腾讯组合视图或指定参与者的视频嵌入 Flutter。 */
-class HarmonyVideoView extends PlatformView {
-  /** 空标识代表组合视图，单路模式仅绑定指定参与者。 */
-  readonly userId: string;
+/** 将单路 SDK 视频绘到能随 ArkUI 节点导出至 Flutter 的纹理。 */
+@Component
+struct HarmonyCallTexture {
+  /** 对端的摄像头状态随 SDK 成员变化更新。 */
+  @ObjectLink participant: CallParticipantInfo;
+  /** 本端镜头关闭时不能由视图重新启动。 */
+  @ObjectLink deviceState: DeviceState;
+  /** 本端使用预览，对端使用订阅。 */
+  isLocal: boolean = false;
+  /** SDK 以 XComponent 的标识查找渲染输出。 */
+  viewName: string = '';
+  /** 只释放此纹理成功接管的对端订阅。 */
+  private boundRemoteId: string = '';
 
-  constructor(userId: string) {
+  build() {
+    // SDK 内置视频节点使用独立的 SURFACE，Flutter 平台视图需要可合成的 TEXTURE。
+    if (this.isLocal ? this.deviceState.cameraStatus === DeviceStatus.on : this.participant.isCameraOpened) {
+      XComponent({ id: this.viewName, type: XComponentType.TEXTURE, libraryname: 'liteavsdk' })
+        .width('100%')
+        .height('100%')
+        .onLoad((): void => this.bindVideo())
+        .onDestroy((): void => this.unbindRemote());
+    }
+  }
+
+  /** 原生节点就绪后才绑定 SDK 视频，保留用户当前选择的镜头方向。 */
+  private bindVideo(): void {
+    const state = CallStore.shared().state;
+    if (state.activeCall.mediaType !== CallMediaType.video ||
+      state.selfInfo.status === CallParticipantStatus.none) return;
+    if (this.isLocal) {
+      if (state.selfInfo.id !== this.participant.id || this.deviceState.cameraStatus !== DeviceStatus.on) return;
+      // SDK 的单路视图也是通过此接口绑定预览，但其默认前置镜头会覆盖当前方向。
+      void EngineBridge.call('DeviceModule.openLocalCamera', JSON.stringify({
+        isFront: this.deviceState.isFrontCamera,
+        view: this.viewName,
+      })).catch((error: Object): void => {
+        Logger.warn('Flutter video texture local bind failed', error);
+      });
+    } else {
+      this.boundRemoteId = this.participant.id;
+      CallVideoManager.shared.startRemoteView(this.boundRemoteId, this.viewName);
+    }
+    Logger.info('Flutter video texture attached', this.isLocal ? 'local' : 'remote');
+  }
+
+  /** 带旧目标标识退订，避免主小画面切换时取消新视图的订阅。 */
+  private unbindRemote(): void {
+    if (this.boundRemoteId.length === 0) return;
+    CallVideoManager.shared.stopRemoteView(this.boundRemoteId, this.viewName);
+    this.boundRemoteId = '';
+  }
+}
+
+/** 在 Flutter 视图的生命周期内承载一个参与者的原生纹理。 */
+class HarmonyVideoView extends PlatformView {
+  /** 当前画面归属的 SDK 用户标识。 */
+  readonly userId: string;
+  /** 稳定且与 SDK 原生窗口使用的标识不重叠。 */
+  readonly viewName: string;
+
+  constructor(userId: string, viewId: number) {
     super();
     this.userId = userId;
+    this.viewName = `oa_flutter_call_${viewId}`;
   }
 
   getView(): WrappedBuilder<[Params]> {
@@ -98,8 +135,8 @@ export class HarmonyVideoViewFactory extends PlatformViewFactory {
     super(StandardMessageCodec.INSTANCE);
   }
 
-  /** Flutter 以字符串指定单路参与者，组合视图沿用原来的空参数。 */
-  create(_context: Context, _viewId: number, args: ESObject): PlatformView {
-    return new HarmonyVideoView(typeof args === 'string' ? args as string : '');
+  /** Flutter 以字符串指定单路参与者，缺少标识时不绑定媒体。 */
+  create(_context: Context, viewId: number, args: ESObject): PlatformView {
+    return new HarmonyVideoView(typeof args === 'string' ? args as string : '', viewId);
   }
 }

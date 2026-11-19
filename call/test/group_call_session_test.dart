@@ -42,6 +42,7 @@ void main() {
     session.sync(
         call, [FakeParticipant('a', status: CallParticipantStatus.accept)]);
     expect(session.value!.members.singleWhere((m) => m.id == 'a').joinOrder, 0);
+    expect(session.joinedIdsFromSdkEvents('first'), isEmpty);
     session.updateMember('a', GroupCallMemberStatus.joined);
     session.updateMember('a', GroupCallMemberStatus.joined);
     expect(session.value!.members.singleWhere((m) => m.id == 'a').joinOrder, 1);
@@ -49,9 +50,13 @@ void main() {
     session.updateMember('a', GroupCallMemberStatus.left);
     session.sync(
         call, [FakeParticipant('a', status: CallParticipantStatus.accept)]);
+    expect(session.joinedIdsFromSdkEvents('first'), ['b']);
+    expect(session.joinedIdsFromSdkEvents('other'), isEmpty);
     session.updateMember('a', GroupCallMemberStatus.joined);
     expect(session.value!.members.singleWhere((m) => m.id == 'a').joinOrder, 3);
+    expect(session.joinedIdsFromSdkEvents('first'), ['b', 'a']);
     session.end('first', CallEndReason.noResponse, isCaller: true);
+    expect(session.joinedIdsFromSdkEvents('first'), isEmpty);
     expect(session.value!.canRetry, isFalse);
   });
 

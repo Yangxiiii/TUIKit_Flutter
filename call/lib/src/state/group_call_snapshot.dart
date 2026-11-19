@@ -103,6 +103,12 @@ class GroupCallSession extends ValueNotifier<GroupCallSnapshot?> {
   /// 用真实加入/离开事件去重，避免资料列表先更新时丢失再次加入的次序。
   final Set<String> _joinedEventUsers = {};
 
+  /// 返回本场仍在席的 SDK 入会事件，供会控独立于资料加载确认成员。
+  List<String> joinedIdsFromSdkEvents(String callId) =>
+      value?.callId == callId && value?.ended == false
+          ? List.unmodifiable(_joinedEventUsers)
+          : const [];
+
   /// 新场次覆盖旧展示结果，参与者只接受非空且去重后的 ID。
   void begin(
       {required String callId,

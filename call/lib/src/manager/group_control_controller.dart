@@ -48,7 +48,7 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
             hostId: trustedHostId ?? inviterId,
             policyKnown: false,
             version: 0,
-            allowSelfUnmute: false,
+            allowSelfUnmute: true,
             allowVideo: false,
             muteAll: false,
             cameraAllClosed: false,
@@ -86,6 +86,15 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
   /// 开启请求给本人留出确认时间，其余指令沿用短超时。
   static const _openRequestTimeout = Duration(seconds: 30);
 
+  /// 在线握手可能先于对端的 SDK 入会事件，给主持端留出刷新成员名单的时间。
+  static const _syncRetryInterval = Duration(seconds: 1);
+
+  /// 单轮握手包含首发，避免对暂时不可达或未支持会控的客户端持续发包。
+  static const _maxSyncAttempts = 5;
+
+  /// 收到可信同步或销毁会话时唤醒等待，IM 发送成功不代表握手完成。
+  Completer<void>? _syncResponse;
+
   /// 注入时间与随机源只用于可重复验证；生产有效期以本机墙钟判断。
   final DateTime Function() _now;
   final String Function() _newId;
@@ -107,7 +116,7 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
   /// 同一场次的可信时间锚点；仅初始主持首次接通创建，后续只接受完全相同的值。
   int? _connectedAtMs, _deadlineMs;
 
-  /// 未获可信同步前禁止自行开启设备。
+  /// 标记主持策略是否已验证，用于主持操作、摄像头和远端命令校验。
   bool _known = false;
 
   /// 权限与入会默认状态分别保存，个人设备命令不改变全员默认策略。
@@ -196,15 +205,15 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
       }
     }
     _members = next;
-    // 未收到可信交接而主持离场时失去策略权威，不能自行选举或相信任意成员自报。
+    // 未收到可信交接时撤销主持权限和摄像头授权，保留最近收到的开麦限制。
     if (_known && !_members.contains(_hostId)) {
       _known = false;
-      unawaited(_suspend());
+      unawaited(_executeDevice(GroupControlDevice.camera, false));
     }
     _publish();
   }
 
-  /// 主持按本场策略初始化设备，其他成员先停止采集并同步可信策略。
+  /// 接通后按默认权限开麦，同时向主持同步策略；摄像头仍须等待可信权限。
   Future<void> start() async {
     if (_disposed) return;
     if (_hostId == selfId) {
@@ -213,22 +222,60 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
       _deadlineMs ??= _connectedAtMs! + 3600000;
       _known = true;
       _publish();
-      await _applyJoinDefaults();
     } else {
-      await _suspend();
-      if (!_disposed) await requestSync();
+      unawaited(requestSync());
     }
+    await Future.wait([
+      // 同步版本变化时仍按实际麦克风策略校验，允许快照不取消本次开麦。
+      _executeDevice(
+        GroupControlDevice.microphone,
+        true,
+        isCommandCurrent: () => !_muteAll,
+      ),
+      _applyJoinCamera(),
+    ]);
   }
 
-  /// 重连重新向已验证主持请求当前策略，不重放旧设备命令。
-  Future<void> requestSync() async {
-    if (_disposed || _hostId == selfId || !_members.contains(selfId)) return;
-    try {
-      await _send(_message(GroupControlMessageKind.hello, _hostId,
-          targetSession: '', commandId: _newId()));
-    } catch (_) {
-      // 在线消息不能恢复离线历史；同步失败保持未知或现有已验证策略。
-    }
+  /// 入会及重连向可信主持请求同步。合并同会话的请求，只重试握手消息。
+  Future<void> requestSync() => _guard.singleFlight(
+    ('tim.call.control.sync', callId, sessionId),
+    () async {
+      final response = Completer<void>();
+      _syncResponse = response;
+      try {
+        for (
+          var attempt = 0;
+          attempt < _maxSyncAttempts && !response.isCompleted;
+          attempt++
+        ) {
+          if (_disposed || _hostId == selfId || !_members.contains(selfId)) {
+            return;
+          }
+          // 每次使用新的有效期，保持同一个入会标识，避免迟到包绑定到其他设备。
+          final hello = _message(
+            GroupControlMessageKind.hello,
+            _hostId,
+            targetSession: '',
+            commandId: _newId(),
+          );
+          final sent = Future<void>.sync(() => _send(hello))
+              .timeout(_syncRetryInterval)
+              .catchError((Object _) {});
+          await Future.wait([
+            sent,
+            response.future.timeout(_syncRetryInterval, onTimeout: () {}),
+          ]);
+        }
+      } finally {
+        _syncResponse = null;
+      }
+    },
+  );
+
+  /// 收到有效策略或离场时唤醒等待，避免后续重发旧入会的握手。
+  void _finishSyncRequest() {
+    final response = _syncResponse;
+    if (response != null && !response.isCompleted) response.complete();
   }
 
   /// 全员静音只作用于其他成员，允许自行开麦时下发单纯关麦。
@@ -312,7 +359,7 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
         });
       });
 
-  /// 本人设备入口同样执行策略；关闭始终允许，未知或被禁止时不能自行打开。
+  /// 本人可自行关设备；麦克风默认允许开启，收到限制后须遵守当前权限。
   Future<GroupControlOutcome> setSelfDevice(
     GroupControlDevice device,
     bool enabled,
@@ -320,11 +367,7 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
       _guard.singleFlight(
         ('tim.call.control.self', callId, sessionId, device, enabled),
         () async {
-          if (_disposed ||
-              (enabled &&
-                  !(device == GroupControlDevice.microphone
-                      ? value.canOpenMicrophone
-                      : value.canOpenCamera))) {
+          if (_disposed || (enabled && !_canOpen(device))) {
             const denied = GroupControlOutcome(
               GroupControlStatus.denied,
               error: '当前策略不允许开启设备',
@@ -666,6 +709,7 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
     _muteAll = message.muteAll!;
     _cameraAllClosed = message.cameraAllClosed!;
     _known = true;
+    _finishSyncRequest();
     if (transfer) {
       _hostId = message.hostId!;
       _hostEpoch = message.hostEpoch;
@@ -694,7 +738,12 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
       if (wasKnown) {
         await _applyRestrictions();
       } else {
-        await _applyJoinDefaults();
+        // 首次同步只按需关麦，避免允许策略重新打开成员已主动关闭的麦克风。
+        await Future.wait([
+          if (_muteAll || !_canOpen(GroupControlDevice.microphone))
+            _executeDevice(GroupControlDevice.microphone, false),
+          _applyJoinCamera(),
+        ]);
       }
     }
   }
@@ -816,32 +865,16 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
           _executeDevice(
             device,
             false,
-            isCommandCurrent: () => _known && !_canOpen(device),
+            isCommandCurrent: () => !_canOpen(device),
           ),
     ]);
   }
 
-  /// 初次取得策略时应用默认值，摄像头无需等待麦克风回包。
-  Future<void> _applyJoinDefaults() async {
-    await Future.wait([
-      _executeDevice(
-        GroupControlDevice.microphone,
-        !_muteAll && (_hostId == selfId || _canMemberUnmute),
-      ),
-      _executeDevice(
+  /// 语音及未获可信授权时保持关摄像头，视频接通后按主持策略开启。
+  Future<GroupControlOutcome> _applyJoinCamera() => _executeDevice(
         GroupControlDevice.camera,
-        video && !_cameraAllClosed && (_hostId == selfId || _canMemberOpenCamera),
-      ),
-    ]);
-  }
-
-  /// 同步前以及主持失联时先停止本端采集，未知策略不能自动打开设备。
-  Future<void> _suspend() async {
-    await Future.wait([
-      _executeDevice(GroupControlDevice.microphone, false),
-      _executeDevice(GroupControlDevice.camera, false),
-    ]);
-  }
+        video && !_cameraAllClosed && value.canOpenCamera,
+      );
 
   /// 默认准备、本人操作和远端命令按设备串行，旧版本不能覆盖后发策略。
   Future<GroupControlOutcome> _executeDevice(
@@ -1032,7 +1065,7 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
       hostId: _hostId,
       policyKnown: _known,
       version: _version,
-      allowSelfUnmute: _known && _canMemberUnmute,
+      allowSelfUnmute: _canMemberUnmute,
       allowVideo: _known && _canMemberOpenCamera,
       muteAll: _muteAll,
       cameraAllClosed: _cameraAllClosed,
@@ -1049,6 +1082,7 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
   @override
   void dispose() {
     _disposed = true;
+    _finishSyncRequest();
     _subscription.cancel();
     _media.changes.removeListener(_publish);
     for (final pending in _pending.values) {

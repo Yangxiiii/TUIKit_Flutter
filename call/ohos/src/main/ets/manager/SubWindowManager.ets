@@ -77,7 +77,7 @@ export class SubWindowManager {
    * 应用一个新路由。每个分支都是幂等的。
    */
   private applyRoute(next: CallRoute): void {
-    // 单聊使用 Flutter 根视图，同一通电话只保留一个可交互页面。
+    // 通话已由 Flutter 根视图承载时，避免同时显示可交互的原生页面。
     if (RouterManager.presentInFlutter(next)) {
       this._currentRoute = CallRoute.none;
       void this.teardownSubWindow();

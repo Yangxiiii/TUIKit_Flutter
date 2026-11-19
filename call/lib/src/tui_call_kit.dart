@@ -1,11 +1,13 @@
+import 'dart:io';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:tuikit_atomic_x/atomicx.dart';
 import 'package:tencent_calls_uikit/src/tui_call_kit_impl.dart';
 import 'bridge/bootloader/bootloader.dart';
 import 'control/group_control_transport.dart';
-import 'manager/group_call_recording.dart' show GroupCallRecordingHandler;
 import 'manager/group_call_result_tracker.dart' show GroupCallResultHandler;
+import 'manager/group_call_recording.dart' show GroupCallRecordingHandler;
 import 'state/group_call_metadata.dart' show GroupCallStartedHandler;
 
 export 'manager/group_call_recording.dart' show GroupCallRecordingHandler;
@@ -22,7 +24,15 @@ typedef GroupMemberSubtitleLoader = Future<Map<String, String>> Function(
 abstract class TUICallKit {
   static final TUICallKit _instance = TUICallKitImpl.instance;
   static TUICallKit get instance => _instance;
-  static NavigatorObserver navigatorObserver = Bootloader.instance;
+
+  /// 鸿蒙由原生 CallKit 持有通话状态，通话页面使用原生窗口或鸿蒙展示层。
+  static bool get usesNativeHarmonyCallKit =>
+      Platform.operatingSystem == 'ohos';
+
+  /// 鸿蒙无需启动 Android 和 iOS 使用的 Flutter 通话路由监听。
+  static NavigatorObserver navigatorObserver = usesNativeHarmonyCallKit
+      ? NavigatorObserver()
+      : Bootloader.instance;
 
   /// login TUICallKit
   ///
@@ -94,19 +104,9 @@ abstract class TUICallKit {
     throw UnimplementedError();
   }
 
-  /// Join a current call
-  ///
-  /// @param callId        Unique ID for this call
-  ///
-  /// 加入当前通话
-  ///
-  /// @param callId 本次通话的唯一ID
-  Future<void> join(String callId) async {
-    // TODO: implement join
-    //
-    // TODO: 实现 join
-    throw UnimplementedError();
-  }
+  /// 使用服务端分配的 [callId] 加入当前通话。
+  /// 鸿蒙群入口可传 [mediaType]，以便在加入前申请对应设备权限。
+  Future<void> join(String callId, {CallMediaType? mediaType});
 
   /// Set the ringtone (preferably shorter than 30s)
   ///

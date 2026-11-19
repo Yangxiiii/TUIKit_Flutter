@@ -4,18 +4,131 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tencent_calls_uikit/src/view/callview/public/float/call_scene.dart';
 import 'package:tencent_calls_uikit/src/view/callview/public/float/call_compact_widget.dart';
+import 'package:tencent_calls_uikit/src/view/callview/public/multi/group_call_scene.dart';
 import 'package:tencent_calls_uikit/src/view/component/incoming_banner/incoming_banner_widget.dart';
 import 'package:tencent_calls_uikit/src/view/harmony_call_overlay.dart';
 
 void main() {
+  testWidgets('鸿蒙多人来电、宫格和小窗复用共享界面，动作仍发送给原生场次', (tester) async {
+    const channel = MethodChannel('tencent_calls_uikit/harmony_presentation');
+    final messenger = tester.binding.defaultBinaryMessenger;
+    Map<String, Object?> member(String id, {bool joined = true}) => {
+      'id': id,
+      'name': id,
+      'avatar': '',
+      'joined': joined,
+      'camera': joined,
+      'microphone': joined,
+    };
+
+    final self = member('self', joined: false);
+    final inviter = member('inviter');
+    final snapshot = <String, Object?>{
+      'id': 'native-group',
+      'chatGroup': true,
+      'inviterId': 'inviter',
+      'banner': true,
+      'incoming': true,
+      'accepted': false,
+      'video': true,
+      'duration': 0,
+      'self': self,
+      'peer': inviter,
+      'members': [
+        inviter,
+        self,
+        member('joined'),
+        member('waiting', joined: false),
+      ],
+    };
+    final actions = <String>[];
+    var creating = 0;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method != 'harmonyPresentationAction') return snapshot;
+      final data = call.arguments as Map<Object?, Object?>;
+      expect(data['id'], 'native-group');
+      actions.add(data['action'] as String);
+      if (actions.last == 'accept') {
+        snapshot.addAll({'accepted': true, 'banner': false, 'incoming': false});
+        self.addAll({'joined': true, 'camera': true});
+      }
+      return null;
+    });
+    messenger.setMockMethodCallHandler(SystemChannels.platform_views, (
+      call,
+    ) async {
+      if (call.method == 'create') return ++creating;
+      if (call.method == 'resize') {
+        final size = call.arguments as Map<Object?, Object?>;
+        return {'width': size['width'], 'height': size['height']};
+      }
+      return null;
+    });
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(channel, null);
+      messenger.setMockMethodCallHandler(SystemChannels.platform_views, null);
+    });
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: HarmonyCallOverlay(child: Scaffold(body: Text('聊天页'))),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final incoming = tester.widget<IncomingBannerContent>(
+      find.byType(IncomingBannerContent),
+    );
+    expect(incoming.multi, isTrue);
+    expect(incoming.userId, 'inviter');
+
+    // 等待成员的动效持续播放，只推进有限帧。
+    Future<void> renderGroupFrame() async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+
+    await tester.tap(find.bySemanticsIdentifier('call.banner.accept'));
+    await renderGroupFrame();
+    expect(
+      find.descendant(
+        of: find.bySemanticsIdentifier('call.minimize'),
+        matching: find.byIcon(AppIcons.collapseModal),
+      ),
+      findsOneWidget,
+    );
+    expect(find.byType(GroupCallScene), findsOneWidget);
+    expect(find.byType(CallScene), findsNothing);
+    expect(find.text('群通话'), findsOneWidget);
+    expect(
+      find.bySemanticsIdentifier('call.group.member.waiting'),
+      findsOneWidget,
+    );
+    expect(creating, 3);
+
+    // 宫格聚焦继续使用同一个鸿蒙纹理，不为同一成员重复订阅。
+    await tester.tap(find.bySemanticsIdentifier('call.group.member.joined'));
+    await renderGroupFrame();
+    expect(creating, 3);
+    await tester.tap(find.bySemanticsIdentifier('call.group.microphone'));
+    await renderGroupFrame();
+    expect(actions, ['accept', 'microphone']);
+
+    await tester.tap(find.bySemanticsIdentifier('call.minimize'));
+    await renderGroupFrame();
+    expect(find.byType(CallCompactAudioContent), findsOneWidget);
+    await tester.tap(find.bySemanticsIdentifier('call.restore'));
+    await renderGroupFrame();
+    expect(find.byType(GroupCallScene), findsOneWidget);
+  });
+
   testWidgets('鸿蒙来电、全屏、小窗与结束使用共享 Flutter 通话组件', (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(390, 844);
     tester.view.padding = const FakeViewPadding(top: 45.76);
     tester.view.viewPadding = const FakeViewPadding(top: 45.76);
     addTearDown(tester.view.reset);
-    final channel =
-        const MethodChannel('tencent_calls_uikit/harmony_presentation');
+    final channel = const MethodChannel(
+      'tencent_calls_uikit/harmony_presentation',
+    );
     final messenger = tester.binding.defaultBinaryMessenger;
     const codec = StandardMethodCodec();
     final snapshot = <String, Object?>{
@@ -43,9 +156,11 @@ void main() {
       return snapshot;
     });
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
-    await tester.pumpWidget(const MaterialApp(
-      home: HarmonyCallOverlay(child: Scaffold(body: Text('聊天页'))),
-    ));
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: HarmonyCallOverlay(child: Scaffold(body: Text('聊天页'))),
+      ),
+    );
     await tester.pumpAndSettle();
     final banner = find.byType(IncomingBannerContent);
     expect(tester.getRect(banner), const Rect.fromLTWH(12, 50, 366, 74));
@@ -73,8 +188,10 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('待接听'), findsOneWidget);
-    final avatar =
-        find.descendant(of: card, matching: find.byType(AppUserAvatar));
+    final avatar = find.descendant(
+      of: card,
+      matching: find.byType(AppUserAvatar),
+    );
     expect(tester.getRect(avatar), const Rect.fromLTWH(324, 128, 36, 36));
 
     // 接听未成功时保留浮窗，确认接通后再恢复同一通话。
@@ -97,7 +214,8 @@ void main() {
     await messenger.handlePlatformMessage(
       channel.name,
       codec.encodeMethodCall(
-          const MethodCall('harmonyPresentationChanged', false)),
+        const MethodCall('harmonyPresentationChanged', false),
+      ),
       (_) {},
     );
     await tester.pumpAndSettle();
@@ -128,9 +246,11 @@ void main() {
       return active ? snapshot : null;
     });
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
-    await tester.pumpWidget(const MaterialApp(
-      home: HarmonyCallOverlay(child: Scaffold(body: Text('聊天页'))),
-    ));
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: HarmonyCallOverlay(child: Scaffold(body: Text('聊天页'))),
+      ),
+    );
     await tester.pumpAndSettle();
 
     // 点击头像恢复同一通话，点击取消则发送原通话的结束动作。
@@ -140,8 +260,10 @@ void main() {
     await tester.tap(minimize);
     await tester.pumpAndSettle();
     expect(find.text('取消'), findsOneWidget);
-    final avatar =
-        find.descendant(of: card, matching: find.byType(AppUserAvatar));
+    final avatar = find.descendant(
+      of: card,
+      matching: find.byType(AppUserAvatar),
+    );
     await tester.tapAt(tester.getCenter(avatar));
     await tester.pumpAndSettle();
     expect(find.byType(CallScene), findsOneWidget);
@@ -151,7 +273,7 @@ void main() {
     await tester.tap(cancel);
     await tester.pumpAndSettle();
     expect(actions, [
-      {'id': 'voice-outgoing', 'action': 'end'}
+      {'id': 'voice-outgoing', 'action': 'end'},
     ]);
     expect(card, findsNothing);
 
@@ -162,7 +284,8 @@ void main() {
     await messenger.handlePlatformMessage(
       channel.name,
       codec.encodeMethodCall(
-          const MethodCall('harmonyPresentationChanged', true)),
+        const MethodCall('harmonyPresentationChanged', true),
+      ),
       (_) {},
     );
     await tester.pumpAndSettle();
@@ -209,9 +332,11 @@ void main() {
       return null;
     });
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
-    await tester.pumpWidget(const MaterialApp(
-      home: HarmonyCallOverlay(child: Scaffold(body: Text('聊天页'))),
-    ));
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: HarmonyCallOverlay(child: Scaffold(body: Text('聊天页'))),
+      ),
+    );
     await tester.pumpAndSettle();
 
     for (final (control, action) in [
@@ -228,7 +353,7 @@ void main() {
     expect(find.text('聊天页'), findsOneWidget);
   });
 
-  testWidgets('远端关开摄像头不改变已交换的画面和小窗坐标', (tester) async {
+  testWidgets('接通时保留本机预览，远端关开摄像头不改变画面和小窗坐标', (tester) async {
     const channel = MethodChannel('tencent_calls_uikit/harmony_presentation');
     final messenger = tester.binding.defaultBinaryMessenger;
     final local = {'id': 'self', 'name': '本人', 'avatar': '', 'camera': true};
@@ -236,15 +361,16 @@ void main() {
     final snapshot = <String, Object?>{
       'id': 'video-1',
       'video': true,
-      'accepted': true,
+      'accepted': false,
       'duration': 8,
       'self': local,
       'peer': peer,
     };
     messenger.setMockMethodCallHandler(channel, (_) async => snapshot);
     var creations = 0;
-    messenger.setMockMethodCallHandler(SystemChannels.platform_views,
-        (call) async {
+    messenger.setMockMethodCallHandler(SystemChannels.platform_views, (
+      call,
+    ) async {
       if (call.method == 'create') {
         creations++;
         return 7;
@@ -259,15 +385,25 @@ void main() {
       messenger.setMockMethodCallHandler(channel, null);
       messenger.setMockMethodCallHandler(SystemChannels.platform_views, null);
     });
-    await tester.pumpWidget(const MaterialApp(
-      home: HarmonyCallOverlay(child: Scaffold(body: Text('聊天页'))),
-    ));
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: HarmonyCallOverlay(child: Scaffold(body: Text('聊天页'))),
+      ),
+    );
     await tester.pumpAndSettle();
     Finder video(String id, {bool skipOffstage = true}) =>
         find.byWidgetPredicate(
-            (widget) => widget is AndroidView && widget.creationParams == id,
-            skipOffstage: skipOffstage);
+          (widget) => widget is AndroidView && widget.creationParams == id,
+          skipOffstage: skipOffstage,
+        );
+    // 等待时只绑定本机，接通后本机从全屏移到小窗并沿用同一个平台视图。
     final localRenderer = tester.state(video('self'));
+    expect(video('peer'), findsNothing);
+    expect(creations, 1);
+    snapshot['accepted'] = true;
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pumpAndSettle();
+    expect(tester.state(video('self')), same(localRenderer));
     final peerRenderer = tester.state(video('peer'));
     expect(creations, 2);
 
@@ -281,7 +417,15 @@ void main() {
     final smallRect = tester.getRect(swap);
     final mainRect = tester.getRect(video('self'));
     expect(smallRect.center.dx, lessThan(beforeDrag.dx));
-    expect(tester.getRect(video('peer')), smallRect);
+    final peerRect = tester.getRect(video('peer'));
+    // 小窗居中裁剪，原生视图与画面都保留竖屏比例。
+    expect(peerRect.center, smallRect.center);
+    expect(peerRect.height, closeTo(smallRect.height, 0.001));
+    expect(peerRect.width / peerRect.height, closeTo(9 / 16, 0.001));
+    expect(peerRect.width, greaterThan(smallRect.width));
+    final nativeSize = const Size(720, 1280) / tester.view.devicePixelRatio;
+    expect(tester.getSize(video('peer')), nativeSize);
+    expect(tester.getSize(video('self')), nativeSize);
 
     // 远端关闭时小画面显示同源头像，本端和原生视图身份保持不变。
     peer['camera'] = false;
@@ -289,21 +433,26 @@ void main() {
     await tester.pumpAndSettle();
     expect(video('peer'), findsNothing);
     expect(
-        tester.state(video('peer', skipOffstage: false)), same(peerRenderer));
+      tester.state(video('peer', skipOffstage: false)),
+      same(peerRenderer),
+    );
     expect(tester.getRect(swap), smallRect);
     expect(tester.getRect(video('self')), mainRect);
     expect(
-        find.descendant(
-            of: swap,
-            matching: find.byWidgetPredicate((widget) =>
-                widget is AppUserAvatar && widget.userId == 'peer')),
-        findsWidgets);
+      find.descendant(
+        of: swap,
+        matching: find.byWidgetPredicate(
+          (widget) => widget is AppUserAvatar && widget.userId == 'peer',
+        ),
+      ),
+      findsWidgets,
+    );
 
     peer['camera'] = true;
     await tester.pump(const Duration(milliseconds: 250));
     await tester.pumpAndSettle();
     expect(tester.state(video('peer')), same(peerRenderer));
-    expect(tester.getRect(video('peer')), smallRect);
+    expect(tester.getRect(video('peer')), peerRect);
     expect(tester.getRect(video('self')), mainRect);
 
     // 悬浮窗内关闭再开启同样保留位置，点击画面仍可恢复。

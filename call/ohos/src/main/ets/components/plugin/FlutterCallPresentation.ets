@@ -1,7 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { MethodChannel } from '@ohos/flutter_ohos';
 import {
-  AudioRoute, CallMediaType, CallParticipantInfo, CallParticipantStatus, CallStore,
+  AudioRoute, CallMediaType, CallParticipantInfo, CallParticipantStatus, CallState, CallStore,
   DeviceStatus, DeviceStore, NetworkQuality,
 } from '@tencentcloud/atomicxcore';
 import { Permission } from '../../common/utils/Permission';
@@ -14,7 +14,7 @@ import { NetworkQualityToastManager } from '../../manager/NetworkQualityToastMan
 import { CallEndedFlag } from '../../state/CallEndedFlag';
 import { CallRoute, ViewState } from '../../state/ViewState';
 
-/** 将单聊展示交给宿主 Flutter。原生 CallStore 仍负责状态、设备及信令。 */
+/** 将单聊和多人展示交给 Flutter，设备、成员和信令仍取自鸿蒙 SDK。 */
 export class FlutterCallPresentation {
   /** 页面会话序号只随通话开始和结束变化，SDK 更新信令 ID 时沿用原序号。 */
   private presentationSequence: number = 0;
@@ -28,30 +28,36 @@ export class FlutterCallPresentation {
 
   private readonly channel: MethodChannel;
   private readonly context: common.UIAbilityContext;
+  /** 构建指定原生回退时，视频全屏不经过 Flutter 的纹理合成。 */
+  private readonly nativeVideo: boolean;
 
-  constructor(channel: MethodChannel, context: common.UIAbilityContext) {
+  constructor(channel: MethodChannel, context: common.UIAbilityContext, nativeVideo: boolean) {
     this.channel = channel;
     this.context = context;
+    this.nativeVideo = nativeVideo;
   }
 
-  /** 关闭已有 Flutter 浮层或接管单聊路由。群聊继续由原生窗口承载。 */
+  /** Flutter 承载单聊和多人页面。显式视频回退时继续使用原生窗口。 */
   present(route: CallRoute): boolean {
     if (route === CallRoute.none) {
-      this.presentationId = '';
-      this.observedSdkCallId = '';
-      this.initializedId = '';
-      this.connectedAt = 0;
-      this.channel.invokeMethod('harmonyPresentationChanged', false);
+      this.clearPresentation();
       return false;
     }
     const state = CallStore.shared().state;
     const call = state.activeCall;
+    if (this.usesNativeVideoWindow(route, call.mediaType)) {
+      // 让 ArkUI 窗口直接合成 SDK 的视频 Surface，避免嵌入 Flutter 纹理后画面不可见。
+      if (this.presentationId.length > 0) {
+        this.clearPresentation();
+        NetworkQualityToastManager.start();
+      }
+      return false;
+    }
     // 主叫振铃时信令标识可能未回填，Flutter 页面仍用独立展示序号接管。
-    const outgoingVoiceWaiting = route === CallRoute.fullView && call.mediaType === CallMediaType.audio &&
+    const outgoingWaiting = route === CallRoute.fullView && call.mediaType !== undefined &&
       state.selfInfo.status === CallParticipantStatus.waiting && state.selfInfo.id.length > 0 &&
-      call.inviterId === state.selfInfo.id && call.inviteeIds.length === 1;
-    if ((call.callId.length === 0 && !outgoingVoiceWaiting) ||
-      call.chatGroupId.length > 0 || call.inviteeIds.length > 1) {
+      call.inviterId === state.selfInfo.id && call.inviteeIds.length > 0;
+    if (call.callId.length === 0 && !outgoingWaiting) {
       return false;
     }
     if (this.presentationId.length === 0) {
@@ -63,10 +69,29 @@ export class FlutterCallPresentation {
     NetworkQualityToastManager.stop();
     if (route === CallRoute.fullView && this.initializedId !== this.presentationId && call.mediaType !== undefined) {
       this.initializedId = this.presentationId;
-      void this.initializeMedia(this.presentationId, call.mediaType);
+      if (this.isGroupCall(state)) {
+        // 多人成员由会控决定开启时机，原生初始化只选择默认音频路由。
+        this.setDefaultAudioRoute(call.mediaType);
+      } else {
+        void this.initializeMedia(this.presentationId, call.mediaType);
+      }
     }
     this.channel.invokeMethod('harmonyPresentationChanged', true);
     return true;
+  }
+
+  /** 回退模式保留 Flutter 来电横幅，打开全屏后才切到原生窗口。 */
+  private usesNativeVideoWindow(route: CallRoute, mediaType: CallMediaType | undefined): boolean {
+    return this.nativeVideo && route === CallRoute.fullView && mediaType === CallMediaType.video;
+  }
+
+  /** 使旧浮层操作失效并通知 Flutter 移除界面。跨到原生窗口时保持同一通话。 */
+  private clearPresentation(): void {
+    this.presentationId = '';
+    this.observedSdkCallId = '';
+    this.initializedId = '';
+    this.connectedAt = 0;
+    this.channel.invokeMethod('harmonyPresentationChanged', false);
   }
 
   /** 只读投影共享界面需要的资料和设备事实。铃声监听沿用原生接通状态。 */
@@ -74,6 +99,11 @@ export class FlutterCallPresentation {
     if (this.presentationId.length === 0) return null;
     const state = CallStore.shared().state;
     const call = state.activeCall;
+    // 原生回退模式下，SDK 补齐早期缺失的媒体类型后仍须交还窗口。
+    if (this.usesNativeVideoWindow(ViewState().router, call.mediaType)) {
+      RouterManager.showCallingView();
+      return null;
+    }
     if (call.callId.length > 0 && call.callId !== this.observedSdkCallId) {
       Logger.info('Flutter call signaling identifier updated within the same presentation');
       this.observedSdkCallId = call.callId;
@@ -86,10 +116,17 @@ export class FlutterCallPresentation {
     if (accepted && this.connectedAt === 0) {
       this.connectedAt = Date.now() - call.duration * 1000;
       // 从系统通知接听也应进入全屏，并初始化本通话的媒体设备。
-      if (ViewState().router === CallRoute.banner) RouterManager.showCallingView();
+      if (ViewState().router === CallRoute.banner) {
+        RouterManager.showCallingView();
+        if (this.presentationId.length === 0) return null;
+      }
     }
-    const peer = state.allParticipants.find((user: CallParticipantInfo): boolean => user.id !== self.id);
-    const peerId = peer?.id ?? (call.inviterId === self.id ? call.inviteeIds[0] ?? '' : call.inviterId);
+    const group = this.isGroupCall(state);
+    const targetId = call.inviterId === self.id ? call.inviteeIds[0] ?? '' : call.inviterId;
+    // 多人横幅始终展示邀请人，不能取成员列表中的任意一人。
+    const peer = state.allParticipants.find((user: CallParticipantInfo): boolean =>
+      group ? user.id === targetId : user.id !== self.id);
+    const peerId = peer?.id ?? targetId;
     // 平台通道只传共享组件所需的只读值，不传登录凭证或 SDK 对象。
     const data = new Map<string, Object>();
     data.set('id', this.presentationId);
@@ -104,7 +141,51 @@ export class FlutterCallPresentation {
     data.set('peerPoor', this.isPoor(state.networkQualities.get(peerId)));
     data.set('self', this.user(self, self.id, device.cameraStatus === DeviceStatus.on));
     data.set('peer', this.user(peer, peerId, peer?.isCameraOpened === true));
+    if (group) {
+      data.set('callId', call.callId);
+      data.set('groupId', call.chatGroupId);
+      data.set('connectedAtMs', call.startTime > 0 ? call.startTime : this.connectedAt);
+      data.set('chatGroup', call.chatGroupId.length > 0);
+      data.set('inviterId', call.inviterId);
+      data.set('members', this.groupMembers(state, accepted));
+    }
     return data;
+  }
+
+  /** SDK 群来源或独立多人标记决定是否进入共享会控。 */
+  private isGroupCall(state: CallState): boolean {
+    const call = state.activeCall;
+    return call.chatGroupId.length > 0 || call.inviteeIds.length > 1 || ViewState().temporaryMulti;
+  }
+
+  /** 只投影当前在场或仍等待的成员，邀请终态以 SDK 状态为准。 */
+  private groupMembers(state: CallState, accepted: boolean): Array<Map<string, Object>> {
+    const call = state.activeCall;
+    const self = state.selfInfo;
+    const device = DeviceStore.shared().state;
+    const live = new Map<string, CallParticipantInfo>();
+    state.allParticipants.forEach((member: CallParticipantInfo): void => {
+      if (member.id.length > 0 && member.status !== CallParticipantStatus.none) live.set(member.id, member);
+    });
+    if (self.id.length > 0 && self.status !== CallParticipantStatus.none) live.set(self.id, self);
+    // 振铃期间软件可能先给邀请名单、再给成员对象。接通后以 SDK 实时成员为准。
+    const ids = new Set<string>([call.inviterId, ...call.inviteeIds, ...Array.from(live.keys())]);
+    const members: Array<Map<string, Object>> = [];
+    ids.forEach((id: string): void => {
+      if (id.length === 0 || members.length >= 9) return;
+      const member = live.get(id);
+      if (member === undefined && accepted) return;
+      const local = id === self.id;
+      const joined = member?.status === CallParticipantStatus.accept;
+      const data = this.user(member, id, joined &&
+        (local ? device.cameraStatus === DeviceStatus.on : member?.isCameraOpened === true));
+      data.set('joined', joined);
+      data.set('microphone', joined &&
+        (local ? device.microphoneStatus === DeviceStatus.on : member?.isMicrophoneOpened === true));
+      data.set('volume', joined ? state.speakerVolumes[id] ?? 0 : 0);
+      members.push(data);
+    });
+    return members;
   }
 
   /** 将 Flutter 按钮转为当前通话的 SDK 操作，权限返回后再次校验通话标识。 */
@@ -168,6 +249,42 @@ export class FlutterCallPresentation {
     }
   }
 
+  /** 仅已接通的原多人场次可以申请权限或操作设备；权限结束后由 Flutter 复核会控版本。 */
+  async groupDevice(presentationId: string, callId: string, device: string,
+    enabled: boolean | null): Promise<boolean> {
+    if (!this.isGroupDeviceCurrent(presentationId, callId, device)) return false;
+    const camera = device === 'camera';
+    if (enabled === null) {
+      return camera ? Permission.requestCameraInCall(this.context) :
+        Permission.hasPermission(this.context, CallMediaType.audio);
+    }
+    // 使用指令的目标状态；重复关闭不能翻转为开启。
+    const devices = DeviceStore.shared();
+    const on = (camera ? devices.state.cameraStatus : devices.state.microphoneStatus) === DeviceStatus.on;
+    if (enabled === on) return true;
+    if (camera) {
+      if (enabled) {
+        await devices.openLocalCamera(devices.state.isFrontCamera);
+      } else {
+        devices.closeLocalCamera();
+      }
+    } else if (enabled) {
+      await devices.openLocalMicrophone();
+    } else {
+      devices.closeLocalMicrophone();
+    }
+    // 这里只报告 SDK 调用已完成，Flutter 还须核对实际设备快照再回执。
+    return this.isGroupDeviceCurrent(presentationId, callId, device);
+  }
+
+  /** 信令 ID、展示序号及媒体能力必须同时对应本次接通。 */
+  private isGroupDeviceCurrent(presentationId: string, callId: string, device: string): boolean {
+    const state = CallStore.shared().state;
+    return this.isCurrent(presentationId) && callId.length > 0 && state.activeCall.callId === callId &&
+      state.selfInfo.status === CallParticipantStatus.accept && this.isGroupCall(state) &&
+      (device === 'microphone' || (device === 'camera' && state.activeCall.mediaType === CallMediaType.video));
+  }
+
   /** 只允许原页面会话操作当前通话，已结束或被替换的页面请求立即失效。 */
   private isCurrent(presentationId: string): boolean {
     return presentationId.length > 0 && presentationId === this.presentationId &&
@@ -179,12 +296,18 @@ export class FlutterCallPresentation {
     try {
       if (!await Permission.hasPermission(this.context, mediaType) || !this.isCurrent(presentationId)) return;
       const devices = DeviceStore.shared();
-      devices.setAudioRoute(mediaType === CallMediaType.video ? AudioRoute.speakerphone : AudioRoute.earpiece);
+      this.setDefaultAudioRoute(mediaType);
       await devices.openLocalMicrophone();
       if (mediaType === CallMediaType.video && this.isCurrent(presentationId)) await devices.openLocalCamera(true);
     } catch (error) {
       Logger.warn('Flutter call media setup failed', error);
     }
+  }
+
+  /** 默认视频用扬声器，语音用听筒，后续由用户自行调整。 */
+  private setDefaultAudioRoute(mediaType: CallMediaType): void {
+    DeviceStore.shared().setAudioRoute(
+      mediaType === CallMediaType.video ? AudioRoute.speakerphone : AudioRoute.earpiece);
   }
 
   private isPoor(quality: NetworkQuality | undefined): boolean {
