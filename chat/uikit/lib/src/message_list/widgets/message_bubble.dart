@@ -251,6 +251,9 @@ class MessageBubble extends StatefulWidget {
   /// Web 回复保留发送时的引用摘要，原生引用继续走既有展示。
   final MessageQuoteInfo? replyQuote;
 
+  /// 由消息行提供可见回应，与正文共享气泡背景。
+  final Widget? reactionBar;
+
   /// 回复详情只展示当前消息内容，图文块可在正文旁显示回执。
   final ({Widget? receipt})? replyDetail;
 
@@ -261,9 +264,11 @@ class MessageBubble extends StatefulWidget {
   /// 在合并详情视图中：bundle的完整消息列表，用作图片/视频查看器的静态数据源（该模式下页面的MessageListStore为空）。
   final List<MessageInfo>? mergedMediaMessages;
 
+  /// 在线会话到达 SDK 历史边缘后，沿用宿主的归档查询。
+  final ChatOlderMessagesLoader? loadOlderMedia;
+
   const MessageBubble({
     super.key,
-    this.actionRowContext,
     required this.message,
     required this.conversationID,
     required this.isSelf,
@@ -282,12 +287,11 @@ class MessageBubble extends StatefulWidget {
     this.onCallMessageClick,
     this.onQuotePreviewTap,
     this.replyQuote,
+    this.reactionBar,
     this.replyDetail,
     this.mergedMediaMessages,
+    this.loadOlderMedia,
   });
-
-  /// 聊天消息整行的布局上下文，菜单避让时包含气泡下方的表情回应。
-  final BuildContext? actionRowContext;
 
   @override
   State<StatefulWidget> createState() => _MessageBubbleState();
@@ -443,12 +447,35 @@ class _MessageBubbleState extends State<MessageBubble>
       );
     }
 
+    final reactionBar = widget.reactionBar == null
+        ? null
+        : Padding(
+            // 回应胶囊从正文起点开始，收发两侧使用相同的内边距。
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: widget.reactionBar!,
+          );
+    final quoteInfo = _quoteInfo;
+    final bodyReactionBar = quoteInfo == null ? reactionBar : null;
+
+    // 文本和通话记录在原背景内追加回应，媒体和卡片由外层气泡承载。
+    Widget withReactionBar(Widget child) {
+      if (reactionBar == null) return child;
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [child, reactionBar],
+      );
+    }
+
+    Widget bodyBackground(Widget child) =>
+        backgroundBuilder(withReactionBar(child));
+
     if (widget.message.status == MessageStatus.revoked) {
       final scope = MessageRecallScope.maybeOf(context);
       if (scope != null) {
         return MessageRecallNotice(
           messageId: widget.message.msgID,
-          text: chatMessageRecallText(widget.message),
+          text: chatMessageRecallText(widget.message, context: context),
           editableUntil: scope.config.editableUntil(widget.message.msgID),
           onReedit: () => scope.onReedit(widget.message.msgID),
         );
@@ -461,22 +488,36 @@ class _MessageBubbleState extends State<MessageBubble>
     final announcement = _groupAnnouncement;
     final notification = _oaAnnouncement;
     Widget messageWidget;
+    // 仅未自行绘制回应的正文需要外层气泡承载。
+    var bodyContainsReactions = false;
 
+    final customContent = widget.message.messageType == MessageType.custom
+        ? widget.config.customContentBuilder
+            ?.call(context, widget.message, widget.maxWidth)
+        : null;
     switch (widget.message.messageType) {
-      case MessageType.face:
-        messageWidget = _buildFaceMessage();
-        break;
-
       case MessageType.text:
+      case MessageType.face:
+        final isFace = widget.message.messageType == MessageType.face;
+        final payload = widget.message.messagePayload;
+        // 外部表情编码可能未注册，保留原有不支持提示。
+        if (isFace &&
+            (payload is! FaceMessagePayload ||
+                !EmojiManager.isOnlyEmojis(payload.faceData ?? ''))) {
+          messageWidget = _buildUnsupportedMessage(context);
+          break;
+        }
+        final hasQuote = quoteInfo != null;
+        bodyContainsReactions = true;
         messageWidget = TextMessageWidget(
           message: widget.message,
           isSelf: widget.isSelf,
           maxWidth: widget.maxWidth,
           config: widget.config,
-          onLongPress: _quoteInfo != null ? null : _longPressCallback,
-          bubbleKey: _quoteInfo != null ? null : _messageKey,
-          backgroundBuilder:
-              _quoteInfo != null ? (child) => child : backgroundBuilder,
+          onLongPress: hasQuote ? null : _longPressCallback,
+          // 带引用的表情继续使用正文作为菜单锚点，背景由引用外层绘制。
+          bubbleKey: !hasQuote || isFace ? _messageKey : null,
+          backgroundBuilder: hasQuote ? (child) => child : bodyBackground,
           onResendTap: widget.message.status == MessageStatus.sendFail
               ? _showResendConfirmDialog
               : null,
@@ -496,6 +537,7 @@ class _MessageBubbleState extends State<MessageBubble>
             messageListStore: widget.messageListStore,
             isInMergedDetailView: widget.isInMergedDetailView,
             mergedMediaMessages: widget.mergedMediaMessages,
+            loadOlderMedia: widget.loadOlderMedia,
             localOnly: widget.messageListStore == null,
             bubbleKey: _messageKey,
           ),
@@ -515,6 +557,7 @@ class _MessageBubbleState extends State<MessageBubble>
             messageListStore: widget.messageListStore,
             isInMergedDetailView: widget.isInMergedDetailView,
             mergedMediaMessages: widget.mergedMediaMessages,
+            loadOlderMedia: widget.loadOlderMedia,
             localOnly: widget.messageListStore == null,
             bubbleKey: _messageKey,
           ),
@@ -523,6 +566,7 @@ class _MessageBubbleState extends State<MessageBubble>
         break;
 
       case MessageType.audio:
+        bodyContainsReactions = true;
         if (widget.isHighlighted) {
           messageWidget = AnimatedBuilder(
             animation: _highlightAnimationController,
@@ -531,6 +575,7 @@ class _MessageBubbleState extends State<MessageBubble>
                 message: widget.message,
                 conversationID: widget.conversationID,
                 asrDisplayManager: widget.asrDisplayManager,
+                reactionBar: bodyReactionBar,
                 onConvertToText: _handleConvertVoiceToText,
                 isSelf: widget.isSelf,
                 maxWidth: widget.maxWidth,
@@ -548,6 +593,7 @@ class _MessageBubbleState extends State<MessageBubble>
             message: widget.message,
             conversationID: widget.conversationID,
             asrDisplayManager: widget.asrDisplayManager,
+            reactionBar: bodyReactionBar,
             onConvertToText: _handleConvertVoiceToText,
             isSelf: widget.isSelf,
             maxWidth: widget.maxWidth,
@@ -600,6 +646,18 @@ class _MessageBubbleState extends State<MessageBubble>
         break;
 
       case MessageType.custom:
+        if (customContent != null) {
+          // 宿主只替换正文，原气泡仍提供长按菜单与定位高亮。
+          messageWidget = _wrapMediaHighlight(
+            GestureDetector(
+              key: _messageKey,
+              onLongPress: _longPressCallback,
+              child: customContent,
+            ),
+            colorsTheme,
+          );
+          break;
+        }
         if (notification != null) {
           // 通知卡复用定位高亮，详情只传业务 ID，不把点击当成业务已读。
           messageWidget = _wrapMediaHighlight(
@@ -639,13 +697,14 @@ class _MessageBubbleState extends State<MessageBubble>
         CallingMessageDataProvider provider =
             CallingMessageDataProvider(widget.message, context);
         if (provider.isCallingSignal) {
+          bodyContainsReactions = true;
           messageWidget = CallMessageWidget(
             message: widget.message,
             isSelf: widget.isSelf,
             maxWidth: widget.maxWidth,
             bubbleKey: _quoteInfo != null ? null : _messageKey,
             backgroundBuilder:
-                _quoteInfo != null ? (child) => child : backgroundBuilder,
+                quoteInfo != null ? (child) => child : bodyBackground,
             isInMergedDetailView: widget.isInMergedDetailView,
             config: widget.config,
             onCallMessageClick: widget.onCallMessageClick,
@@ -659,6 +718,18 @@ class _MessageBubbleState extends State<MessageBubble>
             onLongPress: _longPressCallback,
             messageListStore: widget.messageListStore,
             replyDetail: widget.replyDetail,
+            conversationMedia: !widget.isInMergedDetailView &&
+                    widget.conversationID.isNotEmpty
+                ? (
+                    conversationId: widget.conversationID,
+                    loadOlderMedia: widget.loadOlderMedia,
+                    presetMessages: widget.mergedMediaMessages ??
+                        (widget.messageListStore == null ||
+                                widget.message.rawMessage == null
+                            ? [widget.message]
+                            : null),
+                  )
+                : null,
           );
         }
         break;
@@ -712,22 +783,25 @@ class _MessageBubbleState extends State<MessageBubble>
         messageWidget = _buildUnsupportedMessage(context);
     }
 
-    // 公告详情走业务接口，缓存卡片也可打开；其他依赖 SDK 的卡片操作在联网后恢复。
+    // 公告和宿主卡片可按业务身份打开；依赖 SDK 的操作在联网后恢复。
     if (widget.messageListStore == null &&
         announcement == null &&
         notification == null &&
+        customContent == null &&
         const {MessageType.file, MessageType.audio, MessageType.custom}
             .contains(widget.message.messageType)) {
       messageWidget = IgnorePointer(child: messageWidget);
     }
 
     // 引用与正文共享气泡背景，Web 回复使用单行快照，定位仍交给原列表。
-    final quoteInfo = _quoteInfo;
     if (quoteInfo != null) {
       // Web 引用使用消息行在头像和回执之外的可用宽度。
       final quoteWidth =
           widget.replyQuote == null ? _getBubbleMaxWidth() : widget.maxWidth;
       final quotePreview = QuoteMessagePreview(
+        groupId: widget.message.conversationType == ConversationType.group
+            ? widget.message.to
+            : null,
         quoteInfo: quoteInfo,
         compactIdentifier: widget.replyQuote == null ||
                 widget.message.msgID.isEmpty
@@ -745,6 +819,7 @@ class _MessageBubbleState extends State<MessageBubble>
         children: [
           quotePreview,
           messageWidget,
+          if (reactionBar != null) reactionBar,
         ],
       );
       Widget bubbleContainer;
@@ -800,6 +875,8 @@ class _MessageBubbleState extends State<MessageBubble>
         onLongPress: _longPressCallback,
         child: bubbleContainer,
       );
+    } else if (reactionBar != null && !bodyContainsReactions) {
+      messageWidget = bodyBackground(messageWidget);
     }
 
     // 原消息与记录预览使用不同命名空间，稳定标识保留正文与原有长按动作。
@@ -946,7 +1023,8 @@ class _MessageBubbleState extends State<MessageBubble>
         widget.message.status != MessageStatus.violation;
     final scope = MessageActionsScope.maybeOf(context);
     if (scope != null) {
-      scope.showActions(widget.message, _messageKey, widget.actionRowContext,
+      // 气泡自身包含表情回应，外层消息行的回复计数和翻译不参与避让。
+      scope.showActions(widget.message, _messageKey, context,
           _buildMenuItems(), canReact ? _handleReactionSelected : null);
       return;
     }
@@ -1615,9 +1693,7 @@ class _MessageBubbleState extends State<MessageBubble>
         items.add(MessageMenuItem(
           title: atomicLocal.quote,
           id: 'reply',
-          assetName: 'chat_assets/icon/quote.svg',
-          package: 'tencent_chat_uikit',
-          icon: Icons.format_quote,
+          icon: AppIcons.reply,
           onTap: () => _menuCallbacks?.onQuoteMessage(widget.message),
         ));
       }
@@ -1714,35 +1790,6 @@ class _MessageBubbleState extends State<MessageBubble>
 
   String _getMultiSelectText() {
     return atomicLocal.multiSelect;
-  }
-
-  /// 发送、接收和记录详情共用已注册表情目录；多表情保留顺序，未知数据沿用不支持提示。
-  Widget _buildFaceMessage() {
-    final payload = widget.message.messagePayload;
-    final data = payload is FaceMessagePayload ? payload.faceData : null;
-    // 外部表情数据不保证来自本目录，未知编码不能拼接成图片路径。
-    if (data == null || !EmojiManager.isOnlyEmojis(data)) {
-      return _buildUnsupportedMessage(context);
-    }
-    // 表情使用独立图片展示，仍复用原气泡锚点、长按菜单和定位高亮。
-    return GestureDetector(
-      key: _messageKey,
-      onLongPress: _longPressCallback,
-      child: _wrapMediaHighlight(
-          ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: widget.maxWidth * .9),
-            child: Padding(
-              padding: const EdgeInsets.all(8),
-              child: Text.rich(
-                TextSpan(
-                  children: EmojiManager.buildInlineSpans(data),
-                ),
-                textWidthBasis: TextWidthBasis.longestLine,
-              ),
-            ),
-          ),
-          SemanticColorScheme.of(context)),
-    );
   }
 
   Widget _buildUnsupportedMessage(BuildContext context) {

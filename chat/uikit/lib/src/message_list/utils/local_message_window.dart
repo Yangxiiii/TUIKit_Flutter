@@ -18,6 +18,9 @@ class LocalMessageWindow {
   /// 预览可直接读取候选资源地址，SDK 接管后应恢复使用它的媒体窗口。
   bool isPending(String id) => _pending.containsKey(id);
 
+  /// 存在未由 SDK 接管的消息时，列表为这些气泡准备相邻媒体快照。
+  bool get hasPendingMessages => _pending.isNotEmpty;
+
   /// 安装本地首屏或归档续页；已确认的删除、撤回和修改优先于迟到候选。
   void seed(List<MessageInfo> messages) {
     reconcileRevocations(messages);

@@ -28,6 +28,7 @@ class PositionedList extends StatefulWidget {
     this.alignment = 0,
     this.scrollDirection = Axis.vertical,
     this.reverse = false,
+    this.clipBehavior = Clip.hardEdge,
     this.shrinkWrap = false,
     this.physics,
     this.padding,
@@ -83,6 +84,9 @@ class PositionedList extends StatefulWidget {
   ///
   /// See [ScrollView.reverse].
   final bool reverse;
+
+  /// 传给实际视口的绘制裁剪方式，宿主可将裁剪放在列表平移之后。
+  final Clip clipBehavior;
 
   /// {@template flutter.widgets.scroll_view.shrinkWrap}
   /// Whether the extent of the scroll view in the [scrollDirection] should be
@@ -188,6 +192,7 @@ class _PositionedListState extends State<PositionedList> {
           controller: scrollController,
           scrollDirection: widget.scrollDirection,
           reverse: widget.reverse,
+          clipBehavior: widget.clipBehavior,
           cacheExtent: widget.cacheExtent,
           physics: widget.physics,
           shrinkWrap: widget.shrinkWrap,

@@ -20,7 +20,9 @@ import 'chat_mention_span.dart';
 import 'file_message_widget.dart';
 import 'rich_content_video_preview.dart';
 import '../../utils/rich_content_media_viewer.dart';
+import '../../message_history_config.dart';
 import '../chat_media_placeholder.dart';
+import '../image_viewer_manager.dart';
 import 'system_message_widget.dart';
 
 part 'rich_content_body.dart';
@@ -40,6 +42,13 @@ class CustomMessageWidget extends StatelessWidget {
   final VoidCallback? onLongPress;
   final MessageListStore? messageListStore;
 
+  /// 普通聊天可浏览同一会话的媒体，静态窗口传入已展示的快照。
+  final ({
+    String conversationId,
+    List<MessageInfo>? presetMessages,
+    ChatOlderMessagesLoader? loadOlderMedia,
+  })? conversationMedia;
+
   /// 回复详情与聊天气泡共用附件解析和预览，详情正文使用独立排版。
   final ({Widget? receipt})? replyDetail;
 
@@ -53,6 +62,7 @@ class CustomMessageWidget extends StatelessWidget {
     this.onLongPress,
     this.messageListStore,
     this.replyDetail,
+    this.conversationMedia,
   });
 
   @override
@@ -63,7 +73,35 @@ class CustomMessageWidget extends StatelessWidget {
         return GroupCreationNotice(
           key: ValueKey(notice.eventId),
           notice: notice,
+          groupId: message.conversationType == ConversationType.group
+              ? message.to
+              : null,
           onPersonTap: config.onGroupInfoOperatorTap,
+        );
+      }
+      // 欢迎语随聊天列表居中排版，群名仅用主题色强调。
+      final welcome = notice.groupWelcomeParts;
+      if (welcome != null) {
+        final colors = app.AppColorBuildContext(context).appColors;
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Center(
+            child: Text.rich(
+              TextSpan(children: [
+                TextSpan(text: welcome.prefix),
+                TextSpan(
+                  text: welcome.groupName,
+                  style: TextStyle(color: colors.chatMention),
+                ),
+                TextSpan(text: welcome.suffix),
+              ]),
+              textAlign: TextAlign.center,
+              style: FontScheme.caption3Regular.copyWith(
+                color: colors.textSecondary,
+                height: 19 / 12,
+              ),
+            ),
+          ),
         );
       }
       // 仅离群通知校验群管理权限，邀请与管理员变更按原始投递范围展示。
@@ -172,39 +210,41 @@ class CustomMessageWidget extends StatelessWidget {
     final textStyle = detail == null
         ? FontScheme.caption1Regular.copyWith(color: foreground)
         : TextStyle(fontSize: 14, height: 20 / 14, color: foreground);
-    // 文字气泡在不同对齐方式下的尾角方向必须保持一致。
-    final tailOnRight =
-        config.alignment == 'right' || (config.alignment != 'left' && isSelf);
-    final radius = config.textBubbleCornerRadius;
+    // 只有一个普通文件时由卡片自己形成气泡，混排时继续用图文容器保持正文顺序。
+    final onlyFile = switch (content.blocks.singleOrNull) {
+      RichFileBlock(:final mimeType) => !mimeType.startsWith('video/'),
+      _ => false,
+    };
+    final wrapInBubble = detail == null && !onlyFile;
     return GestureDetector(
       onLongPress: onLongPress,
       child: Container(
         constraints: BoxConstraints(
-          maxWidth: detail == null ? maxWidth * 0.7 : maxWidth,
+          maxWidth: wrapInBubble ? maxWidth * 0.7 : maxWidth,
         ),
-        padding: detail == null
+        padding: wrapInBubble
             ? const EdgeInsets.fromLTRB(16, 8, 16, 8)
             : EdgeInsets.zero,
-        decoration: detail == null
+        // 富文本外框沿用普通文字气泡的四角设置，收发方向只影响摆放位置。
+        decoration: wrapInBubble
             ? BoxDecoration(
                 color: isSelf
                     ? colors.bgColorBubbleOwn
                     : colors.bgColorBubbleReciprocal,
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(radius),
-                  topRight: Radius.circular(radius),
-                  bottomLeft: Radius.circular(tailOnRight ? radius : 0),
-                  bottomRight: Radius.circular(tailOnRight ? 0 : radius),
-                ),
+                borderRadius:
+                    BorderRadius.circular(config.textBubbleCornerRadius),
               )
             : null,
         child: RichContentBody._(
           content: content,
           textStyle: textStyle,
-          maxMediaWidth: detail == null
-              ? maxWidth * 0.7 - 24
-              : (maxWidth < 208 ? maxWidth : 208),
+          maxMediaWidth: onlyFile
+              ? maxWidth
+              : detail == null
+                  ? maxWidth * 0.7 - 24
+                  : (maxWidth < 208 ? maxWidth : 208),
           message: message,
+          conversationMedia: conversationMedia,
           config: config,
           isSelf: isSelf,
           receipt: receipt,

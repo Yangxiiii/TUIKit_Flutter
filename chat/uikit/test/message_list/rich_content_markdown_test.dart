@@ -20,6 +20,36 @@ import 'package:tencent_cloud_chat_sdk/models/v2_tim_user_full_info.dart';
 import 'package:tencent_cloud_chat_sdk/tencent_im_sdk_plugin.dart';
 
 void main() {
+  testWidgets('富文本收发两侧的四个气泡角均使用聊天页配置的圆角', (tester) async {
+    final message = MessageInfo(
+      messageType: MessageType.custom,
+      messagePayload: CustomMessagePayload(
+        customData:
+            const RichContentMessage([RichTextBlock('**正文**')]).toCustomData(),
+      ),
+    );
+    for (final isSelf in [false, true]) {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: CustomMessageWidget(
+            message: message,
+            isSelf: isSelf,
+            maxWidth: 400,
+            config: const ChatMessageListConfig(textBubbleCornerRadius: 12),
+          ),
+        ),
+      ));
+      final bubble = find.ancestor(
+        of: find.byType(RichContentBody),
+        matching: find.byWidgetPredicate((widget) =>
+            widget is Container && widget.decoration is BoxDecoration),
+      );
+      final decoration =
+          tester.widget<Container>(bubble).decoration as BoxDecoration;
+      expect(decoration.borderRadius, BorderRadius.circular(12));
+    }
+  });
+
   testWidgets('群聊和单聊的富文本气泡都渲染正文表情', (tester) async {
     final previousEmojis = EmojiManager.emojis.toList();
     final previousAssetPackage = EmojiManager.assetPackage;

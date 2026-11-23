@@ -13,7 +13,7 @@
 #include <vector>
 
 namespace {
-// 时间戳为微秒；续录沿用整条语音的60秒上限。
+// 时间戳为微秒；裁剪使用当前片段额度，拼接使用整条语音的60秒上限。
 constexpr int64_t MAX_DURATION_US = 60000000;
 
 void Check(bool valid, const char *message)
@@ -49,8 +49,8 @@ struct OutputFile {
     }
 };
 
-// 压缩音频帧顺序复用，避免把M4A容器字节直接追加成损坏文件。
-int64_t Merge(const std::vector<std::string> &paths, const std::string &destination)
+// 裁剪与拼接均复用完整AAC帧，避免生成超过额度或无法解码的M4A。
+int64_t Merge(const std::vector<std::string> &paths, const std::string &destination, int64_t maxDurationUs)
 {
     OutputFile output(destination);
     auto muxer = std::unique_ptr<OH_AVMuxer, decltype(&OH_AVMuxer_Destroy)>(
@@ -119,14 +119,14 @@ int64_t Merge(const std::vector<std::string> &paths, const std::string &destinat
             if (attr.flags & AVCODEC_BUFFER_FLAGS_EOS) break;
             if (firstPts < 0) firstPts = attr.pts;
             attr.pts = offsetUs + attr.pts - firstPts;
-            if (attr.pts + frameUs > MAX_DURATION_US) break;
+            if (attr.pts + frameUs > maxDurationUs) break;
             Check(OH_AVMuxer_WriteSample(muxer.get(), outputTrack, memory.get(), attr) == AV_ERR_OK,
                 "Cannot write audio sample");
             endUs = attr.pts + frameUs;
         }
         Check(endUs > offsetUs, "No audio samples appended");
         offsetUs = endUs;
-        if (offsetUs >= MAX_DURATION_US) break;
+        if (offsetUs >= maxDurationUs) break;
     }
     // 封装器落盘并释放后再解析输出，不能把写帧成功当成完整M4A已经可用。
     Check(OH_AVMuxer_Stop(muxer.get()) == AV_ERR_OK, "Cannot finalize audio");
@@ -139,8 +139,9 @@ int64_t Merge(const std::vector<std::string> &paths, const std::string &destinat
     auto metadata = std::unique_ptr<OH_AVFormat, decltype(&OH_AVFormat_Destroy)>(
         OH_AVSource_GetSourceFormat(verified.get()), OH_AVFormat_Destroy);
     int64_t durationUs = 0;
+    // 一个有效的1秒片段裁掉不完整的尾帧后可能略短于1秒，拼接仍保留原最短时长检查。
     Check(metadata && OH_AVFormat_GetLongValue(metadata.get(), OH_MD_KEY_DURATION, &durationUs) &&
-        durationUs >= 1000000 && durationUs <= MAX_DURATION_US, "Invalid merged duration");
+        durationUs >= (paths.size() == 1 ? 1 : 1000000) && durationUs <= maxDurationUs, "Invalid audio duration");
     output.committed = true;
     return durationUs / 1000;
 }
@@ -151,6 +152,8 @@ struct MergeWork {
     napi_deferred deferred = nullptr;
     std::vector<std::string> paths;
     std::string destination;
+    // 单片段裁剪可传入续录的剩余额度，普通拼接保留60秒默认值。
+    int64_t maxDurationUs = MAX_DURATION_US;
     std::string error;
     int64_t durationMs = 0;
 };
@@ -170,16 +173,24 @@ std::string ReadString(napi_env env, napi_value value)
 // 校验调用参数后移交后台任务，Promise仅在新文件验证或失败清理后兑现。
 napi_value MergeRecordings(napi_env env, napi_callback_info info)
 {
-    size_t argc = 2;
-    napi_value argv[2];
+    size_t argc = 3;
+    napi_value argv[3];
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
     auto task = std::make_unique<MergeWork>();
     try {
         bool array = false;
         uint32_t count = 0;
-        Check(argc == 2 && napi_is_array(env, argv[0], &array) == napi_ok && array &&
-            napi_get_array_length(env, argv[0], &count) == napi_ok && count >= 2 && count <= 60,
+        Check(argc >= 2 && napi_is_array(env, argv[0], &array) == napi_ok && array &&
+            napi_get_array_length(env, argv[0], &count) == napi_ok &&
+            (argc == 3 ? count == 1 : count >= 2 && count <= 60),
             "Invalid audio clips");
+        if (argc == 3) {
+            // 第三个参数仅用于单片段裁剪，接受1至60秒的片段额度。
+            int64_t maxDurationMs = 0;
+            Check(napi_get_value_int64(env, argv[2], &maxDurationMs) == napi_ok &&
+                maxDurationMs >= 1000 && maxDurationMs <= MAX_DURATION_US / 1000, "Invalid clip duration limit");
+            task->maxDurationUs = maxDurationMs * 1000;
+        }
         for (uint32_t index = 0; index < count; ++index) {
             napi_value path;
             napi_get_element(env, argv[0], index, &path);
@@ -198,7 +209,7 @@ napi_value MergeRecordings(napi_env env, napi_callback_info info)
     const auto execute = [](napi_env, void *data) {
         auto *job = static_cast<MergeWork *>(data);
         try {
-            job->durationMs = Merge(job->paths, job->destination);
+            job->durationMs = Merge(job->paths, job->destination, job->maxDurationUs);
         } catch (const std::exception &error) {
             job->error = error.what();
         }

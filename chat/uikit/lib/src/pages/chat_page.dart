@@ -3,7 +3,6 @@ import 'dart:ui' show FlutterView;
 import 'package:flutter/foundation.dart';
 import '../message_input/widget/message_edit_limit_dialog.dart';
 import 'package:app_ui/app_ui.dart';
-import '../emoji_picker/emoji_picker_model.dart';
 import '../message_input/widget/message_edit_composer.dart';
 import '../message_list/widgets/message_action_sheet.dart';
 import '../message_list/widgets/message_actions_scope.dart';
@@ -26,19 +25,25 @@ class ChatPage extends AppBaseStatefulPage {
   /// 当前单聊或群聊的标题、类型与会话标识。
   final ConversationInfo conversation;
 
-  /// 宿主派生的姓名与昵称；为空时保留 SDK 会话标题。
+  /// 宿主提供的联系人或群名称；为空时保留 SDK 会话标题。
   final String? displayName;
 
-  /// 输入占位优先展示联系人的昵称，缺失时沿用聊天标题。
+  /// 输入占位优先展示联系人的昵称，缺失时使用聊天名称。
   final String? recipientName;
 
-  /// 宿主提供的主职组织名称；为空时不展示副标题，也不从长组织路径推测部门。
+  /// 单聊的主职组织名称或群聊的群描述；为空时省略副标题。
   final String? subtitle;
 
-  /// SDK 全局真实未读数，仅显示封顶，不改变未读状态。
+  /// 群内全部成员的总数；群资料尚未取得时为空，标题只显示群名。
+  final int? groupMemberCount;
+
+  /// 有实时会话快照时由宿主更新免打扰标记。
+  final bool? isNotificationMuted;
+
+  /// 宿主提供的普通会话总未读数，仅显示封顶，不改变未读状态。
   final ValueListenable<int>? totalUnreadCount;
 
-  /// 无显式定位或内存快照时先读取本机最新消息，不改变云端分页。
+  /// 普通进入先读取本机最新消息，不改变云端分页。
   final Future<List<MessageInfo>> Function()? localMessagesLoader;
 
   /// 离线窗口最后可见的消息与位置，恢复时围绕该位置请求云端历史。
@@ -101,6 +106,10 @@ class ChatPage extends AppBaseStatefulPage {
   /// 宿主提供单聊唯一置顶、横幅及状态变化；群聊不传此配置。
   final ChatMessageStickyConfig? messageStickyConfig;
 
+  /// 宿主提供右下角的业务入口，返回空时不占空间，点击可请求原窗口定位。
+  final Widget? Function(BuildContext, ValueChanged<MessageInfo>)?
+      floatingMessageActionBuilder;
+
   /// 是否显示现有会话设置入口，不改变设置页面权限。
   final bool isShowAppBarActions;
 
@@ -117,6 +126,8 @@ class ChatPage extends AppBaseStatefulPage {
     this.displayName,
     this.recipientName,
     this.subtitle,
+    this.groupMemberCount,
+    this.isNotificationMuted,
     this.totalUnreadCount,
     this.localMessagesLoader,
     this.offlineViewport,
@@ -142,6 +153,7 @@ class ChatPage extends AppBaseStatefulPage {
     this.messageRecallConfig,
     this.messageReplyConfig,
     this.messageStickyConfig,
+    this.floatingMessageActionBuilder,
     this.isShowAppBarActions = true,
     this.onOpenSettings,
   });
@@ -164,6 +176,9 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
 
   /// 上一次系统回报的底部遮挡，单位为物理像素，仅用于判断变化方向。
   double _lastKeyboardInset = 0;
+
+  /// 普通输入唤起键盘或展开富文本编辑器时递增，让列表对每次操作只响应一次。
+  int _scrollToLatestRevision = 0;
 
   /// 每次连续下降最多启动一次，超时后等到归零或重新升起才允许补帧。
   bool _keyboardDismissStarted = false;
@@ -218,10 +233,8 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
 
   @override
   void dispose() {
-    if (_keyboardDismissTicker != null) {
-      WidgetsBinding.instance.removeObserver(this);
-      _keyboardDismissTicker!.dispose();
-    }
+    WidgetsBinding.instance.removeObserver(this);
+    _keyboardDismissTicker?.dispose();
     _editRevision++;
     _overlay.dispose();
     super.dispose();
@@ -231,7 +244,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
   void _showActions(
       MessageInfo message,
       GlobalKey bubble,
-      BuildContext? messageRow,
+      BuildContext? bubbleContent,
       List<MessageMenuItem> original,
       void Function(EmojiPickerModelItem)? reaction) {
     Future<void> open() async {
@@ -241,13 +254,19 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
       _messageInputKey.currentState?.collapseAllPanels();
       FocusScope.of(context).unfocus();
       final items = [...original];
-      if (widget.messageStickyConfig != null &&
-          StickyMessageEvent.canPin(message)) {
-        items.add(MessageMenuItem(
-            id: 'top',
-            title: '置顶消息',
-            icon: AppIcons.topMessage,
-            onTap: () => unawaited(_pinStickyMessage(message))));
+      if (widget.messageStickyConfig case final sticky?) {
+        // 群内多条消息可以同时置顶，菜单按所点消息判断取消目标。
+        final unpin = sticky.groupPinnedMessageIds.contains(message.msgID)
+            ? sticky.unpinGroupMessage
+            : null;
+        if (unpin != null || StickyMessageEvent.canPin(message)) {
+          items.add(MessageMenuItem(
+              id: 'top',
+              title: unpin == null ? '置顶消息' : '取消置顶消息',
+              icon: unpin == null ? AppIcons.topMessage : AppIcons.cancelTop,
+              onTap: () => unawaited(
+                  _changeStickyMessage(() => (unpin ?? sticky.pin)(message)))));
+        }
       }
       if (widget.messageEditConfig?.canEdit(message) ?? false) {
         items.add(MessageMenuItem(
@@ -256,40 +275,29 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
             icon: AppIcons.editMessage,
             onTap: () => unawaited(_beginEditing(message, bubble))));
       }
-      // 浮层不占据列表布局高度，实际遮挡由路由动画后的边界测量决定。
-      await showModalBottomSheet<void>(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.transparent,
-        barrierColor: Colors.transparent,
-        builder: (sheetContext) => MessageActionSheet(
-          recallExpiresAt:
-              widget.messageRecallConfig == null || message.timestamp == null
-                  ? null
-                  : DateTime.fromMillisecondsSinceEpoch(
-                      (message.timestamp! + 120) * 1000),
-          editExpiresAt: message.timestamp == null
-              ? null
-              : DateTime.fromMillisecondsSinceEpoch(
-                  (message.timestamp! + 300) * 1000),
-          items: items,
-          onClose: () => Navigator.of(sheetContext).pop(),
-          onBounds: (bounds) {
-            if (mounted) {
-              _overlay.avoid(bubble, bounds.top, row: messageRow);
-            }
-          },
-          onReaction: reaction,
-          onMoreReactions: reaction == null
-              ? null
-              : () async {
-                  Navigator.of(sheetContext).pop();
-                  final selected = await ReactionEmojiPickerSheet.show(context);
-                  if (mounted && selected != null) {
-                    reaction(selected);
-                  }
-                },
-        ),
+      // 只按菜单初始高度避让，拉高面板时聊天气泡保持原位。
+      await MessageActionSheet.show(
+        context,
+        items: items,
+        recallExpiresAt:
+            widget.messageRecallConfig == null || message.timestamp == null
+                ? null
+                : DateTime.fromMillisecondsSinceEpoch(
+                    (message.timestamp! + 120) * 1000),
+        editExpiresAt: message.timestamp == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(
+                (message.timestamp! + 300) * 1000),
+        onBounds: (bounds) {
+          if (mounted) {
+            _overlay.avoid(bubble, bounds.top, bubbleContent: bubbleContent);
+          }
+        },
+        onReaction: reaction == null
+            ? null
+            : (emoji) {
+                if (mounted) reaction(emoji);
+              },
       );
       if (mounted && _editingMessage == null) {
         // 进入编辑后由新编辑区继续报告边界，普通关闭才在这里复原位移。
@@ -304,9 +312,9 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
   }
 
   /// 防重保护完整反馈过程，重复调用方不能各自展示相同提示。
-  Future<void> _pinStickyMessage(MessageInfo message) async {
+  Future<void> _changeStickyMessage(Future<String?> Function() action) async {
     Future<void> submit() async {
-      final error = await widget.messageStickyConfig?.pin(message);
+      final error = await action();
       if (mounted && error != null) AppToast.show(error);
     }
 
@@ -484,6 +492,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
       // 键盘高度和页面位置仍来自系统；Ticker 只让下一个 VSync 有待处理的帧请求。
       _keyboardDismissTicker = createTicker((elapsed) {
@@ -491,25 +500,23 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
           _keyboardDismissTicker!.stop();
         }
       });
-      WidgetsBinding.instance.addObserver(this);
     }
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final ticker = _keyboardDismissTicker;
-    if (ticker == null) return;
     final view =
         ModalRoute.isCurrentOf(context) == false ? null : View.of(context);
     if (identical(view, _keyboardView)) return;
     // 切换路由或窗口后重新记录起点，旧窗口的遮挡不能触发新窗口补帧。
-    ticker.stop();
+    _keyboardDismissTicker?.stop();
     _keyboardView = view;
     _lastKeyboardInset = view?.viewInsets.bottom ?? 0;
     _keyboardDismissStarted = false;
   }
 
+  /// 系统键盘打开时通知普通消息列表，收起阶段仍交给 iOS 补帧逻辑。
   @override
   void didChangeMetrics() {
     final view = _keyboardView;
@@ -518,14 +525,29 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
     final previousInset = _lastKeyboardInset;
     if (inset == previousInset) return;
     _lastKeyboardInset = inset;
+    // 编辑原消息的键盘属于操作浮层，继续由原气泡的遮挡检测决定位置。
+    if (previousInset == 0 &&
+        inset > 0 &&
+        _editingMessage == null &&
+        _messageInputKey.currentState?.hasSystemInputFocus == true) {
+      _scrollToLatestForInput();
+    }
+
+    final ticker = _keyboardDismissTicker;
+    if (ticker == null) return;
     if (inset == 0 || inset > previousInset) {
       // 键盘收完或反向弹出时立即停下，后续收起允许重新启动。
-      _keyboardDismissTicker!.stop();
+      ticker.stop();
       _keyboardDismissStarted = false;
     } else if (!_keyboardDismissStarted) {
       _keyboardDismissStarted = true;
-      _keyboardDismissTicker!.start();
+      ticker.start();
     }
+  }
+
+  /// 通知消息列表在输入区完成布局后回到会话最新端。
+  void _scrollToLatestForInput() {
+    setState(() => _scrollToLatestRevision++);
   }
 
   void _onDestroyCallback() {
@@ -650,11 +672,14 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
   bool get resizeToAvoidBottomInset => _editingMessage == null;
 
   @override
-  Color backgroundColorOf(BuildContext context) => context.appColors.surface;
+  Color backgroundColorOf(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? context.appColors.pageBackground
+          : context.appColors.surface;
 
   @override
   Color navigationBarBackgroundColorOf(BuildContext context) =>
-      context.appColors.surface;
+      backgroundColorOf(context);
 
   @override
   Widget titleWidgetOf(BuildContext context, Locale locale) {
@@ -666,7 +691,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
           maxLines: 1,
           overflow: TextOverflow.ellipsis);
     }
-    final title = Text(
+    final name = Text(
       widget.displayName ??
           widget.conversation.title ??
           AppLocalization.text(context, LocaleKeys.chat_title, '聊天'),
@@ -674,24 +699,50 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
       overflow: TextOverflow.ellipsis,
       maxLines: 1,
     );
+    // 标题过长时先省略名称，为成员人数和免打扰图标保留空间。
+    final memberCount = widget.groupMemberCount;
+    final colors = context.appColors;
+    final isMuted = widget.isNotificationMuted ??
+        (widget.conversation.receiveOption != ReceiveMessageOption.receive);
+    final Widget title = memberCount == null && !isMuted
+        ? name
+        : Row(mainAxisSize: MainAxisSize.min, children: [
+            Flexible(child: name),
+            if (memberCount != null)
+              Text('（$memberCount）', style: FontScheme.caption1Medium),
+            if (isMuted) ...[
+              const SizedBox(width: 4),
+              Icon(AppIcons.doNotDisturb,
+                  size: 14,
+                  color: colors.sheetCaption,
+                  semanticLabel: AppLocalization.of(context).doNotDisturb),
+            ],
+          ]);
     final subtitle = widget.subtitle?.trim();
     if (subtitle == null || subtitle.isEmpty) return title;
-    // 姓名和组织分属两行，固定导航栏高度内保留各自的字号与省略边界。
+    final subtitleColor = Theme.of(context).brightness == Brightness.dark
+        ? colors.textSecondary
+        : colors.textTertiary;
+    final description = Text(subtitle,
+        textAlign: TextAlign.center,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+            fontSize: 10,
+            height: 14 / 10,
+            fontWeight: FontWeight.w400,
+            color: subtitleColor));
+    // 群描述居中独占一行，单聊组织保留原有展开图标。
     return Column(mainAxisSize: MainAxisSize.min, children: [
       title,
-      Row(mainAxisSize: MainAxisSize.min, children: [
-        Flexible(
-            child: Text(subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 10,
-                    height: 14 / 10,
-                    fontWeight: FontWeight.w400,
-                    color: context.appColors.textTertiary))),
-        const SizedBox(width: 4),
-        Icon(AppIcons.expand, size: 10, color: context.appColors.textTertiary),
-      ]),
+      if (widget.conversation.type == ConversationType.group)
+        description
+      else
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          Flexible(child: description),
+          const SizedBox(width: 4),
+          Icon(AppIcons.expand, size: 10, color: colors.textTertiary),
+        ]),
     ]);
   }
 
@@ -773,7 +824,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
       height: height,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: context.appColors.controlBackground,
+        color: context.appColors.chatHeaderBadgeBackground,
         borderRadius: BorderRadius.circular(height / 2),
       ),
       child: Text(label, style: style, maxLines: 1, softWrap: false),
@@ -831,7 +882,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
   }
 
   /// 普通聊天保持输入挂载以保留草稿，通知窗口仅复用消息列表与设置导航。
-  Widget _buildConversation() => GestureDetector(
+  Widget _buildConversation(BuildContext pageContext) => GestureDetector(
         onTap: () {
           FocusScope.of(context).unfocus();
           _messageInputKey.currentState?.collapseAllPanels();
@@ -840,9 +891,16 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
         child: Column(
           children: [
             MessageList(
+              floatingMessageAction:
+                  widget.floatingMessageActionBuilder?.call(context, (target) {
+                if (mounted) setState(() => _locateMessage = target);
+              }),
+              backgroundColor: backgroundColorOf(pageContext),
               initialSelection:
                   _selectionAtWindowChange ?? widget.historySelection,
               localMessagesLoader: widget.localMessagesLoader,
+              startAtLatest: true,
+              scrollToLatestRevision: _scrollToLatestRevision,
               offlineViewport: widget.offlineViewport,
               offlineMessages: widget.offlineMessages,
               connectionUnavailable: widget.connectionUnavailable,
@@ -885,10 +943,13 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
                         displayName: displayName,
                       );
                     },
-              onCallMessageClick:
-                  widget.offlineMessages == null && widget.showMessageInput
-                      ? _onCallMessageClick
-                      : null,
+              // 旧通话记录与输入区共用通话入口配置，隐藏入口时不能从气泡回拨。
+              onCallMessageClick: widget.offlineMessages == null &&
+                      widget.showMessageInput &&
+                      (widget.messageInputConfig.isShowAudioCall ||
+                          widget.messageInputConfig.isShowVideoCall)
+                  ? _onCallMessageClick
+                  : null,
               onQuoteMessage: (MessageInfo message) {
                 _messageInputKey.currentState?.setQuotedMessage(message);
               },
@@ -944,6 +1005,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
                   replyConfig: widget.messageReplyConfig,
                   onLocalMessageSent:
                       widget.messageRecallConfig?.onLocalMessageSent,
+                  onRichContentEditorOpened: _scrollToLatestForInput,
                 ),
               ),
           ],
@@ -997,7 +1059,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
   Widget buildBody(BuildContext context, WidgetRef ref, Locale locale) {
     final page = Stack(
       children: [
-        _buildConversation(),
+        _buildConversation(context),
         // 聆听浮层保持原有全屏收起手势；编辑区随后绘制，优先接收编辑交互。
         const Positioned.fill(child: ListenPlaybackBar()),
         // 快选入口不占用消息窗口高度，仅按钮和分隔线覆盖消息。

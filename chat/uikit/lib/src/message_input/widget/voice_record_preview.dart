@@ -19,7 +19,7 @@ import 'package:tuikit_atomic_x/base_component/theme/color_scheme.dart';
 
 enum _VoicePhase { recording, recognizing, preview }
 
-/// 单条语音的录音与识别预览浮层；只在用户确认时交给宿主发送，草稿拥有临时文件。
+/// 管理单条语音的录音与识别预览；累计达到60秒时交给宿主自动发送原音。
 class VoiceRecordPreview extends StatefulWidget {
   const VoiceRecordPreview({
     super.key,
@@ -53,7 +53,7 @@ class VoiceRecordPreview extends StatefulWidget {
   State<VoiceRecordPreview> createState() => VoiceRecordPreviewState();
 }
 
-/// 管理浮层局部手势、焦点和识别时序，音频替换与清理由单一草稿维护。
+/// 协调手势、录音终态与发送，音频合并及清理由同一草稿维护。
 class VoiceRecordPreviewState extends State<VoiceRecordPreview>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final _recorder = widget.recorder ?? AudioRecorder();
@@ -71,14 +71,18 @@ class VoiceRecordPreviewState extends State<VoiceRecordPreview>
   /// 与普通聊天输入区共用键盘/表情交接与高度保留，随当前浮层释放。
   InputKeyboardPanel? _keyboardPanel;
 
-  /// 原生自动结束与手势抬起共用当前阶段，终态不会重复追加或识别。
+  /// 原生自动结束与手势抬起共用当前阶段，一条录音只处理一次终态。
   _VoicePhase _phase = _VoicePhase.recording;
 
   /// 关闭后所有原生及识别回调只可清理资源，不能更新界面或发送。
   bool _closed = false;
+
+  /// 手指已滑入取消区时，即使录音达到上限也按取消处理。
   bool _cancelHover = false;
   bool _editing = false;
   bool _emoji = false;
+
+  /// 等待发送结果期间阻止重复提交和取消，并保留草稿。
   bool _sending = false;
   bool _poorNetwork = false;
 
@@ -207,7 +211,7 @@ class VoiceRecordPreviewState extends State<VoiceRecordPreview>
     if (cancel != _cancelHover) setState(() => _cancelHover = cancel);
   }
 
-  /// 松手只停止采音或取消，正常终态交由识别预览处理，不直接发送消息。
+  /// 松手时停止采音或取消；录音终态由完成回调统一处理。
   void stopRecord() {
     if (_closed || _phase != _VoicePhase.recording) return;
     if (_cancelHover) {
@@ -227,7 +231,7 @@ class VoiceRecordPreviewState extends State<VoiceRecordPreview>
     widget.onClose();
   }
 
-  /// 有效片段先合并到草稿，再识别新片段；追加识别文本不会覆盖用户此前的编辑。
+  /// 有效片段先追加到草稿；达到上限时发送完整原音，其余片段进入识别预览。
   Future<void> _complete(RecordInfo? info) async {
     if (_closed || !mounted || _phase != _VoicePhase.recording) return;
     if (_cancelHover) {
@@ -249,6 +253,11 @@ class VoiceRecordPreviewState extends State<VoiceRecordPreview>
       }
       return;
     }
+    // 松手与原生限时同时发生时，录音器也可能返回恰好用完额度的普通成功结果。
+    final reachedLimit =
+        info.errorCode == AudioRecordResultCode.successExceedMaxDuration ||
+            info.durationMs == _draft.remainingDurationMs;
+    // 在等待文件校验和合并前结束录音阶段，随后松手不能再次处理同一录音。
     setState(() => _phase = _VoicePhase.recognizing);
     try {
       await _draft.append(info);
@@ -263,6 +272,13 @@ class VoiceRecordPreviewState extends State<VoiceRecordPreview>
       return;
     }
     if (!mounted || _closed) return;
+    if (reachedLimit) {
+      // 发送失败时可在预览中重试完整录音，无需等待语音识别。
+      setState(() => _phase = _VoicePhase.preview);
+      await _send(true);
+      return;
+    }
+
     final generation = ++_recognition;
     final prefix = _text.text;
     _poorNetwork = false;
@@ -288,7 +304,7 @@ class VoiceRecordPreviewState extends State<VoiceRecordPreview>
     }
   }
 
-  /// 两种确认动作共用一次发送边界；SDK调用前移交音频读取权，只有真实成功才关闭。
+  /// 自动发送与手动确认共用同一发送入口；SDK接管音频后，仅发送成功才关闭。
   Future<void> _send(bool audio) =>
       widget.guard.singleFlight<void>(('chat.voice.confirm', this), () async {
         final recording = _draft.current;

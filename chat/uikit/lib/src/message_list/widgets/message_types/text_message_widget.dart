@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:flutter/gestures.dart';
 import '../../../message_input/mention/mention_info.dart';
 import '../../../message_input/mention/message_mentions.dart';
@@ -15,7 +16,7 @@ import 'chat_mention_span.dart';
 
 typedef BackgroundBuilder = Widget Function(Widget child);
 
-/// 渲染文本型消息的共用气泡，支持纯文本正文和带媒体图标的通话记录。
+/// 为文本、纯表情及通话记录共用气泡和正文排版。
 class TextMessageWidget extends StatefulWidget {
   /// 当前正文及发送状态的数据来源。
   final MessageInfo message;
@@ -106,11 +107,16 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
   Widget build(BuildContext context) {
     final colors = SemanticColorScheme.of(context);
     final payload = widget.message.messagePayload;
-    final text = payload is TextMessagePayload ? payload.text : '';
-    final mentions =
-        widget.isInMergedDetailView || widget.contentBuilder != null
-            ? const <MentionInfo>[]
-            : MessageMentions.read(widget.message, text, 0);
+    final text = switch (payload) {
+      TextMessagePayload(:final text) => text,
+      FaceMessagePayload(:final faceData) => faceData ?? '',
+      _ => '',
+    };
+    final mentions = payload is TextMessagePayload &&
+            !widget.isInMergedDetailView &&
+            widget.contentBuilder == null
+        ? MessageMentions.read(widget.message, text, 0)
+        : const <MentionInfo>[];
     final highlightedUserId = widget.isSelf || mentions.isEmpty
         ? null
         : incomingGroupMentionUserId(widget.message);
@@ -202,7 +208,10 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
       colorScheme: colorsTheme,
       onTapUrl: _launchUrl,
       showAtBackground: true,
+      spaceMessageEmoji: true,
     );
+    final editedStyle =
+        TextStyle(fontSize: 12, color: context.appColors.chatMessageSecondary);
     _clearMentionTaps();
     if (mentions.isNotEmpty) {
       final children = <InlineSpan>[];
@@ -247,10 +256,7 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
             textStyle: style));
       }
       if (edited) {
-        children.add(TextSpan(
-            text: ' (已编辑)',
-            style: TextStyle(
-                fontSize: 12, color: colorsTheme.textColorSecondary)));
+        children.add(TextSpan(text: ' (已编辑)', style: editedStyle));
       }
       return ExtendedText.rich(TextSpan(children: children), style: style);
     }
@@ -263,10 +269,7 @@ class _TextMessageWidgetState extends State<TextMessageWidget>
     return ExtendedText.rich(
         TextSpan(children: [
           builder.build(content, textStyle: style),
-          TextSpan(
-              text: ' (已编辑)',
-              style: TextStyle(
-                  fontSize: 12, color: colorsTheme.textColorSecondary)),
+          TextSpan(text: ' (已编辑)', style: editedStyle),
         ]),
         style: style);
   }

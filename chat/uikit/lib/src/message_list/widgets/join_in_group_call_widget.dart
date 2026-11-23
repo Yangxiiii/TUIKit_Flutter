@@ -52,7 +52,8 @@ class _JoinInGroupCallWidgetState extends State<JoinInGroupCallWidget> {
   int _nameGeneration = 0;
 
   /// 鸿蒙由原生通话引擎维护场次，横幅仅使用群属性确认加入资格。
-  CallStore? get _store => widget.callStore ??
+  CallStore? get _store =>
+      widget.callStore ??
       (defaultTargetPlatform == TargetPlatform.ohos ? null : CallStore.shared);
   LoginStore get _loginStore => widget.loginStore ?? LoginStore.shared;
 
@@ -116,7 +117,7 @@ class _JoinInGroupCallWidgetState extends State<JoinInGroupCallWidget> {
     }
   }
 
-  /// 使用 SDK 的公开群成员查询，返回同一个目标用户的群名片、备注或昵称。
+  /// 使用 SDK 的公开群成员查询，返回同一个目标用户的群名片或个人昵称。
   Future<String?> _queryMemberName(String groupId, String userId) async {
     final result = await GroupMemberStore.create(groupID: groupId)
         .getMemberInfo(userIDList: [userId]);
@@ -124,7 +125,7 @@ class _JoinInGroupCallWidgetState extends State<JoinInGroupCallWidget> {
     final member = result.memberInfoList
         .where((item) => item.userID == userId)
         .firstOrNull;
-    return [member?.nameCard, member?.friendRemark, member?.nickname]
+    return [member?.nameCard, member?.nickname]
         .whereType<String>()
         .where((name) => name.trim().isNotEmpty)
         .firstOrNull;
@@ -139,7 +140,9 @@ class _JoinInGroupCallWidgetState extends State<JoinInGroupCallWidget> {
         _loginStore,
       ]),
       builder: (context, _) {
-        if (widget.callId.isEmpty || widget.userIDs.length < 2 || !_canDisplay) {
+        if (widget.callId.isEmpty ||
+            widget.userIDs.length < 2 ||
+            !_canDisplay) {
           return const SizedBox.shrink();
         }
         // 只凭本端 SDK 已接通状态显示“已加入”，不能凭群属性里存在本人推断。
@@ -153,7 +156,12 @@ class _JoinInGroupCallWidgetState extends State<JoinInGroupCallWidget> {
   /// 固定单行横幅只展示通话摘要与加入动作，超长姓名不挤压操作按钮。
   Widget _banner(BuildContext context, bool joined) {
     final colors = context.appColors;
-    final name = _memberName ?? widget.userIDs.first;
+    final name = AppUserAvatarScope.personName(
+      context,
+      widget.userIDs.first,
+      groupId: widget.groupId,
+      groupNickname: _memberName,
+    );
     final people =
         widget.userIDs.length > 1 ? '$name等${widget.userIDs.length}人' : name;
     final media = widget.mediaType == CallMediaType.audio ? '语音' : '视频';

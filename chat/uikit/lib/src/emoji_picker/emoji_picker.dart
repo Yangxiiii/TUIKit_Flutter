@@ -7,15 +7,12 @@ import 'package:tuikit_atomic_x/base_component/theme/color_scheme.dart';
 import 'emoji_picker_config.dart';
 import 'emoji_picker_model.dart';
 
-/// 展示当前业务唯一表情目录，插入令牌、删除与发送交给输入框回调。
+/// 展示常用表情与完整目录，选择后将令牌交给活动输入框。
 class EmojiPicker extends StatefulWidget {
   /// 选择后返回完整文字令牌，由输入框决定插入和发送时机。
   final Function(Map<String, dynamic> data)? onEmojiClick;
 
-  /// 复用输入框已有发送动作，面板不直接创建SDK消息。
-  final VoidCallback? onSendClick;
-
-  /// 交由输入框按完整表情和字素执行退格。
+  /// 语音预览的退格交由预览文字输入框处理。
   final VoidCallback? onDeleteClick;
 
   /// 语音编辑采用带分区标题的目录，确认发送仍由浮层提供，不在面板另放发送按钮。
@@ -24,7 +21,6 @@ class EmojiPicker extends StatefulWidget {
   const EmojiPicker({
     super.key,
     this.onEmojiClick,
-    this.onSendClick,
     this.onDeleteClick,
     this.voicePreview = false,
   });
@@ -109,8 +105,6 @@ class EmojiPickerState extends State<EmojiPicker> {
                   EmojiPickerContent(
                     activeTabIndex: 0,
                     onEmojiClick: _onEmojiClick,
-                    onSendClick: widget.onSendClick,
-                    onDeleteClick: widget.onDeleteClick,
                   ),
                 ]),
     );
@@ -265,167 +259,51 @@ class _QuickEmojiRow extends StatelessWidget {
   }
 }
 
-/// 按业务顺序展示表情网格，并保留输入框的发送和退格操作。
-class EmojiPickerContent extends StatefulWidget {
+/// 按业务顺序显示可滚动表情网格，常用行由面板单独承载。
+class EmojiPickerContent extends StatelessWidget {
   /// 当前显示的分组编号，不作为表情的业务编号。
   final int activeTabIndex;
 
   /// 选择当前目录项，令牌事件由外层面板统一构造。
   final ValueChanged<EmojiPickerModelItem>? onEmojiClick;
 
-  /// 复用输入框已有发送动作，面板不直接创建SDK消息。
-  final VoidCallback? onSendClick;
-
-  /// 交由输入框按完整表情和字素执行退格。
-  final VoidCallback? onDeleteClick;
-
   const EmojiPickerContent({
     super.key,
     required this.activeTabIndex,
     this.onEmojiClick,
-    this.onSendClick,
-    this.onDeleteClick,
   });
 
   @override
-  State<StatefulWidget> createState() => EmojiPickerContentState();
-}
-
-/// 将当前目录令牌交给输入框，滚动网格独立于底部操作按钮。
-class EmojiPickerContentState extends State<EmojiPickerContent> {
-  /// 面板依赖变化时读取当前语言，底部发送按钮沿用输入区文案。
-  late AppLocalizedText atomicLocale;
-
-  /// 网格与底部操作区域使用当前主题，不缓存跨主题颜色。
-  late SemanticColorScheme colorsTheme;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    atomicLocale = AppLocalization.of(context);
-    colorsTheme = SemanticColorScheme.of(context);
-  }
-
-  @override
   Widget build(BuildContext context) {
-    List<EmojiPickerModelItem> currentStickerList = [];
-    int crossAxisCount = 7;
-    if (EmojiPickerConfig.customStickerLists
-            .elementAtOrNull(widget.activeTabIndex) !=
-        null) {
-      currentStickerList =
-          EmojiPickerConfig.customStickerLists[widget.activeTabIndex].stickers;
-      crossAxisCount =
-          EmojiPickerConfig.customStickerLists[widget.activeTabIndex].rowNum;
-    }
-
+    final group =
+        EmojiPickerConfig.customStickerLists.elementAtOrNull(activeTabIndex);
     return Expanded(
       child: SafeArea(
-        child: Stack(
+        // 输入工具栏承担操作入口，表情网格填满面板可用高度。
+        child: GridView(
+          padding: const EdgeInsets.all(10),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: group?.rowNum ?? 7,
+            childAspectRatio: 1,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+          ),
           children: [
-            // 网格填满实际键盘区域，底部留出操作按钮的位置，不再嵌套固定高度滚动区。
-            Positioned.fill(
-              child: GridView(
-                padding: const EdgeInsets.fromLTRB(10, 10, 10, 70),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: crossAxisCount,
-                  childAspectRatio: 1,
-                  mainAxisSpacing: 10,
-                  crossAxisSpacing: 10,
+            for (final emoji
+                in group?.stickers ?? const <EmojiPickerModelItem>[])
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => onEmojiClick?.call(emoji),
+                child: Semantics(
+                  identifier: 'tim.emoji.insert.${emoji.name}',
+                  label: emoji.label,
+                  button: true,
+                  child: Image.asset(emoji.path,
+                      package: EmojiManager.assetPackage),
                 ),
-                children: [
-                  for (final emoji in currentStickerList)
-                    GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => widget.onEmojiClick?.call(emoji),
-                      child: Semantics(
-                        identifier: 'tim.emoji.insert.${emoji.name}',
-                        label: emoji.label,
-                        button: true,
-                        child: Image.asset(emoji.path,
-                            package: EmojiManager.assetPackage),
-                      ),
-                    ),
-                ],
               ),
-            ),
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: _buildActionButtons(colorsTheme, atomicLocale),
-            ),
           ],
         ),
-      ),
-    );
-  }
-
-  /// 底部操作固定在网格上层，发送和退格仍由输入框处理。
-  Widget _buildActionButtons(
-      SemanticColorScheme colorsTheme, AppLocalizedText atomicLocale) {
-    return Container(
-      height: 50,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            colorsTheme.textColorButton.withAlpha(0),
-            colorsTheme.textColorButton.withAlpha(200),
-            colorsTheme.textColorButton,
-          ],
-        ),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          if (widget.onDeleteClick != null)
-            Container(
-              margin: const EdgeInsets.only(right: 12),
-              child: Semantics(
-                identifier: 'tim.emoji.delete',
-                label: '删除表情',
-                button: true,
-                child: InkWell(
-                  onTap: widget.onDeleteClick,
-                  child: Icon(
-                    Icons.backspace_outlined,
-                    size: 24,
-                    color: colorsTheme.buttonColorOff,
-                  ),
-                ),
-              ),
-            ),
-          if (widget.onSendClick != null)
-            Semantics(
-              identifier: 'tim.emoji.send',
-              label: atomicLocale.send,
-              button: true,
-              child: InkWell(
-                onTap: widget.onSendClick,
-                child: Container(
-                  width: 60,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: colorsTheme.buttonColorPrimaryDefault,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Center(
-                    child: Text(
-                      atomicLocale.send,
-                      style: TextStyle(
-                        color: colorsTheme.textColorButton,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
       ),
     );
   }

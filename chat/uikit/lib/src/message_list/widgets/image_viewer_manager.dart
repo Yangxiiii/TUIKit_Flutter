@@ -3,8 +3,14 @@ import 'dart:io';
 import 'package:atomic_x_core/api/message/message_action_store.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
-import 'package:tencent_chat_uikit/src/image_viewer/image_element.dart';
 import 'package:tencent_cloud_chat_sdk/tencent_im_sdk_plugin.dart';
+
+import '../../image_viewer/image_element.dart';
+import '../../image_viewer/image_viewer.dart';
+import '../../message_input/chat_media_sender.dart';
+import '../message_history_config.dart';
+import '../utils/rich_content_media_viewer.dart';
+import '../utils/rich_content_message.dart';
 
 /// 将消息媒体转换为预览数据，静态转发集合不拉取原会话历史。
 class ImageViewerManager {
@@ -12,21 +18,21 @@ class ImageViewerManager {
   List<ImageElement> _initialImageElements = [];
   int _initialImageIndex = 0;
   bool _isLoadingImageData = false;
-  String _conversationID = '';
+  final String _conversationID;
+
+  /// 预览窗口必须排除当前账号已删除的消息，即使 SDK 仍能查询到。
+  final Set<String> _hiddenMessageIDs;
+
+  /// 富文本视频使用宿主下载，SDK 视频继续下载原消息附件。
+  final ChatFileDownloader? _downloadRichVideo;
+
+  /// 宿主负责旧消息归档的账号、会话和网络校验。
+  final ChatOlderMessagesLoader? _loadOlderMedia;
 
   ImageViewerDataManager? _imageViewerDataManager;
-  final MessageListStore _messageListStore;
   final MessageInfo _currentMessage;
 
-  /// Optional pre-populated media list. When supplied (e.g. by the
-  /// merged-message detail page, where there is no live MessageListStore
-  /// to back-fill from), the viewer skips `loadMessages` entirely and
-  /// renders this exact list. `loadMore` becomes a no-op in that mode
-  /// because merged forwards are immutable bundles — there is nothing
-  /// older or newer to fetch.
-  ///
-  /// 可选的预填充媒体列表。当提供时（例如通过合并消息详情页，这里没有 live MessageListStore 来补充数据），查看器会完全跳过 `loadMessages`
-  /// 并渲染这个精确列表。`loadMore` 在这种模式下无效，因为合并转发是不可变的包——没有更多旧的或新的内容可以获取。
+  /// 合并记录、离线窗口或本机补齐的现有媒体。只有提供归档查询时才继续向旧侧翻页。
   final List<MessageInfo>? _presetMediaMessages;
 
   ImageViewerManager({
@@ -34,8 +40,12 @@ class ImageViewerManager {
     required MessageInfo currentMessage,
     required BuildContext context,
     List<MessageInfo>? presetMediaMessages,
-  })  : _messageListStore =
-            MessageListStore.create(conversationID: conversationID),
+    Set<String> hiddenMessageIDs = const {},
+    ChatFileDownloader? downloadRichVideo,
+    ChatOlderMessagesLoader? loadOlderMedia,
+  })  : _loadOlderMedia = loadOlderMedia,
+        _hiddenMessageIDs = hiddenMessageIDs,
+        _downloadRichVideo = downloadRichVideo,
         _conversationID = conversationID,
         _currentMessage = currentMessage,
         _presetMediaMessages = presetMediaMessages;
@@ -49,6 +59,45 @@ class ImageViewerManager {
 
   bool get isLoadingImageData => _isLoadingImageData;
 
+  /// 在线会话可在两侧续页，预设窗口仅在宿主提供归档查询时向前续页。
+  bool get canPageAtEdge =>
+      _presetMediaMessages == null || _loadOlderMedia != null;
+
+  /// 初次预览与后续分页复用同一份会话媒体窗口。
+  ImageViewerDataManager get _dataManager =>
+      _imageViewerDataManager ??= ImageViewerDataManager(
+        conversationID: _conversationID,
+        currentMessage: _currentMessage,
+        presetMediaMessages: _presetMediaMessages,
+        hiddenMessageIDs: _hiddenMessageIDs,
+        loadOlderMedia: _loadOlderMedia,
+      );
+
+  /// 先展示点中的图片，较清晰的资源和相邻媒体随后更新，不阻塞预览页打开。
+  Stream<List<ImageElement>> loadImageWindow() =>
+      _dataManager.loadImageWindow();
+
+  /// 先定位被点的块，再合并同一会话的历史，避免等待历史请求才打开预览。
+  Future<void> showRichContent(
+      BuildContext context, RichContentMessage content, int blockIndex) async {
+    final media =
+        richContentMediaEntries(content, messageId: _currentMessage.msgID);
+    final index = media.indexWhere((entry) => entry.index == blockIndex);
+    if (index < 0) return;
+    final selected = media[index].element;
+    await ImageViewer.view(
+      context,
+      imageElements: media.map((entry) => entry.element).toList(),
+      initialIndex: index,
+      imageUpdates: _dataManager
+          .loadInitialData(currentImage: selected)
+          .asStream()
+          .map((window) => window.mediaElements),
+      onEventTriggered: handleImageViewerEvent,
+      loadMoreOnOverscroll: canPageAtEdge,
+    );
+  }
+
   Future<void> showImageViewerIfAvailable() async {
     if (_isLoadingImageData) return;
 
@@ -56,16 +105,8 @@ class ImageViewerManager {
     _initialImageElements = [];
     _initialImageIndex = 0;
 
-    final dataManager = ImageViewerDataManager(
-      conversationID: _conversationID,
-      currentMessage: _currentMessage,
-      messageListStore: _messageListStore,
-      presetMediaMessages: _presetMediaMessages,
-    );
-    _imageViewerDataManager = dataManager;
-
     try {
-      final result = await dataManager.loadInitialData();
+      final result = await _dataManager.loadInitialData();
       _initialImageElements = result.mediaElements;
       _initialImageIndex = result.currentIndex;
       _isShowingImageViewer = _initialImageElements.isNotEmpty;
@@ -96,8 +137,8 @@ class ImageViewerManager {
 
       case 'onDownloadVideo':
         final param = eventData['param'] as Map<String, dynamic>;
-        final imagePath = param['path'] as String;
-        _handleDownloadVideo(imagePath, callback);
+        _handleDownloadVideo(
+            param['mediaId'] as String?, param['path'] as String, callback);
         break;
 
       default:
@@ -122,10 +163,19 @@ class ImageViewerManager {
     }
   }
 
+  /// 按稳定块标识找到视频；普通视频仍允许用已有封面路径定位。
   Future<void> _handleDownloadVideo(
-      String imagePath, Function(dynamic) callback) async {
+      String? mediaId, String imagePath, Function(dynamic) callback) async {
+    if (_dataManager.findRichVideo(mediaId) case final video?) {
+      try {
+        callback(await downloadRichContentVideo(video, _downloadRichVideo));
+      } on Object {
+        callback(<String>[]);
+      }
+      return;
+    }
     final targetMessage =
-        _imageViewerDataManager?.findMessage(byImagePath: imagePath);
+        _dataManager.findVideo(mediaId: mediaId, imagePath: imagePath);
     if (targetMessage == null) {
       callback([]);
       return;
@@ -143,7 +193,7 @@ class ImageViewerManager {
 
     await MessageActionStore.create(targetMessage).downloadMedia();
 
-    final updatedMessage = _messageListStore.state.messageList.value.firstWhere(
+    final updatedMessage = _dataManager.messageListStore.state.messageList.value.firstWhere(
       (message) => message.msgID == targetMessage.msgID,
       orElse: () => targetMessage,
     );
@@ -169,232 +219,336 @@ class ImageViewerManager {
 
 /// 读取媒体本地文件及远端展示地址，按来源集合提供分页和SDK下载回退。
 class ImageViewerDataManager {
+  /// 在线预览仅查询此会话范围内的媒体。
   final String conversationID;
-  final MessageInfo currentMessage;
-  final MessageListStore messageListStore;
 
-  /// Static media list provided by the caller. When non-null, this manager
-  /// operates in "preset" mode: it does not call `messageListStore.
-  /// loadMessages` and `loadMoreData` returns empty. Used by the merged
-  /// message detail page where the bundle is immutable and the underlying
-  /// store is empty (there is no real conversation to page against).
-  ///
-  /// 由调用方提供的静态媒体列表。当非空时，该管理器运行在“预设”模式：不会调用 `messageListStore.loadMessages`，`loadMoreData`
-  /// 会返回空。用于合并消息详情页，其中包是不可变的，底层存储为空（没有真正的会话可以分页）。
+  /// 用作历史查询锚点，历史不可用时保留这条消息的媒体。
+  final MessageInfo currentMessage;
+
+  /// 需要分页或解析原生视频时才建立 SDK 窗口，静态图片预览可离线打开。
+  late final MessageListStore messageListStore =
+      _providedStore ?? MessageListStore.create(conversationID: conversationID);
+
+  /// 调用方注入的分页窗口，缺省时由预览器建立独立窗口。
+  final MessageListStore? _providedStore;
+
+  /// 预设媒体窗口无需创建 SDK 历史查询；宿主可提供同一会话的旧页归档。
   final List<MessageInfo>? presetMediaMessages;
 
-  bool _isLoadingOlder = false;
-  bool _isLoadingNewer = false;
+  /// 当前账号从会话中隐藏的消息不进入预览。
+  final Set<String> hiddenMessageIDs;
+
+  /// SDK 历史只能覆盖保留期，旧页通过宿主的会话归档续查。
+  final ChatOlderMessagesLoader? loadOlderMedia;
+
+  /// 已取到的归档按时间正序放在 SDK 窗口之前。
+  final _archivedMessages = <MessageInfo>[];
+
+  /// 第一页按 SDK 或预设窗口的最早时间查，之后只推进归档游标。
+  String? _archiveCursor;
+
+  /// 归档没有更早游标时终止，不重复请求最后一页。
+  bool _archiveExhausted = false;
+
+  /// SDK 异常重复同一端游标时，该方向不再请求 SDK。
+  final _stalledSdkDirections = <bool>{};
+
+  /// 媒体历史使用独立 SDK 窗口，串行读取以保护双向游标。
+  bool _loadingHistory = false;
+
+  /// 首次读取失败时保留当前媒体，下一次边缘滑动仍能重试。
+  bool _historyReady = false;
+
+  /// 关闭预览后停止继续翻找历史。
+  bool _disposed = false;
+
+  /// SDK 地址和下载回执超过此时长后，继续尝试其他图片规格。
+  static const _imageRequestTimeout = Duration(seconds: 10);
 
   ImageViewerDataManager({
     required this.conversationID,
     required this.currentMessage,
-    required this.messageListStore,
+    MessageListStore? messageListStore,
     this.presetMediaMessages,
-  });
+    this.hiddenMessageIDs = const {},
+    this.loadOlderMedia,
+  }) : _providedStore = messageListStore;
 
   bool get _isPresetMode => presetMediaMessages != null;
 
+  List<MessageInfo> get _sdkOrPresetMessages =>
+      presetMediaMessages ?? messageListStore.state.messageList.value;
+
+  List<MessageInfo> get _sourceMessages => _archivedMessages.isEmpty
+      ? _sdkOrPresetMessages
+      : [..._archivedMessages, ..._sdkOrPresetMessages];
+
+  /// 会话按消息时间排列，重复的历史游标只保留一次。
   List<MessageInfo> get _mediaMessages {
-    if (_isPresetMode) {
-      return presetMediaMessages!
-          .where((msg) =>
-              msg.messageType == MessageType.image ||
-              msg.messageType == MessageType.video)
-          .toList();
-    }
-    return messageListStore.state.messageList.value
-        .where((msg) =>
-            msg.messageType == MessageType.image ||
-            msg.messageType == MessageType.video)
-        .toList();
+    final seen = <String>{};
+    return [
+      for (final msg in _sourceMessages)
+        if (!hiddenMessageIDs.contains(msg.msgID) &&
+            msg.status != MessageStatus.revoked &&
+            msg.status != MessageStatus.deleted &&
+            msg.status != MessageStatus.violation &&
+            (msg.messageType == MessageType.image ||
+                msg.messageType == MessageType.video ||
+                _richContent(msg)?.mediaBlocks.isNotEmpty == true) &&
+            (msg.msgID.isEmpty || seen.add(msg.msgID)))
+          msg,
+    ];
   }
 
+  RichContentMessage? _richContent(MessageInfo msg) {
+    final payload = msg.messagePayload;
+    return payload is CustomMessagePayload
+        ? RichContentMessage.tryParse(payload.customData)
+        : null;
+  }
+
+  /// 先发布现成图片，再查询大图和周边消息。窗口重查不能替换点中消息已解析的资源。
+  Stream<List<ImageElement>> loadImageWindow() async* {
+    // 气泡已有的图片先交给预览，弱网时无需等待 SDK。
+    final cached = await _processImageMessagePayload(
+      currentMessage,
+      resolveFromSdk: false,
+    );
+    if (cached.imagePath.isNotEmpty) yield [cached];
+    final current = await _processImageMessagePayload(currentMessage);
+    if (cached.imagePath.isEmpty || cached != current) yield [current];
+
+    // 历史消息可能缺少已取到的网址，重建窗口时沿用当前预览资源。
+    final window = await loadInitialData(currentImage: current);
+    if (window.mediaElements.length > 1) yield window.mediaElements;
+  }
+
+  /// 从当前来源建立浏览窗口，优先复用点中的图片资源。
   Future<({List<ImageElement> mediaElements, int currentIndex})>
-      loadInitialData() async {
+      loadInitialData({ImageElement? currentImage}) async {
     if (_isPresetMode) {
-      // Skip the live store fetch — the merged bundle is the entire
-      // dataset. Build elements directly from the preset list.
-      //
-      // 跳过实时商店获取——合并后的包就是完整数据集。直接从预设列表构建元素。
-      final mediaElements = await _buildElementsFromPreset();
-      final currentIndex = _findCurrentMessageIndex();
-      return (mediaElements: mediaElements, currentIndex: currentIndex);
+      // 合并转发和已展示的本机窗口可直接定位点中的图片。
+      final mediaElements = await _buildMediaElements(
+        _mediaMessages,
+        currentImage: currentImage,
+      );
+      final currentIndex = _findCurrentIndex(mediaElements, currentImage);
+      if (currentIndex >= 0) {
+        return (mediaElements: mediaElements, currentIndex: currentIndex);
+      }
+      return _currentMedia(currentImage);
     }
 
-    var option = MessageLoadOption();
-    option.direction = MessageLoadDirection.both;
-    option.pageCount = 5;
-    option.cursor = currentMessage;
-    option.messageTypeList = [MessageType.image, MessageType.video];
+    if (_loadingHistory) return _currentMedia(currentImage);
+    // SDK 加类型过滤只查本机；先按会话读取云端消息，再筛选普通及富文本媒体。
+    final option = MessageLoadOption()
+      ..direction = MessageLoadDirection.both
+      ..pageCount = 20
+      ..cursor = currentMessage;
 
+    _loadingHistory = true;
     try {
-      final mediaElements = await _loadMediaMessages(option: option);
-      final currentIndex = _mediaMessages
-          .indexWhere((message) => message.msgID == currentMessage.msgID);
+      final mediaElements = await _loadMediaMessages(
+        option: option,
+        currentImage: currentImage,
+      );
+      final currentIndex = _findCurrentIndex(mediaElements, currentImage);
       if (currentIndex >= 0) {
         return (mediaElements: mediaElements, currentIndex: currentIndex);
       }
     } on Object {
-      // 历史窗口查询失败时仍保留用户点开的资源，便于弱网和归档场景重试。
+      // 历史窗口查询失败时仍保留用户点开的资源。
+    } finally {
+      _loadingHistory = false;
     }
-    return (
-      mediaElements: [await _processMediaMessage(currentMessage)],
-      currentIndex: 0
-    );
+    return _currentMedia(currentImage);
   }
 
+  /// 滑到会话媒体边缘时跳过纯文本页，以原始历史游标推进。
   Future<({List<ImageElement> elements, bool hasMoreData})> loadMoreData(
       {required bool isOlder}) async {
-    // Merged bundles are bounded in-memory lists; nothing to page.
-    //
-    // 合并的包是有界的内存列表；没有需要分页的内容。
-    if (_isPresetMode) {
-      return (elements: <ImageElement>[], hasMoreData: false);
+    if (_disposed) return (elements: const <ImageElement>[], hasMoreData: false);
+    if (_loadingHistory) {
+      return (elements: const <ImageElement>[], hasMoreData: true);
     }
-
-    bool hasMoreData = isOlder
-        ? messageListStore.state.hasOlderMessages.value
-        : messageListStore.state.hasNewerMessages.value;
-    if (!hasMoreData) {
-      return (elements: <ImageElement>[], hasMoreData: false);
+    // 首次历史查询失败时先重建窗口，避免用空游标直接进入旧页。
+    if (!_isPresetMode && !_historyReady) {
+      final window = await loadInitialData();
+      return (
+        elements: window.mediaElements,
+        hasMoreData: !_historyReady || _hasMoreMedia(isOlder),
+      );
     }
-
-    final isCurrentlyLoading = isOlder ? _isLoadingOlder : _isLoadingNewer;
-    if (isCurrentlyLoading) {
-      return (elements: <ImageElement>[], hasMoreData: hasMoreData);
-    }
-
-    if (_mediaMessages.isEmpty) {
-      return (elements: <ImageElement>[], hasMoreData: hasMoreData);
-    }
-
-    if (isOlder) {
-      _isLoadingOlder = true;
-    } else {
-      _isLoadingNewer = true;
-    }
-
+    final known = _mediaMessages.map((message) => message.msgID).toSet();
+    _loadingHistory = true;
     try {
-      final anchorMessage =
-          isOlder ? _mediaMessages.first : _mediaMessages.last;
-
-      var option = MessageLoadOption();
-      option.direction =
-          isOlder ? MessageLoadDirection.older : MessageLoadDirection.newer;
-      option.pageCount = 5;
-      option.cursor = anchorMessage;
-      option.messageTypeList = [MessageType.image, MessageType.video];
-
-      final allElements = await _loadMediaMessages(option: option);
-      hasMoreData = isOlder
-          ? messageListStore.state.hasOlderMessages.value
-          : messageListStore.state.hasNewerMessages.value;
-
-      return (elements: allElements, hasMoreData: hasMoreData);
-    } catch (e) {
-      return (elements: <ImageElement>[], hasMoreData: hasMoreData);
+      while (!_disposed && _hasMoreMedia(isOlder)) {
+        // 先取完 SDK 历史，再由宿主归档续查更早一侧。
+        if (_hasMoreSdkMedia(isOlder)) {
+          await _loadSdkPage(isOlder);
+        } else {
+          await _loadArchivePage();
+        }
+        if (_disposed) break;
+        final messages = _mediaMessages;
+        if (messages.any((message) => !known.contains(message.msgID))) {
+          return (
+            elements: await _buildMediaElements(messages),
+            hasMoreData: _hasMoreMedia(isOlder),
+          );
+        }
+      }
+      return (elements: const <ImageElement>[], hasMoreData: false);
+    } on Object {
+      return (elements: const <ImageElement>[], hasMoreData: !_disposed);
     } finally {
-      if (isOlder) {
-        _isLoadingOlder = false;
-      } else {
-        _isLoadingNewer = false;
-      }
+      _loadingHistory = false;
     }
   }
 
-  int _findCurrentMessageIndex() {
-    int index =
-        _mediaMessages.indexWhere((msg) => msg.msgID == currentMessage.msgID);
-    if (index >= 0) {
-      return index;
-    }
+  bool _hasMoreSdkMedia(bool isOlder) =>
+      !_isPresetMode &&
+      !_stalledSdkDirections.contains(isOlder) &&
+      (isOlder
+          ? messageListStore.state.hasOlderMessages.value
+          : messageListStore.state.hasNewerMessages.value);
 
-    if (currentMessage.msgID.isNotEmpty) {
-      index =
-          _mediaMessages.indexWhere((msg) => msg.msgID == currentMessage.msgID);
-      if (index >= 0) {
-        return index;
-      }
-    }
+  bool _hasMoreMedia(bool isOlder) =>
+      _hasMoreSdkMedia(isOlder) ||
+      (isOlder && loadOlderMedia != null && !_archiveExhausted);
 
-    return 0;
+  /// SDK 以未筛选的原始历史边缘为游标，空媒体页也能推进。
+  Future<void> _loadSdkPage(bool isOlder) async {
+    String? edgeId() =>
+        (isOlder ? _sdkOrPresetMessages.firstOrNull : _sdkOrPresetMessages.lastOrNull)
+            ?.msgID;
+    final before = edgeId();
+    final result = isOlder
+        ? await messageListStore.loadOlderMessages()
+        : await messageListStore.loadNewerMessages();
+    if (!result.isSuccess) throw StateError('会话媒体历史加载失败');
+    if (before == edgeId()) _stalledSdkDirections.add(isOlder);
   }
 
-  MessageInfo? findMessage({required String byImagePath}) {
-    return _mediaMessages.firstWhere((message) {
-      if (message.messageType == MessageType.image) {
-        final originalImagePath =
-            (message.messagePayload as ImageMessagePayload?)?.originalImagePath;
-        final largeImagePath =
-            (message.messagePayload as ImageMessagePayload?)?.largeImagePath;
-        final payload = message.messagePayload as ImageMessagePayload?;
-        return originalImagePath == byImagePath ||
-            largeImagePath == byImagePath ||
-            payload?.originalImageURL == byImagePath ||
-            payload?.largeImageURL == byImagePath ||
-            payload?.thumbImageURL == byImagePath;
-      } else if (message.messageType == MessageType.video) {
-        final payload = message.messagePayload as VideoMessagePayload?;
-        final videoSnapshotPath = payload?.videoSnapshotPath;
-        return videoSnapshotPath == byImagePath ||
-            (message.messagePayload as VideoMessagePayload?)
-                    ?.videoSnapshotURL ==
-                byImagePath;
+  /// SDK 更早一侧耗尽后，用最早消息时间接上宿主归档。
+  Future<void> _loadArchivePage() async {
+    int? earliest;
+    final existing = <String>{};
+    for (final message in _sourceMessages) {
+      if (message.msgID.isNotEmpty) existing.add(message.msgID);
+      final time = message.timestamp;
+      if (time != null && time > 0 && (earliest == null || time < earliest)) {
+        earliest = time;
       }
-      return false;
-    });
+    }
+    final page =
+        await loadOlderMedia!(beforeTimestamp: earliest, cursor: _archiveCursor);
+    if (_disposed) return;
+    // SDK 和预设中已有的消息可能带撤回或编辑状态，归档不能覆盖它们。
+    final messages = page.messages
+        .where((message) => message.msgID.isEmpty || existing.add(message.msgID))
+        .toList()
+      ..sort((a, b) => (a.timestamp ?? 0).compareTo(b.timestamp ?? 0));
+    _archivedMessages.insertAll(0, messages);
+    _archiveExhausted =
+        page.nextCursor == null || page.nextCursor == _archiveCursor;
+    _archiveCursor = page.nextCursor;
   }
 
-  Future<List<ImageElement>> _buildElementsFromPreset() async {
-    final messages = _mediaMessages;
+  int _findCurrentIndex(List<ImageElement> elements, ImageElement? selected) {
+    final rich = _richContent(currentMessage);
+    final firstRichId = rich == null
+        ? null
+        : richContentMediaEntries(rich, messageId: currentMessage.msgID)
+            .firstOrNull
+            ?.element
+            .mediaId;
+    final id = selected?.mediaId ?? firstRichId ?? currentMessage.msgID;
+    if (id.isEmpty) return elements.isEmpty ? -1 : 0;
+    return elements.indexWhere((element) => element.mediaId == id);
+  }
+
+  /// 当前会话历史暂不可用时保留被点消息里的完整附件顺序。
+  Future<({List<ImageElement> mediaElements, int currentIndex})> _currentMedia(
+      ImageElement? currentImage) async {
+    final elements =
+        await _buildMediaElements([currentMessage], currentImage: currentImage);
+    final index = _findCurrentIndex(elements, currentImage);
+    return (mediaElements: elements, currentIndex: index < 0 ? 0 : index);
+  }
+
+  /// 从当前消息及分页窗口定位富文本视频，多个块共用封面时仍能精确下载。
+  RichFileBlock? findRichVideo(String? mediaId) {
+    if (mediaId == null || !mediaId.startsWith('rich:')) return null;
+    for (final message in [currentMessage, ..._mediaMessages]) {
+      final content = _richContent(message);
+      if (content == null) continue;
+      for (final entry
+          in richContentMediaEntries(content, messageId: message.msgID)) {
+        if (entry.element.mediaId == mediaId && entry.block is RichFileBlock) {
+          return entry.block as RichFileBlock;
+        }
+      }
+    }
+    return null;
+  }
+
+  /// SDK 视频优先按消息标识定位，兼容旧调用方仅提供封面路径。
+  MessageInfo? findVideo({String? mediaId, required String imagePath}) =>
+      [currentMessage, ..._mediaMessages].where((message) {
+        final payload = message.messagePayload;
+        if (payload is! VideoMessagePayload) return false;
+        return mediaId != null
+            ? message.msgID == mediaId
+            : payload.videoSnapshotPath == imagePath ||
+                payload.videoSnapshotURL == imagePath;
+      }).firstOrNull;
+
+  /// 转换时保留消息顺序；单个资源异常仍在原位置保留占位，避免滑到错误消息。
+  Future<List<ImageElement>> _buildMediaElements(
+    List<MessageInfo> messages, {
+    ImageElement? currentImage,
+  }) async {
     final List<ImageElement> resultElements = [];
-    for (int i = 0; i < messages.length; i++) {
-      final msg = messages[i];
+    for (final msg in messages) {
+      if (_disposed) break;
+      if (_richContent(msg) case final rich?) {
+        resultElements.addAll(richContentMediaEntries(rich, messageId: msg.msgID)
+            .map((entry) => entry.element));
+        continue;
+      }
       try {
-        final element = await _processMediaMessage(msg);
+        final element =
+            currentImage != null && msg.msgID == currentMessage.msgID
+                ? currentImage
+                : await _processMediaMessage(msg);
         resultElements.add(element);
       } catch (e) {
+        // 单条解析失败仍占原位置，保持页码和消息顺序对应。
         final isVideo = msg.messageType == MessageType.video;
         resultElements.add(ImageElement(
           type: isVideo ? 1 : 0,
           imagePath: '',
           videoPath: '',
+          mediaId: msg.msgID.isEmpty ? null : msg.msgID,
         ));
       }
     }
     return resultElements;
   }
 
+  /// 载入会话媒体窗口，刷新列表时复用已解析的当前图片。
   Future<List<ImageElement>> _loadMediaMessages({
     required MessageLoadOption option,
+    ImageElement? currentImage,
   }) async {
     final result = await messageListStore.loadMessages(option: option);
     if (!result.isSuccess) {
       throw Exception('fetchMessages failed');
     }
 
-    final fetchedMediaMessages = _mediaMessages;
-
-    final List<ImageElement> resultElements = [];
-
-    for (int i = 0; i < fetchedMediaMessages.length; i++) {
-      final msg = fetchedMediaMessages[i];
-
-      try {
-        final element = await _processMediaMessage(msg);
-        resultElements.add(element);
-      } catch (e) {
-        final isVideo = msg.messageType == MessageType.video;
-        resultElements.add(ImageElement(
-          type: isVideo ? 1 : 0,
-          imagePath: '',
-          videoPath: '',
-        ));
-      }
-    }
-
-    return resultElements;
+    _historyReady = true;
+    return _buildMediaElements(_mediaMessages, currentImage: currentImage);
   }
 
   Future<ImageElement> _processMediaMessage(MessageInfo msg) async {
@@ -407,9 +561,13 @@ class ImageViewerDataManager {
     }
   }
 
-  /// 依次收集本机大图、SDK下载和预览降级资源，解码时由查看器按顺序尝试。
-  Future<ImageElement> _processImageMessagePayload(MessageInfo msg) async {
+  /// 先收集本机和现成网址，缺少大图时按需查询 SDK，并保留缩略图作为回退。
+  Future<ImageElement> _processImageMessagePayload(
+    MessageInfo msg, {
+    bool resolveFromSdk = true,
+  }) async {
     final imagePayload = msg.messagePayload as ImageMessagePayload?;
+    final rawMessage = msg.rawMessage;
     final paths = <String>{};
     Future<void> addLocal(String? path) async {
       if (path == null || path.isEmpty) return;
@@ -423,60 +581,56 @@ class ImageViewerDataManager {
       }
     }
 
-    await addLocal(imagePayload?.largeImagePath);
-    await addLocal(imagePayload?.originalImagePath);
-    // 收到的消息可能只有部分规格，SDK失败后继续尝试其他尺寸和在线地址。
-    if (paths.isEmpty && msg.rawMessage != null && imagePayload != null) {
-      final action = MessageActionStore.create(msg);
-      for (final quality in [MediaQuality.standard, MediaQuality.original]) {
-        try {
-          final result = await action.downloadMedia(quality: quality);
-          if (result.isSuccess) {
-            await addLocal(quality == MediaQuality.standard
-                ? imagePayload.largeImagePath
-                : imagePayload.originalImagePath);
-          }
-          if (paths.isNotEmpty) break;
-        } on Object {
-          // 单个规格下载异常不能阻止打开其他可用图片。
-        }
-      }
+    void addRemote(String? value) {
+      final path = _remotePreviewUrl([value]);
+      if (path.isNotEmpty) paths.add(path);
     }
 
-    final remote = [
-      imagePayload?.largeImageURL,
-      imagePayload?.originalImageURL
-    ];
-    if (paths.isEmpty &&
-        _remotePreviewUrl(remote).isEmpty &&
-        msg.rawMessage != null) {
+    await addLocal(imagePayload?.largeImagePath);
+    await addLocal(imagePayload?.originalImagePath);
+    addRemote(imagePayload?.largeImageURL);
+    addRemote(imagePayload?.originalImageURL);
+
+    // 跨端消息可能缺少直接网址，先取可预览地址，避免等待完整文件下载。
+    if (resolveFromSdk && paths.isEmpty && rawMessage != null) {
       try {
         final result = await TencentImSDKPlugin.v2TIMManager
             .getMessageManager()
-            .getMessageOnlineUrl(message: msg.rawMessage, msgID: msg.msgID);
+            .getMessageOnlineUrl(message: rawMessage, msgID: msg.msgID)
+            .timeout(_imageRequestTimeout);
         if (result.code == 0) {
-          remote.addAll(
-              result.data?.imageElem?.imageList?.map((image) => image?.url) ??
-                  const []);
+          for (final image in result.data?.imageElem?.imageList ?? const []) {
+            addRemote(image?.url);
+          }
         }
       } on Object {
         // 无在线地址时仍尝试本机缩略图，打开失败保留原会话可再次点开。
       }
     }
-    for (final url in remote) {
-      final path = _remotePreviewUrl([url]);
-      if (path.isNotEmpty) paths.add(path);
-    }
     await addLocal(imagePayload?.thumbImagePath);
-    final thumbnail = _remotePreviewUrl([imagePayload?.thumbImageURL]);
-    if (thumbnail.isNotEmpty) paths.add(thumbnail);
-    if (paths.isEmpty && msg.rawMessage != null && imagePayload != null) {
-      try {
-        final result = await MessageActionStore.create(msg)
-            .downloadMedia(quality: MediaQuality.thumbnail);
-        if (result.isSuccess) await addLocal(imagePayload.thumbImagePath);
-      } on Object {
-        // 全部规格暂不可用时保留占位，用户可关闭后再次尝试。
+    addRemote(imagePayload?.thumbImageURL);
+    // 没有可读文件或地址时才下载，单个规格失败不影响剩余候选。
+    if (resolveFromSdk && paths.isEmpty && rawMessage != null) {
+      for (final quality in [
+        MediaQuality.standard,
+        MediaQuality.original,
+        MediaQuality.thumbnail,
+      ]) {
+        try {
+          final result = await MessageActionStore.create(msg)
+              .downloadMedia(quality: quality)
+              .timeout(_imageRequestTimeout);
+          if (!result.isSuccess) continue;
+          final updated = msg.messagePayload as ImageMessagePayload?;
+          await addLocal(switch (quality) {
+            MediaQuality.standard => updated?.largeImagePath,
+            MediaQuality.original => updated?.originalImagePath,
+            MediaQuality.thumbnail => updated?.thumbImagePath,
+          });
+          if (paths.isNotEmpty) break;
+        } on Object {
+          // 全部规格无法读取时保留错误占位，用户仍可关闭预览。
+        }
       }
     }
 
@@ -526,6 +680,7 @@ class ImageViewerDataManager {
       type: 1,
       imagePath: imagePath,
       videoPath: videoPayload2?.videoPath,
+      mediaId: msg.msgID.isEmpty ? null : msg.msgID,
     );
   }
 
@@ -544,5 +699,7 @@ class ImageViewerDataManager {
     return '';
   }
 
-  void dispose() {}
+  void dispose() {
+    _disposed = true;
+  }
 }

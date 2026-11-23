@@ -150,17 +150,12 @@ export default class AudioRecorder implements
     }
   }
 
+  /** 当前录音完成落盘和裁剪后才允许复用同一桥接实例。 */
   private handleStartRecord(call: MethodCall, result: MethodResult): void {
-    // 如果上一次 startRecord 的 result 还没兑现,先把它按 cancel 兑现,避免 leak MethodResult
+    // 收尾期间保留上一次调用的结果归属，避免旧录音回调被交给新请求。
     if (this.pendingResult !== null) {
-      console.warn(`${AudioRecorder.TAG} previous startRecord pending, force-canceling`);
-      const stale = this.pendingResult;
-      this.pendingResult = null;
-      stale.success(this.buildResultMap(RecordResultCode.ERROR_CANCEL, null, 0));
-      // 也尝试 cancel 录音机,以防仍在录
-      AudioRecorderHelper.shared().cancelRecord().catch((e: Error) => {
-        console.warn(`${AudioRecorder.TAG} force-cancel prev failed`, e.message);
-      });
+      result.success(this.buildResultMap(RecordResultCode.ERROR_RECORDING, null, 0));
+      return;
     }
 
     const filepath = call.argument('filepath') as string | null;

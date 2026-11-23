@@ -94,17 +94,29 @@ void main() {
         messageType: MessageType.custom,
         messagePayload: CustomMessagePayload(customData: raw));
     for (final (type, prefix) in [(1, '[语音通话]'), (2, '[视频通话]')]) {
-      final info = message(jsonEncode({
-        'actionType': 1,
-        'groupID': '',
-        'inviteeList': ['peer'],
-        'data': jsonEncode(
-            {'businessID': 'av_call', 'call_type': type, 'call_end': 600})
-      }));
-      final parsed = CallingMessageDataProvider(info, page);
-      expect(parsed.isCallingSignal, isTrue);
-      expect(parsed.content, '通话时长 10:00');
-      expect(MessageUtil.getMessageAbstract(info, page), '$prefix 通话时长 10:00');
+      for (final (seconds, label) in [
+        (5, '00:05'),
+        (600, '10:00'),
+        (3599, '59:59'),
+        (3600, '1:00:00'),
+        (3601, '1:00:00')
+      ]) {
+        final info = message(jsonEncode({
+          'actionType': 1,
+          'groupID': '',
+          'inviteeList': ['peer'],
+          'data': jsonEncode({
+            'businessID': 'av_call',
+            'call_type': type,
+            'call_end': seconds,
+          }),
+        }));
+        final parsed = CallingMessageDataProvider(info, page);
+        expect(parsed.isCallingSignal, isTrue);
+        expect(parsed.content, '通话时长 $label');
+        expect(
+            MessageUtil.getMessageAbstract(info, page), '$prefix 通话时长 $label');
+      }
     }
     for (final raw in [
       '{',

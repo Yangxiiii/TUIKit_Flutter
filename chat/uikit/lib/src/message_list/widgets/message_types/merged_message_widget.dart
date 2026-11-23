@@ -119,11 +119,12 @@ class _MergedMessageWidgetState extends State<MergedMessageWidget> {
     List<String>? abstractList,
     SemanticColorScheme colors,
   ) {
+    final foreground = context.appColors.chatMessageSecondary;
     if (abstractList == null || abstractList.isEmpty) {
       return Text(
         _getChatRecordsText(context),
         style: FontScheme.caption3Regular.copyWith(
-          color: colors.textColorSecondary,
+          color: foreground,
         ),
       );
     }
@@ -145,11 +146,12 @@ class _MergedMessageWidgetState extends State<MergedMessageWidget> {
             specialTextSpanBuilder: ChatSpecialTextSpanBuilder(
               colorScheme: colors,
               onTapUrl: (_) {},
+              spaceMessageEmoji: true,
             ),
             style: TextStyle(
                 fontSize: 14,
                 height: 22 / 14,
-                color: colors.textColorSecondary),
+                color: foreground),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),

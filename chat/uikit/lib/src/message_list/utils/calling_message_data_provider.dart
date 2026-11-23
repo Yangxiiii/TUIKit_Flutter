@@ -1,3 +1,4 @@
+import 'package:app_core/app_core.dart' show formatCallDuration;
 import 'package:app_ui/app_ui.dart';
 import 'dart:convert';
 
@@ -95,6 +96,10 @@ class CallingMessageDataProvider {
 
   // 上屏内容
   String get content => _content;
+
+  /// 气泡与会话摘要共用同场接通文案，历史场次继续使用持久消息正文。
+  String contentForAcceptedAttempt(String? acceptedAttempt) =>
+      attemptId != null && attemptId == acceptedAttempt ? '已接听' : content;
 
   // 是否Call信令
   bool get isCallingSignal => _isCallingSignal;
@@ -426,9 +431,10 @@ class CallingMessageDataProvider {
             ? atomicLocale.callCancelCaller
             : atomicLocale.callCancelCallee;
       } else if (_protocolType == CallProtocolType.hangup) {
+        // 旧记录可能不含有效秒数，此时沿用通用结束文案。
         final duration = _jsonData['call_end'];
         _content = duration is num && duration >= 0
-            ? '${atomicLocale.stopCallTip} ${_getShowTime(duration.toInt())}'
+            ? '${atomicLocale.stopCallTip} ${formatCallDuration(duration.toInt())}'
             : atomicLocale.callEndedTheCall;
       } else if (_protocolType == CallProtocolType.timeout) {
         _content = isCaller
@@ -452,16 +458,5 @@ class CallingMessageDataProvider {
     } else {
       _content = atomicLocale.unknownCall;
     }
-  }
-
-  _twoDigits(int n) {
-    if (n >= 10) return "$n";
-    return "0$n";
-  }
-
-  _getShowTime(int seconds) {
-    int secondsShow = seconds % 60;
-    int minutesShow = seconds ~/ 60;
-    return "${_twoDigits(minutesShow)}:${_twoDigits(secondsShow)}";
   }
 }

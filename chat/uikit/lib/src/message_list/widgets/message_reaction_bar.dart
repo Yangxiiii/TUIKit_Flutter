@@ -1,27 +1,34 @@
+import 'package:app_ui/app_ui.dart' show AppColorBuildContext;
 import 'package:tencent_chat_uikit/src/emoji_picker/emoji_manager.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
-import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/recent_emoji_manager.dart';
 
-/// Maximum number of reactions to display before showing "..."
-///
-/// 在显示“...”之前显示的最大反应数量
+/// 原生回应最多在气泡内展示五种，更多条目继续通过明细查看。
 const int _maxDisplayReactions = 5;
 
-/// Bar displaying message reactions below the message bubble
-///
-/// 在消息气泡下方显示消息反应的栏
+/// 在没有业务回应组件时逐行展示原生表情，保留成员明细入口。
 class MessageReactionBar extends StatelessWidget {
+  /// 与表情编码共同标识当前消息的回应入口。
+  final String messageId;
+
+  /// 当前消息的原生回应快照。
   final List<MessageReaction> reactionList;
-  final bool isLeft;
+
+  /// 回应底色使用消息归属，不受列表对齐模式影响。
+  final bool isSelf;
+
+  /// 打开完整回应成员名单。
   final VoidCallback onClick;
+
+  /// 宿主可单独处理某个表情的点击。
   final void Function(MessageReaction reaction)? onReactionTap;
 
   const MessageReactionBar({
     super.key,
+    required this.messageId,
     required this.reactionList,
-    required this.isLeft,
+    required this.isSelf,
     required this.onClick,
     this.onReactionTap,
   });
@@ -30,130 +37,114 @@ class MessageReactionBar extends StatelessWidget {
   Widget build(BuildContext context) {
     if (reactionList.isEmpty) return const SizedBox.shrink();
 
-    final colors = SemanticColorScheme.of(context);
-    final displayReactions = reactionList.take(_maxDisplayReactions).toList();
-    final hasMore = reactionList.length > _maxDisplayReactions;
+    final colors = context.appColors;
+    final background = colors.chatMessageReactionBackground(isSelf: isSelf);
+    final tapReaction = onReactionTap;
 
     return Padding(
-      padding: const EdgeInsets.only(top: 2),
-      child: Row(
-        mainAxisAlignment:
-            isLeft ? MainAxisAlignment.start : MainAxisAlignment.end,
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: 10,
         children: [
-          GestureDetector(
-            onTap: onClick,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: colors.bgColorBubbleReciprocal,
-                borderRadius: BorderRadius.circular(30),
-                border: Border.all(
-                  color: colors.strokeColorPrimary,
-                  width: 1,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ...displayReactions.map((reaction) => _ReactionItem(
-                        reaction: reaction,
-                        showCount: displayReactions.length == 1,
-                        onTap: onReactionTap != null
-                            ? () => onReactionTap!(reaction)
-                            : null,
-                      )),
-                  if (hasMore)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 2),
-                      child: Text(
-                        '...',
-                        style: FontScheme.caption2Regular.copyWith(
-                          color: colors.textColorTertiary,
-                        ),
-                      ),
-                    ),
-                  if (displayReactions.length > 1 || hasMore)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 4),
-                      child: Text(
-                        '${_getTotalCount()}',
-                        style: FontScheme.caption2Regular.copyWith(
-                          color: colors.textColorTertiary,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+          // 每种表情保留自己的计数和点击动作，宽屏也只占一行。
+          for (final reaction in reactionList.take(_maxDisplayReactions))
+            _buildChip(
+              background: background,
+              identifier: 'emoji.${Uri.encodeComponent(reaction.reactionID)}',
+              onTap:
+                  tapReaction == null ? onClick : () => tapReaction(reaction),
+              child: _ReactionItem(reaction: reaction),
             ),
-          ),
+          // 超出气泡展示上限的条目可从明细完整查看。
+          if (reactionList.length > _maxDisplayReactions)
+            _buildChip(
+              background: background,
+              identifier: 'more',
+              onTap: onClick,
+              child: Text('…',
+                  style: TextStyle(color: colors.chatMessageSecondary)),
+            ),
         ],
       ),
     );
   }
 
-  int _getTotalCount() {
-    return reactionList.fold(0, (sum, r) => sum + r.totalUserCount);
+  /// 原生胶囊沿用与业务回应一致的边距，语义节点保留点击入口。
+  Widget _buildChip({
+    required Color background,
+    required String identifier,
+    required VoidCallback onTap,
+    required Widget child,
+  }) {
+    const radius = BorderRadius.all(Radius.circular(11));
+    return Material(
+      color: background,
+      borderRadius: radius,
+      child: Semantics(
+        identifier: messageId.isEmpty
+            ? null
+            : 'tim.reaction.native.${Uri.encodeComponent(messageId)}.$identifier',
+        child: InkWell(
+          borderRadius: radius,
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            child: child,
+          ),
+        ),
+      ),
+    );
   }
 }
 
-/// 根据当前目录显示回应图片与人数，添加或撤销交给外层消息流程。
+/// 展示一个原生表情及其人数，条目的点击由外层胶囊接管。
 class _ReactionItem extends StatelessWidget {
+  /// SDK 提供的表情编码和对应人数。
   final MessageReaction reaction;
-  final bool showCount;
-  final VoidCallback? onTap;
 
-  const _ReactionItem({
-    required this.reaction,
-    required this.showCount,
-    this.onTap,
-  });
+  const _ReactionItem({required this.reaction});
 
   @override
   Widget build(BuildContext context) {
-    final colors = SemanticColorScheme.of(context);
+    final colors = context.appColors;
     final emoji =
         RecentEmojiManager.getEmojiByReactionID(context, reaction.reactionID);
 
-    return GestureDetector(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 1),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (emoji != null)
-              Image.asset(
-                emoji.path,
-                package: EmojiManager.assetPackage,
-                width: 18,
-                height: 18,
-                errorBuilder: (context, error, stackTrace) {
-                  return Icon(
-                    Icons.sentiment_satisfied_alt,
-                    size: 18,
-                    color: colors.textColorSecondary,
-                  );
-                },
-              )
-            else
-              Icon(
-                Icons.sentiment_satisfied_alt,
-                size: 18,
-                color: colors.textColorSecondary,
-              ),
-            if (showCount && reaction.totalUserCount > 0)
-              Padding(
-                padding: const EdgeInsets.only(left: 2),
-                child: Text(
-                  '${reaction.totalUserCount}',
-                  style: FontScheme.caption2Regular.copyWith(
-                    color: colors.textColorTertiary,
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
+    final fallback = Icon(Icons.sentiment_satisfied_alt,
+        size: 16, color: colors.chatMessageSecondary);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // 历史编码没有对应图片时仍保留回应计数和点击入口。
+        if (emoji == null)
+          fallback
+        else
+          Image.asset(
+            emoji.path,
+            package: EmojiManager.assetPackage,
+            width: 16,
+            height: 16,
+            errorBuilder: (_, __, ___) => fallback,
+          ),
+        if (reaction.totalUserCount > 0) ...[
+          Container(
+            width: 1,
+            height: 10,
+            margin: const EdgeInsets.symmetric(horizontal: 4),
+            color: colors.chatMessageReactionDivider,
+          ),
+          Text(
+            '${reaction.totalUserCount}',
+            style: TextStyle(
+              color: colors.chatMessageSecondary,
+              fontSize: 12,
+              height: 1.25,
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

@@ -58,7 +58,7 @@ void main() {
     expect(find.byIcon(AppIcons.read), findsOneWidget);
     final read = tester.widget<Icon>(find.byIcon(AppIcons.read));
     expect(read.semanticLabel, '已读');
-    expect(read.color, isNot(unread.color));
+    expect(read.color, const Color(0xFF1C9B3C));
   });
 
   testWidgets('未请求回执、开关关闭、对方消息及合并详情不显示阅读小勾', (tester) async {

@@ -8,6 +8,7 @@ import 'package:tencent_chat_uikit/src/message_list/message_list_config.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/asr_display_manager.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_action_sheet.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_attachments.dart';
+import 'package:tencent_chat_uikit/src/message_list/widgets/message_item.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_tooltip.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/sound_message_widget.dart';
 
@@ -16,12 +17,18 @@ Widget _host(Widget child) => MaterialApp(
           const AppNormalColorScheme(), Brightness.light),
       home: Scaffold(body: child),
     );
-MessageInfo _voice(int seconds, {String? asr}) => MessageInfo(
-    msgID: 'voice',
-    conversationType: ConversationType.c2c,
-    messageType: MessageType.audio,
-    status: MessageStatus.sendSuccess,
-    messagePayload: AudioMessagePayload(audioDuration: seconds, asrText: asr));
+MessageInfo _voice(
+  int seconds, {
+  String? asr,
+  ConversationType conversation = ConversationType.c2c,
+}) =>
+    MessageInfo(
+      msgID: 'voice',
+      conversationType: conversation,
+      messageType: MessageType.audio,
+      status: MessageStatus.sendSuccess,
+      messagePayload: AudioMessagePayload(audioDuration: seconds, asrText: asr),
+    );
 
 void main() {
   testWidgets('单聊语音按时长扩展并独立显示红点、转换、过期状态', (tester) async {
@@ -78,6 +85,61 @@ void main() {
     await tester.pumpWidget(body(text: '缓存识别正文'));
     expect(find.text('缓存识别正文'), findsOneWidget);
     expect(find.text('无法识别'), findsNothing);
+  });
+
+  testWidgets('群聊收发语音复用单聊主气泡尺寸和状态区', (tester) async {
+    for (final isSelf in [false, true]) {
+      Size? directSize;
+      for (final type in [ConversationType.c2c, ConversationType.group]) {
+        final bubble = GlobalKey();
+        await tester.pumpWidget(_host(SoundMessageWidget(
+          message: _voice(60, conversation: type),
+          isSelf: isSelf,
+          maxWidth: 390,
+          bubbleKey: bubble,
+          config: const ChatMessageListConfig(),
+          conversationID: type == ConversationType.group ? 'group_g' : 'c2c_p',
+          onConvertToText: () {},
+        )));
+        final size = tester.getSize(find.byKey(bubble));
+        expect(size, directSize ?? const Size(182, 40));
+        directSize ??= size;
+        expect(find.text('60″'), findsOneWidget);
+        final voice = find.byIcon(AppIcons.voice);
+        final duration = find.text('60″');
+        expect(voice, findsOneWidget);
+        expect(tester.getCenter(voice).dx,
+            isSelf ? greaterThan(tester.getCenter(duration).dx)
+                : lessThan(tester.getCenter(duration).dx));
+        expect(find.bySemanticsIdentifier('chat.voice.unheard.voice'),
+            isSelf ? findsNothing : findsOneWidget);
+        expect(find.text('转文字'), isSelf ? findsNothing : findsOneWidget);
+      }
+    }
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('己方语音回执位于气泡右侧', (tester) async {
+    await tester.pumpWidget(_host(MessageItem(
+      message: MessageInfo(
+        msgID: 'outgoing-voice',
+        conversationType: ConversationType.c2c,
+        messageType: MessageType.audio,
+        messagePayload: AudioMessagePayload(audioDuration: 2),
+        isSentBySelf: true,
+        status: MessageStatus.sendSuccess,
+        needReadReceipt: true,
+        readReceiptInfo: MessageReceipt(isPeerRead: true),
+      ),
+      conversationID: 'c2c_peer',
+      messageListStore: null,
+      isHighlighted: false,
+      config: const ChatMessageListConfig(enableReadReceipt: true),
+    )));
+    expect(
+      tester.getTopLeft(find.byIcon(AppIcons.read)).dx,
+      greaterThan(tester.getTopRight(find.byType(SoundMessageWidget)).dx),
+    );
   });
 
   testWidgets('语音路由和转文字在撤回分组之前，点击回调只执行一次', (tester) async {

@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_message.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_bubble.dart';
+import 'package:tuikit_atomic_x/base_component/base_component.dart';
 
 const _profileAvatar = 'https://example.com/profile.png';
 const _rawAvatar = 'https://example.com/raw.png';
@@ -13,7 +14,7 @@ const _rawAvatar = 'https://example.com/raw.png';
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  testWidgets('发送与接收表情消息按同一目录显示多个表情，不落入不支持消息', (tester) async {
+  testWidgets('纯表情和文字加表情使用相同的表情尺寸与气泡外观', (tester) async {
     EmojiManager.configure(assetPackage: 'tuikit_atomic_x', emojis: const [
       EmojiPickerModelItem(
           name: '[ZDEmoji_Like]',
@@ -24,30 +25,83 @@ void main() {
           label: '微笑',
           path: 'call_assets/handsfree_on.png'),
     ]);
-    for (final isSelf in [false, true]) {
+    for (final (isSelf, hasQuote, conversationType) in [
+      (false, false, ConversationType.c2c),
+      (true, false, ConversationType.group),
+      (true, true, ConversationType.c2c),
+    ]) {
       await tester.pumpWidget(MaterialApp(
         theme: AppThemeFactory.create(
             const AppNormalColorScheme(), Brightness.light),
         home: Scaffold(
-            body: MessageBubble(
-          message: MessageInfo(
-              msgID: 'face',
-              messageType: MessageType.face,
-              status: MessageStatus.sendSuccess,
-              messagePayload: FaceMessagePayload(
-                  faceData: '[ZDEmoji_Like][ZDEmoji_Smile]')),
-          conversationID: 'c2c_peer',
-          isSelf: isSelf,
-          maxWidth: 390,
-          config: ChatMessageListConfig(enableReadReceipt: false),
-          messageListStore: _ListStore(),
-        )),
+          body: Column(children: [
+            for (final (id, type, payload) in [
+              (
+                'face',
+                MessageType.face,
+                FaceMessagePayload(faceData: '[ZDEmoji_Like][ZDEmoji_Smile]'),
+              ),
+              (
+                'mixed',
+                MessageType.text,
+                TextMessagePayload(text: '你好[ZDEmoji_Like][ZDEmoji_Smile]'),
+              ),
+            ])
+              MessageBubble(
+                message: MessageInfo(
+                  msgID: id,
+                  messageType: type,
+                  conversationType: conversationType,
+                  messagePayload: payload,
+                  status: MessageStatus.sendSuccess,
+                ),
+                conversationID: conversationType == ConversationType.group
+                    ? 'group_peer'
+                    : 'c2c_peer',
+                isSelf: isSelf,
+                maxWidth: 390,
+                replyQuote: hasQuote
+                    ? MessageQuoteInfo(
+                        msgID: 'original',
+                        messagePayload: TextMessagePayload(text: '原消息'),
+                      )
+                    : null,
+                config: const ChatMessageListConfig(
+                    enableReadReceipt: false, textBubbleCornerRadius: 13),
+                messageListStore: _ListStore(),
+              ),
+          ]),
+        ),
       ));
-      final images = tester.widgetList<Image>(find.byType(Image)).toList();
-      expect(images.map((image) => image.semanticLabel), ['点赞', '微笑']);
-      expect(images.map((image) => image.width), everyElement(48));
+      final face = find.bySemanticsIdentifier('tim.chat.message.face');
+      final mixed = find.bySemanticsIdentifier('tim.chat.message.mixed');
+      Finder images(Finder message) =>
+          find.descendant(of: message, matching: find.byType(Image));
+      expect(images(face), findsNWidgets(2));
+      expect(images(mixed), findsNWidgets(2));
+      expect(tester.getSize(images(face).first),
+          tester.getSize(images(mixed).first));
+      expect(tester.getSize(images(face).last),
+          tester.getSize(images(mixed).last));
       expect(
-          find.bySemanticsIdentifier('tim.chat.message.face'), findsOneWidget);
+        tester
+            .widgetList<Image>(images(face))
+            .map((image) => image.semanticLabel),
+        ['点赞', '微笑'],
+      );
+      final colors = SemanticColorScheme.of(tester.element(face));
+      final decoration = BoxDecoration(
+        color:
+            isSelf ? colors.bgColorBubbleOwn : colors.bgColorBubbleReciprocal,
+        borderRadius: BorderRadius.circular(13),
+      );
+      Finder bubble(Finder message) => find.descendant(
+            of: message,
+            matching: find.byWidgetPredicate((widget) =>
+                widget is Container && widget.decoration == decoration),
+          );
+      expect(bubble(face), findsOneWidget);
+      expect(bubble(mixed), findsOneWidget);
     }
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -80,7 +134,7 @@ void main() {
     });
     final image = (await tester.runAsync(() => createTestImage()))!;
     final pixelSize =
-        (AvatarSize.m.value * tester.view.devicePixelRatio).ceil();
+        (AvatarSize.s.value * tester.view.devicePixelRatio).ceil();
     final avatarKey = await ResizeImage.resizeIfNeeded(
       pixelSize,
       pixelSize,
@@ -142,14 +196,16 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('默认文字头像的名称保留群名片、好友备注和昵称的优先级', (tester) async {
+  testWidgets('默认文字头像优先采用群名片与个人昵称', (tester) async {
     final sender = MessageSenderInfo(
         userID: 'peer', nickname: '昵称', friendRemark: '备注', nameCard: '群名片');
-    for (final expected in ['群名片', '备注', '昵称', 'peer']) {
+    for (final expected in ['群名片', '昵称', 'peer']) {
       await mount(
           tester,
           MessageInfo(
             msgID: 'peer',
+            conversationType: ConversationType.group,
+            to: 'g',
             from: sender,
             messageType: MessageType.text,
             messagePayload: TextMessagePayload(text: '内容'),
@@ -159,8 +215,6 @@ void main() {
       switch (expected) {
         case '群名片':
           sender.nameCard = '';
-        case '备注':
-          sender.friendRemark = null;
         case '昵称':
           sender.nickname = '';
       }

@@ -13,6 +13,8 @@ void main() {
     expect(find.byType(Divider), findsNothing);
     expect(find.text('语音通话'), findsOneWidget);
     expect(find.text('视频通话'), findsOneWidget);
+    expect(find.byIcon(AppIcons.phone3), findsOneWidget);
+    expect(find.byIcon(AppIcons.cameraOn), findsOneWidget);
     expect(find.text('取消'), findsOneWidget);
     expect(tester.getSize(find.byType(CallSelectionSheet)).height, 152);
   });

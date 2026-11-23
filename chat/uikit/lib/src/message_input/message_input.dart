@@ -1,4 +1,6 @@
+import '../chat_display_name.dart';
 import 'package:tencent_cloud_chat_sdk/tencent_im_sdk_plugin.dart';
+import 'package:tencent_cloud_chat_sdk/enum/message_status.dart' as sdk_status;
 import 'mention/message_mentions.dart';
 import 'mention/mention_text_editing_controller.dart';
 import 'chat_media_sender.dart';
@@ -11,7 +13,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:app_core/app_core.dart';
 import 'package:app_ui/app_ui.dart'
-    show AppIcons, AppDialog, AppColorBuildContext, AppToast;
+    show
+        AppIcons,
+        AppDialog,
+        AppColorBuildContext,
+        AppToast,
+        AppUserAvatarScope;
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:atomic_x_core/impl/message/message_input_store_impl.dart';
 import 'package:atomic_x_core/impl/message/message_list_store_impl.dart';
@@ -72,6 +79,14 @@ export 'message_input_config.dart';
 /// - [文本]: 文本输入激活。显示键盘，左侧为麦克风图标。- [语音]: 语音录制模式。显示“按住说话”按钮，左侧为键盘图标。
 enum _InputMode { idle, text, voice }
 
+/// 深色占位使用三级灰，输入框的展开图标仍使用二级灰。
+Color _chatInputHintColor(BuildContext context) {
+  final colors = context.appColors;
+  return Theme.of(context).brightness == Brightness.dark
+      ? colors.textTertiary
+      : colors.textSecondary;
+}
+
 /// 聊天页消息输入组件，统一协调文字、富文本、媒体和语音入口。
 class MessageInput extends StatefulWidget {
   /// 当前输入和草稿所属的稳定会话标识。
@@ -98,6 +113,9 @@ class MessageInput extends StatefulWidget {
   /// 仅当前输入流程的本机成功发送事件，用于宿主证明原发送设备。
   final ValueChanged<MessageInfo>? onLocalMessageSent;
 
+  /// 展开富文本编辑器时通知宿主，同一次展开只触发一次。
+  final VoidCallback? onRichContentEditorOpened;
+
   const MessageInput({
     super.key,
     required this.conversationID,
@@ -107,6 +125,7 @@ class MessageInput extends StatefulWidget {
     this.connectionUnavailable = false,
     this.sendMuted = false,
     this.onLocalMessageSent,
+    this.onRichContentEditorOpened,
     this.replyConfig,
   });
 
@@ -126,6 +145,15 @@ class MessageInputState extends State<MessageInput>
   late ConversationListStore _conversationListStore;
   late MentionTextEditingController _textEditingController;
   final FocusNode _textEditingFocusNode = FocusNode();
+
+  /// 仅普通输入接收系统键盘时为真，展开编辑器或自定义面板各自处理布局。
+  bool get hasSystemInputFocus =>
+      _textEditingFocusNode.hasFocus &&
+      !_isRichContentEditorOpen &&
+      !_showEmojiPanel &&
+      !_showMorePanel;
+
+  /// 供独立挂载使用的表情面板，由输入工具栏统一发送。
   Widget stickerWidget = Container();
 
   late AppLocalizedText atomicLocale;
@@ -171,6 +199,8 @@ class MessageInputState extends State<MessageInput>
       const TextSelection.collapsed(offset: -1);
   late final TextInputFormatter _inlineFormatInputFormatter =
       activeMarkdownFormatInputFormatter(() => _activeInlineFormats);
+
+  /// 只记录默认更多面板的页码，用于绘制分页指示。
   int _morePanelPageIndex = 0;
   final GlobalKey<AudioRecordOverlayState> _recordOverlayKey = GlobalKey();
   final GlobalKey<VoiceRecordPreviewState> _voicePreviewKey = GlobalKey();
@@ -1124,60 +1154,6 @@ class MessageInputState extends State<MessageInput>
     );
   }
 
-  /// 将表情键盘退格交给当前输入区，普通输入仍保留提及和表情的原子删除。
-  void _onDeleteClick() {
-    if (_isRichContentEditorOpen) {
-      _richContentEditorKey.currentState?.deleteEmojiCharacter();
-      return;
-    }
-    final text = _textEditingController.text;
-    if (text.isEmpty) return;
-
-    final cursorPos = _textEditingController.selection.baseOffset;
-    final targetPos = cursorPos == -1 ? text.length : cursorPos;
-
-    // First check if we're deleting a mention (cursor at end or inside)
-    //
-    // 先检查是否在删除提及（光标在末尾或内部）
-    MentionInfo? mentionToDelete = _textEditingController.getMentionEndingAt(
-      targetPos,
-    );
-    mentionToDelete ??= _textEditingController.getMentionAt(targetPos);
-
-    if (mentionToDelete != null) {
-      // Delete the entire mention
-      //
-      // 删除整个提及
-      _textEditingController.isInternalUpdate = true;
-      final newText = text.substring(0, mentionToDelete.startIndex) +
-          text.substring(mentionToDelete.endIndex);
-      _textEditingController.mentionList.remove(mentionToDelete);
-
-      // Update positions of mentions after the removed one
-      //
-      // 更新被删除提及之后的提及位置
-      final removedLength = mentionToDelete.length;
-      for (final m in _textEditingController.mentionList) {
-        if (m.startIndex > mentionToDelete.startIndex) {
-          m.startIndex -= removedLength;
-        }
-      }
-
-      _textEditingController.value = TextEditingValue(
-        text: newText,
-        selection: TextSelection.collapsed(offset: mentionToDelete.startIndex),
-      );
-      _textEditingController.isInternalUpdate = false;
-      return;
-    }
-
-    _textEditingController.value = deleteMessageCharacterBefore(
-      _textEditingController.value.copyWith(
-        selection: TextSelection.collapsed(offset: targetPos),
-      ),
-    );
-  }
-
   /// 纯业务表情使用SDK表情消息，混合正文保留文字消息；表情令牌作为自定义数据透传。
   MessageInfo _createTextOrFaceMessage(String text) {
     final isFace = EmojiManager.isOnlyEmojis(text);
@@ -1269,7 +1245,7 @@ class MessageInputState extends State<MessageInput>
     });
   }
 
-  /// 在共享工具条上方展开富文本编辑器，保留已有选区和键盘状态。
+  /// 在共享工具条上方展开富文本编辑器，并通知宿主同步调整消息列表。
   void _openRichContentEditor() {
     if (_isRichContentEditorOpen || _richContentEditorBuilder != null) return;
     // 捕获展开前的选区和面板状态；只有 iOS 系统键盘已显示时才交接原生输入连接。
@@ -1292,6 +1268,8 @@ class MessageInputState extends State<MessageInput>
       _isRichContentEditorOpen = true;
       _keepNormalInputLayout = keepNormalInputLayout;
     });
+    // 展开可能沿用已显示的键盘，直接通知宿主在本次布局后回到最新消息。
+    widget.onRichContentEditorOpened?.call();
     // 工具条完成本帧布局后再建立覆盖层，确保编辑器底部精确贴合工具条顶部。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_isRichContentEditorOpen) return;
@@ -1701,6 +1679,7 @@ class MessageInputState extends State<MessageInput>
           defaultTargetPlatform == TargetPlatform.android,
       // 保留腾讯相册界面，确认时读取原件大小供占位和发送分流。
       includeSourceMetadata: canUploadLargeFiles,
+      iosInitialAlbum: AlbumPickerIosInitialAlbum.smartAlbumRecentlyAdded,
       maxOutputFileSizeInMB: canUploadLargeFiles
           ? AlbumPickerConfig.unrestrictedOutputFileSizeInMB
           : null,
@@ -2649,7 +2628,98 @@ class MessageInputState extends State<MessageInput>
     }
   }
 
+  /// 在同一原会话内送出卡片，绕开引用和草稿编辑状态。
+  Future<bool> _sendMoreCustomMessage(
+    MessageInfo message,
+    String conversation,
+    String? account,
+  ) async {
+    bool canSend() =>
+        mounted &&
+        !widget.connectionUnavailable &&
+        !widget.sendMuted &&
+        widget.conversationID == conversation &&
+        account != null &&
+        LoginStore.shared.loginState.loginUserInfo?.userID == account;
+    final payload = message.messagePayload;
+    if (!canSend() ||
+        message.messageType != MessageType.custom ||
+        payload is! CustomMessagePayload) {
+      return false;
+    }
+    final sdk = TencentImSDKPlugin.v2TIMManager.getMessageManager();
+    if (message.status == MessageStatus.sendSuccess) return true;
+
+    // 已分配消息 ID 时先核对 SDK 状态，未知结果不能转换成第二次新发。
+    if (message.msgID.isNotEmpty) {
+      final found = await sdk.findMessages(messageIDList: [message.msgID]);
+      final raw =
+          found.data?.where((item) => item.msgID == message.msgID).firstOrNull;
+      if (!canSend() ||
+          found.code != 0 ||
+          raw == null ||
+          'group_${raw.groupID}' != conversation ||
+          raw.sender != account) {
+        return false;
+      }
+      if (raw.status == sdk_status.MessageStatus.V2TIM_MSG_STATUS_SEND_SUCC) {
+        // SDK 已送达时只回填原消息状态，列表按同一消息 ID 更新。
+        message.status = MessageStatus.sendSuccess;
+        notificationCenter.post(
+          MessageSendNotifyKey.messageSendSuccess,
+          MessageSendEventData(conversationID: conversation, message: message),
+        );
+        return true;
+      }
+      if (raw.status != sdk_status.MessageStatus.V2TIM_MSG_STATUS_SEND_FAIL) {
+        return false;
+      }
+      // ignore: invalid_use_of_internal_member
+      message.rawMessage = raw;
+    } else {
+      if (message.status == MessageStatus.sending) return false;
+      final created = await sdk.createCustomMessage(
+        data: payload.customData,
+        desc: payload.description ?? '',
+        extension: payload.extensionInfo ?? '',
+      );
+      final raw = created.data?.messageInfo;
+      if (!canSend() || created.code != 0 || raw == null) return false;
+      // ignore: invalid_use_of_internal_member
+      message.rawMessage = raw;
+    }
+
+    // 使用原会话的发送通知，发送方列表和现有发送监听都能收到同一 SDK 消息。
+    message.needReadReceipt = widget.config.enableReadReceipt;
+    message.offlinePushInfo = _createOfflinePushInfo(message);
+    final input = _messageInputStore as MessageInputStoreImpl;
+    // ignore: invalid_use_of_internal_member
+    final result = await input.sendMessageInternal(message);
+    return result.isSuccess;
+  }
+
+  /// 宿主提供整屏内容时直接展示，其余会话沿用默认更多面板。
   Widget _buildMorePanelContent(SemanticColorScheme colorsTheme) {
+    final hostPanel = widget.config.morePanelBuilder;
+    final dividerColor = colorsTheme.textColorPrimary.withValues(alpha: 0.1);
+    if (hostPanel != null) {
+      // 固定发送动作所属的账号和会话，选人返回后仍按打开时的目标校验。
+      final conversation = widget.conversationID;
+      final account = LoginStore.shared.loginState.loginUserInfo?.userID;
+      return Container(
+        decoration: BoxDecoration(
+          color: colorsTheme.bgColorInput,
+          border: Border(top: BorderSide(color: dividerColor, width: 0.5)),
+        ),
+        child: hostPanel(
+          context,
+          (message) => _sendMoreCustomMessage(message, conversation, account),
+          collapseAllPanels,
+        ),
+      );
+    }
+
+    // 缺省配置只构建原有媒体和通话菜单。
     final List<_MorePanelItem> items = [];
 
     if (widget.config.isShowAlbum) {
@@ -2713,8 +2783,7 @@ class MessageInputState extends State<MessageInput>
 
     // Each page shows 2 rows × 4 columns = 8 items max
     const int itemsPerPage = 8;
-    final int pageCount =
-        items.isEmpty ? 0 : (items.length / itemsPerPage).ceil();
+    final pageCount = (items.length / itemsPerPage).ceil();
 
     return Container(
       color: colorsTheme.bgColorInput,
@@ -2722,7 +2791,7 @@ class MessageInputState extends State<MessageInput>
         children: [
           Container(
             height: 0.5,
-            color: colorsTheme.textColorPrimary.withValues(alpha: 0.1),
+            color: dividerColor,
           ),
           Expanded(
             child: pageCount == 0
@@ -2916,11 +2985,12 @@ class MessageInputState extends State<MessageInput>
   Widget _buildInput(BuildContext context) {
     _bottomPadding = MediaQuery.paddingOf(context).bottom;
     atomicLocale = AppLocalization.of(context);
+    final composerBackground = context.appColors.chatComposerBackground;
     if (widget.readOnly) {
       // 保留在线输入框和工具条的尺寸，屏蔽触摸、焦点和读屏操作。
       final colors = SemanticColorScheme.of(context);
       return ColoredBox(
-        color: colors.bgColorInput,
+        color: composerBackground,
         child: Padding(
           padding: EdgeInsets.only(bottom: _bottomPadding),
           child: Semantics(
@@ -2961,7 +3031,7 @@ class MessageInputState extends State<MessageInput>
                   : Duration.zero,
               curve: Curves.ease,
               clipBehavior: Clip.hardEdge,
-              decoration: BoxDecoration(color: colors.bgColorInput),
+              decoration: BoxDecoration(color: composerBackground),
               height: panelHeight,
               constraints: (showEmoji || _showMorePanel)
                   ? BoxConstraints(minHeight: panelHeight)
@@ -2972,15 +3042,17 @@ class MessageInputState extends State<MessageInput>
                         alignment: Alignment.topCenter,
                         minHeight: _activeKeyboardPanel?.height ?? 280,
                         maxHeight: _activeKeyboardPanel?.height ?? 280,
-                        child: EmojiPicker(
-                          onEmojiClick: _onEmojiClicked,
-                          onSendClick: _handleInputSend,
-                          onDeleteClick: _onDeleteClick,
-                        ),
+                        child: EmojiPicker(onEmojiClick: _onEmojiClicked),
                       ),
                     )
                   : _showMorePanel
-                      ? _buildMorePanelContent(colors)
+                      // 展开动画只改变裁剪高度，面板内容始终按目标高度布局。
+                      ? OverflowBox(
+                          alignment: Alignment.topCenter,
+                          minHeight: panelHeight,
+                          maxHeight: panelHeight,
+                          child: _buildMorePanelContent(colors),
+                        )
                       : Container(),
             ),
           ],
@@ -3016,12 +3088,9 @@ class MessageInputState extends State<MessageInput>
     return IgnorePointer(ignoring: widget.connectionUnavailable, child: input);
   }
 
+  /// 准备可独立挂载的表情面板，发送入口由输入工具栏提供。
   Future<bool> getEmojiPanelWidget() async {
-    stickerWidget = EmojiPicker(
-      onEmojiClick: _onEmojiClicked,
-      onSendClick: _handleInputSend,
-      onDeleteClick: _onDeleteClick,
-    );
+    stickerWidget = EmojiPicker(onEmojiClick: _onEmojiClicked);
     return true;
   }
 
@@ -3029,11 +3098,11 @@ class MessageInputState extends State<MessageInput>
   Widget _buildInputWidget(SemanticColorScheme colorsTheme) {
     final reply = widget.replyConfig == null ? null : _quotedMessage;
     return Container(
-      color: colorsTheme.bgColorInput,
+      color: context.appColors.chatComposerBackground,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 键盘已打开时让覆盖层盖住原输入行，保留聊天列表的可视范围和滚动位置。
+          // 键盘已打开时保留原输入行的占位，避免编辑器覆盖时改变消息列表高度。
           Offstage(
             key: const Key('message_input_normal_input_offstage'),
             offstage: _isRichContentEditorOpen && !_keepNormalInputLayout,
@@ -3116,7 +3185,6 @@ class MessageInputState extends State<MessageInput>
   /// 构建普通输入和展开编辑器共用同一状态与回调的工具条视图。
   Widget _buildSharedToolbar({required Key key}) {
     final richEditor = _richContentEditorKey.currentState;
-    final platform = Theme.of(context).platform;
     return RichContentInputToolbar(
       key: key,
       switcherKey: const Key('message_input_toolbar_switcher'),
@@ -3138,8 +3206,6 @@ class MessageInputState extends State<MessageInput>
                   ? _canSubmitRichContentDraft(_buildInlineRichContentDraft())
                   : _showSendButton),
       showKeyboard: _isEmojiPanelVisible,
-      showVideoAndFile: !_isRichContentEditorOpen ||
-          (platform != TargetPlatform.iOS && platform.name != 'ohos'),
       emojiTooltip: _isEmojiPanelVisible ? '显示键盘' : '表情',
       imageTooltip: _isRichContentEditorOpen ? '插入图片/视频' : atomicLocale.album,
       fileTooltip: _isRichContentEditorOpen ? '插入文件' : atomicLocale.file,
@@ -3166,6 +3232,12 @@ class MessageInputState extends State<MessageInput>
       // 展开态不发送独立文件，收起后恢复宿主配置的入口。
       onFile: !_isRichContentEditorOpen && widget.config.isShowFile
           ? _onPickFile
+          : null,
+      moreOpen: _showMorePanel,
+      onMore: !_isRichContentEditorOpen &&
+              widget.config.isShowMore &&
+              widget.config.morePanelBuilder != null
+          ? _toggleMorePanel
           : null,
       onShowFormatting: _isRichContentEditorOpen
           ? () => _richContentEditorKey.currentState?.showFormattingToolbar()
@@ -3309,6 +3381,22 @@ class MessageInputState extends State<MessageInput>
     }
   }
 
+  /// 收起当前输入法或表情面板，保留文字和引用以便从选人页返回后继续编辑。
+  void _toggleMorePanel() {
+    if (_showMorePanel) {
+      collapseAllPanels();
+      return;
+    }
+    _isSwitchingPanel = _textEditingFocusNode.hasFocus;
+    _textEditingFocusNode.unfocus();
+    _keyboardPanel?.clear();
+    setState(() {
+      _showEmojiPanel = false;
+      _showMorePanel = true;
+      _morePanelPageIndex = 0;
+    });
+  }
+
   /// 构建与文本输入区同色的按住说话按钮。
   Widget _buildHoldToTalkButton(SemanticColorScheme colorsTheme) {
     return Semantics(
@@ -3343,41 +3431,45 @@ class MessageInputState extends State<MessageInput>
 
   /// 构建空闲输入区；录音只由独立麦克风入口触发，避免与键盘焦点竞争。
   Widget _buildIdleInputArea(SemanticColorScheme colorsTheme) {
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          _showEmojiPanel = false;
-          _showMorePanel = false;
-          _inputMode = _InputMode.text;
-        });
-        // 文本框创建完成后再申请焦点，避免向已移除的输入连接发起键盘请求。
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            _textEditingFocusNode.requestFocus();
-          }
-        });
-      },
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 44),
-        decoration: BoxDecoration(
-          color: colorsTheme.bgColorOperate,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                '发送给 ${widget.conversationDisplayName ?? _conversationInfo?.title ?? widget.conversationID}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: FontScheme.caption1Regular.copyWith(
-                  color: colorsTheme.textColorSecondary,
+    return Semantics(
+      identifier: 'tim.input.text',
+      button: true,
+      child: GestureDetector(
+        onTap: () {
+          setState(() {
+            _showEmojiPanel = false;
+            _showMorePanel = false;
+            _inputMode = _InputMode.text;
+          });
+          // 文本框创建完成后再申请焦点，避免向已移除的输入连接发起键盘请求。
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              _textEditingFocusNode.requestFocus();
+            }
+          });
+        },
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 44),
+          decoration: BoxDecoration(
+            color: colorsTheme.bgColorOperate,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '发送给 ${widget.conversationDisplayName ?? _conversationInfo?.title ?? widget.conversationID}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: FontScheme.caption1Regular.copyWith(
+                    color: _chatInputHintColor(context),
+                  ),
                 ),
               ),
-            ),
-            _buildRichContentExpandButton(colorsTheme),
-          ],
+              _buildRichContentExpandButton(colorsTheme),
+            ],
+          ),
         ),
       ),
     );
@@ -3406,7 +3498,7 @@ class MessageInputState extends State<MessageInput>
       colorsTheme: colorsTheme,
       hintText: reply == null
           ? '发送给 ${widget.conversationDisplayName ?? _conversationInfo?.title ?? widget.conversationID}'
-          : '发送给${ChatUtil.getMessageSenderName(reply)}',
+          : '发送给${chatSenderDisplayName(context, reply)}',
       onExpand: reply == null ? _openRichContentEditor : null,
       compactReply: reply != null,
       onTap: () {
@@ -3456,9 +3548,11 @@ class MessageInputState extends State<MessageInput>
       ? _richContentEditorKey.currentState?.keyboardPanel ?? _keyboardPanel
       : _keyboardPanel;
 
-  /// 自定义面板与系统遮挡合计只占一份键盘区域，更多面板保留既有高度。
+  /// 更多面板按内容来源确定高度，键盘与系统遮挡共用同一区域。
   double _getBottomContainerHeight() {
-    if (_showMorePanel) return 280;
+    if (_showMorePanel) {
+      return widget.config.morePanelBuilder != null ? 155 : 280;
+    }
     final keyboard = _activeKeyboardPanel;
     return keyboard?.hasReservedSpace == true
         ? keyboard!.remainingHeight
@@ -3711,13 +3805,13 @@ class _MentionTextFieldState extends State<_MentionTextField> {
                               textStyle: style,
                             ),
                             decoration: InputDecoration(
-                              // 白色背景与圆角由父输入框承载，避免主题填充覆盖圆角。
+                              // 背景与圆角由父输入框承载，避免主题填充覆盖圆角。
                               filled: false,
                               isDense: true,
                               hintText: widget.hintText,
                               hintMaxLines: 1,
                               hintStyle: FontScheme.caption1Regular.copyWith(
-                                color: widget.colorsTheme.textColorSecondary,
+                                color: _chatInputHintColor(context),
                                 height: 1.5,
                               ),
                               border: InputBorder.none,

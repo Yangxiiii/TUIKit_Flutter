@@ -64,17 +64,22 @@ final class GroupAnnouncementMessage {
         return null;
       }
       // 新卡片可携带完整内容，旧卡片只带摘要。正文不可用时仍保留详情入口。
-      final preview =
-          _readSummary(content) ?? _readSummary(summary) ?? '公告内容暂无法显示';
+      final preview = formatSummary(
+        content is String ? content : null,
+        fallback: summary is String ? summary : null,
+      );
       return GroupAnnouncementMessage._(id, group, preview);
     } on FormatException {
       return null;
     }
   }
 
-  /// 复用聊天的内容块与摘要规则，为紧凑卡片保留正文和媒体类型。
-  static String? _readSummary(Object? value) {
-    if (value is! String) return null;
+  /// 将公告内容块整理为带媒体标记的纯文本，首选内容不可用时解析备用字段。
+  static String formatSummary(String? value, {String? fallback}) =>
+      _readSummary(value) ?? _readSummary(fallback) ?? '公告内容暂无法显示';
+
+  static String? _readSummary(String? value) {
+    if (value == null) return null;
     final text = value.trim();
     // 识别内容块数组，同时保留旧摘要中单独出现的「[图片]」等文本。
     final isStructured =

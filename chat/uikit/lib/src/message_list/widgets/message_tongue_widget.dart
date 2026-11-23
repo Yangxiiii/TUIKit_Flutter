@@ -63,15 +63,7 @@ class TongueState {
   }
 }
 
-/// A floating tongue widget displayed in the message list.
-/// Supports multiple display modes:
-/// 1. "Back to latest" - scroll back to bottom (bottom-right, double down arrow)
-/// 2. "x new messages" - new message count indicator (bottom-right, double down arrow)
-/// 3. "@mention" - at-mention navigation (bottom-right, double down arrow)
-/// 4. "x unread messages" - unread messages on enter (top-right, double up arrow)
-///
-/// 消息列表中显示的浮动小舌头控件。支持多种显示模式：1. “返回最新” - 滚动到底部（右下角，双下箭头） 2. “x 条新消息” - 新消息数量提示（右下角，双下箭头） 3. “@提到” -
-/// @提到导航（右下角，双下箭头） 4. “x 条未读消息” - 进入时未读消息（右上角，双上箭头）
+/// 绘制群提及、消息导航及宿主业务入口共用的悬浮提示按钮。
 class MessageTongueWidget extends StatelessWidget {
   /// 当前跳转方向、数量和加载状态，不在展示组件内推进消息游标。
   final TongueState tongueState;
@@ -88,6 +80,18 @@ class MessageTongueWidget extends StatelessWidget {
   /// 返回引用原位置时使用的文案。
   final String? backToQuoteText;
 
+  /// 宿主入口提供独立文案，不参与原生提及和未读导航状态。
+  final String? _actionText;
+
+  /// 宿主业务入口可用专属图标，默认导航仍按方向选双箭头。
+  final IconData? _leadingIcon;
+
+  /// 宿主业务入口的自动化标识，默认提及使用自身标识。
+  final String? _semanticsIdentifier;
+
+  /// 宿主业务入口可补充只供读屏说明的定位操作。
+  final String? _semanticsLabel;
+
   const MessageTongueWidget({
     super.key,
     required this.tongueState,
@@ -95,7 +99,27 @@ class MessageTongueWidget extends StatelessWidget {
     required this.backToLatestText,
     this.newMessageCountText,
     this.backToQuoteText,
-  });
+  })  : _actionText = null,
+        _leadingIcon = null,
+        _semanticsIdentifier = null,
+        _semanticsLabel = null;
+
+  /// 业务入口使用与群提及一致的高亮样式，定位动作仍由宿主处理。
+  const MessageTongueWidget.highlighted({
+    super.key,
+    required String text,
+    required this.onTap,
+    required IconData icon,
+    required String semanticsIdentifier,
+    required String semanticsLabel,
+  })  : tongueState = const TongueState(),
+        backToLatestText = '',
+        newMessageCountText = null,
+        backToQuoteText = null,
+        _actionText = text,
+        _leadingIcon = icon,
+        _semanticsIdentifier = semanticsIdentifier,
+        _semanticsLabel = semanticsLabel;
 
   /// Whether the arrow should point upward (for unread messages tongue at top)
   ///
@@ -104,19 +128,22 @@ class MessageTongueWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (tongueState.type == TongueType.none) {
+    if (_actionText == null && tongueState.type == TongueType.none) {
       return const SizedBox.shrink();
     }
 
     final colorsTheme = SemanticColorScheme.of(context);
-    final text = _getDisplayText();
+    final text = _actionText ?? _getDisplayText();
     final isMention = tongueState.type == TongueType.atMention;
-    final foreground = isMention
+    final isHighlighted = isMention || _actionText != null;
+    final foreground = isHighlighted
         ? context.appColors.onPrimary
         : colorsTheme.buttonColorPrimaryDefault;
 
     return Semantics(
-      identifier: isMention ? 'tim.groupMention.jump' : null,
+      identifier: _semanticsIdentifier ??
+          (isMention ? 'tim.groupMention.jump' : null),
+      label: _semanticsLabel,
       button: true,
       child: GestureDetector(
         onTap: tongueState.isLoading ? null : onTap,
@@ -124,7 +151,7 @@ class MessageTongueWidget extends StatelessWidget {
           // 数量提示沿用132宽设计基线，长文案仍可随可用空间扩展。
           constraints: BoxConstraints(
             minHeight: 44,
-            minWidth: isMention
+            minWidth: isHighlighted
                 ? 114
                 : tongueState.type == TongueType.newMessages ||
                         tongueState.type == TongueType.unreadMessages
@@ -133,7 +160,7 @@ class MessageTongueWidget extends StatelessWidget {
           ),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            color: isMention
+            color: isHighlighted
                 ? context.appColors.primary
                 : colorsTheme.bgColorOperate,
             borderRadius: BorderRadius.circular(22),
@@ -174,15 +201,9 @@ class MessageTongueWidget extends StatelessWidget {
     if (tongueState.isLoading) {
       return const CupertinoActivityIndicator(radius: 8);
     }
-    return _buildDoubleArrow(color);
-  }
-
-  /// 两种方向使用同源字体的双箭头，不改变各自跳转目标。
-  Widget _buildDoubleArrow(Color color) {
-    final icon =
-        _isUpDirection ? AppIcons.directionIcon2 : AppIcons.directionIcon;
     return Icon(
-      icon,
+      _leadingIcon ??
+          (_isUpDirection ? AppIcons.directionIcon2 : AppIcons.directionIcon),
       size: 16,
       color: color,
     );

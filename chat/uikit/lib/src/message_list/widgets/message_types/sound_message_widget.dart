@@ -14,7 +14,7 @@ import '../../utils/asr_display_manager.dart';
 import '../../utils/voice_message_media.dart';
 import '../message_actions_scope.dart';
 
-/// 展示语音气泡及单聊识别入口，播放状态由共享播放器协调。
+/// 群聊与单聊共用语音气泡和识别入口，播放状态由共享播放器协调。
 class SoundMessageWidget extends StatefulWidget {
   /// 腾讯消息模型，音频时长按秒读取，ASR沿用SDK缓存。
   final MessageInfo message;
@@ -34,13 +34,16 @@ class SoundMessageWidget extends StatefulWidget {
   /// 当前会话的SDK列表，作为同消息异步请求的作用域。
   final MessageListStore? messageListStore;
 
+  /// 表情回应跟随语音气泡，播放和转写状态仍由各自的入口处理。
+  final Widget? reactionBar;
+
   /// 只标记主气泡边界，不能包含识别附件以免回执和菜单锚点偏移。
   final GlobalKey? bubbleKey;
 
   /// 沿用宿主的回执、时间与合并转发展示配置。
   final MessageListConfigProtocol config;
 
-  /// 单聊按MasterGo展示，其他场景保留既有气泡布局。
+  /// 当前聊天窗口的会话标识，用于识别在线和离线语音所属的聊天类型。
   final String? conversationID;
 
   /// 与文字附件和消息菜单共用状态，避免重复维护转换及过期事实。
@@ -49,7 +52,7 @@ class SoundMessageWidget extends StatefulWidget {
   /// 点击转换时交给气泡统一动作入口，不在展示组件另起识别请求。
   final VoidCallback? onConvertToText;
 
-  /// 合并转发详情沿用原展示，不添加单聊动作入口。
+  /// 合并转发详情沿用紧凑布局，语音识别入口只在聊天窗口展示。
   final bool isInMergedDetailView;
 
   /// Optional override for bubble background color (used for highlight animation)
@@ -67,6 +70,7 @@ class SoundMessageWidget extends StatefulWidget {
     this.onLongPress,
     this.messageListStore,
     this.bubbleKey,
+    this.reactionBar,
     this.isInMergedDetailView = false,
     this.bubbleColor,
     this.conversationID,
@@ -95,6 +99,14 @@ class _SoundMessageWidgetState extends State<SoundMessageWidget>
   bool get _isC2C =>
       widget.conversationID?.startsWith('c2c_') == true ||
       widget.message.conversationType == ConversationType.c2c;
+
+  /// 两种聊天窗口采用同一主气泡，合并转发详情继续用原布局。
+  bool get _usesChatVoiceBubble =>
+      !widget.isInMergedDetailView &&
+      (_isC2C ||
+          widget.conversationID?.startsWith('group_') == true ||
+          widget.message.conversationType == ConversationType.group);
+
   bool get _isPlaying => _audioPlayer.isPlaying;
   Duration get _currentPosition =>
       Duration(milliseconds: _audioPlayer.getCurrentPosition());
@@ -129,7 +141,7 @@ class _SoundMessageWidgetState extends State<SoundMessageWidget>
       },
     ));
     // 确定性预览不触发SDK；在线会话从腾讯本地消息恢复播放标记。
-    if (_isC2C &&
+    if (_usesChatVoiceBubble &&
         !widget.isSelf &&
         LoginStore.shared.loginState.loginStatus == LoginStatus.logined) {
       final id = widget.message.msgID;
@@ -189,7 +201,7 @@ class _SoundMessageWidgetState extends State<SoundMessageWidget>
 
   @override
   Widget build(BuildContext context) {
-    if (_isC2C && !widget.isInMergedDetailView) {
+    if (_usesChatVoiceBubble) {
       return _buildVoiceMessage(context);
     }
     final colors = SemanticColorScheme.of(context);
@@ -234,6 +246,7 @@ class _SoundMessageWidgetState extends State<SoundMessageWidget>
               widget.isSelf ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
             _buildSoundContent(colors),
+            if (widget.reactionBar != null) widget.reactionBar!,
             if (statusAndTimeWidgets.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
@@ -325,34 +338,54 @@ class _SoundMessageWidgetState extends State<SoundMessageWidget>
           onLongPress: widget.onLongPress,
           child: Container(
             key: widget.bubbleKey,
-            width: width,
-            height: height,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            // 有回应时气泡可容纳胶囊，语音播放区保持原宽高。
+            constraints: BoxConstraints(minWidth: width),
             decoration: BoxDecoration(
                 color: widget.bubbleColor ??
                     (widget.isSelf
                         ? colors.chatOutgoingBubble
                         : colors.chatIncomingBubble),
                 borderRadius: BorderRadius.circular(12)),
-            child: Row(children: [
-              if (_isDownloading)
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: widget.isSelf
+                  ? CrossAxisAlignment.end
+                  : CrossAxisAlignment.start,
+              children: [
                 SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: colors.primary))
-              else
-                AnimatedOpacity(
-                    opacity: _isPlaying &&
-                            (_audioPlayer.getCurrentPosition() ~/ 250).isOdd
-                        ? .45
-                        : 1,
-                    duration: const Duration(milliseconds: 180),
-                    child: Icon(AppIcons.voice,
-                        size: 20, color: colors.textPrimary)),
-              const SizedBox(width: 8),
-              Text('$duration″', style: labelStyle),
-            ]),
+                  width: width,
+                  height: height,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      textDirection: widget.isSelf
+                          ? TextDirection.rtl
+                          : TextDirection.ltr,
+                      children: [
+                        if (_isDownloading)
+                          SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: colors.primary))
+                        else
+                          AnimatedOpacity(
+                              opacity: _isPlaying &&
+                                      (_audioPlayer.getCurrentPosition() ~/ 250).isOdd
+                                  ? .45
+                                  : 1,
+                              duration: const Duration(milliseconds: 180),
+                              child: Icon(AppIcons.voice,
+                                  size: 20, color: colors.textPrimary)),
+                        const SizedBox(width: 8),
+                        Text('$duration″', style: labelStyle),
+                      ],
+                    ),
+                  ),
+                ),
+                if (widget.reactionBar != null) widget.reactionBar!,
+              ],
+            ),
           ),
         ));
   }
@@ -366,6 +399,7 @@ class _SoundMessageWidgetState extends State<SoundMessageWidget>
     return SizedBox(
       width: 160,
       child: Row(
+        textDirection: widget.isSelf ? TextDirection.rtl : TextDirection.ltr,
         children: [
           Icon(
             widget.isSelf ? Icons.volume_up : Icons.volume_down,

@@ -1,13 +1,17 @@
+import 'package:flutter/widgets.dart';
+import '../chat_display_name.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import '../message_input/rich_content_draft.dart';
 import 'utils/rich_content_message.dart';
 
 /// 聊天提示和会话摘要共用身份事实，摘要按设计省去姓名后的空格。
-String chatMessageRecallText(MessageInfo message, {bool compact = false}) {
+String chatMessageRecallText(MessageInfo message,
+    {bool compact = false, BuildContext? context}) {
   if (message.isSentBySelf) return '你撤回了一条消息';
   final name = message.from.nickname;
-  final displayName =
-      name != null && name.isNotEmpty ? name : message.from.userID;
+  final displayName = context == null
+      ? (name?.isNotEmpty == true ? name : message.from.userID)
+      : chatSenderDisplayName(context, message);
   return '“$displayName”${compact ? '' : ' '}撤回了一条消息';
 }
 

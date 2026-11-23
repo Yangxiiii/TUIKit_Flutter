@@ -9,6 +9,7 @@ class ImagePicker {
   static Future<String?> editImage({required String imagePath}) =>
       AlbumPicker.editImage(imagePath: imagePath);
 
+  /// 打开原生选择器，未指定媒体类型时仅显示图片。
   static Future<void> pickImages({
     ImagePickerConfig? config,
     AlbumPickerTheme? theme,
@@ -29,6 +30,8 @@ class ImagePicker {
       compressQuality: config?.compressQuality,
       maxVideoDurationInSeconds: config?.maxVideoDurationInSeconds,
       maxOutputFileSizeInMB: config?.maxOutputFileSizeInMB,
+      iosInitialAlbum: config?.iosInitialAlbum,
+      preferRecentAlbum: config?.preferRecentAlbum ?? false,
     );
     return AlbumPicker.pickMedia(
       config: effectiveConfig,

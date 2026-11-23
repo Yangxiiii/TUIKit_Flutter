@@ -12,6 +12,8 @@ final class ChatMessageStickyConfig {
       required this.bannerBuilder,
       required this.onMessagesChanged,
       required this.onMessagesDeleted,
+      this.groupPinnedMessageIds = const {},
+      this.unpinGroupMessage,
       this.onInitialLoadFinished});
 
   /// 首屏消息请求结束后启动辅助查询；成功、空窗口和失败都会通知，不用于清未读。
@@ -19,6 +21,12 @@ final class ChatMessageStickyConfig {
 
   /// 提交置顶；返回null表示成功，否则由页面显示业务反馈。
   final Future<String?> Function(MessageInfo message) pin;
+
+  /// 腾讯已确认置顶的群消息，包含横幅之外的旧置顶。
+  final Set<String> groupPinnedMessageIds;
+
+  /// 取消菜单中的指定群置顶，返回错误提示时由页面展示。
+  final Future<String?> Function(MessageInfo message)? unpinGroupMessage;
 
   /// 宿主提供横幅并使用UIKit提供的定位回调，避免访问私有列表状态。
   final Widget Function(BuildContext context, void Function(MessageInfo) locate)

@@ -76,3 +76,5 @@ export 'src/third_party/extended_text/extended_text.dart' show ExtendedText;
 // 群设置由宿主定制，邀请入口仍复用 UIKit。
 export 'src/chat_setting/pages/group_add_member.dart' show GroupAddMember;
 export 'src/third_party/lpinyin/lpinyin.dart' show PinyinHelper;
+
+export 'src/chat_display_name.dart';

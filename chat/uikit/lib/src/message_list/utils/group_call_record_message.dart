@@ -1,4 +1,5 @@
 import 'package:app_api/app_api_models.dart';
+import 'package:app_core/app_core.dart' show formatCallDuration;
 import 'package:atomic_x_core/atomicxcore.dart';
 
 /// 校验个人通话结果的发送身份和会话范围，并合并同场各端报告。
@@ -124,11 +125,7 @@ abstract final class GroupCallRecordMessage {
     final outcome = group && !own
         ? record.outcomesByUserId[viewerId] ?? record.outcome
         : record.outcome;
-    final seconds = record.durationSeconds;
-    final minutes = '${(seconds ~/ 60 % 60).toString().padLeft(2, '0')}:'
-        '${(seconds % 60).toString().padLeft(2, '0')}';
-    final time = seconds < 3600 ? minutes
-        : '${(seconds ~/ 3600).toString().padLeft(2, '0')}:$minutes';
+    final time = formatCallDuration(record.durationSeconds);
     return switch (outcome) {
       GroupCallRecordOutcome.cancelled => caller ? '已取消' : '对方已取消',
       GroupCallRecordOutcome.unanswered => caller ? '无人接听' : '未接听',

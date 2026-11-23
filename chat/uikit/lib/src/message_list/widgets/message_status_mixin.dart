@@ -194,13 +194,15 @@ mixin MessageStatusMixin {
     if (!isGroup) {
       // 发送成功只是展示回执的前提，小勾必须随对方阅读回执变化。
       final isRead = message.readReceiptInfo?.isPeerRead == true;
-      return Icon(
-        isRead ? AppIcons.read : AppIcons.unread,
-        size: 18,
-        color: isRead
-            ? colorsTheme.textColorSuccess
-            : colorsTheme.textColorSecondary,
-        semanticLabel: isRead ? locale.groupReadBy : locale.groupDeliveredTo,
+      return Builder(
+        builder: (context) => Icon(
+          isRead ? AppIcons.read : AppIcons.unread,
+          size: 18,
+          color: isRead
+              ? context.appColors.groupReadReceipt
+              : colorsTheme.textColorSecondary,
+          semanticLabel: isRead ? locale.groupReadBy : locale.groupDeliveredTo,
+        ),
       );
     }
 

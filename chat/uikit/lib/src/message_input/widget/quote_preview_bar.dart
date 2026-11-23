@@ -1,3 +1,4 @@
+import '../../chat_display_name.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/big_file_message.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:app_ui/app_ui.dart' show AppIcons, AppColorBuildContext;
@@ -10,7 +11,10 @@ import '../../message_list/utils/message_utils.dart';
 
 /// 引用预览栏。单聊回复在输入行上方展示单行摘要，原生引用保留媒体预览。
 class QuotePreviewBar extends StatelessWidget {
+  /// 用户当前选择回复的原消息。
   final MessageInfo quotedMessage;
+
+  /// 清除输入区当前引用，保留已经输入的正文。
   final VoidCallback onClose;
 
   /// 单聊回复的摘要位于共享输入卡片内，旧引用仍展示对应媒体预览。
@@ -27,13 +31,13 @@ class QuotePreviewBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = SemanticColorScheme.of(context);
     final locale = AppLocalization.of(context);
-    final senderName = ChatUtil.getMessageSenderName(quotedMessage);
+    final senderName = chatSenderDisplayName(context, quotedMessage);
+    final appColors = context.appColors;
 
     if (compactReply) {
-      final appColors = context.appColors;
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 6),
-        height: 32,
+        constraints: const BoxConstraints(minHeight: 32),
         decoration: BoxDecoration(
           color: appColors.referenceBackground,
           borderRadius: BorderRadius.circular(4),
@@ -60,7 +64,9 @@ class QuotePreviewBar extends StatelessWidget {
                 '$senderName：${MessageUtil.getMessageAbstract(quotedMessage, context)}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12, color: appColors.textSecondary),
+                style: FontScheme.caption2Regular.copyWith(
+                  color: appColors.chatMessageSecondary,
+                ),
               ),
             ),
           ],
@@ -84,7 +90,8 @@ class QuotePreviewBar extends StatelessWidget {
           //
           // 内容区 - 单行：“发送者：内容”
           Expanded(
-            child: _buildSingleLineContent(colors, locale, senderName),
+            child: _buildSingleLineContent(
+                colors, locale, senderName, appColors.chatMessageSecondary),
           ),
           // Thumbnail (for image/video)
           //
@@ -107,12 +114,10 @@ class QuotePreviewBar extends StatelessWidget {
     );
   }
 
-  Widget _buildSingleLineContent(
-      SemanticColorScheme colors, AppLocalizedText locale, String senderName) {
+  Widget _buildSingleLineContent(SemanticColorScheme colors,
+      AppLocalizedText locale, String senderName, Color foreground) {
     final payload = quotedMessage.messagePayload;
-    final textStyle = FontScheme.caption2Regular.copyWith(
-      color: colors.textColorSecondary,
-    );
+    final textStyle = FontScheme.caption2Regular.copyWith(color: foreground);
     final prefix = senderName.isNotEmpty ? '$senderName：' : '';
 
     // Audio and file use Icon prefix

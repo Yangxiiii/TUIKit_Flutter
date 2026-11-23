@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:app_ui/app_ui.dart' show AppColorBuildContext;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -26,8 +27,10 @@ String _encode(
       'data': data,
     });
 
-MessageInfo _custom(String id, String data) => MessageInfo(
+MessageInfo _custom(String id, String data, {MessageSenderInfo? from}) =>
+    MessageInfo(
       msgID: id,
+      from: from,
       messageType: MessageType.custom,
       messagePayload: CustomMessagePayload(customData: data),
     );
@@ -489,40 +492,76 @@ void main() {
     );
   });
 
-  testWidgets('聊天和摘要使用同一提示文案，系统行不响应多选', (tester) async {
+  testWidgets('欢迎语居中并强调群名，摘要省略投递账号，系统行不响应多选', (tester) async {
     final message = _custom(
       'welcome',
       _encode('group.welcome', {
-        'group': {'groupId': 'group-a', 'nameSnapshot': '测试群'},
-        'member': _member,
+        'group': {'groupId': 'test', 'nameSnapshot': '再遇欢大厅'},
+        'member': {'userId': 'u002'},
+        'text': '欢迎加入再遇欢大厅群组',
       }),
+      from: MessageSenderInfo(userID: 'system', nickname: '投递账号'),
     );
-    String? preview;
+    const welcomeText = '欢迎加入 再遇欢大厅 群组';
     var selections = 0;
     await tester.pumpWidget(MaterialApp(
-      home: Builder(
-        builder: (context) {
-          preview = MessageUtil.getMessageAbstract(message, context);
-          return MessageItem(
-            message: message,
-            conversationID: 'group_test',
-            maxWidth: 360,
-            config: ChatMessageListConfig(),
-            messageListStore: null,
-            isHighlighted: false,
-            isMultiSelectMode: true,
-            onToggleSelection: () => selections++,
-          );
-        },
+      home: Scaffold(
+        body: Column(
+          children: [
+            MessageItem(
+              message: message,
+              conversationID: 'group_test',
+              isGroup: true,
+              maxWidth: 360,
+              config: const ChatMessageListConfig(),
+              messageListStore: null,
+              isHighlighted: false,
+              isMultiSelectMode: true,
+              onToggleSelection: () => selections++,
+            ),
+            ConversationItem(
+              conversation: ConversationInfo(
+                conversationID: 'group_test',
+                type: ConversationType.group,
+                lastMessage: message,
+              ),
+              contentBuilder: (_, subtitle) => subtitle,
+              config: const ChatConversationActionConfig(),
+            ),
+          ],
+        ),
       ),
     ));
-    final notice = find.byType(SystemMessageWidget);
-    expect(preview, '欢迎加入 测试群 群组');
+    final messageRow = find.byType(MessageItem);
+    final welcome = find.descendant(
+      of: messageRow,
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is Text && widget.textSpan?.toPlainText() == welcomeText,
+      ),
+    );
+    final paragraph = tester.widget<Text>(welcome);
+    final colors = tester.element(welcome).appColors;
+    final spans = (paragraph.textSpan! as TextSpan).children!.cast<TextSpan>();
+    expect(paragraph.textAlign, TextAlign.center);
+    expect(tester.getCenter(welcome).dx, tester.getCenter(messageRow).dx);
+    expect(paragraph.style!.color, colors.textSecondary);
+    expect(spans.map((span) => span.text), ['欢迎加入 ', '再遇欢大厅', ' 群组']);
+    expect(spans[1].style!.color, colors.chatMention);
+    expect(spans[1].recognizer, isNull);
+    expect(find.byType(SystemMessageWidget), findsNothing);
     expect(
-      find.descendant(of: notice, matching: find.text(preview!)),
+      MessageUtil.getMessageAbstract(message, tester.element(welcome)),
+      welcomeText,
+    );
+    expect(
+      find.descendant(
+        of: find.byType(ConversationItem),
+        matching: find.text(welcomeText),
+      ),
       findsOneWidget,
     );
-    await tester.tap(find.text(preview!), warnIfMissed: false);
+    await tester.tap(welcome, warnIfMissed: false);
     expect(selections, 0);
   });
 
@@ -604,6 +643,7 @@ void main() {
 
   test('仅接受当前版本和必填字段完整的提示', () {
     final emptyDescription = {'operator': _operator, 'newDescription': ''};
+    const group = {'groupId': 'test', 'nameSnapshot': '测试群'};
     expect(
       ConversationNotice.tryParse(
         _encode('group.description_changed', emptyDescription),
@@ -614,6 +654,17 @@ void main() {
       '{',
       _encode('group.description_changed', {'operator': _operator}),
       _encode('group.members_joined', {'members': []}),
+      _encode('group.member_left', {
+        'member': {'userId': 'u002'},
+      }),
+      _encode('group.welcome', {
+        'group': group,
+        'member': {'userId': ' '},
+      }),
+      _encode('group.welcome', {
+        'group': {'groupId': 'test'},
+        'member': _member,
+      }),
       _encode('group.unknown', emptyDescription),
       _encode('group.description_changed', emptyDescription, version: 2),
       _encode('group.description_changed', emptyDescription,

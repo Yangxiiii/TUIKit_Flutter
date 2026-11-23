@@ -64,12 +64,14 @@ class ImageViewer {
     return '';
   }
 
-  /// 普通页面使用透明路由，全局Sheet没有Navigator时叠加独立的全屏预览。
+  /// 打开全屏预览并在关闭后返回。可分页会话允许越界滑动请求历史。
   static Future<void> view(
     BuildContext context, {
     required List<ImageElement> imageElements,
     required int initialIndex,
     required EventHandler onEventTriggered,
+    Stream<List<ImageElement>>? imageUpdates,
+    bool loadMoreOnOverscroll = false,
   }) async {
     if (imageElements.isEmpty) return;
     final navigator = Navigator.maybeOf(context);
@@ -87,21 +89,25 @@ class ImageViewer {
             imageElements: imageElements,
             initialIndex: initialIndex,
             onEventTriggered: onEventTriggered,
+            imageUpdates: imageUpdates,
+            loadMoreOnOverscroll: loadMoreOnOverscroll,
             onClose: AppDialog.dismiss,
           ),
         ),
       );
       return;
     }
-    // 图片预览依赖透明 Route 叠加在当前页面之上，因此保留 Overlay 导航。
-    navigator.push(
-      PageRouteBuilder(
+    // 路由关闭后再释放消息查看器，保证预览期间可以继续加载媒体。
+    await navigator.push<void>(
+      PageRouteBuilder<void>(
         opaque: false,
         pageBuilder: (context, animation, secondaryAnimation) =>
             ImageViewerWidget(
           imageElements: imageElements,
           initialIndex: initialIndex,
           onEventTriggered: onEventTriggered,
+          imageUpdates: imageUpdates,
+          loadMoreOnOverscroll: loadMoreOnOverscroll,
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(

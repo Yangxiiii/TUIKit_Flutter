@@ -111,14 +111,35 @@ void main() {
     expect(images, hasLength(1));
     expect(images.single.actualText, '[ZDEmoji_Smile]');
     expect(images.single.start, 1);
+    expect(images.single.width, 22);
+    final display = ChatSpecialTextSpanBuilder(
+      onTapUrl: (_) {},
+      colorScheme: SemanticColorScheme.of(context),
+      spaceMessageEmoji: true,
+    );
+    final spaced = display
+        .build('甲[ZDEmoji_Like][ZDEmoji_Smile]乙')
+        .children!
+        .whereType<ImageSpan>()
+        .toList();
+    expect(spaced.map((span) => (span.child as Container).padding), [
+      const EdgeInsets.only(left: 2, right: 2),
+      const EdgeInsets.only(right: 2),
+    ]);
+    final adjacent = display
+        .build('[ZDEmoji_Like][ZDEmoji_Smile]')
+        .children!
+        .whereType<ImageSpan>();
+    expect(adjacent.map((span) => span.width), [24, 22]);
     expect(editor.toPlainText(), contains('[TUIEmoji_Smile][ZDEmoji_Unknown]'));
     expect(EmojiManager.createLocalizedStringFromEmojiCodes(context, source),
         '甲[微笑]乙[TUIEmoji_Smile][ZDEmoji_Unknown]');
     expect(EmojiManager.findEmojiKeyListFromText('$source😀'),
         ['[ZDEmoji_Smile]', '😀']);
     final spans = EmojiManager.buildInlineSpans(source);
-    final image = (spans.whereType<WidgetSpan>().single.child as Image).image
-        as AssetImage;
+    final padded = spans.whereType<WidgetSpan>().single.child as Padding;
+    expect(padded.padding, const EdgeInsets.symmetric(horizontal: 2));
+    final image = (padded.child as Image).image as AssetImage;
     expect(image.package, 'feature_tim');
     expect(image.assetName, endsWith('zd_emoji_smile.png'));
     expect(RecentEmojiManager.getAllEmojis(context).map((e) => e.name),

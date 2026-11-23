@@ -11,6 +11,7 @@ final class RichContentBody extends StatelessWidget {
     this.config = const ChatMessageListConfig(),
   })  : standalone = true,
         message = null,
+        _conversationMedia = null,
         isSelf = false,
         receipt = null,
         localPreview = false,
@@ -22,12 +23,18 @@ final class RichContentBody extends StatelessWidget {
     required this.textStyle,
     required this.maxMediaWidth,
     required this.message,
+    required ({
+      String conversationId,
+      List<MessageInfo>? presetMessages,
+      ChatOlderMessagesLoader? loadOlderMedia,
+    })? conversationMedia,
     required this.config,
     required this.isSelf,
     required this.receipt,
     required this.localPreview,
     required double mediaRadius,
   })  : standalone = false,
+        _conversationMedia = conversationMedia,
         _mediaRadius = mediaRadius,
         _standaloneSemantics = null;
 
@@ -42,6 +49,13 @@ final class RichContentBody extends StatelessWidget {
 
   /// 聊天消息提供提及位置和媒体标识；公告正文没有消息上下文。
   final MessageInfo? message;
+
+  /// 聊天媒体使用当前会话范围，独立正文只展示自身附件。
+  final ({
+    String conversationId,
+    List<MessageInfo>? presetMessages,
+    ChatOlderMessagesLoader? loadOlderMedia,
+  })? _conversationMedia;
 
   /// 沿用宿主的缩略图、下载及提及处理。
   final MessageListConfigProtocol config;
@@ -72,6 +86,7 @@ final class RichContentBody extends StatelessWidget {
     final receiptIndex = receipt == null
         ? -1
         : content.blocks.lastIndexWhere((block) => block is RichTextBlock);
+    final fileOccurrences = <int, int>{};
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -91,14 +106,7 @@ final class RichContentBody extends StatelessWidget {
                 width,
                 height,
                 colors,
-                localPreview
-                    ? null
-                    : () => showRichContentMediaViewer(
-                          context,
-                          content,
-                          index,
-                          downloadVideo: config.fileDownloader,
-                        ),
+                localPreview ? null : () => _openMedia(context, index),
                 localPreview: localPreview,
               ),
             RichFileBlock(
@@ -116,25 +124,42 @@ final class RichContentBody extends StatelessWidget {
                 thumbnailUrl,
                 width,
                 height,
-                localPreview
-                    ? null
-                    : () => showRichContentMediaViewer(
-                          context,
-                          content,
-                          index,
-                          downloadVideo: config.fileDownloader,
-                        ),
+                localPreview ? null : () => _openMedia(context, index),
                 localPreview: localPreview,
                 videoDuration: videoDuration,
               ),
-            RichFileBlock(:final url, :final name, :final size) => _buildFile(
-                url, name, size, foreground, colors,
-                localPreview: localPreview),
+            RichFileBlock file =>
+              _buildFile(file, foreground, colors, fileOccurrences),
           },
         ],
         if (receipt != null && receiptIndex < 0) receipt,
       ],
     );
+  }
+
+  /// 从点中的块打开会话媒体，独立正文保留自己的附件范围。
+  Future<void> _openMedia(BuildContext context, int index) async {
+    final media = _conversationMedia;
+    final source = message;
+    if (media == null || source == null) {
+      showRichContentMediaViewer(context, content, index,
+          downloadVideo: config.fileDownloader);
+      return;
+    }
+    final manager = ImageViewerManager(
+      conversationID: media.conversationId,
+      currentMessage: source,
+      context: context,
+      presetMediaMessages: media.presetMessages,
+      hiddenMessageIDs: config.hiddenMessageIDs,
+      downloadRichVideo: config.fileDownloader,
+      loadOlderMedia: media.loadOlderMedia,
+    );
+    try {
+      await manager.showRichContent(context, content, index);
+    } finally {
+      manager.dispose();
+    }
   }
 
   /// 聊天编辑器用空行分隔标题和同一块正文，只放大标题所在段落。
@@ -305,20 +330,47 @@ final class RichContentBody extends StatelessWidget {
     );
   }
 
-  /// 普通文件沿用附件卡片，视频由共用封面组件展示，点击时打开协议 URL。
+  /// 聊天附件复用独立文件卡片和会话下载，公告中的外链继续交给系统打开。
   Widget _buildFile(
-    String url,
-    String name,
-    int size,
+    RichFileBlock file,
     Color foreground,
-    SemanticColorScheme colors, {
-    bool localPreview = false,
-  }) {
+    SemanticColorScheme colors,
+    Map<int, int> fileOccurrences,
+  ) {
+    final source = message;
+    if (source == null) {
+      return _buildAnnouncementFile(file, foreground, colors);
+    }
+
+    // 仅暴露地址散列，并用相同散列的出现次数区分一条消息中重复插入的附件。
+    final hash = file.url.hashCode;
+    final occurrence =
+        fileOccurrences.update(hash, (count) => count + 1, ifAbsent: () => 1);
+    final identifier = '$_semanticsPrefix.file.$hash.$occurrence';
+    return FileMessageWidget(
+      key: ValueKey((identifier, file.url, file.name, file.size)),
+      message: source,
+      isSelf: isSelf,
+      maxWidth: _mediaWidth,
+      config: config,
+      attachment: (
+        file: BigFileMessage(url: file.url, name: file.name, size: file.size),
+        semanticsIdentifier: identifier,
+        localPreview: localPreview,
+      ),
+    );
+  }
+
+  /// 独立公告没有聊天消息上下文，保留原有附件布局与打开方式。
+  Widget _buildAnnouncementFile(
+    RichFileBlock file,
+    Color foreground,
+    SemanticColorScheme colors,
+  ) {
     return InkWell(
-      onTap: localPreview
-          ? null
-          : () =>
-              launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
+      // 公告未接入会话文件服务，仍把已校验的远端地址交给系统处理。
+      onTap: () =>
+          launchUrl(Uri.parse(file.url), mode: LaunchMode.externalApplication),
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
@@ -330,6 +382,7 @@ final class RichContentBody extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // 公告附件沿用通用标识，文件名和大小在剩余宽度内展示。
             Container(
               width: 40,
               height: 40,
@@ -349,7 +402,7 @@ final class RichContentBody extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    name,
+                    file.name,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style:
@@ -357,7 +410,7 @@ final class RichContentBody extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    _formatFileSize(size),
+                    formatChatFileSize(file.size),
                     style: FontScheme.caption3Regular.copyWith(
                       color: isSelf
                           ? colors.textColorAntiSecondary
@@ -371,15 +424,5 @@ final class RichContentBody extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  /// 与普通文件气泡保持相同的文件大小展示单位。
-  String _formatFileSize(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    }
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 }

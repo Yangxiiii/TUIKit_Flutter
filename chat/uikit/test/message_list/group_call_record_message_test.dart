@@ -63,6 +63,9 @@ void main() {
     expect(GroupCallRecordMessage.content(remoteData, 'peer'), '对方已结束通话');
     final ownData = GroupCallRecordMessage.fromMessage(own2, 'peer')!;
     expect(GroupCallRecordMessage.content(ownData, 'peer'), '通话时长 00:20');
+    final capped = GroupCallRecordMessage.fromMessage(
+        _message('capped', 'peer', group: 'group', seconds: 3601), 'peer')!;
+    expect(GroupCallRecordMessage.content(capped, 'peer'), '通话时长 1:00:00');
     final text = MessageInfo(msgID: 'text', messageType: MessageType.text);
     expect(
         GroupCallRecordMessage.visibleMessages([own1, text, own2], 'peer')

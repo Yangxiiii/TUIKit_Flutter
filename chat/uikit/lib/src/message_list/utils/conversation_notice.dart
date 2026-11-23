@@ -55,6 +55,16 @@ final class ConversationNotice {
   /// 邀请通知沿用成员变动样式，受众仍由该消息的投递范围决定。
   bool get isGroupInvitation => type == 'group.members_invited';
 
+  /// 欢迎语正文与摘要共用文案，聊天行只强调事件中的群名快照。
+  ({String prefix, String groupName, String suffix})? get groupWelcomeParts {
+    if (type != 'group.welcome') return null;
+    return (
+      prefix: '欢迎加入 ',
+      groupName: (_data['group'] as Map)['nameSnapshot'] as String,
+      suffix: ' 群组',
+    );
+  }
+
   /// 管理员身份变更面向全群，不受退群通知的展示开关限制。
   bool get isGroupAdminChange => type == _adminAdded || type == _adminRemoved;
 
@@ -273,6 +283,7 @@ final class ConversationNotice {
     }
     final occurredAt = DateTime.tryParse(time);
     if (occurredAt == null) return null;
+    final member = data['member'];
     final valid = switch (type) {
       'message.recalled' ||
       'message.pinned' ||
@@ -289,9 +300,11 @@ final class ConversationNotice {
       _adminRemoved =>
         _person(data['operator']) && _members(data['members']),
       'group.members_joined' => _members(data['members']),
-      'group.member_left' => _person(data['member']),
-      'group.welcome' =>
-        _named(data['group'], 'groupId') && _person(data['member']),
+      'group.member_left' => _person(member),
+      // 欢迎语只显示群名，兼容服务端仅提供成员 ID 的载荷。
+      'group.welcome' => _named(data['group'], 'groupId') &&
+          member is Map &&
+          _nonEmpty(member['userId']),
       'group.description_changed' =>
         _person(data['operator']) && data['newDescription'] is String,
       _ => false,
@@ -320,8 +333,13 @@ final class ConversationNotice {
           ? '$operator 清空了群描述'
           : '$operator 更新了群描述：$description';
 
-  /// 成员类提示按账号称呼本人，群资料变更沿用操作人的姓名快照。
+  /// 成员类提示按账号称呼本人，资料变更和欢迎语使用事件中的名称快照。
   String textFor(String? viewerId) {
+    final welcome = groupWelcomeParts;
+    if (welcome != null) {
+      return '${welcome.prefix}${welcome.groupName}${welcome.suffix}';
+    }
+
     String name(Map user) =>
         user['userId'] == viewerId ? '你' : user['nameSnapshot'] as String;
     String person(String key) => name(_data[key] as Map);
@@ -350,7 +368,6 @@ final class ConversationNotice {
       _adminAdded ||
       _adminRemoved =>
         groupMemberParts(viewerId: viewerId).map((part) => part.text).join(),
-      'group.welcome' => '欢迎加入 ${(_data['group'] as Map)['nameSnapshot']} 群组',
       'group.description_changed' => groupDescriptionText(
           descriptionOperator()!.name,
           _data['newDescription'] as String,

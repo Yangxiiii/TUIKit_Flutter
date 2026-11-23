@@ -7,7 +7,7 @@ import 'package:tencent_chat_uikit/src/third_party/extended_text/extended_text.d
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
-/// 在聊天输入框中统一渲染表情、链接和 Markdown 编辑样式。
+/// 为聊天输入框和消息正文渲染表情、链接和 Markdown。
 ///
 /// 显示样式不改变底层原始文本，确保光标位置、草稿和发送内容仍使用同一份 Markdown。
 class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
@@ -27,10 +27,14 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
   /// 编辑区已选提及的 UTF-16 起止范围，用于叠加蓝色而不改写原文。
   final Map<int, int> mentionRanges;
 
+  /// 消息正文在表情和相邻内容之间留出 2 像素，编辑框沿用原有宽度。
+  final bool spaceMessageEmoji;
+
   ChatSpecialTextSpanBuilder({
     this.mentionRanges = const {},
     this.showAtBackground = false,
     this.mapMarkdownMarkers = false,
+    this.spaceMessageEmoji = false,
     required this.onTapUrl,
     required this.colorScheme,
   });
@@ -163,7 +167,17 @@ class ChatSpecialTextSpanBuilder extends SpecialTextSpanBuilder {
       }
       offset = end + token.endFlag.length;
       token.appendContent(data.substring(match.end, offset));
-      children.add(token.finishText());
+      if (spaceMessageEmoji && token is EmojiText) {
+        // 相邻表情只由前一个表情留间距；令牌的原文偏移保持不变。
+        children.add(token.finishText(
+          margin: EdgeInsets.only(
+            left: children.isNotEmpty && children.last is! ImageSpan ? 2 : 0,
+            right: offset < data.length ? 2 : 0,
+          ),
+        ));
+      } else {
+        children.add(token.finishText());
+      }
     }
     if (offset < data.length) {
       children.add(TextSpan(text: data.substring(offset), style: textStyle));
@@ -380,7 +394,7 @@ class EmojiText extends SpecialText {
       : super(EmojiText.flag, ']', textStyle);
 
   @override
-  InlineSpan finishText() {
+  InlineSpan finishText({EdgeInsets margin = EdgeInsets.zero}) {
     final String key = toString();
     final emoji = EmojiManager.getEmoji(key);
     // 未知令牌可能来自其他客户端，保留原文以避免空路径图片和错误的整项删除。
@@ -391,8 +405,9 @@ class EmojiText extends SpecialText {
       actualText: key,
       imageWidth: 22,
       imageHeight: 22,
+      semanticLabel: emoji.label,
       start: start!,
-      margin: const EdgeInsets.all(0),
+      margin: margin,
     );
   }
 }

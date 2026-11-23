@@ -47,7 +47,7 @@ class CallMessageWidget extends StatelessWidget {
   /// 合并详情中使用只读消息展示配置。
   final bool isInMergedDetailView;
 
-  /// 点击单聊记录时传递对端用户标识及原媒体类型。
+  /// 点击单聊记录时传递对端用户标识及原媒体类型，缺省时仅展示记录。
   final void Function(String userID, bool isVideoCall)? onCallMessageClick;
 
   /// 离线预览可显式提供查看账号；生产默认读取当前登录账号。
@@ -75,6 +75,7 @@ class CallMessageWidget extends StatelessWidget {
       CallProtocolType.lineBusy
     ].contains(provider.protocolType);
     final openGroupCall = config.onGroupCallBubbleTap;
+    final redial = onCallMessageClick;
     final accepted = config.acceptedCallAttempt;
     final attempt = provider.attemptId;
     return Semantics(
@@ -90,16 +91,18 @@ class CallMessageWidget extends StatelessWidget {
         isInMergedDetailView: isInMergedDetailView,
         onTap: group
             ? (openGroupCall == null ? null : () => openGroupCall(context))
-            : provider.isTemporaryMultiParty
+            : provider.isTemporaryMultiParty || redial == null
                 ? null
                 : () {
                     // 单聊旧记录继续向实际对端回拨。
                     final userId =
                         message.isSentBySelf ? message.to : message.from.userID;
-                    if (userId.isNotEmpty) onCallMessageClick?.call(userId, isVideo);
+                    if (userId.isNotEmpty) redial(userId, isVideo);
                   },
         contentBuilder: (style) => Row(
           mainAxisSize: MainAxisSize.min,
+          textDirection:
+              isSelf ? TextDirection.rtl : Directionality.of(context),
           children: [
             Icon(
                 isVideo
@@ -114,7 +117,7 @@ class CallMessageWidget extends StatelessWidget {
                   : ValueListenableBuilder<String?>(
                       valueListenable: accepted,
                       builder: (_, confirmed, __) => Text(
-                        confirmed == attempt ? '已接听' : provider.content,
+                        provider.contentForAcceptedAttempt(confirmed),
                         style: style,
                       ),
                     ),

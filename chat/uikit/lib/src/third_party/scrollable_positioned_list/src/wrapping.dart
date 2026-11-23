@@ -42,6 +42,7 @@ class CustomShrinkWrappingViewport extends CustomViewport {
     AxisDirection? crossAxisDirection,
     double anchor = 0.0,
     required ViewportOffset offset,
+    super.clipBehavior,
     List<RenderSliver>? children,
     Key? center,
     double? cacheExtent,
@@ -71,6 +72,7 @@ class CustomShrinkWrappingViewport extends CustomViewport {
           Viewport.getDefaultCrossAxisDirection(context, axisDirection),
       offset: offset,
       anchor: anchor,
+      clipBehavior: clipBehavior,
       cacheExtent: cacheExtent,
     );
   }
@@ -101,6 +103,7 @@ class CustomRenderShrinkWrappingViewport extends CustomRenderViewport {
     AxisDirection axisDirection = AxisDirection.down,
     required AxisDirection crossAxisDirection,
     required ViewportOffset offset,
+    super.clipBehavior,
     double anchor = 0.0,
     List<RenderSliver>? children,
     RenderSliver? center,

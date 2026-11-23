@@ -98,7 +98,8 @@ class MessageUtil {
         getChangeGroupNameDisplayString(groupTipsInfo, context),
       ChangeGroupAvatar() =>
         getChangeGroupAvatarDisplayString(groupTipsInfo, context),
-      ChangeGroupIntroduction() => groupDescriptionChangeText(groupTipsInfo),
+      ChangeGroupIntroduction() =>
+        groupDescriptionChangeText(groupTipsInfo, context: context),
       ChangeGroupNotification() =>
         getChangeGroupNotificationDisplayString(groupTipsInfo, context),
       ChangeGroupOwner() =>
@@ -156,10 +157,16 @@ class MessageUtil {
       content = localizations.messageRevokedBySelf;
     } else {
       if (messageInfo.conversationType == ConversationType.group) {
-        final nickname = revokerInfo?.nickname;
-        final userID = revokerInfo?.userID ?? '';
-        final revokerName =
-            (nickname != null && nickname.isNotEmpty) ? nickname : userID;
+        final revokerId = revokerInfo?.userID;
+        final revokerName = AppUserAvatarScope.personName(
+          context,
+          revokerId,
+          nickname: revokerInfo?.nickname,
+          groupId: messageInfo.to,
+          groupNickname: revokerId == messageInfo.from.userID
+              ? messageInfo.from.nameCard
+              : null,
+        );
         if (revokerName.isEmpty) {
           content = localizations.messageRevokedByOther;
         } else {
@@ -182,7 +189,7 @@ class MessageUtil {
     AppLocalizedText localizations = AppLocalization.of(context);
     int muteTime = systemMessage.muteTime;
     String memberShowName = systemMessage.mutedGroupMembers
-        .map((m) => UIKitUtil.memberDisplayName(m))
+        .map((m) => UIKitUtil.memberDisplayName(m, context: context))
         .join('、');
     bool isSelfMuted = systemMessage.isSelfMuted;
     String actualShowName = isSelfMuted ? localizations.you : memberShowName;
@@ -200,26 +207,28 @@ class MessageUtil {
   static String getChangeGroupNameDisplayString(
       ChangeGroupName systemMessage, BuildContext context) {
     AppLocalizedText localizations = AppLocalization.of(context);
-    return '${UIKitUtil.memberDisplayName(systemMessage.opUser)} ${localizations.groupNameChangedTo} “${systemMessage.groupName}”';
+    return '${UIKitUtil.memberDisplayName(systemMessage.opUser, context: context)} ${localizations.groupNameChangedTo} “${systemMessage.groupName}”';
   }
 
   static String getChangeGroupAvatarDisplayString(
       ChangeGroupAvatar systemMessage, BuildContext context) {
     AppLocalizedText localizations = AppLocalization.of(context);
-    return '${UIKitUtil.memberDisplayName(systemMessage.opUser)} ${localizations.groupAvatarChanged}';
+    return '${UIKitUtil.memberDisplayName(systemMessage.opUser, context: context)} ${localizations.groupAvatarChanged}';
   }
 
   /// 沿用群名变更的操作人显示规则，由群聊和缓存摘要共用。
-  static String groupDescriptionChangeText(ChangeGroupIntroduction tip) =>
+  static String groupDescriptionChangeText(ChangeGroupIntroduction tip,
+          {BuildContext? context}) =>
       ConversationNotice.groupDescriptionText(
-        UIKitUtil.memberDisplayName(tip.opUser),
+        UIKitUtil.memberDisplayName(tip.opUser, context: context),
         tip.groupIntroduction,
       );
 
   static String getChangeGroupNotificationDisplayString(
       ChangeGroupNotification systemMessage, BuildContext context) {
     AppLocalizedText localizations = AppLocalization.of(context);
-    String operator = UIKitUtil.memberDisplayName(systemMessage.opUser);
+    String operator =
+        UIKitUtil.memberDisplayName(systemMessage.opUser, context: context);
     String groupNotice = systemMessage.groupNotification;
     if (groupNotice.isNotEmpty) {
       return '$operator ${localizations.groupNoticeChangedTo} $groupNotice';
@@ -231,13 +240,14 @@ class MessageUtil {
   static String getChangeGroupOwnerDisplayString(
       ChangeGroupOwner systemMessage, BuildContext context) {
     AppLocalizedText localizations = AppLocalization.of(context);
-    return '${UIKitUtil.memberDisplayName(systemMessage.opUser)} ${localizations.groupOwnerTransferredTo} ${systemMessage.groupOwner}';
+    return '${UIKitUtil.memberDisplayName(systemMessage.opUser, context: context)} ${localizations.groupOwnerTransferredTo} ${systemMessage.groupOwner}';
   }
 
   static String getChangeGroupMuteAllDisplayString(
       ChangeGroupMuteAll systemMessage, BuildContext context) {
     AppLocalizedText localizations = AppLocalization.of(context);
-    String operator = UIKitUtil.memberDisplayName(systemMessage.opUser);
+    String operator =
+        UIKitUtil.memberDisplayName(systemMessage.opUser, context: context);
     bool isMuteAll = systemMessage.isMuteAll;
     return '$operator ${isMuteAll ? localizations.groupMuteAllEnabled : localizations.groupMuteAllDisabled}';
   }
@@ -245,7 +255,8 @@ class MessageUtil {
   static String getChangeJoinGroupApprovalDisplayString(
       ChangeJoinGroupApproval systemMessage, BuildContext context) {
     AppLocalizedText localizations = AppLocalization.of(context);
-    String operator = UIKitUtil.memberDisplayName(systemMessage.opUser);
+    String operator =
+        UIKitUtil.memberDisplayName(systemMessage.opUser, context: context);
     String approvalDesc;
     switch (systemMessage.groupJoinOption) {
       case GroupJoinOption.forbid:
@@ -264,7 +275,8 @@ class MessageUtil {
   static String getChangeInviteToGroupApprovalDisplayString(
       ChangeInviteToGroupApproval systemMessage, BuildContext context) {
     AppLocalizedText localizations = AppLocalization.of(context);
-    String operator = UIKitUtil.memberDisplayName(systemMessage.opUser);
+    String operator =
+        UIKitUtil.memberDisplayName(systemMessage.opUser, context: context);
     String approvalDesc;
     switch (systemMessage.groupInviteOption) {
       case GroupInviteOption.forbid:

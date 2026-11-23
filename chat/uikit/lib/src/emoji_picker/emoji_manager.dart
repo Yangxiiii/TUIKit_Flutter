@@ -61,7 +61,7 @@ class EmojiManager {
         for (final emoji in emojis) emoji.name: '[${emoji.label}]',
       };
 
-  /// 将已知令牌显示为业务资源；保留未知编码和相邻原文。
+  /// 富文本正文用业务表情资源保留令牌顺序，并为相邻内容留出 2 像素。
   static List<InlineSpan> buildInlineSpans(String text, {double size = 18}) {
     final spans = <InlineSpan>[];
     var offset = 0;
@@ -73,11 +73,17 @@ class EmojiManager {
       final emoji = getEmoji(match.group(0)!)!;
       spans.add(WidgetSpan(
         alignment: PlaceholderAlignment.middle,
-        child: Image.asset(emoji.path,
-            package: assetPackage,
-            width: size,
-            height: size,
-            semanticLabel: emoji.label),
+        child: Padding(
+          padding: EdgeInsets.only(
+            left: match.start > offset ? 2 : 0,
+            right: match.end < text.length ? 2 : 0,
+          ),
+          child: Image.asset(emoji.path,
+              package: assetPackage,
+              width: size,
+              height: size,
+              semanticLabel: emoji.label),
+        ),
       ));
       offset = match.end;
     }

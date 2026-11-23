@@ -1,4 +1,5 @@
 import 'package:atomic_x_core/api/message/message_action_store.dart';
+import '../../message_history_config.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -33,6 +34,9 @@ class VideoMessageWidget extends StatefulWidget {
   /// 参见 [ImageMessageWidget.mergedMediaMessages]。
   final List<MessageInfo>? mergedMediaMessages;
 
+  /// 在线会话到达 SDK 历史边缘后，沿用宿主的归档查询。
+  final ChatOlderMessagesLoader? loadOlderMedia;
+
   static const double kVideoFixedHeight = 160.0;
 
   const VideoMessageWidget({
@@ -49,6 +53,7 @@ class VideoMessageWidget extends StatefulWidget {
     this.bubbleKey,
     this.isInMergedDetailView = false,
     this.mergedMediaMessages,
+    this.loadOlderMedia,
   });
 
   @override
@@ -151,6 +156,9 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
       currentMessage: widget.message,
       context: context,
       presetMediaMessages: widget.mergedMediaMessages,
+      hiddenMessageIDs: widget.config.hiddenMessageIDs,
+      downloadRichVideo: widget.config.fileDownloader,
+      loadOlderMedia: widget.loadOlderMedia,
     );
   }
 
@@ -354,6 +362,7 @@ class _VideoMessageWidgetState extends State<VideoMessageWidget>
         context,
         imageElements: _imageViewerManager!.initialImageElements,
         initialIndex: _imageViewerManager!.initialImageIndex,
+        loadMoreOnOverscroll: _imageViewerManager!.canPageAtEdge,
         onEventTriggered: _imageViewerManager!.handleImageViewerEvent,
       );
     }

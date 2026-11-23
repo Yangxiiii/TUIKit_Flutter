@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:app_core/app_core.dart' show formatPersonName;
 import 'package:atomic_x_core/atomicxcore.dart';
 
 /// 识别单聊中的公告通知协议，卡片、会话摘要与搜索复用同一解析结果。
@@ -31,13 +32,7 @@ final class OaAnnouncementMessage {
   String get preview => title;
 
   /// 姓名与昵称分别来自消息快照，缺少一项时不产生空括号。
-  String get publisherName {
-    final name = realName.trim();
-    final nick = nickname.trim();
-    if (name.isEmpty) return nick;
-    if (nick.isEmpty || nick == name) return name;
-    return '$name($nick)';
-  }
+  String get publisherName => formatPersonName(realName, nickname);
 
   /// 仅在正常单聊消息中识别公告，不依赖固定的后台账号。
   static OaAnnouncementMessage? fromMessage(MessageInfo? message) {

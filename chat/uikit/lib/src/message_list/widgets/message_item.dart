@@ -1,3 +1,4 @@
+import '../../chat_display_name.dart';
 import 'message_confirmation.dart';
 import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
@@ -24,7 +25,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   /// 当前消息、发送状态及阅读回执，状态标记和正文共用此数据。
   final MessageInfo message;
 
-  /// 同组后续消息隐藏头像但保留头像列，气泡仍是独立消息。
+  /// 同组后续消息隐藏头像和群聊名称，保留头像列及独立气泡。
   final bool isContinuation;
 
   /// 删除成功后通知列表移除尚未被 SDK 接管的本地候选。
@@ -130,6 +131,9 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   /// 是空的，因此查看器需要这个备用列表来渲染任何媒体。
   final List<MessageInfo>? mergedMediaMessages;
 
+  /// 在线会话到达 SDK 历史边缘后，沿用宿主的归档查询。
+  final ChatOlderMessagesLoader? loadOlderMedia;
+
   const MessageItem({
     super.key,
     required this.message,
@@ -161,6 +165,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     this.replyQuote,
     this.replyIndicator,
     this.mergedMediaMessages,
+    this.loadOlderMedia,
   });
 
   @override
@@ -176,16 +181,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         : message.rawMessage?.faceUrl;
     // 群聊宿主可以按群策略显示名称，标题与文字头像沿用同一份结果。
     final groupName = isGroup ? config.groupSenderName?.call(message) : null;
-    var senderName = groupName ??
-        [
-          message.from.nameCard,
-          message.from.friendRemark,
-          message.from.nickname,
-          ChatUtil.getMessageSenderName(message),
-          message.from.userID,
-        ]
-            .whereType<String>()
-            .firstWhere((name) => name.isNotEmpty, orElse: () => '');
+    var senderName = groupName ?? chatSenderDisplayName(context, message);
     final provider = CallingMessageDataProvider(message, context);
     if (provider.isCallingSignal && provider.excludeFromHistory) {
       return const SizedBox.shrink();
@@ -195,8 +191,12 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     if (record != null) {
       // 报告由本人发送，但气泡代表原始来电；不能把被叫本人的头像当作发起人。
       avatarURL = record.callerAvatarURL;
-      senderName =
-          record.callerName.isEmpty ? record.callerId : record.callerName;
+      senderName = AppUserAvatarScope.personName(
+        context,
+        record.callerId,
+        groupId: isGroup ? message.to : null,
+        fallback: record.callerName,
+      );
     }
 
     // 通话方向跟随发起人，建群草稿沿用消息头像以保留整行勾选。
@@ -215,28 +215,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
       }
     }
 
-    final messageBubble = MessageBubble(
-      actionRowContext: context,
-      message: message,
-      conversationID: conversationID,
-      isSelf: isSelf,
-      maxWidth: maxWidth,
-      config: config,
-      messageListStore: messageListStore,
-      isHighlighted: isHighlighted,
-      onHighlightComplete: onHighlightComplete,
-      customActions: customActions,
-      menuCallbacks: _buildMenuCallbacks(context),
-      isInMergedDetailView: isInMergedDetailView,
-      asrDisplayManager: asrDisplayManager,
-      onAsrBubbleLongPress: onAsrBubbleLongPress,
-      translationDisplayManager: translationDisplayManager,
-      onTranslationBubbleLongPress: onTranslationBubbleLongPress,
-      onCallMessageClick: onCallMessageClick,
-      onQuotePreviewTap: onQuotePreviewTap,
-      replyQuote: replyQuote,
-      mergedMediaMessages: mergedMediaMessages,
-    );
+    final messageBubble = _buildMessageBubble(context, isSelf);
 
     if (message.messageType == MessageType.tips ||
         message.status == MessageStatus.revoked ||
@@ -455,7 +434,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         if (snapshot.hasData && snapshot.data != null) {
           final conversationInfo = snapshot.data!;
           avatarURL = conversationInfo.avatarURL ?? defaultAvatarURL;
-          senderName = conversationInfo.title ?? defaultSenderName;
+          senderName = chatConversationDisplayName(context, conversationInfo,
+              fallback: defaultSenderName);
         }
 
         return _buildMessageLayout(isSelf, avatarURL, senderName, context);
@@ -487,6 +467,9 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         maintainAnimation: true,
         child: avatar,
       );
+
+  /// 群聊只在组首显示发送者名称，避免重复昵称撑开连续气泡的间距。
+  bool get _showsSenderName => !isGroup || !isContinuation;
 
   /// 单聊媒体卡片的发送提示和回执共用一列，状态切换时保持正文可用宽度。
   Widget? _mediaStatusLane(Widget? indicator,
@@ -520,29 +503,43 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     );
   }
 
+  /// 网络与缓存入口共用同一气泡，表情回应随正文刷新。
+  Widget _buildMessageBubble(BuildContext context, bool isSelf) {
+    final bubble = _withReactionBar(
+      context,
+      isSelf,
+      (bar) => MessageBubble(
+        reactionBar: bar,
+        message: message,
+        conversationID: conversationID,
+        isSelf: isSelf,
+        maxWidth: maxWidth,
+        config: config,
+        messageListStore: messageListStore,
+        isHighlighted: isHighlighted,
+        onHighlightComplete: onHighlightComplete,
+        customActions: customActions,
+        menuCallbacks: _buildMenuCallbacks(context),
+        isInMergedDetailView: isInMergedDetailView,
+        asrDisplayManager: asrDisplayManager,
+        onAsrBubbleLongPress: onAsrBubbleLongPress,
+        translationDisplayManager: translationDisplayManager,
+        onTranslationBubbleLongPress: onTranslationBubbleLongPress,
+        onCallMessageClick: onCallMessageClick,
+        onQuotePreviewTap: onQuotePreviewTap,
+        replyQuote: replyQuote,
+        mergedMediaMessages: mergedMediaMessages,
+        loadOlderMedia: loadOlderMedia,
+      ),
+    );
+    return config.messageContentWrapper?.call(context, message, bubble) ??
+        bubble;
+  }
+
   /// 通话资料异步补齐后仍使用相同菜单回调，删除与聚合规则不随布局路径丢失。
   Widget _buildMessageLayout(
       bool isSelf, String? avatarUrl, String senderName, BuildContext context) {
-    Widget messageBubble = MessageBubble(
-      message: message,
-      conversationID: conversationID,
-      isSelf: isSelf,
-      maxWidth: maxWidth,
-      config: config,
-      menuCallbacks: _buildMenuCallbacks(context),
-      messageListStore: messageListStore,
-      isHighlighted: isHighlighted,
-      onHighlightComplete: onHighlightComplete,
-      customActions: customActions,
-      isInMergedDetailView: isInMergedDetailView,
-      asrDisplayManager: asrDisplayManager,
-      onAsrBubbleLongPress: onAsrBubbleLongPress,
-      translationDisplayManager: translationDisplayManager,
-      onTranslationBubbleLongPress: onTranslationBubbleLongPress,
-      onCallMessageClick: onCallMessageClick,
-      onQuotePreviewTap: onQuotePreviewTap,
-      mergedMediaMessages: mergedMediaMessages,
-    );
+    final messageBubble = _buildMessageBubble(context, isSelf);
 
     if (message.messageType == MessageType.tips ||
         message.status == MessageStatus.revoked ||
@@ -614,9 +611,22 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
       message.from.userID;
 
   /// 各种对齐方式共用头像交互。多选时头像仅用于切换消息选择。
-  Widget _buildSenderAvatar(String? avatarUrl, String senderName,
+  Widget _buildSenderAvatar(
+      BuildContext context, String? avatarUrl, String senderName,
       {required bool isSelf}) {
     final userID = _displaySenderId;
+    final openGroupContact = isGroup ? config.onGroupSenderAvatarTap : null;
+    final fallbackTap = isSelf ? null : onUserClick;
+    // 转发详情只读，多选优先勾选消息，普通群聊才交给宿主打开名片。
+    final tap = switch ((isInMergedDetailView, isMultiSelectMode)) {
+      (true, _) => null,
+      (_, true) => onToggleSelection,
+      _ when userID.trim().isEmpty => null,
+      _ when openGroupContact != null => () =>
+          openGroupContact(context, userID),
+      _ when fallbackTap != null => () => fallbackTap(userID),
+      _ => null,
+    };
     // 历史消息会保留已退群成员的头像，长按资格以当前群名单为准。
     final mention = isGroup &&
             !isSelf &&
@@ -627,23 +637,20 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         : null;
     final avatar = GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: isInMergedDetailView
-          ? null
-          : () {
-              if (isMultiSelectMode) {
-                onToggleSelection?.call();
-              } else if (!isSelf) {
-                onUserClick?.call(userID);
-              }
-            },
+      onTap: tap,
       onLongPress: mention == null ? null : () => mention(userID, senderName),
       child: Avatar(
+        size: AvatarSize.s,
         userID: userID,
         content: AvatarImageContent(url: avatarUrl, name: senderName),
       ),
     );
     return _groupAvatar(
-      mention != null && message.msgID.isNotEmpty
+      message.msgID.isNotEmpty &&
+              (mention != null ||
+                  (openGroupContact != null &&
+                      tap != null &&
+                      !isMultiSelectMode))
           ? Semantics(
               identifier: 'tim.message.avatar.${message.msgID}',
               child: avatar,
@@ -663,7 +670,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
 
     // 详情沿用来源头像和昵称布局，只在交互入口限制操作。
     final shouldShowAvatar = config.isShowLeftAvatar;
-    final shouldShowNickname = config.isShowLeftNickname;
+    final shouldShowNickname = config.isShowLeftNickname && _showsSenderName;
 
     final statusIndicator = _buildSendStatus(context, colors);
 
@@ -684,7 +691,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (shouldShowAvatar)
-            _buildSenderAvatar(displayAvatarUrl, displaySenderName,
+            _buildSenderAvatar(context, displayAvatarUrl, displaySenderName,
                 isSelf: isSelf),
           if (shouldShowAvatar) SizedBox(width: config.avatarSpacing),
           Flexible(
@@ -694,9 +701,10 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                 if (shouldShowNickname && displaySenderName.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(left: 2, top: 8, bottom: 4),
-                    child: Text(
-                      '$displaySenderName:',
-                      style: FontScheme.caption3Regular,
+                    child: _wrapSenderName(
+                      context,
+                      Text('$displaySenderName:',
+                          style: FontScheme.caption3Regular),
                     ),
                   ),
                 // 气泡外分别承载发送提示和阅读回执。
@@ -728,10 +736,6 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                 //
                 // 气泡下方的违规提示文本
                 _buildViolationHintText(context),
-                // Reaction bar for left-aligned layout
-                //
-                // 左对齐布局的反应条
-                if (_showsReactionBar) _buildReactionBar(context, isLeft: true),
               ],
             ),
           ),
@@ -771,32 +775,25 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                if (config.isShowRightNickname && displaySenderName.isNotEmpty)
+                if (config.isShowRightNickname &&
+                    _showsSenderName &&
+                    displaySenderName.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(right: 2, top: 8, bottom: 4),
-                    child: Text(
-                      '$displaySenderName:',
-                      style: FontScheme.caption3Regular,
+                    child: _wrapSenderName(
+                      context,
+                      Text('$displaySenderName:',
+                          style: FontScheme.caption3Regular),
                     ),
                   ),
-                // 己方气泡左侧依次承载阅读回执和发送提示。
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    if (mediaStatus != null) mediaStatus,
-                    if (mediaStatus == null &&
-                        readReceiptIndicator != null) ...[
-                      readReceiptIndicator,
-                      const SizedBox(width: 4),
-                    ],
-                    if (mediaStatus == null && statusIndicator != null) ...[
-                      statusIndicator,
-                      const SizedBox(width: 6),
-                    ],
-                    Flexible(child: messageBubble),
-                  ],
+                _buildRightBubbleRow(
+                  context,
+                  messageBubble,
+                  mediaStatus: mediaStatus,
+                  receipt: readReceiptIndicator,
+                  status: statusIndicator,
+                  statusGap: 6,
+                  isSelf: isSelf,
                 ),
                 if (replyIndicator != null) replyIndicator!,
                 if (attachment != null) attachment,
@@ -804,20 +801,53 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
                 //
                 // 气泡下方的违规提示文本
                 _buildViolationHintText(context),
-                // Reaction bar for right-aligned layout
-                //
-                // 右对齐布局的反应条
-                if (_showsReactionBar)
-                  _buildReactionBar(context, isLeft: false),
               ],
             ),
           ),
           if (config.isShowLeftAvatar) SizedBox(width: config.avatarSpacing),
           if (config.isShowLeftAvatar)
-            _buildSenderAvatar(displayAvatarUrl, displaySenderName,
+            _buildSenderAvatar(context, displayAvatarUrl, displaySenderName,
                 isSelf: isSelf),
         ],
       ),
+    );
+  }
+
+  /// 己方语音及通话记录把发送状态和回执放在正文右侧。
+  Widget _buildRightBubbleRow(
+    BuildContext context,
+    Widget bubble, {
+    required Widget? mediaStatus,
+    required Widget? receipt,
+    required Widget? status,
+    required double statusGap,
+    required bool isSelf,
+  }) {
+    final trailing = isSelf &&
+        (receipt != null || status != null) &&
+        (message.messageType == MessageType.audio ||
+            (message.messageType == MessageType.custom &&
+                CallingMessageDataProvider(message, context).isCallingSignal));
+    final body = Flexible(child: bubble);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.end,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        if (trailing) body,
+        if (mediaStatus != null) mediaStatus,
+        if (mediaStatus == null && receipt != null) ...[
+          if (trailing) const SizedBox(width: 4),
+          receipt,
+          if (!trailing) const SizedBox(width: 4),
+        ],
+        if (mediaStatus == null && status != null) ...[
+          if (trailing) SizedBox(width: statusGap),
+          status,
+          if (!trailing) SizedBox(width: statusGap),
+        ],
+        if (!trailing) body,
+      ],
     );
   }
 
@@ -831,7 +861,6 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
 
     final statusIndicator = _buildSendStatus(context, colors);
 
-    // 阅读回执显示在己方气泡左侧，与发送进度和失败提示分别处理。
     final readReceiptIndicator = _buildReadReceipt(context, colors, locale);
 
     final attachment = _buildAttachmentIfAny(true);
@@ -843,7 +872,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     // 普通消息按对侧头像对齐，回复可以使用这段留白，实际头像和回执继续独立排列。
     final needLeftSpacer = config.isShowLeftAvatar && replyQuote == null;
     final leftSpacerWidth =
-        needLeftSpacer ? AvatarSize.m.value + config.avatarSpacing : 0.0;
+        needLeftSpacer ? AvatarSize.s.value + config.avatarSpacing : 0.0;
 
     return [
       if (needLeftSpacer) SizedBox(width: leftSpacerWidth),
@@ -851,25 +880,18 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            if (config.isShowRightNickname && displaySenderName.isNotEmpty)
+            if (config.isShowRightNickname &&
+                _showsSenderName &&
+                displaySenderName.isNotEmpty)
               _buildSenderLabel(context, displaySenderName, isSelf: true),
-            // 己方气泡左侧依次承载阅读回执和发送提示。
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.end,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                if (mediaStatus != null) mediaStatus,
-                if (mediaStatus == null && readReceiptIndicator != null) ...[
-                  readReceiptIndicator,
-                  const SizedBox(width: 4),
-                ],
-                if (mediaStatus == null && statusIndicator != null) ...[
-                  statusIndicator,
-                  const SizedBox(width: 8),
-                ],
-                Flexible(child: messageBubble),
-              ],
+            _buildRightBubbleRow(
+              context,
+              messageBubble,
+              mediaStatus: mediaStatus,
+              receipt: readReceiptIndicator,
+              status: statusIndicator,
+              statusGap: 8,
+              isSelf: true,
             ),
             // 计数独立占一行，避免把正文旁的回执拉到计数的底部。
             if (replyIndicator != null) replyIndicator!,
@@ -878,20 +900,13 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
             //
             // 气泡下方的违规提示文字
             _buildViolationHintText(context),
-            // Reaction bar for self messages (right aligned)
-            //
-            // 自己消息的反应条（右对齐）
-            if (_showsReactionBar) _buildReactionBar(context, isLeft: false),
           ],
         ),
       ),
       if (config.isShowRightAvatar) SizedBox(width: config.avatarSpacing),
       if (config.isShowRightAvatar)
-        _groupAvatar(Avatar(
-          userID: _displaySenderId,
-          content: AvatarImageContent(
-              url: displayAvatarUrl, name: displaySenderName),
-        )),
+        _buildSenderAvatar(context, displayAvatarUrl, displaySenderName,
+            isSelf: true),
     ];
   }
 
@@ -906,13 +921,16 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
 
     return [
       if (config.isShowLeftAvatar)
-        _buildSenderAvatar(displayAvatarUrl, displaySenderName, isSelf: false),
+        _buildSenderAvatar(context, displayAvatarUrl, displaySenderName,
+            isSelf: false),
       if (config.isShowLeftAvatar) SizedBox(width: config.avatarSpacing),
       Flexible(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (config.isShowLeftNickname && displaySenderName.isNotEmpty)
+            if (config.isShowLeftNickname &&
+                _showsSenderName &&
+                displaySenderName.isNotEmpty)
               _buildSenderLabel(context, displaySenderName, isSelf: false),
             // 被叫本人发送的个人报告保持左侧头像和气泡，发送失败仍在气泡外提供恢复。
             if (statusIndicator == null)
@@ -933,16 +951,12 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
             //
             // 气泡下方的违规提示文字
             _buildViolationHintText(context),
-            // Reaction bar for other messages (left aligned)
-            //
-            // 对方消息的反应条（左对齐）
-            if (_showsReactionBar) _buildReactionBar(context, isLeft: true),
           ],
         ),
       ),
       // 对方普通消息按己方头像对齐，回复摘要可使用这段留白。
       if (config.isShowRightAvatar && replyQuote == null)
-        SizedBox(width: AvatarSize.m.value + config.avatarSpacing),
+        SizedBox(width: AvatarSize.s.value + config.avatarSpacing),
     ];
   }
 
@@ -955,40 +969,63 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
           ? EdgeInsets.only(bottom: useGroupNameStyle ? 4 : 6)
           : EdgeInsets.only(
               left: isSelf ? 0 : 2, right: isSelf ? 2 : 0, top: 8, bottom: 4),
-      child: Text(
-        isGroup ? name : '$name:',
-        style: isGroup
-            ? FontScheme.caption3Regular.copyWith(
-                color: SemanticColorScheme.of(context).textColorSecondary,
-                fontSize: useGroupNameStyle ? 12 : null,
-                height: useGroupNameStyle ? 20 / 12 : null,
-              )
-            : FontScheme.caption3Regular,
-        maxLines: isGroup ? 1 : null,
-        overflow: isGroup ? TextOverflow.ellipsis : null,
+      child: _wrapSenderName(
+        context,
+        Text(
+          isGroup ? name : '$name:',
+          style: isGroup
+              ? FontScheme.caption3Regular.copyWith(
+                  color: SemanticColorScheme.of(context).textColorSecondary,
+                  fontSize: useGroupNameStyle ? 12 : null,
+                  height: useGroupNameStyle ? 20 / 12 : null,
+                )
+              : FontScheme.caption3Regular,
+          maxLines: isGroup ? 1 : null,
+          overflow: isGroup ? TextOverflow.ellipsis : null,
+        ),
       ),
     );
   }
 
-  /// 云回复可以存在于原生列表为空的消息，宿主自行判断是否有可见条目。
-  bool get _showsReactionBar =>
-      config.isSupportReaction &&
-      (config.reactionConfig != null || message.reactionList.isNotEmpty);
+  /// 保留 UIKit 的昵称样式和布局约束，只由宿主补充关联标记。
+  Widget _wrapSenderName(BuildContext context, Widget child) =>
+      config.senderNameWrapper?.call(context, message, child) ?? child;
 
-  /// 宿主优先渲染云协议，旧群聊回应仍可打开 UIKit 明细。
-  Widget _buildReactionBar(BuildContext context, {required bool isLeft}) {
+  /// 由宿主订阅云回应并组装气泡，旧群聊回应仍可打开原生明细。
+  Widget _withReactionBar(
+      BuildContext context, bool isSelf, Widget Function(Widget?) buildBubble) {
+    if (!config.isSupportReaction ||
+        message.status == MessageStatus.revoked ||
+        message.messageType == MessageType.tips ||
+        MessageUtil.isSystemStyleCustomMessagePayload(message, context) ||
+        OaAnnouncementMessage.fromConversation(message, conversationID) !=
+            null) {
+      return buildBubble(null);
+    }
+    final isLeft = switch (config.alignment) {
+      AppBuilder.MESSAGE_ALIGNMENT_LEFT => true,
+      AppBuilder.MESSAGE_ALIGNMENT_RIGHT => false,
+      _ => !isSelf,
+    };
     final reaction = config.reactionConfig;
     if (reaction != null) {
-      return reaction.buildBar(context, message, isLeft,
-          showNativeDetails: isGroup && messageListStore != null
-              ? () => _showReactionDetailSheet(context)
-              : null);
+      return reaction.buildBar(
+        context,
+        message,
+        isLeft,
+        buildBubble: buildBubble,
+        showNativeDetails: isGroup && messageListStore != null
+            ? () => _showReactionDetailSheet(context)
+            : null,
+      );
     }
-    return MessageReactionBar(
+    if (message.reactionList.isEmpty) return buildBubble(null);
+    return buildBubble(MessageReactionBar(
+      messageId: message.msgID,
       reactionList: message.reactionList,
-      isLeft: isLeft,
+      isSelf: isSelf,
       onClick: () => _showReactionDetailSheet(context),
-    );
+    ));
   }
 
   void _showReactionDetailSheet(BuildContext context) {
@@ -999,6 +1036,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     ReactionDetailSheet.show(
       context: context,
       reactionList: message.reactionList,
+      groupId: isGroup ? message.to : null,
       currentUserID: currentUserID,
       onFetchUsers: (reactionID) {
         messageActionStore.loadReactionUsers(

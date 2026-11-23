@@ -1,4 +1,6 @@
 import 'package:tencent_chat_uikit/src/message_list/utils/big_file_message.dart';
+import 'package:app_ui/app_ui.dart'
+    show AppColorBuildContext, AppUserAvatarScope;
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -6,22 +8,27 @@ import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_input/src/chat_special_text_span_builder.dart';
 import 'package:tencent_chat_uikit/src/third_party/extended_text/extended_text.dart';
 
-/// A quote message preview block shown inside a message bubble.
-/// Displays the quoted message's sender name + content summary/thumbnail.
-/// Tapping triggers navigation to the quoted message.
-///
-/// 显示在消息气泡内的引用消息预览块。显示被引用消息的发送者姓名 + 内容摘要/缩略图。点击可导航到引用消息。
+/// 在气泡内显示引用摘要或缩略图，点击后定位到原消息。
 class QuoteMessagePreview extends StatelessWidget {
+  /// 发送时保存的引用摘要或 SDK 回填的原消息内容。
   final MessageQuoteInfo quoteInfo;
+
+  /// 原消息仍可定位时由消息列表处理跳转。
   final VoidCallback? onTap;
+
+  /// 消息行扣除头像和回执后为引用预留的可用宽度。
   final double maxWidth;
 
   /// Web 回复使用单行摘要并可独立定位原消息；未指定时沿用原生富媒体预览。
   final String? compactIdentifier;
 
+  /// 外层气泡来源群，单聊引用为空。
+  final String? groupId;
+
   const QuoteMessagePreview({
     super.key,
     required this.quoteInfo,
+    this.groupId,
     this.onTap,
     this.maxWidth = 200,
     this.compactIdentifier,
@@ -31,12 +38,13 @@ class QuoteMessagePreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = SemanticColorScheme.of(context);
     final locale = AppLocalization.of(context);
+    final foreground = context.appColors.chatMessageSecondary;
 
     if (compactIdentifier != null) {
       final available = quoteInfo.status != MessageStatus.revoked &&
           quoteInfo.status != MessageStatus.deleted;
       final text = available
-          ? '${quoteInfo.sender.nickname ?? ''}：${(quoteInfo.messagePayload as TextMessagePayload?)?.text ?? ''}'
+          ? '${_getSenderName(context)}：${(quoteInfo.messagePayload as TextMessagePayload?)?.text ?? ''}'
           : quoteInfo.status == MessageStatus.revoked
               ? locale.quotedMessageRevoked
               : locale.quotedMessageNotFound;
@@ -56,8 +64,7 @@ class QuoteMessagePreview extends StatelessWidget {
             child: Text(text,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: FontScheme.caption2Regular
-                    .copyWith(color: colors.textColorSecondary)),
+                style: FontScheme.caption2Regular.copyWith(color: foreground)),
           ),
         ),
       );
@@ -92,7 +99,7 @@ class QuoteMessagePreview extends StatelessWidget {
                 child: Padding(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                  child: _buildContent(colors, locale),
+                  child: _buildContent(context, colors, locale, foreground),
                 ),
               ),
             ],
@@ -102,7 +109,8 @@ class QuoteMessagePreview extends StatelessWidget {
     );
   }
 
-  Widget _buildContent(SemanticColorScheme colors, AppLocalizedText locale) {
+  Widget _buildContent(BuildContext context, SemanticColorScheme colors,
+      AppLocalizedText locale, Color foreground) {
     // Display priority — derived from (status, payload) only; no extra
     // "isNotFound" flag is needed because the engine repurposes
     // `status = deleted` to mean "original unreachable" when cloud
@@ -144,18 +152,18 @@ class QuoteMessagePreview extends StatelessWidget {
     //
     // 5. 否则 → 正常渲染完整原始内容。
     if (quoteInfo.status == MessageStatus.revoked) {
-      return _buildStatusContent(colors, locale.quotedMessageRevoked);
+      return _buildStatusContent(foreground, locale.quotedMessageRevoked);
     }
     if (quoteInfo.status == MessageStatus.deleted) {
       if (quoteInfo.messagePayload == null) {
-        return _buildStatusContent(colors, locale.quotedMessageNotFound);
+        return _buildStatusContent(foreground, locale.quotedMessageNotFound);
       }
-      return _buildFullContent(colors, locale);
+      return _buildFullContent(context, colors, locale, foreground);
     }
     if (quoteInfo.messagePayload == null) {
-      return _buildPartialContent(colors);
+      return _buildPartialContent(context, foreground);
     }
-    return _buildFullContent(colors, locale);
+    return _buildFullContent(context, colors, locale, foreground);
   }
 
   /// Tap handler: gate the upstream `onTap` (navigate-to-original) when
@@ -184,8 +192,8 @@ class QuoteMessagePreview extends StatelessWidget {
     onTap?.call();
   }
 
-  Widget _buildPartialContent(SemanticColorScheme colors) {
-    final senderName = _getSenderName();
+  Widget _buildPartialContent(BuildContext context, Color foreground) {
+    final senderName = _getSenderName(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -193,8 +201,8 @@ class QuoteMessagePreview extends StatelessWidget {
         if (senderName.isNotEmpty)
           Text(
             '$senderName:',
-            style: FontScheme.caption3Medium.copyWith(
-              color: colors.textColorSecondary,
+            style: FontScheme.caption2Medium.copyWith(
+              color: foreground,
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -202,26 +210,26 @@ class QuoteMessagePreview extends StatelessWidget {
         const SizedBox(height: 2),
         Text(
           '...',
-          style: FontScheme.caption3Regular.copyWith(
-            color: colors.textColorSecondary,
+          style: FontScheme.caption2Regular.copyWith(
+            color: foreground,
           ),
         ),
       ],
     );
   }
 
-  Widget _buildStatusContent(SemanticColorScheme colors, String statusText) {
+  Widget _buildStatusContent(Color foreground, String statusText) {
     return Text(
       statusText,
-      style: FontScheme.caption3Regular.copyWith(
-        color: colors.textColorSecondary,
+      style: FontScheme.caption2Regular.copyWith(
+        color: foreground,
       ),
     );
   }
 
-  Widget _buildFullContent(
-      SemanticColorScheme colors, AppLocalizedText locale) {
-    final senderName = _getSenderName();
+  Widget _buildFullContent(BuildContext context, SemanticColorScheme colors,
+      AppLocalizedText locale, Color foreground) {
+    final senderName = _getSenderName(context);
     final payload = quoteInfo.messagePayload!;
     final thumbnail = _getThumbnailUrl(payload);
 
@@ -237,8 +245,8 @@ class QuoteMessagePreview extends StatelessWidget {
               if (senderName.isNotEmpty)
                 Text(
                   '$senderName:',
-                  style: FontScheme.caption3Medium.copyWith(
-                    color: colors.textColorSecondary,
+                  style: FontScheme.caption2Medium.copyWith(
+                    color: foreground,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -253,7 +261,7 @@ class QuoteMessagePreview extends StatelessWidget {
               // 文本标签）一起渲染时——缩略图本身就是内容摘要，同时显示两者会形成视觉干扰。
               if (thumbnail == null) ...[
                 const SizedBox(height: 2),
-                _buildContentWidget(payload, colors, locale),
+                _buildContentWidget(payload, colors, locale, foreground),
               ],
             ],
           ),
@@ -267,9 +275,9 @@ class QuoteMessagePreview extends StatelessWidget {
   }
 
   Widget _buildContentWidget(MessagePayload payload, SemanticColorScheme colors,
-      AppLocalizedText locale) {
-    final textStyle = FontScheme.caption3Regular.copyWith(
-      color: colors.textColorSecondary,
+      AppLocalizedText locale, Color foreground) {
+    final textStyle = FontScheme.caption2Regular.copyWith(
+      color: foreground,
     );
 
     // Audio and file types use Icon prefix instead of emoji
@@ -285,7 +293,7 @@ class QuoteMessagePreview extends StatelessWidget {
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.volume_up, size: 14, color: colors.textColorSecondary),
+            Icon(Icons.volume_up, size: 14, color: foreground),
             const SizedBox(width: 2),
             Text(timeText,
                 style: textStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -295,8 +303,7 @@ class QuoteMessagePreview extends StatelessWidget {
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.insert_drive_file,
-                size: 14, color: colors.textColorSecondary),
+            Icon(Icons.insert_drive_file, size: 14, color: foreground),
             const SizedBox(width: 2),
             Flexible(
               child: Text(
@@ -315,6 +322,7 @@ class QuoteMessagePreview extends StatelessWidget {
           specialTextSpanBuilder: ChatSpecialTextSpanBuilder(
             colorScheme: colors,
             onTapUrl: (_) {},
+            spaceMessageEmoji: true,
           ),
           style: textStyle,
           maxLines: 2,
@@ -323,11 +331,16 @@ class QuoteMessagePreview extends StatelessWidget {
     }
   }
 
-  String _getSenderName() {
+  /// 引用只带发送者快照，使用外层气泡的群 ID 获取对应群名片。
+  String _getSenderName(BuildContext context) {
     final sender = quoteInfo.sender;
-    final name = sender.friendRemark ?? sender.nameCard ?? sender.nickname;
-    if (name != null && name.isNotEmpty) return name;
-    return sender.userID;
+    return AppUserAvatarScope.personName(
+      context,
+      sender.userID,
+      nickname: sender.nickname,
+      groupId: groupId,
+      groupNickname: groupId == null ? null : sender.nameCard,
+    );
   }
 
   String _getContentSummary(MessagePayload payload, AppLocalizedText locale) {

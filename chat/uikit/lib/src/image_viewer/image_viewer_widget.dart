@@ -585,14 +585,8 @@ class _ImageItemViewState extends State<_ImageItemView>
               _doubleTapDetails = details;
             },
             onDoubleTap: _handleDoubleTap,
-            onTap: () {
-              // Only allow tap-to-close when at original scale
-              //
-              // 仅在原始缩放下允许点击关闭
-              if (_scale <= 1.0 + 0.1) {
-                widget.onTap();
-              }
-            },
+            // 单点由手势识别器与缩放、拖动区分，任意缩放比例都可关闭。
+            onTap: widget.onTap,
             child: Container(
               width: constraints.maxWidth,
               height: constraints.maxHeight,
@@ -839,26 +833,34 @@ class ImageViewerWidget extends StatefulWidget {
   /// 由调用方处理历史分页和视频下载，完成后交还预览器更新当前媒体。
   final EventHandler onEventTriggered;
 
+  /// 预览打开后逐次补全当前资源和相邻媒体，已有图片可先展示。
+  final Stream<List<ImageElement>>? imageUpdates;
+
   /// 浮层预览由调用方关闭当前浮层；不传时保留原页面路由返回行为。
   final VoidCallback? onClose;
 
   /// 为搜索预览的右下操作栏让出空间，并切换到搜索用视频控制条。
   final bool reserveActionBar;
 
+  /// 会话在边缘继续分页，即使当前窗口只有一张图。
+  final bool loadMoreOnOverscroll;
+
   const ImageViewerWidget({
     Key? key,
     required this.imageElements,
     this.initialIndex = 0,
     required this.onEventTriggered,
+    this.imageUpdates,
     this.onClose,
     this.reserveActionBar = false,
+    this.loadMoreOnOverscroll = false,
   }) : super(key: key);
 
   @override
   State<ImageViewerWidget> createState() => _ImageViewerWidgetState();
 }
 
-/// 管理预览页切换和视频下载状态，关闭后忽略仍在执行的下载回调。
+/// 管理预览页切换与媒体加载，关闭后忽略迟到的异步结果。
 class _ImageViewerWidgetState extends State<ImageViewerWidget> {
   late List<ImageElement> _imageElements;
   late int _currentIndex;
@@ -867,10 +869,21 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
 
   bool _isLoadingOlder = false;
   bool _isLoadingNewer = false;
+
+  /// 更早的历史已耗尽时，向前越界只提示到达边缘。
+  bool _hasMoreOlder = true;
+
+  /// 更新的历史已耗尽时，向后越界只提示到达边缘。
+  bool _hasMoreNewer = true;
+
   bool _isUpdatingData = false;
 
+  /// 当前图片缺少预览资源或边缘分页耗时较长时，显示预览层的加载提示。
   bool _showLoadingIndicator = false;
   Timer? _loadingTimer;
+
+  /// 所属预览关闭时停止接收媒体结果，避免回填到已销毁的页面。
+  StreamSubscription<List<ImageElement>>? _imageUpdatesSubscription;
 
   /// 当前正在下载的媒体标识，不同视频不能因封面相同而共享下载状态。
   final Set<String> _downloadingVideoElements = {};
@@ -891,14 +904,37 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
     _currentIndex = widget.initialIndex.clamp(0, _imageElements.length - 1);
     _previousIndex = _currentIndex;
     _pageController = PageController(initialPage: _currentIndex);
+    if (widget.imageUpdates case final updates?) {
+      // 相邻媒体在后台补齐；当前图片已有资源时由图片组件自行处理解码状态。
+      final initial = _imageElements[_currentIndex];
+      _showLoadingIndicator = initial.isImage &&
+          initial.imagePath.isEmpty &&
+          initial.fallbackImagePaths.isEmpty;
+      // 先让分页控制器连到首帧，缓存立即返回时也能正确定位到选中照片。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _subscribeToImageUpdates(updates);
+      });
+    }
   }
 
   @override
   void dispose() {
+    unawaited(_imageUpdatesSubscription?.cancel());
     _pageController.dispose();
     _loadingTimer?.cancel();
     _overscrollToastTimer?.cancel();
     super.dispose();
+  }
+
+  /// 资源窗口扩充时按原媒体标识保留浏览位置，失败仍可关闭预览。
+  void _subscribeToImageUpdates(Stream<List<ImageElement>> updates) {
+    _imageUpdatesSubscription = updates.listen((elements) {
+      if (!mounted) return;
+      setState(() => _showLoadingIndicator = false);
+      if (elements.isNotEmpty) _updateImageElements(elements, false);
+    }, onError: (Object _, StackTrace __) {
+      if (mounted) setState(() => _showLoadingIndicator = false);
+    });
   }
 
   /// 关闭当前媒体承载容器，浮层模式不弹出下方仍持有转发草稿的页面。
@@ -951,27 +987,34 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
     final isSwipingLeft = newIndex < previousIndex;
     final isSwipingRight = newIndex > previousIndex;
 
-    if (newIndex < preloadThreshold && isSwipingLeft && !_isLoadingOlder) {
-      _isLoadingOlder = true;
-      _startLoadingTimer();
-
-      _onLoadMore(true, (newElementsData, hasMore) {
-        _handleLoadMoreResponse(newElementsData, true);
-      });
+    if (newIndex < preloadThreshold && isSwipingLeft) {
+      _requestMore(true);
     } else if (newIndex >= (_imageElements.length - preloadThreshold) &&
-        isSwipingRight &&
-        !_isLoadingNewer) {
-      _isLoadingNewer = true;
-      _startLoadingTimer();
-
-      _onLoadMore(false, (newElementsData, hasMore) {
-        _handleLoadMoreResponse(newElementsData, false);
-      });
+        isSwipingRight) {
+      _requestMore(false);
     }
   }
 
+  /// 到达边缘和越界滑动共享同一方向的请求，翻页前保留当前图片。
+  void _requestMore(bool isOlder) {
+    if (isOlder ? _isLoadingOlder : _isLoadingNewer) return;
+    if (widget.loadMoreOnOverscroll &&
+        !(isOlder ? _hasMoreOlder : _hasMoreNewer)) {
+      return;
+    }
+    if (isOlder) {
+      _isLoadingOlder = true;
+    } else {
+      _isLoadingNewer = true;
+    }
+    _startLoadingTimer();
+    _onLoadMore(isOlder, (elements, hasMore) {
+      _handleLoadMoreResponse(elements, isOlder, hasMore);
+    });
+  }
+
   void _handleLoadMoreResponse(
-      List<ImageElement> newElementsData, bool isOlder) {
+      List<ImageElement> newElementsData, bool isOlder, bool hasMore) {
     if (!mounted) return;
     _cancelLoadingTimer();
 
@@ -984,18 +1027,22 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
     setState(() {
       if (isOlder) {
         _isLoadingOlder = false;
+        _hasMoreOlder = hasMore;
       } else {
         _isLoadingNewer = false;
+        _hasMoreNewer = hasMore;
       }
     });
   }
 
+  /// 替换媒体窗口时继续展示原来选中的资源。
   void _updateImageElements(List<ImageElement> newElements, bool isOlder) {
     setState(() {
       _isUpdatingData = true;
     });
 
     setState(() {
+      // 原图可能替换缩略图，使用稳定标识匹配而非比较文件路径。
       final currentElement = _imageElements[_currentIndex];
       final currentElementSignature = _getElementSignature(currentElement);
 
@@ -1010,6 +1057,8 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
         debugPrint('not found，use _currentIndex: $_currentIndex');
       }
 
+      // 窗口补全会改变当前媒体序号，程序定位不应当作用户滑动触发分页。
+      _previousIndex = _currentIndex;
       _pageController.jumpToPage(_currentIndex);
 
       _isUpdatingData = false;
@@ -1119,14 +1168,22 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
           else
             NotificationListener<ScrollNotification>(
               onNotification: (ScrollNotification notification) {
-                if (notification is OverscrollNotification) {
+                if (notification is OverscrollNotification &&
+                    notification.depth == 0) {
+                  // 列表更新可能重定位页码，边界以当前滚动位置判断。
                   final isAtStart =
-                      _currentIndex == 0 && notification.overscroll < 0;
-                  final isAtEnd = _currentIndex == _imageElements.length - 1 &&
+                      notification.metrics.extentBefore == 0 &&
+                          notification.overscroll < 0;
+                  final isAtEnd = notification.metrics.extentAfter == 0 &&
                       notification.overscroll > 0;
 
                   if (isAtStart || isAtEnd) {
-                    _showNoMoreDataToastWithDebounce();
+                    final hasMore = isAtStart ? _hasMoreOlder : _hasMoreNewer;
+                    if (widget.loadMoreOnOverscroll && hasMore) {
+                      _requestMore(isAtStart);
+                    } else {
+                      _showNoMoreDataToastWithDebounce();
+                    }
                   }
                 }
                 return false;
@@ -1136,7 +1193,13 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
                 itemCount: _imageElements.length,
                 physics: _isImageZoomed
                     ? const NeverScrollableScrollPhysics()
-                    : const PageScrollPhysics(),
+                    : widget.loadMoreOnOverscroll
+                        ? const PageScrollPhysics(
+                            parent: AlwaysScrollableScrollPhysics(
+                              parent: ClampingScrollPhysics(),
+                            ),
+                          )
+                        : const PageScrollPhysics(),
                 onPageChanged: (index) {
                   setState(() {
                     _currentIndex = index;
@@ -1166,18 +1229,22 @@ class _ImageViewerWidgetState extends State<ImageViewerWidget> {
     final isCurrentPage = index == _currentIndex;
 
     if (element.isImage) {
-      final image = _ImageItemView(
-        key: ValueKey(element),
-        element: element,
-        onTap: _onImageTap,
-        onZoomChanged: (isZoomed) {
-          if (index != _currentIndex) return;
-          if (_isImageZoomed != isZoomed) {
-            setState(() {
-              _isImageZoomed = isZoomed;
-            });
-          }
-        },
+      final image = Semantics(
+        // 只标记当前图片的关闭手势，避免预加载的相邻页出现重复标识。
+        identifier: isCurrentPage ? 'tim.image_viewer.dismiss' : null,
+        child: _ImageItemView(
+          key: ValueKey(element),
+          element: element,
+          onTap: _onImageTap,
+          onZoomChanged: (isZoomed) {
+            if (index != _currentIndex) return;
+            if (_isImageZoomed != isZoomed) {
+              setState(() {
+                _isImageZoomed = isZoomed;
+              });
+            }
+          },
+        ),
       );
       if (!widget.reserveActionBar) return image;
       return Column(

@@ -1,7 +1,8 @@
 import { abilityAccessCtrl, bundleManager, common, Permissions } from '@kit.AbilityKit';
-import { BusinessError } from '@kit.BasicServicesKit';
+import { BusinessError, systemDateTime } from '@kit.BasicServicesKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { media } from '@kit.MediaKit';
+import { mergeRecordings } from 'libchat_voice.so';
 
 /**
  * OHOS 端 audio 录音核心工具类。
@@ -56,8 +57,10 @@ interface RecordConfig {
   completion: RecordCompletionListener;
 }
 
+/** 管理鸿蒙采音和录音文件，在有效音频落盘后向平台桥接交付一次结果。 */
 export default class AudioRecorderHelper {
   private static readonly TAG = 'ChatUiKit.AudioRecorderHelper';
+  /** 进度和音量的刷新间隔，不负责判断录音上限。 */
   private static readonly PROGRESS_INTERVAL_MS = 200;
   private static readonly MIC_PERM: Permissions = 'ohos.permission.MICROPHONE';
 
@@ -72,18 +75,24 @@ export default class AudioRecorderHelper {
   private avRecorder: media.AVRecorder | null = null;
   private audioFile: fs.File | null = null;
   private recordingFilePath: string = '';
+  /** 仅采音期间为真，停止和裁剪前同步复位以拒绝重复收尾。 */
   private isRecording: boolean = false;
-  private recordingStartTs: number = 0;   // Date.now() 值,精确计时
-  private recordingDurationMs: number = 0;
+  /** 当前片段的启动时间，使用单调时钟，避免系统时间调整改变录音时长。 */
+  private recordingStartTs: number = 0;
+  /** 停止或取消时一并清理，避免上次进度回调影响下一段录音。 */
   private progressTimerId: number = -1;
+  /** 采音成功启动后按剩余额度计时，先到期限会请求自动停止。 */
+  private limitTimerId: number = -1;
   private progress: RecordProgressListener | null = null;
   private completion: RecordCompletionListener | null = null;
+  /** 持有采音会话直到结果交付，启动和裁剪期间仍独占文件与回调。 */
   private currentConfig: RecordConfig | null = null;
   /** 保证 completion 只被 fire 一次,stop 和 timeout 竞争 */
   private completionFired: boolean = false;
 
+  /** 权限与路径检查通过后启动采音；上限从实际开始采音时计算。 */
   async startRecord(config: RecordConfig): Promise<void> {
-    if (this.isRecording) {
+    if (this.currentConfig !== null) {
       console.warn(`${AudioRecorderHelper.TAG} already recording, reject start`);
       config.completion.onCompleted(RecordResultCode.ERROR_RECORDING, null, 0);
       return;
@@ -93,7 +102,6 @@ export default class AudioRecorderHelper {
     this.progress = config.progress;
     this.completion = config.completion;
     this.completionFired = false;
-    this.recordingDurationMs = 0;
 
     // 1) 权限:Dart 上层调用前已经 Permission.checkAndRequest(microphone),
     //    这里只 check,授权被撤销时才走 -6 分支。
@@ -143,7 +151,7 @@ export default class AudioRecorderHelper {
 
     // 4) 状态置位 + 计时
     this.isRecording = true;
-    this.recordingStartTs = Date.now();
+    this.recordingStartTs = systemDateTime.getUptime(systemDateTime.TimeType.STARTUP);
     this.startProgressTracking(config.maxDurationMs);
   }
 
@@ -172,17 +180,16 @@ export default class AudioRecorderHelper {
   //
   // ---- 私有 ----
 
-  /**
-   * 收尾流程:stop AVRecorder + 判定 min duration + 触发 completion。
-   * @param exceededMax 是否是因为达到 maxDurationMs 自动结束
-   */
-  private async finishAndEmit(exceededMax: boolean): Promise<void> {
+  /** 停止录音、校验时长并交付文件；限时结束时裁掉录音器停止延迟带来的尾帧。 */
+  private async finishAndEmit(timedOut: boolean): Promise<void> {
+    // 先结束采音状态，计时到期与松手竞争时只允许一方收尾。
     this.isRecording = false;
     this.stopProgressTracking();
 
-    const finalDurationMs = this.recordingDurationMs > 0
-      ? this.recordingDurationMs
-      : (Date.now() - this.recordingStartTs);
+    const maxMs = this.currentConfig?.maxDurationMs ?? 60000;
+    const elapsed = systemDateTime.getUptime(systemDateTime.TimeType.STARTUP) - this.recordingStartTs;
+    const reachedLimit = timedOut || elapsed >= maxMs;
+    const finalDurationMs = reachedLimit ? maxMs : elapsed;
 
     // 先落盘 stop + release,再判定 min duration,否则 avRecorder 内部资源没释放
     let stopOk = true;
@@ -208,18 +215,34 @@ export default class AudioRecorderHelper {
       this.fireCompletion(RecordResultCode.ERROR_RECORD_INNER_FAIL, null, finalDurationMs);
       return;
     }
-    const code = exceededMax
-      ? RecordResultCode.SUCCESS_EXCEED_MAX_DURATION
-      : RecordResultCode.SUCCESS;
-    this.fireCompletion(code, this.recordingFilePath, finalDurationMs);
+    if (reachedLimit) {
+      // AVRecorder 异步落盘后才可裁剪；重封装只保留额度内的完整 AAC 帧。
+      const trimmedPath = `${this.recordingFilePath}.trimmed.m4a`;
+      try {
+        await mergeRecordings([this.recordingFilePath], trimmedPath, maxMs);
+      } catch (e) {
+        console.warn(`${AudioRecorderHelper.TAG} trim failed`, (e as BusinessError).message);
+        await this.deleteRecordingFile();
+        this.fireCompletion(RecordResultCode.ERROR_RECORD_INNER_FAIL, null, finalDurationMs);
+        return;
+      }
+      await this.deleteRecordingFile();
+      this.fireCompletion(RecordResultCode.SUCCESS_EXCEED_MAX_DURATION, trimmedPath, finalDurationMs);
+      return;
+    }
+    this.fireCompletion(RecordResultCode.SUCCESS, this.recordingFilePath, finalDurationMs);
   }
 
+  /** 采音中的异步故障由错误回调处理；启动与收尾失败由对应的方法处理。 */
   private setupRecorderCallbacks(): void {
     const r = this.avRecorder;
     if (r === null) {
       return;
     }
     r.on('error', (err: BusinessError) => {
+      if (!this.isRecording || r !== this.avRecorder) {
+        return;
+      }
       console.error(`${AudioRecorderHelper.TAG} avRecorder error`, err.message);
       // 走 cancel 语义,清理资源并回调 inner fail
       this.isRecording = false;
@@ -232,23 +255,23 @@ export default class AudioRecorderHelper {
     });
   }
 
+  /** 限时停止与界面采样分别计时，避免200毫秒的进度采样推迟截断。 */
   private startProgressTracking(maxDurationMs: number): void {
     this.stopProgressTracking();
+    this.limitTimerId = setTimeout(() => {
+      if (this.isRecording) {
+        this.finishAndEmit(true).catch((e: Error) => {
+          console.warn(`${AudioRecorderHelper.TAG} auto stop on max duration failed`, e.message);
+        });
+      }
+    }, maxDurationMs);
     this.progressTimerId = setInterval(() => {
       if (!this.isRecording) {
         return;
       }
-      const elapsed = Date.now() - this.recordingStartTs;
-      this.recordingDurationMs = elapsed;
-      this.progress?.onRecordTime?.(elapsed);
-      if (elapsed >= maxDurationMs) {
-        // 到达上限,自动 stop 并给 exceedMax 结果
-        this.finishAndEmit(true).catch((e: Error) => {
-          console.warn(`${AudioRecorderHelper.TAG} auto stop on max duration failed`, e.message);
-        });
-      } else {
-        void this.samplePowerLevel();
-      }
+      const elapsed = systemDateTime.getUptime(systemDateTime.TimeType.STARTUP) - this.recordingStartTs;
+      this.progress?.onRecordTime?.(Math.min(elapsed, maxDurationMs));
+      void this.samplePowerLevel();
     }, AudioRecorderHelper.PROGRESS_INTERVAL_MS);
   }
 
@@ -268,7 +291,12 @@ export default class AudioRecorderHelper {
     }
   }
 
+  /** 结束采音时同时废止进度监听和限时停止回调。 */
   private stopProgressTracking(): void {
+    if (this.limitTimerId !== -1) {
+      clearTimeout(this.limitTimerId);
+      this.limitTimerId = -1;
+    }
     if (this.progressTimerId !== -1) {
       clearInterval(this.progressTimerId);
       this.progressTimerId = -1;

@@ -4,31 +4,29 @@ import os.log
 import AVFoundation
 import Foundation
 
-internal class AudioRecorderSystem: AudioRecorderInternalProtocol {
+/// 使用系统录音器按采音时长截断文件，并统一交付手动停止和限时结束的结果。
+internal class AudioRecorderSystem: NSObject, AudioRecorderInternalProtocol, AVAudioRecorderDelegate {
     let logger = Logger(subsystem: "AudioRecoder", category: "AudioRecorderSystem")
-    private static let kMinDuration:Int = 1000
     
     private var listener: AudioRecorderListener?
     private var recorder: AVAudioRecorder?
-    private var minDurationMs : Int = 1000
-    private var maxDurationMs : Int = 60000
+    /// 短于此时长的片段不能发送，单位为毫秒。
+    private var minDurationMs: Int = 1000
+    /// 当前片段的采音上限，续录时等于整条语音的剩余额度。
+    private var maxDurationMs: Int = 60000
 
+    /// 仅用于刷新波形和进度，在任一录音终态释放。
     private var recordTimer: Timer?
-    private var currentPower: Int = 0
-    private var currentTime: TimeInterval = 0
     
-    private var recordSetting:[String: Any]
+    private let recordSetting: [String: Any] = [
+        AVSampleRateKey: 16000.0,
+        AVFormatIDKey: kAudioFormatMPEG4AAC,
+        AVLinearPCMBitDepthKey: 16,
+        AVNumberOfChannelsKey: 1,
+        AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+    ]
     
-    init() {
-        recordSetting = [
-            AVSampleRateKey: 16000.0,
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVLinearPCMBitDepthKey: 16,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
-        ]
-    }
-    
+    /// 会话准备完成后启动系统限时采音，上限由录音器执行。
     func startRecord(_ path : String, _ minDuration: Int, _ maxDuration: Int) {
         self.minDurationMs = minDuration
         self.maxDurationMs = maxDuration
@@ -45,11 +43,15 @@ internal class AudioRecorderSystem: AudioRecorderInternalProtocol {
         
         let url = URL(fileURLWithPath: path)
         do {
-            recorder = try AVAudioRecorder(url: url, settings: recordSetting)
-            recorder?.isMeteringEnabled = true
-            recorder?.prepareToRecord()
-            recorder?.record()
-            recorder?.updateMeters()
+            let recorder = try AVAudioRecorder(url: url, settings: recordSetting)
+            recorder.delegate = self
+            recorder.isMeteringEnabled = true
+            // 系统按录音时间截断，界面的进度采样间隔不会推迟停止。
+            guard recorder.record(forDuration: Double(maxDurationMs) / 1000) else {
+                listener?.onComplete(.errorRecordInnerFail)
+                return
+            }
+            self.recorder = recorder
         } catch {
             logger.error("Failed to initialize AVAudioRecorder: \(error)")
             listener?.onComplete(.errorRecordInnerFail);
@@ -61,28 +63,35 @@ internal class AudioRecorderSystem: AudioRecorderInternalProtocol {
         logger.info("start system recording")
     }
     
+    /// 松手时读取尚未归零的录音时间，等文件关闭后再交付结果。
     func stopRecord() {
-        guard AVAudioSession.sharedInstance().recordPermission != .denied else {
+        // 已达到系统上限时由委托回调交付，避免松手抢先读到归零的时长。
+        guard let recorder = recorder, recorder.isRecording else { return }
+        let durationMs = min(Int(recorder.currentTime * 1000), maxDurationMs)
+        recorder.delegate = nil
+        recorder.stop()
+        let result: AudioRecordResultCode = durationMs < minDurationMs
+            ? .errorLessThanMinDuration : .success
+        finishRecord(durationMs, result)
+    }
+
+    /// 手动停止已解除委托，仍由当前录音器交付的成功回调表示达到限时。
+    func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
+        guard recorder === self.recorder else { return }
+        guard flag else {
+            finishRecord(0, .errorRecordInnerFail)
             return
         }
-        onRecordTimer()
-        
-        recorder?.stop()
+        finishRecord(maxDurationMs, maxDurationMs < minDurationMs ? .errorLessThanMinDuration : .exceedMaxDuration)
+    }
+
+    /// 清理本次采音和计时后再发布终态，允许下一段重新启动。
+    private func finishRecord(_ durationMs: Int, _ result: AudioRecordResultCode) {
         recorder = nil
-        
         recordTimer?.invalidate()
         recordTimer = nil
-        
-        if Int(currentTime) * 1000 < minDurationMs {
-            listener?.onComplete(.errorLessThanMinDuration)
-        } else if Int(currentTime) * 1000 > maxDurationMs {
-            listener?.onComplete(.exceedMaxDuration)
-        } else {
-            listener?.onComplete(.success)
-        }
-        
-        currentTime = 0
-        logger.info("stop system recording")
+        listener?.onProgress(durationMs)
+        listener?.onComplete(result)
     }
     
     func setListener(_ listener: AudioRecorderListener) {
@@ -104,22 +113,11 @@ internal class AudioRecorderSystem: AudioRecorderInternalProtocol {
         #endif
     }
     
+    /// 正在采音时才更新波形和进度，系统结束到委托交付之间忽略归零读数。
     @objc private func onRecordTimer() {
-        recorder?.updateMeters()
-        
-        let time = recorder?.currentTime ?? 0
-        print("record time = \(time)")
-        if time > currentTime {
-            currentTime = time
-            listener?.onProgress(Int(time * 1000))
-        }
-        
-        if Int(time * 1000) > maxDurationMs {
-            stopRecord()
-        }
-        
-        let power = recorder?.averagePower(forChannel: 0) ?? 0
-        currentPower = Int(power)
-        listener?.onPower(currentPower)
+        guard let recorder = recorder, recorder.isRecording else { return }
+        recorder.updateMeters()
+        listener?.onProgress(Int(recorder.currentTime * 1000))
+        listener?.onPower(Int(recorder.averagePower(forChannel: 0)))
     }
 }

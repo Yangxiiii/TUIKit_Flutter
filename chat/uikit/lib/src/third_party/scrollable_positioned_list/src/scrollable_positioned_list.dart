@@ -38,6 +38,7 @@ class ScrollablePositionedList extends StatefulWidget {
     this.leadingItemsInserted = 0,
     this.scrollDirection = Axis.vertical,
     this.reverse = false,
+    this.clipBehavior = Clip.hardEdge,
     this.physics,
     this.semanticChildCount,
     this.padding,
@@ -68,6 +69,7 @@ class ScrollablePositionedList extends StatefulWidget {
     this.initialAlignment = 0,
     this.scrollDirection = Axis.vertical,
     this.reverse = false,
+    this.clipBehavior = Clip.hardEdge,
     this.physics,
     this.semanticChildCount,
     this.padding,
@@ -128,6 +130,9 @@ class ScrollablePositionedList extends StatefulWidget {
   ///
   /// See [ScrollView.reverse].
   final bool reverse;
+
+  /// 默认由滚动视口裁剪；宿主在平移后裁剪时可使用 [Clip.none]。
+  final Clip clipBehavior;
 
   /// {@template flutter.widgets.scroll_view.shrinkWrap}
   /// Whether the extent of the scroll view in the [scrollDirection] should be
@@ -435,6 +440,7 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
                   itemPositionsNotifier: primary.itemPositionsNotifier,
                   scrollDirection: widget.scrollDirection,
                   reverse: widget.reverse,
+                  clipBehavior: widget.clipBehavior,
                   cacheExtent: cacheExtent,
                   alignment: primary.alignment,
                   physics: widget.physics,
@@ -466,6 +472,7 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
                     controller: secondary.scrollController,
                     scrollDirection: widget.scrollDirection,
                     reverse: widget.reverse,
+                    clipBehavior: widget.clipBehavior,
                     cacheExtent: cacheExtent,
                     alignment: secondary.alignment,
                     physics: widget.physics,

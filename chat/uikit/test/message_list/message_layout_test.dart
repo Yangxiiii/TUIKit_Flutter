@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:atomic_x_core/impl/message/message_action_store_impl.dart';
 import 'package:atomic_x_core/impl/message/message_input_store_impl.dart';
 import 'package:atomic_x_core/impl/message/message_list_store_impl.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:tencent_chat_uikit/src/image_viewer/image_viewer_widget.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_bubble.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_viewport_anchor.dart'
     show MessageViewportAnchor;
@@ -11,21 +14,31 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_action_sheet.dart';
 import 'package:tencent_chat_uikit/src/message_input/widget/message_edit_composer.dart';
+import 'package:tencent_chat_uikit/src/message_input/widget/rich_content_editor_sheet.dart';
 import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart';
 import 'package:tencent_cloud_chat_sdk/tencent_im_sdk_plugin.dart';
 import 'package:tencent_cloud_chat_sdk/enum/V2TimAdvancedMsgListener.dart';
 import 'package:tencent_cloud_chat_sdk/enum/history_msg_get_type_enum.dart';
+import 'package:tencent_cloud_chat_sdk/enum/image_types.dart';
 import 'package:tencent_cloud_chat_sdk/manager/v2_tim_manager.dart';
 import 'package:tencent_cloud_chat_sdk/manager/v2_tim_message_manager.dart';
 import 'package:tencent_cloud_chat_sdk/manager/v2_tim_conversation_manager.dart';
 import 'package:tencent_cloud_chat_sdk/manager/v2_tim_friendship_manager.dart';
+import 'package:tencent_cloud_chat_sdk/manager/v2_tim_group_manager.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_value_callback.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_callback.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_conversation.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_conversation_result.dart';
+import 'package:tencent_cloud_chat_sdk/models/v2_tim_group_info_result.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_message.dart';
+import 'package:tencent_cloud_chat_sdk/models/v2_tim_message_receipt.dart';
+import 'package:tencent_cloud_chat_sdk/models/v2_tim_image.dart';
+import 'package:tencent_cloud_chat_sdk/models/v2_tim_custom_elem.dart';
+import 'package:tencent_cloud_chat_sdk/models/v2_tim_image_elem.dart';
+import 'package:tencent_cloud_chat_sdk/models/v2_tim_message_online_url.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_text_elem.dart';
 import 'package:tencent_cloud_chat_sdk/models/v2_tim_merger_elem.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/merged_message_widget.dart';
@@ -36,15 +49,323 @@ import 'package:tencent_cloud_chat_sdk/models/v2_tim_message_reaction.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_overlay_avoider.dart';
+import 'package:tencent_chat_uikit/src/third_party/visibility_detector/visibility_detector.dart';
 import 'package:tencent_chat_uikit/src/third_party/scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/text_message_widget.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/file_message_widget.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/video_message_widget.dart';
 import 'package:tencent_chat_uikit/src/third_party/extended_text/extended_text.dart';
 import 'package:tencent_chat_uikit/src/third_party/extended_text_field/extended_text_field.dart'
-    show ExtendedEditableText;
+    show ExtendedEditableText, ExtendedTextField;
 
 void main() {
+  for (final scenario in [
+    (label: '群聊富文本单图', conversationId: 'group_visual', rich: true),
+    (label: '单聊富文本单图', conversationId: 'c2c_visual', rich: true),
+    (label: '单聊普通图片', conversationId: 'c2c_visual', rich: false),
+  ]) {
+    testWidgets('${scenario.label}可跨文字页左右浏览普通图片、富文本和归档图片',
+        (tester) async {
+      const archiveUrl = 'https://example.com/archive.png';
+      const oldUrl = 'https://example.com/old.png';
+      const currentUrl = 'https://example.com/current.png';
+      const newUrl = 'https://example.com/new.png';
+      final sdk = _Sdk('/conversation-media');
+      final original = TencentImSDKPlugin.v2TIMManager;
+      TencentImSDKPlugin.v2TIMManager = sdk;
+      addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+      V2TimImageElem photo(String url) => V2TimImageElem(imageList: [
+            V2TimImage(type: V2TIM_IMAGE_TYPE.V2TIM_IMAGE_TYPE_ORIGIN, url: url),
+          ]);
+      final groupId =
+          scenario.conversationId.startsWith('group_') ? 'visual' : null;
+      final current = _Message(
+        'current',
+        groupId: groupId,
+        image: scenario.rich ? null : photo(currentUrl),
+        custom: scenario.rich
+            ? V2TimCustomElem(
+                data: const RichContentMessage([
+                  RichImageBlock(currentUrl, 160, 90),
+                ]).toCustomData())
+            : null,
+      );
+      sdk.messages.limitHistoryPages = true;
+      sdk.messages.chronologicalHistory = [
+        _Message('old',
+            groupId: groupId, timestampOverride: 100, image: photo(oldUrl)),
+        for (var i = 0; i < 41; i++) _Message('older-$i'),
+        current,
+        for (var i = 0; i < 21; i++) _Message('newer-$i'),
+        _Message('new',
+            groupId: groupId,
+            custom: V2TimCustomElem(
+                data: const RichContentMessage([
+              RichImageBlock(newUrl, 160, 90),
+            ]).toCustomData())),
+      ];
+      final cache = PaintingBinding.instance.imageCache;
+      addTearDown(cache.clear);
+      final decoded = (await tester.runAsync(() => createTestImage()))!;
+      addTearDown(decoded.dispose);
+      for (final provider in const [
+        CachedNetworkImageProvider(archiveUrl),
+        CachedNetworkImageProvider(oldUrl),
+        CachedNetworkImageProvider(currentUrl),
+        CachedNetworkImageProvider(newUrl),
+        NetworkImage(currentUrl),
+      ]) {
+        cache.putIfAbsent(provider, () {
+          return OneFrameImageStreamCompleter(
+              Future.value(ImageInfo(image: decoded.clone())));
+        });
+      }
+      final scale = tester.view.devicePixelRatio * 1.5;
+      final thumbnail = ResizeImage(
+        const CachedNetworkImageProvider(currentUrl),
+        width: (200 * scale).ceil(),
+        height: (112.5 * scale).ceil(),
+        policy: ResizeImagePolicy.fit,
+      );
+      cache.putIfAbsent(
+        await thumbnail.obtainKey(ImageConfiguration.empty),
+        () => OneFrameImageStreamCompleter(
+            Future.value(ImageInfo(image: decoded.clone()))),
+      );
+      final archiveRequests = <(int?, String?)>[];
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: MessageBubble(
+            message: ChatUtil.convertToUIMessage(current),
+            conversationID: scenario.conversationId,
+            isSelf: false,
+            maxWidth: 320,
+            config: const ChatMessageListConfig(),
+            messageListStore: _UnusedMenuListStore(),
+            loadOlderMedia: ({required beforeTimestamp, required cursor}) async {
+              archiveRequests.add((beforeTimestamp, cursor));
+              if (cursor == null) {
+                return (
+                  messages: [
+                    MessageInfo(msgID: 'archived-text', timestamp: 90),
+                  ],
+                  nextCursor: '90',
+                );
+              }
+              return (
+                messages: [
+                  MessageInfo(
+                    msgID: 'archived-image',
+                    timestamp: 80,
+                    messageType: MessageType.image,
+                    messagePayload:
+                        ImageMessagePayload(originalImageURL: archiveUrl),
+                  ),
+                ],
+                nextCursor: null,
+              );
+            },
+          ),
+        ),
+      ));
+      await tester.tap(scenario.rich
+          ? find.bySemanticsIdentifier('tim.rich.current.image.${currentUrl.hashCode}')
+          : find.byType(ImageMessageWidget));
+      await tester.pumpAndSettle();
+
+      final viewer = find.byType(ImageViewerWidget);
+      final pages = find.descendant(of: viewer, matching: find.byType(PageView));
+      Finder picture(String url) => find.descendant(
+            of: viewer,
+            matching: find.byWidgetPredicate((widget) =>
+                widget is Image && widget.image == CachedNetworkImageProvider(url)),
+          ).hitTestable();
+      Future<void> swipe(double dx) async {
+        await tester.drag(pages, Offset(dx, 0));
+        await tester.pumpAndSettle();
+      }
+
+      expect(picture(currentUrl), findsOneWidget);
+      expect(sdk.messages.historyCursors, ['current', 'current']);
+      expect(sdk.messages.historyTypes.take(2), [
+        HistoryMsgGetTypeEnum.V2TIM_GET_CLOUD_OLDER_MSG,
+        HistoryMsgGetTypeEnum.V2TIM_GET_CLOUD_NEWER_MSG,
+      ]);
+      await swipe(600);
+      expect(sdk.messages.historyCursors, containsAll(['older-21', 'older-1']));
+      expect(picture(currentUrl), findsOneWidget);
+      await swipe(600);
+      expect(picture(oldUrl), findsOneWidget);
+
+      await swipe(-600);
+      expect(picture(currentUrl), findsOneWidget);
+      await swipe(-600);
+      expect(sdk.messages.historyCursors, contains('newer-19'));
+      await swipe(-600);
+      expect(picture(newUrl), findsOneWidget);
+
+      await swipe(600);
+      expect(picture(currentUrl), findsOneWidget);
+      await swipe(600);
+      expect(picture(oldUrl), findsOneWidget);
+      if (archiveRequests.isEmpty) await swipe(600);
+      expect(archiveRequests, [(100, null), (90, '90')]);
+      await swipe(600);
+      expect(picture(archiveUrl), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('单聊本机首屏缺少原始 SDK 消息时可滑到邻近图片', (tester) async {
+    const oldUrl = 'https://example.com/local-old.png';
+    const newUrl = 'https://example.com/local-new.png';
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/cached-media');
+    final history = Completer<V2TimValueCallback<List<V2TimMessage>>>();
+    sdk.messages.historyGate = history;
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    final cache = PaintingBinding.instance.imageCache;
+    final decoded = (await tester.runAsync(createTestImage))!;
+    addTearDown(decoded.dispose);
+    addTearDown(cache.clear);
+    for (final provider in const [
+      NetworkImage(oldUrl),
+      NetworkImage(newUrl),
+      CachedNetworkImageProvider(oldUrl),
+      CachedNetworkImageProvider(newUrl),
+    ]) {
+      cache.putIfAbsent(provider, () => OneFrameImageStreamCompleter(
+          Future.value(ImageInfo(image: decoded.clone()))));
+    }
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Column(children: [
+          MessageList(
+            conversationID: 'c2c_visual',
+            localMessagesLoader: () async => [
+              MessageInfo(
+                msgID: 'cached-old',
+                timestamp: 1700000000,
+                messageType: MessageType.image,
+                messagePayload: ImageMessagePayload(originalImageURL: oldUrl),
+              ),
+              MessageInfo(
+                msgID: 'cached-new',
+                timestamp: 1700000001,
+                messageType: MessageType.image,
+                messagePayload: ImageMessagePayload(originalImageURL: newUrl),
+              ),
+            ],
+          ),
+        ]),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.bySemanticsIdentifier('tim.chat.message.cached-new'));
+    await tester.pumpAndSettle();
+    final viewer = find.byType(ImageViewerWidget);
+    await tester.drag(
+      find.descendant(of: viewer, matching: find.byType(PageView)),
+      const Offset(600, 0),
+    );
+    await tester.pumpAndSettle();
+
+    // 首屏 SDK 查询仍未结束，预览使用列表里的两张本机消息。
+    expect(sdk.messages.historyCalls, 1);
+    expect(
+      find.descendant(
+        of: viewer,
+        matching: find.byWidgetPredicate((widget) =>
+            widget is Image &&
+            widget.image == const CachedNetworkImageProvider(oldUrl)),
+      ).hitTestable(),
+      findsOneWidget,
+    );
+    history.complete(V2TimValueCallback(code: 0, desc: '', data: []));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('群聊收到图片时先打开缩略图，原图和历史查询随后返回', (tester) async {
+    const thumb = 'https://example.com/received-thumb.png';
+    const full = 'https://example.com/received-full.png';
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/image-preview');
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    final onlineUrl = Completer<V2TimValueCallback<V2TimMessageOnlineUrl>>();
+    final history = Completer<V2TimValueCallback<List<V2TimMessage>>>();
+    sdk.messages.imageUrlLoader = () => onlineUrl.future;
+    sdk.messages.historyGate = history;
+
+    // 预置气泡与全屏所需的解码结果，异步行为只由 SDK 替身控制。
+    final cache = PaintingBinding.instance.imageCache;
+    addTearDown(cache.clear);
+    final decoded = (await tester.runAsync(() => createTestImage()))!;
+    addTearDown(decoded.dispose);
+    for (final provider in const [
+      NetworkImage(thumb),
+      CachedNetworkImageProvider(thumb),
+      CachedNetworkImageProvider(full),
+    ]) {
+      cache.putIfAbsent(
+        provider,
+        () => OneFrameImageStreamCompleter(
+          Future.value(ImageInfo(image: decoded.clone())),
+        ),
+      );
+    }
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ImageMessageWidget(
+          conversationID: 'group_preview',
+          message: MessageInfo(
+            msgID: 'received-image',
+            messageType: MessageType.image,
+            rawMessage: _Message('received-image'),
+            messagePayload: ImageMessagePayload(thumbImageURL: thumb),
+          ),
+          isSelf: false,
+          maxWidth: 200,
+          config: const ChatMessageListConfig(),
+        ),
+      ),
+    ));
+    await tester.pump();
+    await tester.tap(find.byType(ImageMessageWidget));
+    await tester.pumpAndSettle();
+    final viewer = find.byType(ImageViewerWidget);
+    Finder picture(String url) => find.descendant(
+          of: viewer,
+          matching: find.byWidgetPredicate((widget) =>
+              widget is Image &&
+              widget.image == CachedNetworkImageProvider(url)),
+        );
+    expect(viewer, findsOneWidget);
+    expect(picture(thumb), findsOneWidget);
+    expect(sdk.messages.historyCalls, 0);
+    onlineUrl.complete(V2TimValueCallback(
+      code: 0,
+      desc: '',
+      data: V2TimMessageOnlineUrl(
+        imageElem: V2TimImageElem(imageList: [
+          V2TimImage(type: V2TIM_IMAGE_TYPE.V2TIM_IMAGE_TYPE_ORIGIN, url: full),
+        ]),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(picture(full), findsOneWidget);
+    expect(sdk.messages.historyCalls, 1);
+
+    Navigator.of(tester.element(viewer)).pop();
+    await tester.pumpAndSettle();
+    history.complete(V2TimValueCallback(code: 10001, desc: '模拟查询失败'));
+    await tester.pumpAndSettle();
+    expect(viewer, findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('退出再进后，双向历史窗口超过20条仍能恢复表情回复', (tester) async {
     final original = TencentImSDKPlugin.v2TIMManager;
     final sdk = _Sdk('/layout');
@@ -97,6 +418,13 @@ void main() {
     await open();
     expect(batchSizes, [20]);
     expect(find.byType(MessageReactionBar), findsWidgets);
+    expect(
+      find.ancestor(
+        of: find.byType(MessageReactionBar).first,
+        matching: find.byType(MessageBubble),
+      ),
+      findsOneWidget,
+    );
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
 
@@ -199,7 +527,7 @@ void main() {
                       ? '加载归档中'
                       : status.hasError
                           ? '重试归档'
-                          : '查询更早消息'),
+                          : '没有更多消息了'),
                 ),
               ),
             ),
@@ -207,7 +535,7 @@ void main() {
         ),
       ));
       await tester.pumpAndSettle();
-      final entry = find.text('查询更早消息');
+      final entry = find.text('没有更多消息了');
       expect(sdk.messages.historyCalls, 1);
       expect(calls, isEmpty);
       expect(entry, findsNothing);
@@ -244,7 +572,9 @@ void main() {
       expect(calls, [(boundary, null), (boundary, null), (null, 'next')]);
       expect(tester.getTopLeft(find.text('归档第二条')).dy,
           lessThan(tester.getTopLeft(find.text('归档第一条')).dy));
-      expect(entry, findsNothing);
+      expect(entry, findsOneWidget);
+      expect(tester.getTopLeft(entry).dy,
+          lessThan(tester.getTopLeft(find.text('归档第二条')).dy));
       if (selecting) {
         expect(selection?.selectedMessages?.call().single.msgID, 'SDK 最早消息');
       }
@@ -446,6 +776,146 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('群聊顶部省略长群名和描述，保留完整人数和输入栏群名', (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final groupName = '群聊天窗口标题' * 8;
+    final description = '群描述单行展示' * 12;
+    final conversation = ConversationInfo(
+      conversationID: 'group_visual',
+      type: ConversationType.group,
+    );
+
+    Future<void> show({int? count, String? subtitle, bool? muted}) =>
+        tester.pumpWidget(
+          ProviderScope(
+            child: MaterialApp(
+              home: ChatPage(
+                conversation: conversation,
+                displayName: groupName,
+                groupMemberCount: count,
+                isNotificationMuted: muted,
+                subtitle: subtitle,
+                offlineMessages: const [],
+              ),
+            ),
+          ),
+        );
+
+    await show();
+    await tester.pumpAndSettle();
+    final header = find.byType(AppBar);
+    Finder titleText(String text) =>
+        find.descendant(of: header, matching: find.text(text));
+    expect(titleText(groupName), findsOneWidget);
+    expect(titleText('（0）'), findsNothing);
+
+    final muteIcon = find.descendant(
+        of: header, matching: find.byIcon(AppIcons.doNotDisturb));
+    expect(muteIcon, findsNothing);
+    await show(count: 1234, subtitle: ' $description ', muted: true);
+    await tester.pumpAndSettle();
+
+    for (final text in [groupName, description]) {
+      final widget = tester.widget<Text>(titleText(text));
+      expect(widget.maxLines, 1);
+      expect(widget.overflow, TextOverflow.ellipsis);
+    }
+    final count = titleText('（1234）');
+    expect(count, findsOneWidget);
+    expect(muteIcon, findsOneWidget);
+    expect(tester.widget<Icon>(muteIcon).color, const Color(0xFF8E8E99));
+    expect(tester.getTopLeft(count).dy,
+        tester.getTopLeft(titleText(groupName)).dy);
+    expect(tester.getRect(header).contains(tester.getRect(count).bottomRight),
+        isTrue);
+    expect(tester.widget<Text>(titleText(description)).textAlign,
+        TextAlign.center);
+    expect(find.descendant(of: header, matching: find.byIcon(AppIcons.expand)),
+        findsNothing);
+    expect(find.text('发送给 $groupName'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('深色聊天区分消息列表、气泡、导航和底部编辑区', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    tester.view.padding = const FakeViewPadding(top: 44, bottom: 24);
+    addTearDown(tester.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/dark-colors');
+    sdk.messages.chronologicalHistory = [
+      _Message('对方消息'),
+      _Message('我的消息', isSelfOverride: true),
+    ];
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    addTearDown(MessageList.clearViewportSnapshots);
+    final unreadCount = ValueNotifier(100);
+    addTearDown(unreadCount.dispose);
+
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        initialAppearanceSelectionProvider.overrideWithValue(
+            const AppAppearanceSelection(themeMode: AppThemeMode.dark)),
+      ],
+      child: MaterialApp(
+        home: ChatPage(
+          conversation: ConversationInfo(
+              conversationID: 'c2c_visual', type: ConversationType.c2c),
+          displayName: '联系人',
+          subtitle: '行政人事部',
+          totalUnreadCount: unreadCount,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final header = tester.widget<AppBar>(find.byType(AppBar));
+    expect(header.backgroundColor, const Color(0xFF111111));
+    expect(header.titleTextStyle?.color, const Color(0xFFD1D1D1));
+    expect(tester.widget<Text>(find.text('行政人事部')).style?.color,
+        const Color(0xFF909090));
+    final line = tester.widget<DecoratedBox>(
+        find.byKey(const ValueKey('app.page.appBarDivider')));
+    final divider = (line.decoration as BoxDecoration).border as Border;
+    expect(divider.bottom.color, const Color(0xFF303030));
+
+    Color? fill(Container container) =>
+        container.color ??
+        switch (container.decoration) {
+          BoxDecoration(:final color) => color,
+          _ => null,
+        };
+    Iterable<Color?> fills(Finder search) => tester
+        .widgetList<Container>(
+            find.descendant(of: search, matching: find.byType(Container)))
+        .map(fill);
+    final badge =
+        find.ancestor(of: find.text('99+'), matching: find.byType(Container));
+    expect(tester.widgetList<Container>(badge).map(fill),
+        contains(const Color(0xFF242424)));
+    expect(fills(find.byType(MessageList)), contains(const Color(0xFF111111)));
+    expect(fills(find.byType(TextMessageWidget)),
+        containsAll(const [Color(0xFF2C2C2C), Color(0xFF212C44)]));
+    expect(fills(find.byType(MessageInput)),
+        containsAll(const [Color(0xFF1C1C1C), Color(0xFF2C2C2C)]));
+
+    final placeholder = find.text('发送给 联系人');
+    expect(
+        tester.widget<Text>(placeholder).style?.color, const Color(0xFF5E5E5E));
+    final idleInput = find.bySemanticsIdentifier('tim.input.text');
+    expect(idleInput, findsOneWidget);
+    await tester.tap(idleInput);
+    await tester.pumpAndSettle();
+    final field = tester.widget<ExtendedTextField>(
+        find.byKey(const Key('message_input_text_field')));
+    expect(field.decoration?.hintStyle?.color, const Color(0xFF5E5E5E));
+  });
 
   testWidgets('聊天点击合并记录后通过全局Sheet显示正文、滚动并关闭', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
@@ -1599,6 +2069,7 @@ void main() {
         body: Column(children: [
           MessageList(
             conversationID: 'c2c_visual',
+            startAtLatest: true,
             offlineViewport: offlineViewport,
           ),
         ]),
@@ -1610,6 +2081,59 @@ void main() {
     expect(find.text('second').hitTestable(), findsOneWidget);
     expect(find.text('third').hitTestable(), findsOneWidget);
     expect(find.text('first').hitTestable(), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('重新进入群聊从最新消息加载，旧提及等用户点击后跳转', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/layout');
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    addTearDown(MessageList.clearViewportSnapshots);
+    V2TimMessage message(int number) => _Message('group-message-$number',
+        groupId: 'visual', timestampOverride: 1700000000 + number);
+    sdk.messages.chronologicalHistory = List.generate(20, (i) => message(i + 1));
+
+    Widget page({List<GroupAtInfo>? mentions}) => MaterialApp(
+          home: ProviderScope(
+            child: ChatPage(
+              conversation: ConversationInfo(
+                conversationID: 'group_visual',
+                type: ConversationType.group,
+                groupAtInfoList: mentions,
+              ),
+            ),
+          ),
+        );
+
+    await tester.pumpWidget(page());
+    await tester.pumpAndSettle();
+    expect(find.text('group-message-20').hitTestable(), findsOneWidget);
+    await tester.drag(
+        find.byType(ScrollablePositionedList), const Offset(0, 700));
+    await tester.pumpAndSettle();
+    expect(find.text('group-message-20').hitTestable(), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+
+    // 退出后有新消息及历史提及，重新进入优先读取最新一页。
+    sdk.messages.historyCursors.clear();
+    sdk.messages.chronologicalHistory!.add(message(21));
+    await tester.pumpWidget(page(mentions: [
+      GroupAtInfo(msgSeq: 4, atType: GroupAtType.atMe),
+    ]));
+    await tester.pumpAndSettle();
+    expect(sdk.messages.historyCursors.first, isNull);
+    expect(find.text('group-message-21').hitTestable(), findsOneWidget);
+    expect(find.text('group-message-4').hitTestable(), findsNothing);
+    final mention = find.byWidgetPredicate((widget) =>
+        widget is MessageTongueWidget &&
+        widget.tongueState.type == TongueType.atMention);
+    await tester.tap(mention);
+    await tester.pumpAndSettle();
+    expect(find.text('group-message-4').hitTestable(), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -1656,6 +2180,44 @@ void main() {
     expect(bubble('third').top - bubble('second').bottom, closeTo(16, .01));
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('群聊已置顶的旧消息长按显示取消置顶并提交该消息', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/sticky-menu');
+    sdk.messages.chronologicalHistory = [_Message('older')];
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    final unpinned = <String>[];
+    await tester.pumpWidget(ProviderScope(
+      child: MaterialApp(
+        home: ChatPage(
+          conversation: ConversationInfo(
+              conversationID: 'group_visual', type: ConversationType.group),
+          messageStickyConfig: ChatMessageStickyConfig(
+            pin: (_) async => throw StateError('已置顶消息不得重复提交置顶'),
+            groupPinnedMessageIds: const {'older', 'latest'},
+            unpinGroupMessage: (message) async {
+              unpinned.add(message.msgID);
+              return null;
+            },
+            bannerBuilder: (_, __) => const SizedBox.shrink(),
+            onMessagesChanged: (_) {},
+            onMessagesDeleted: (_) {},
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.byType(TextMessageWidget));
+    await tester.pumpAndSettle();
+    expect(find.text('置顶消息'), findsNothing);
+    await tester.tap(find.text('取消置顶消息'));
+    await tester.pumpAndSettle();
+    expect(unpinned, ['older']);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('首屏消息先加载，置顶辅助请求挂起或失败不影响消息显示', (tester) async {
@@ -1740,6 +2302,211 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     }
+  });
+
+  testWidgets('首屏发出已读回执后第一次长按仍能避让遮挡', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/layout');
+    sdk.messages.chronologicalHistory = List.generate(
+      20,
+      (index) => _Message('history-${index + 1}',
+          timestampOverride: 1700000000 + index, needsReceipt: index == 19),
+    );
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+
+    await tester.pumpWidget(ProviderScope(
+      child: MaterialApp(
+        home: Builder(builder: (context) {
+          // 宿主在菜单路由覆盖时重建聊天页，与实际入口的路由依赖一致。
+          ModalRoute.isCurrentOf(context);
+          return ChatPage(
+            conversation: ConversationInfo(
+                conversationID: 'c2c_history_visual', type: ConversationType.c2c),
+            messageListConfig: ChatMessageListConfig(
+              isShowTimeMessage: false,
+              forwardHandler: (_, __) async => false,
+            ),
+          );
+        }),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    VisibilityDetectorController.instance.notifyNow();
+    await tester.pump(const Duration(milliseconds: 800));
+    expect(sdk.messages.receiptCalls, 1);
+
+    final bubble = find.bySemanticsIdentifier('tim.chat.message.history-20');
+    final target =
+        find.ancestor(of: bubble, matching: find.byType(MessageBubble));
+    final originalState = tester.state(target);
+    final originalBottom = tester.getRect(bubble).bottom;
+    await tester.longPress(bubble);
+    await tester.pumpAndSettle();
+
+    final sheet = find.byType(MessageActionSheet);
+    final sheetTop = tester.getRect(sheet).top;
+    expect(originalBottom, greaterThan(sheetTop));
+    expect(sheetTop - tester.getRect(bubble).bottom, closeTo(16, .01));
+    expect(tester.state(target), same(originalState));
+    expect(sdk.messages.receiptCalls, 1);
+  });
+
+  testWidgets('长按被列表底部截断的消息时完整绘制气泡', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/layout');
+    sdk.messages.chronologicalHistory = List.generate(
+      20,
+      (index) => _Message('history-${index + 1}',
+          timestampOverride: 1700000000 + index, isSelfOverride: true),
+    );
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    final screen = GlobalKey();
+    await tester.pumpWidget(ProviderScope(
+      child: RepaintBoundary(
+        key: screen,
+        child: MaterialApp(
+          home: ChatPage(
+            conversation: ConversationInfo(
+                conversationID: 'c2c_visual', type: ConversationType.c2c),
+            messageListConfig: ChatMessageListConfig(
+              isShowTimeMessage: false,
+              forwardHandler: (_, __) async => false,
+            ),
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final bubble = find.bySemanticsIdentifier('tim.chat.message.history-20');
+    final list = find.byType(ScrollablePositionedList);
+    final viewportBottom = tester.getRect(list).bottom;
+    final boundary =
+        tester.renderObject<RenderRepaintBoundary>(find.byKey(screen));
+    Future<int?> bubbleBottomPixel() {
+      final rect = tester.getRect(bubble);
+      return tester.runAsync(() async {
+        final image = await boundary.toImage();
+        try {
+          final pixels =
+              (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+          final index =
+              (image.width * (rect.bottom - 6).floor() + rect.center.dx.floor());
+          return pixels.getUint32(index * 4);
+        } finally {
+          image.dispose();
+        }
+      });
+    }
+
+    final fullBubblePixel = await bubbleBottomPixel();
+    final scroll = tester.state<ScrollableState>(
+        find.descendant(of: list, matching: find.byType(Scrollable)).first);
+    final bottomGap = viewportBottom - tester.getRect(bubble).bottom;
+    scroll.position.jumpTo(scroll.position.pixels + bottomGap + 20);
+    await tester.pumpAndSettle();
+    final clipped = tester.getRect(bubble);
+    expect(clipped.bottom, greaterThan(viewportBottom + 6));
+    expect(clipped.top, lessThan(viewportBottom));
+    expect(await bubbleBottomPixel(), isNot(fullBubblePixel));
+    // 从仍露出的上半部打开菜单，再检查原本超出视口的底部是否实际绘制。
+    await tester.longPressAt(Offset(clipped.center.dx, clipped.top + 4));
+    await tester.pumpAndSettle();
+    final sheet = find.byType(MessageActionSheet);
+    expect(tester.getRect(sheet).top - tester.getRect(bubble).bottom,
+        closeTo(16, .01));
+    expect(await bubbleBottomPixel(), fullBubblePixel);
+
+    Navigator.of(tester.element(sheet)).pop();
+    await tester.pumpAndSettle();
+    expect(tester.getRect(bubble), clipped);
+    expect(await bubbleBottomPixel(), isNot(fullBubblePixel));
+  });
+
+  testWidgets('长按菜单按气泡边缘避让，气泡下方的回复计数不额外抬高列表', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/single');
+    sdk.messages.chronologicalHistory = [_Message('third')];
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+
+    await tester.pumpWidget(ProviderScope(
+      child: MaterialApp(
+        home: ChatPage(
+          conversation: ConversationInfo(
+              conversationID: 'c2c_visual', type: ConversationType.c2c),
+          messageListConfig: ChatMessageListConfig(
+            isShowTimeMessage: false,
+            forwardHandler: (_, __) async => false,
+          ),
+          messageReplyConfig: ChatMessageReplyConfig(
+            project: (_, __) => (
+              quotes: {},
+              replies: {'third': ['reply-id']},
+            ),
+            openDetails: (_, __, ___, ____) {},
+            sendError: (_) => (message: '', reset: false),
+            canStart: (_, __, ___) => true,
+            contentTooLongMessage: '',
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final bubble = find.bySemanticsIdentifier('tim.chat.message.third');
+    final replyCount = find.bySemanticsIdentifier('tim.reply.count.third');
+    final sheet = find.byType(MessageActionSheet);
+    final originalBottom = tester.getRect(bubble).bottom;
+
+    Future<void> openMenu() async {
+      await tester.longPress(bubble);
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> closeMenu() async {
+      Navigator.of(tester.element(sheet)).pop();
+      await tester.pumpAndSettle();
+    }
+
+    await openMenu();
+    final sheetHeight = tester.getSize(sheet).height;
+    await closeMenu();
+
+    // 使用实际面板高度，让菜单只挡住回复计数而不挡正文气泡。
+    final unobscuredHeight = sheetHeight + originalBottom + 1;
+    tester.view.physicalSize = Size(390, unobscuredHeight);
+    await tester.pumpAndSettle();
+    final replyBottom = tester.getRect(replyCount).bottom;
+    await openMenu();
+    final sheetTop = tester.getRect(sheet).top;
+    expect(sheetTop, greaterThan(originalBottom));
+    expect(sheetTop, lessThan(replyBottom));
+    expect(tester.getRect(bubble).bottom, closeTo(originalBottom, .01));
+    await closeMenu();
+
+    // 面板真正挡住气泡时只补足设计间距，关闭后恢复原位置。
+    tester.view.physicalSize = Size(390, unobscuredHeight - 10);
+    await tester.pumpAndSettle();
+    await openMenu();
+    expect(tester.getRect(sheet).top - tester.getRect(bubble).bottom,
+        closeTo(16, .01));
+    await closeMenu();
+    expect(tester.getRect(bubble).bottom, closeTo(originalBottom, .01));
   });
 
   testWidgets('长按和松手只打开操作面板，点击多选才进入多选', (tester) async {
@@ -1894,6 +2661,133 @@ void main() {
       expect(find.text('100'), findsOneWidget);
     });
   }
+
+  for (final withMention in [false, true]) {
+    testWidgets('星标悬浮入口共享右下锚点，与普通提醒间隔 12（@=$withMention）', (tester) async {
+      final original = TencentImSDKPlugin.v2TIMManager;
+      final sdk = _Sdk('/history');
+      TencentImSDKPlugin.v2TIMManager = sdk;
+      addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+      MessageList.clearViewportSnapshots();
+      addTearDown(MessageList.clearViewportSnapshots);
+      var located = 0;
+      await tester.pumpWidget(MaterialApp(
+        theme: AppThemeFactory.create(
+            const AppNormalColorScheme(), Brightness.light),
+        home: Scaffold(
+          body: Column(children: [
+            MessageList(
+              conversationID: 'c2c_history_visual',
+              groupAtInfoList: withMention
+                  ? [
+                      GroupAtInfo(msgSeq: 19, atType: GroupAtType.atMe),
+                      GroupAtInfo(msgSeq: 20, atType: GroupAtType.atMe),
+                    ]
+                  : null,
+              floatingMessageAction: MessageTongueWidget.highlighted(
+                text: '2 条星标消息',
+                icon: AppIcons.starFull,
+                onTap: () => located++,
+                semanticsIdentifier: 'tim.star.locate',
+                semanticsLabel: '2 条星标消息，定位最早未读',
+              ),
+            ),
+          ]),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      final star = find.bySemanticsIdentifier('tim.star.locate');
+      final list = find.byType(MessageList);
+      final bottomRight = tester.getBottomRight(list) - const Offset(16, 16);
+      if (!withMention) {
+        expect(tester.getBottomRight(star), bottomRight);
+        await tester.drag(
+            find.byType(ScrollablePositionedList), const Offset(0, 400));
+        await tester.pumpAndSettle();
+        sdk.messages.listener!.onRecvNewMessage(_Message('new-21'));
+        await tester.pumpAndSettle();
+      }
+      final navigation = find.byWidgetPredicate(
+        (widget) =>
+            widget is MessageTongueWidget &&
+            widget.tongueState.type ==
+                (withMention ? TongueType.atMention : TongueType.newMessages),
+      );
+      expect(navigation, findsOneWidget);
+      expect(tester.getBottomRight(navigation), bottomRight);
+      expect(tester.getTopRight(navigation) - tester.getBottomRight(star),
+          const Offset(0, 12));
+
+      await tester.tap(star);
+      await tester.pump();
+      expect(located, 1);
+      expect(navigation, findsOneWidget);
+    });
+  }
+
+  testWidgets('同一发送人连续消息定位到指定气泡，并避开右下角星标入口', (tester) async {
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/history');
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    MessageList.clearViewportSnapshots();
+    addTearDown(MessageList.clearViewportSnapshots);
+    final target = ValueNotifier<MessageInfo?>(null);
+    addTearDown(target.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Column(children: [
+          ValueListenableBuilder(
+            valueListenable: target,
+            builder: (_, selected, __) => MessageList(
+              conversationID: 'c2c_history_visual',
+              aggregateMessages: true,
+              locateMessage: selected,
+              floatingMessageAction: MessageTongueWidget.highlighted(
+                text: '3 条星标消息',
+                icon: AppIcons.starFull,
+                onTap: () => target.value =
+                    ChatUtil.convertToUIMessage(_Message('history-14')),
+                semanticsIdentifier: 'tim.star.locate',
+                semanticsLabel: '定位最早未读星标消息',
+              ),
+            ),
+          ),
+        ]),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final star = find.bySemanticsIdentifier('tim.star.locate');
+    await tester.tap(star);
+    await tester.pump();
+    for (final sequence in [21, 22, 23]) {
+      sdk.messages.listener!
+          .onRecvNewMessage(_Message('new-$sequence', isSelfOverride: true));
+    }
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    final matched = find.byWidgetPredicate((widget) =>
+        widget is MessageItem && widget.message.msgID == 'history-14');
+    expect(matched.hitTestable(), findsOneWidget);
+    expect(tester.widget<MessageItem>(matched).isHighlighted, isTrue);
+    final list = find.byType(ScrollablePositionedList);
+    final listBounds = tester.getRect(list);
+    final bottomPadding =
+        tester.widget<ScrollablePositionedList>(list).padding?.bottom ?? 0;
+    final targetBottom = tester.getBottomLeft(matched).dy;
+    expect(listBounds.bottom - targetBottom,
+        closeTo(listBounds.height * .3 + bottomPadding, 2));
+    expect(targetBottom, lessThan(tester.getTopLeft(star).dy));
+    expect(
+      tester
+          .widgetList<MessageItem>(find.byType(MessageItem))
+          .where((row) => row.isHighlighted)
+          .map((row) => row.message.msgID),
+      ['history-14'],
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets('文字气泡没有内部时间时不留空槽，有时间时保留分隔', (tester) async {
     final message = MessageInfo(
@@ -2075,6 +2969,109 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('普通输入键盘打开时回到最新消息，后续尺寸变化允许继续浏览历史', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/layout');
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    sdk.messages.chronologicalHistory = List.generate(
+      20,
+      (index) => _Message('history-${index + 1}',
+          timestampOverride: 1700000000 + index),
+    );
+
+    await tester.pumpWidget(ProviderScope(
+      child: MaterialApp(
+        home: ChatPage(
+          conversation: ConversationInfo(
+            conversationID: 'c2c_history_visual',
+            type: ConversationType.c2c,
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final latest = find.text('history-20').hitTestable();
+    final list = find.byType(ScrollablePositionedList);
+    expect(latest, findsOneWidget);
+    await tester.drag(list, const Offset(0, 700));
+    await tester.pumpAndSettle();
+    expect(latest, findsNothing);
+
+    await tester.tap(find.bySemanticsIdentifier('tim.input.text'));
+    await tester.pumpAndSettle();
+    expect(tester.testTextInput.isVisible, isTrue);
+    tester.view.viewInsets = const FakeViewPadding(bottom: 250);
+    await tester.pumpAndSettle();
+    expect(latest, findsOneWidget);
+
+    // 键盘已显示时允许翻看旧消息，改变输入法高度不会触发第二次回底。
+    await tester.drag(list, const Offset(0, 300));
+    await tester.pumpAndSettle();
+    expect(latest, findsNothing);
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    await tester.pumpAndSettle();
+    expect(latest, findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  for (final keyboardVisible in [false, true]) {
+    final keyboardState = keyboardVisible ? '键盘已打开' : '键盘未打开';
+    testWidgets('$keyboardState时展开富文本编辑器会回到最新消息', (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      SharedPreferences.setMockInitialValues({});
+      final original = TencentImSDKPlugin.v2TIMManager;
+      final sdk = _Sdk('/layout');
+      TencentImSDKPlugin.v2TIMManager = sdk;
+      addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+      sdk.messages.chronologicalHistory = List.generate(
+        20,
+        (index) => _Message('history-${index + 1}',
+            timestampOverride: 1700000000 + index),
+      );
+
+      await tester.pumpWidget(ProviderScope(
+        child: MaterialApp(
+          home: ChatPage(
+            conversation: ConversationInfo(
+              conversationID: 'c2c_history_visual',
+              type: ConversationType.c2c,
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      if (keyboardVisible) {
+        await tester.tap(find.bySemanticsIdentifier('tim.input.text'));
+        await tester.pumpAndSettle();
+        tester.view.viewInsets = const FakeViewPadding(bottom: 250);
+        await tester.pumpAndSettle();
+      }
+
+      final list = find.byType(ScrollablePositionedList);
+      final scroll =
+          tester.widget<ScrollablePositionedList>(list).itemScrollController!;
+      await tester.drag(list, const Offset(0, 700));
+      await tester.pumpAndSettle();
+      expect(scroll.isAtLeadingEdge, isFalse);
+
+      await tester.tap(find.bySemanticsIdentifier('tim.input.expand'));
+      await tester.pumpAndSettle();
+      expect(find.byType(RichContentEditorSheet), findsOneWidget);
+      // 编辑器覆盖消息区，直接检查反向列表是否贴住最新端。
+      expect(scroll.isAtLeadingEdge, isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
   // 字体方案按首次使用的平台初始化，平台切换用例放在默认字号断言之后。
   testWidgets('iOS 聊天只在键盘收起时持续请求帧，归零、反向及超时后停止', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
@@ -2141,16 +3138,30 @@ final class _Sdk implements V2TIMManager {
   final _Conversations conversations;
   final _Messages messages;
   final friends = _Friends();
+  final groups = _Groups();
   @override
   dynamic noSuchMethod(Invocation call) => switch (call.memberName) {
         #getConversationManager => conversations,
         #getMessageManager => messages,
         #getFriendshipManager => friends,
+        #getGroupManager => groups,
+        #addGroupListener => Future<void>.value(),
         #callExperimentalAPI => Future.value(
             V2TimValueCallback<String>(code: 0, desc: '', data: ''),
           ),
         _ => throw StateError('夹具未覆盖SDK入口: ${call.memberName}'),
       };
+}
+
+final class _Groups implements V2TIMGroupManager {
+  @override
+  Future<V2TimValueCallback<List<V2TimGroupInfoResult>>> getGroupsInfo({
+    required List<String> groupIDList,
+  }) async =>
+      V2TimValueCallback(code: 0, desc: '', data: []);
+
+  @override
+  dynamic noSuchMethod(Invocation call) => super.noSuchMethod(call);
 }
 
 final class _Conversations implements V2TIMConversationManager {
@@ -2203,17 +3214,29 @@ final class _Messages implements V2TIMMessageManager {
   final String scene;
   Completer<V2TimValueCallback<List<V2TimMessage>>>? historyGate;
 
+  /// 让群聊图片的在线地址可晚于预览页返回。
+  Future<V2TimValueCallback<V2TimMessageOnlineUrl>> Function()? imageUrlLoader;
+
   /// 单独控制 SDK 旧页的返回时机，验证归档等待 SDK 取齐。
   Completer<V2TimValueCallback<List<V2TimMessage>>>? olderHistoryGate;
   int historyCalls = 0;
 
   /// 保留 SDK 请求游标，用于确认恢复时查询的是当前锚点两侧。
   final historyCursors = <String?>[];
+
+  /// 记录原始 SDK 历史请求方向，供预览测试区分本机与云端查询。
+  final historyTypes = <HistoryMsgGetTypeEnum?>[];
   List<V2TimMessage>? mergedContents;
   int deleteCalls = 0;
 
+  /// 记录首屏可见消息已实际发出的回执批次。
+  int receiptCalls = 0;
+
   /// 按时间正序排列的可变历史，用于模拟页面关闭期间收到新消息。
   List<V2TimMessage>? chronologicalHistory;
+
+  /// 媒体分页回归按 SDK 请求上限截取，其他夹具仍返回完整窗口。
+  bool limitHistoryPages = false;
 
   /// 测试可注入批量表情回包，默认继续返回空的表情列表。
   Future<V2TimValueCallback<List<V2TimMessageReactionResult>>> Function(
@@ -2224,6 +3247,7 @@ final class _Messages implements V2TIMMessageManager {
     historyCalls++;
     final cursor = (call.namedArguments[#lastMsg] as V2TimMessage?)?.msgID;
     historyCursors.add(cursor);
+    historyTypes.add(call.namedArguments[#getType] as HistoryMsgGetTypeEnum?);
     final olderGate = olderHistoryGate;
     if (cursor != null && olderGate != null) return olderGate.future;
     final history = chronologicalHistory;
@@ -2239,7 +3263,9 @@ final class _Messages implements V2TIMMessageManager {
               ? history.skip(index + 1).toList()
               : history.take(index).toList().reversed.toList();
       return Future.value(
-          V2TimValueCallback(code: 0, desc: '', data: messages));
+          V2TimValueCallback(code: 0, desc: '', data: limitHistoryPages
+              ? messages.take(call.namedArguments[#count] as int).toList()
+              : messages));
     }
     return historyGate?.future ??
         Future.value(
@@ -2268,6 +3294,14 @@ final class _Messages implements V2TIMMessageManager {
             return V2TimCallback(code: 0, desc: '');
           }),
         #getHistoryMessageList => _loadHistory(call),
+        #getMessageReadReceipts =>
+          Future.value(V2TimValueCallback<List<V2TimMessageReceipt>>(
+              code: 0, desc: '', data: [])),
+        #sendMessageReadReceipts => Future<V2TimCallback>.sync(() {
+            receiptCalls++;
+            return V2TimCallback(code: 0, desc: '');
+          }),
+        #getMessageOnlineUrl => imageUrlLoader!(),
         #downloadMergerMessage => Future.value(
             V2TimValueCallback<List<V2TimMessage>>(
                 code: 0,
@@ -2312,11 +3346,21 @@ final class _Message implements V2TimMessage {
       {this.timestampOverride,
       this.statusOverride = 2,
       this.isSelfOverride = false,
-      this.isMerged = false});
+      this.needsReceipt = false,
+      this.isMerged = false,
+      this.groupId,
+      this.custom,
+      this.image});
   final int? timestampOverride;
   final int statusOverride;
   final bool isSelfOverride;
+
+  /// 标记对端消息需要在首屏过半可见时发送已读回执。
+  final bool needsReceipt;
   final bool isMerged;
+  final String? groupId;
+  final V2TimCustomElem? custom;
+  final V2TimImageElem? image;
   @override
   final String msgID;
   @override
@@ -2333,15 +3377,18 @@ final class _Message implements V2TimMessage {
                     )
                     .millisecondsSinceEpoch ~/
                 1000,
-        #elemType => isMerged ? 10 : 1,
+        #elemType => isMerged ? 10 : custom != null ? 2 : image != null ? 3 : 1,
+        #groupID => groupId,
+        #customElem => custom,
+        #imageElem => image,
         #mergerElem => isMerged
             ? V2TimMergerElem(title: '测试合并记录', abstractList: ['测试摘要'])
             : null,
         #sender || #userID => msgID.contains('-') ? 'history_visual' : 'visual',
         #isSelf => isSelfOverride,
+        #needReadReceipt => needsReceipt,
         #isRead ||
         #isPeerRead ||
-        #needReadReceipt ||
         #isSupportMessageExtension =>
           false,
         #textElem => V2TimTextElem(text: msgID),

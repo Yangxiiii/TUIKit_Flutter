@@ -14,7 +14,7 @@ typedef ChatOlderMessagesLoader = Future<ChatOlderMessagesPage> Function({
   required String? cursor,
 });
 
-/// 宿主提供加载和失败重试的样式，列表负责滚动续页。
+/// 宿主提供加载、失败重试和历史结束的样式，列表负责滚动续页。
 typedef ChatOlderMessagesEntryBuilder = Widget Function(
   BuildContext context, {
   required AsyncValue<void> status,
@@ -31,6 +31,6 @@ final class ChatMessageHistoryConfig {
   /// 分页请求必须绑定当前账号和会话；失败通过异常交给列表显示重试。
   final ChatOlderMessagesLoader load;
 
-  /// 在最早一条消息上方显示加载状态或重试操作。
+  /// 在历史顶部展示状态；收到成功状态时表示已到最早一条消息。
   final ChatOlderMessagesEntryBuilder buildEntry;
 }

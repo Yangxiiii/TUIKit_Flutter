@@ -4,13 +4,14 @@ import 'dart:math' as math;
 import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../file_picker/file_picker.dart';
 import '../../../message_input/chat_media_sender.dart';
 import '../../message_list_config.dart';
 import '../../utils/big_file_message.dart';
 
-/// 普通文件与大文件共用卡片；业务下载交给宿主，SDK文件沿原生下载边界处理。
+/// 普通文件、大文件和图文附件共用卡片，远端业务文件由宿主下载。
 class FileMessageWidget extends StatefulWidget {
   const FileMessageWidget(
       {super.key,
@@ -23,7 +24,8 @@ class FileMessageWidget extends StatefulWidget {
       this.bubbleKey,
       this.isInMergedDetailView = false,
       this.bubbleColor,
-      this.bigFile});
+      this.bigFile,
+      this.attachment});
 
   /// SDK消息或上传占位；不把自定义消息伪装成SDK文件元素。
   final MessageInfo message;
@@ -52,14 +54,23 @@ class FileMessageWidget extends StatefulWidget {
   /// 定位高亮时覆盖背景，不改变文件信息布局。
   final Color? bubbleColor;
 
-  /// 已校验的大文件协议；为空时读取SDK文件负载。
+  /// 已校验的独立大文件协议，提供 SDK 文件元素以外的下载信息。
   final BigFileMessage? bigFile;
+
+  /// 已校验的图文附件使用独立语义标识，发送草稿仅展示文件信息。
+  final ({
+    BigFileMessage file,
+    String semanticsIdentifier,
+    bool localPreview
+  })? attachment;
+
   @override
   State<FileMessageWidget> createState() => _FileMessageWidgetState();
 }
 
 /// 展示文件导出和上传状态，管理卡片打开动作及资源失效反馈。
 class _FileMessageWidgetState extends State<FileMessageWidget> {
+  /// 一个卡片只接受一次在途打开操作，结束后允许再次点击。
   bool _opening = false;
 
   /// 仅明确资源失效时锁定，网络异常不改变此值。
@@ -72,24 +83,39 @@ class _FileMessageWidgetState extends State<FileMessageWidget> {
       widget.message.messagePayload is FileMessagePayload
           ? widget.message.messagePayload as FileMessagePayload
           : null;
-  String get _name => widget.bigFile?.name ?? _payload?.fileName ?? '';
-  int get _size => widget.bigFile?.size ?? _payload?.fileSize ?? 0;
+
+  /// 图文附件和独立大文件均由宿主按 URL 下载。
+  BigFileMessage? get _remoteFile => widget.attachment?.file ?? widget.bigFile;
+
+  String get _name => _remoteFile?.name ?? _payload?.fileName ?? '';
+  int get _size => _remoteFile?.size ?? _payload?.fileSize ?? 0;
 
   /// 等导出与发送结束后才允许打开，403 与断网保留重试，不判为过期。
   Future<void> _open() async {
     if (_opening ||
         _expired ||
+        widget.attachment?.localPreview == true ||
         widget.message.status == MessageStatus.sending ||
         widget.config.fileTransfers.containsKey(widget.message.msgID)) {
       return;
     }
     setState(() => _opening = true);
     try {
+      // 优先打开本地文件，缺失时按文件来源调用对应下载入口。
       var path = _localPath ?? _payload?.filePath;
       if (path == null || !await File(path).exists()) {
-        final file = widget.bigFile;
+        final file = _remoteFile;
         if (file != null) {
           final download = widget.config.fileDownloader;
+          if (download == null && widget.attachment != null) {
+            // 转发预览等未注入下载服务的宿主仍支持打开原有附件链接。
+            final launched = await launchUrl(Uri.parse(file.url),
+                mode: LaunchMode.externalApplication);
+            if (!launched && mounted) {
+              AppToast.show(AppLocalization.of(context).appFileOpenFailed);
+            }
+            return;
+          }
           if (download == null) throw StateError('未配置文件下载');
           path = await download(file);
         } else {
@@ -101,6 +127,7 @@ class _FileMessageWidgetState extends State<FileMessageWidget> {
       }
       if (path == null || !await File(path).exists()) throw StateError('文件不可用');
       _localPath = path;
+      // 页面已离开时保留下载缓存，跳过系统打开动作。
       if (!mounted) return;
       if (!await FilePicker.openFile(path, fileName: _name) && mounted) {
         AppToast.show(AppLocalization.of(context).appFileOpenFailed);
@@ -127,6 +154,10 @@ class _FileMessageWidgetState extends State<FileMessageWidget> {
         widget.message.status == MessageStatus.sendFail;
     final sending = transfer != null && !failed ||
         widget.message.status == MessageStatus.sending;
+    final canOpen = !_expired &&
+        !sending &&
+        transfer == null &&
+        widget.attachment?.localPreview != true;
     // 相册导出阶段尚无本地路径，用持续动画提示处理中，不把未知大小显示为 0 B。
     final preparing = sending &&
         transfer == null &&
@@ -144,7 +175,7 @@ class _FileMessageWidgetState extends State<FileMessageWidget> {
                         .resolve(LocaleKeys.common_loading, '加载中…')
                     : null;
     final progress = transfer?.progress ??
-        (sending && transfer == null
+        (sending && transfer == null && widget.attachment == null
             ? widget.message.uploadMediaProgress / 100
             : null);
     final nameColor = _expired ? colors.textTertiary : colors.textPrimary;
@@ -156,11 +187,12 @@ class _FileMessageWidgetState extends State<FileMessageWidget> {
                 child: Text(_name.split('.').last.toUpperCase(), maxLines: 1)));
 
     return Semantics(
-      identifier: 'tim.fileMessage.open.${widget.message.msgID}',
+      identifier: widget.attachment?.semanticsIdentifier ??
+          'tim.fileMessage.open.${widget.message.msgID}',
       button: true,
-      enabled: !_expired && !sending && transfer == null,
+      enabled: canOpen,
       child: GestureDetector(
-        onTap: _open,
+        onTap: canOpen ? _open : null,
         onLongPress: widget.onLongPress,
         child: Container(
           key: widget.bubbleKey, width: math.min(284, widget.maxWidth),

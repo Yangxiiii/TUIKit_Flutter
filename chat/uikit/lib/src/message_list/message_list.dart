@@ -151,8 +151,17 @@ class MessageCustomAction {
 
 /// 展示 SDK 与宿主归档的会话消息，并协调分页和列表内跳转。
 class MessageList extends StatefulWidget {
+  /// 普通聊天页传入自己的底色，例如深色主题的一级背景；嵌入列表默认沿用 UIKit 承载面。
+  final Color? backgroundColor;
+
   /// 最新窗口先显示本机记录；显式定位和进程内浏览快照仍优先。
   final Future<List<MessageInfo>> Function()? localMessagesLoader;
+
+  /// 普通进入时显示最新消息，显式定位和当前页面的离线重连可指定位置。
+  final bool startAtLatest;
+
+  /// 宿主在普通输入唤起键盘或展开富文本编辑器时递增，列表布局后回到最新消息。
+  final int scrollToLatestRevision;
 
   /// 宿主离线窗口的浏览位置，优先于本列表离开时保存的位置。
   final MessageViewportSnapshot? offlineViewport;
@@ -177,6 +186,10 @@ class MessageList extends StatefulWidget {
   /// 非空时由宿主解析 Web 回复并打开详情，未配置的会话保持原引用行为。
   final ChatMessageReplyConfig? replyConfig;
   final MessageInfo? locateMessage;
+
+  /// 宿主的独立提醒，与原有导航按钮共享消息列表右下角。
+  final Widget? floatingMessageAction;
+
   final OnUserClick? onUserClick;
 
   /// 首次SDK消息窗口成功加载且非空后通知业务，失败或空窗口不清未读。
@@ -234,8 +247,11 @@ class MessageList extends StatefulWidget {
   final List<MessageInfo>? initialSelection;
 
   const MessageList({
+    this.backgroundColor,
     this.initialSelection,
     this.localMessagesLoader,
+    this.startAtLatest = false,
+    this.scrollToLatestRevision = 0,
     this.offlineViewport,
     this.offlineMessages,
     this.connectionUnavailable = false,
@@ -247,6 +263,7 @@ class MessageList extends StatefulWidget {
     required this.conversationID,
     this.config = const ChatMessageListConfig(),
     this.locateMessage,
+    this.floatingMessageAction,
     this.onUserClick,
     this.onInitialMessagesLoaded,
     this.onInitialLoadFinished,
@@ -280,33 +297,8 @@ class MessageList extends StatefulWidget {
   State<MessageList> createState() => _MessageListState();
 }
 
-/// What the message list is currently doing, navigation-wise.
-///
-/// All four "in-flight" states are mutually exclusive: the list can be
-/// navigating to the oldest unread message, or to an @ mention, or to a
-/// quoted message, or reloading to the latest page — never two at once.
-/// Modelling them as a sealed hierarchy instead of as a bag of independent
-/// booleans (the previous design) makes that exclusivity a compile-time
-/// guarantee, lets the scroll listener short-circuit on the single check
-/// `_navigationState is _NavIdle`, and gives the inbound
-/// `_onMessageListStateChanged` dispatcher exhaustive pattern matching
-/// over each navigation kind.
-///
-/// `_NavToAtMention.targetSeq` and `_NavToQuotedMessage.targetMsgID` are
-/// nullable on purpose: setting them to null after the inbound branch has
-/// run is the "processed once" guard that prevents a second
-/// notifyListeners (e.g. from a reaction/extension fetch in the same
-/// 2-frame settle window) from re-applying the jump/highlight and yanking
-/// the user away from where they just landed.
-///
-/// 当前消息列表在导航方面正在做什么。
-///
-/// 四种“进行中”状态是互斥的：列表可以导航到最旧的未读消息，或者 @
-/// 提醒，或者引用的消息，或者重新加载到最新页面——永远不会同时出现两种。将它们建模为一个封闭的层次结构，而不是一堆独立的布尔值（之前的设计），可以在编译时保证这种互斥性，让滚动监听器在
-/// `_navigationState is _NavIdle` 的单次检查上就能短路，并且让传入的 `_onMessageListStateChanged` 分发器能对每种导航类型进行穷尽模式匹配。
-///
-/// `_NavToAtMention.targetSeq` 和 `_NavToQuotedMessage.targetMsgID` 是故意设计成可空的：在入站分支运行后将它们设置为
-/// null，是“只处理一次”的保护措施，可以防止第二次 notifyListeners（例如在同一个两帧稳定窗口里的反应/扩展获取）重新应用跳转/高亮，把用户从刚到达的位置拉走。
+/// 消息列表的导航状态。显式定位与自动追随互斥，避免同帧的消息更新覆盖跳转。
+/// SDK 窗口定位完成后清空目标，重复的列表通知不能再次滚动到同一目标。
 sealed class _NavigationState {
   const _NavigationState();
 }
@@ -314,6 +306,10 @@ sealed class _NavigationState {
 class _NavIdle extends _NavigationState {
   const _NavIdle();
 }
+
+/// 已载入目标从点击到布局完成期间持有导航权，无需清空本地窗口或查询 SDK。
+/// 每次点击使用独立实例，旧回调不能接管新目标。
+class _NavToLoadedMessage extends _NavigationState {}
 
 class _NavToUnread extends _NavigationState {
   const _NavToUnread();
@@ -391,7 +387,7 @@ class _MessageListState extends State<MessageList>
   static String _viewportKey(String userID, String conversationID) =>
       '$userID\u0000$conversationID';
 
-  /// 横幅定位沿用已有分页和高亮；系统提示由SDK收消息链路更新。
+  /// 同步宿主的输入回底请求、删除记录和指定消息定位，保留离线窗口的独立刷新流程。
   @override
   void didUpdateWidget(covariant MessageList oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -405,6 +401,9 @@ class _MessageListState extends State<MessageList>
     }
     if (oldWidget.connectionUnavailable && !widget.connectionUnavailable) {
       _reconnectRefreshPending = true;
+    }
+    if (widget.scrollToLatestRevision != oldWidget.scrollToLatestRevision) {
+      _scrollToBottom(fromInput: true);
     }
     if (!setEquals(
         widget.config.hiddenMessageIDs, oldWidget.config.hiddenMessageIDs)) {
@@ -733,10 +732,10 @@ class _MessageListState extends State<MessageList>
         LoginStore.shared.loginState.loginUserInfo?.userID ?? '';
     _viewportAnchorKey = _viewportKey(currentUserID, widget.conversationID);
 
-    // 外部指定消息用于搜索、@ 或引用跳转，优先级高于普通浏览位置恢复。
+    // 普通聊天从最新消息进入；同一页面的离线重连仍可接续当前浏览位置。
     if (widget.locateMessage == null) {
-      final snapshot =
-          widget.offlineViewport ?? _viewportSnapshots[_viewportAnchorKey];
+      final snapshot = widget.offlineViewport ??
+          (widget.startAtLatest ? null : _viewportSnapshots[_viewportAnchorKey]);
       if (snapshot != null) {
         // initState 内同步注入消息窗口，让缓存会话在页面转场的第一帧就有内容。
         _restoreViewportSnapshot = snapshot;
@@ -829,8 +828,8 @@ class _MessageListState extends State<MessageList>
       super.dispose();
       return;
     }
-    // 草稿选择期间的滚动不覆盖普通聊天的浏览位置。
-    if (widget.initialSelection == null) {
+    // 仅使用历史快照恢复的普通列表记录退出位置，草稿选择不参与保存。
+    if (!widget.startAtLatest && widget.initialSelection == null) {
       // 插入尚未布局时，不能拿上一帧的可见索引去读取新的消息窗口。
       final viewportAnchor = (_awaitingInsertionLayout
               ? null
@@ -955,19 +954,19 @@ class _MessageListState extends State<MessageList>
         isAtLoadedWindowBottom: isAtBottom,
         hasNewerMessages: hasNewerMessages,
       );
-      if (_tongueType != TongueType.none || _newMessageCount > 0) {
+      // 贴底时继续显示待处理的提及，滚动回调无需为它重复构建列表。
+      if (_remainingAtInfoList.isEmpty &&
+          (_tongueType != TongueType.none || _newMessageCount > 0)) {
         setState(() {
-          if (_remainingAtInfoList.isEmpty) {
-            // 当前可能只是历史分页窗口的底部；SDK 仍有更新消息时必须保留未读数量。
-            if (!isAtLatest) {
-              _tongueType = _newMessageCount > 0
-                  ? TongueType.newMessages
-                  : TongueType.backToLatest;
-            } else {
-              _newMessageCount = 0;
-              _pendingNewMessages.clear();
-              _tongueType = TongueType.none;
-            }
+          // 历史分页窗口的底部可能还有更新消息，保留未读数量供用户跳转。
+          if (!isAtLatest) {
+            _tongueType = _newMessageCount > 0
+                ? TongueType.newMessages
+                : TongueType.backToLatest;
+          } else {
+            _newMessageCount = 0;
+            _pendingNewMessages.clear();
+            _tongueType = TongueType.none;
           }
         });
       }
@@ -1054,13 +1053,13 @@ class _MessageListState extends State<MessageList>
               alignment: restoredAnchor.alignment,
             )) {
           // SDK 已无法返回原锚点时丢弃失效快照，并降级展示最新消息。
-          if (widget.initialSelection == null) {
+          if (!widget.startAtLatest && widget.initialSelection == null) {
             _viewportSnapshots.remove(_viewportAnchorKey);
           }
           loadSucceeded = await _loadLatestMessages();
         }
       } else {
-        // 首次访问或进程重启后没有内存快照，按原有规则进入最新消息位置。
+        // 普通进入先显示本机最新消息，再以同一位置接收 SDK 刷新。
         final loader = widget.localMessagesLoader;
         if (loader != null) {
           try {
@@ -1117,9 +1116,13 @@ class _MessageListState extends State<MessageList>
         target == null &&
         _remainingAtInfoList.isNotEmpty &&
         widget.config.isSupportTongue) {
-      // 先让首屏完成布局，避免在列表尚未连接时跳转到未读提及。
+      // 等列表完成布局再处理提及，普通聊天将跳转交给提醒入口。
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _itemScrollController.isAttached) {
+        if (!mounted || !_itemScrollController.isAttached) return;
+        if (widget.startAtLatest) {
+          // 群未读提示先按首屏可见范围结算，再决定是否显示提及提醒。
+          if (!_pendingUnreadCheck) _activateAtMentionTongueIfNeeded();
+        } else {
           unawaited(_onAtMentionTongueTap());
         }
       });
@@ -1177,7 +1180,10 @@ class _MessageListState extends State<MessageList>
   /// SDK 窗口接管本地同 ID 消息，并复用已有导航和锚点补偿处理新增项。
   void _onMessageListStateChanged() {
     _notifyEditWindow();
-    if (_navigationState is! _NavIdle && !_archiveLoaded) _localWindow.clear();
+    final locatingLoaded = _navigationState is _NavToLoadedMessage;
+    if (_navigationState is! _NavIdle && !locatingLoaded && !_archiveLoaded) {
+      _localWindow.clear();
+    }
     final state = _messageListStore.state;
     final visibleWindow = _visibleMessages(
       widget.localMessagesLoader == null && !_archiveLoaded
@@ -1318,6 +1324,7 @@ class _MessageListState extends State<MessageList>
         return;
 
       case _NavIdle():
+      case _NavToLoadedMessage():
       case _NavToUnread():
       case _NavToAtMention():
       case _NavToQuotedMessage():
@@ -1343,12 +1350,14 @@ class _MessageListState extends State<MessageList>
     final followSelfSend = insertedAtHead > 0 &&
         !isSyncedSelfHistory &&
         !_isLoadingNewer &&
+        _navigationState is _NavIdle &&
         nextMessages.first.isSentBySelf;
     final preserveViewport = insertedAtHead > 0 &&
         !followSelfSend &&
-        !_isLoadingNewer &&
-        _navigationState is _NavIdle &&
-        !_isUserAtBottom();
+        (locatingLoaded ||
+            (!_isLoadingNewer &&
+                _navigationState is _NavIdle &&
+                !_isUserAtBottom()));
 
     setState(() {
       _messages = nextMessages;
@@ -1393,7 +1402,8 @@ class _MessageListState extends State<MessageList>
         if (notice == null && StickyMessageEvent.fromMessage(message) == null) {
           _clearUnreadCount();
         }
-        final isAtBottom = _isUserAtBottom();
+        final isAtBottom =
+            _navigationState is! _NavToLoadedMessage && _isUserAtBottom();
         if (!isLoading && isAtBottom) {
           _scrollToBottom();
         } else if (!isAtBottom && widget.config.isSupportTongue) {
@@ -1572,9 +1582,10 @@ class _MessageListState extends State<MessageList>
       !_messageListStore.state.hasOlderMessages.value &&
       (!_archiveLoaded || _archiveCursor != null);
 
-  /// 聊天窗口仅在归档请求中或失败时展示历史端状态。
+  /// 归档加载中或失败时展示状态；确认结束后将提示固定在最早消息上方。
   bool get _showOlderHistoryEntry =>
-      _canLoadArchive && (_archiveStatus.isLoading || _archiveStatus.hasError);
+      (_archiveLoaded && _archiveCursor == null && _messages.isNotEmpty) ||
+      (_canLoadArchive && (_archiveStatus.isLoading || _archiveStatus.hasError));
 
   /// SDK 与归档共用反向列表的旧端阈值；SDK 空窗口也允许开始归档查询。
   void _maybeLoadOlderMessages(Iterable<ItemPosition> positions) {
@@ -1657,7 +1668,7 @@ class _MessageListState extends State<MessageList>
     }
   }
 
-  /// 用宿主样式显示归档加载状态，并在失败时重试原游标。
+  /// 用宿主样式展示加载、重试或结束；只有失败状态需要重试原游标。
   Widget _buildOlderHistoryEntry(BuildContext context) =>
       widget.historyConfig!.buildEntry(
         context,
@@ -1708,7 +1719,9 @@ class _MessageListState extends State<MessageList>
     try {
       await _messageListStore.loadNewerMessages();
       final newListLength = _messages.length;
-      if (mounted && newListLength > oldListLength) {
+      if (mounted &&
+          _navigationState is _NavIdle &&
+          newListLength > oldListLength) {
         final newIndex = newListLength - oldListLength;
         _itemScrollController.jumpTo(index: newIndex);
       }
@@ -1722,31 +1735,46 @@ class _MessageListState extends State<MessageList>
     }
   }
 
-  /// 等最新消息完成布局后再滚动到底部，已退出的页面不再执行。
-  void _scrollToBottom() {
+  /// 在布局后回到底部，输入区的回底请求也能从历史窗口返回会话最新端。
+  void _scrollToBottom({bool fromInput = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _itemScrollController.isAttached && _messages.isNotEmpty) {
+      if (!mounted || _navigationState is! _NavIdle) return;
+      if (fromInput) {
+        // 输入区触发回底后若本帧弹出了操作菜单，保留原气泡供菜单测量遮挡。
+        if (ModalRoute.of(context)?.isCurrent == false) return;
+        if (!widget.connectionUnavailable &&
+            !isLoading &&
+            !_isLoadingNewer &&
+            _messageListStore.state.hasNewerMessages.value) {
+          _onBackToLatestTongueTap();
+          return;
+        }
+      }
+      if (_itemScrollController.isAttached && _messages.isNotEmpty) {
         _itemScrollController.jumpTo(index: 0);
       }
     });
   }
 
-  /// 在列表挂载后定位并复用气泡高亮；页面已退出时丢弃待执行回调。
+  /// 布局后按消息 ID 定位并高亮，连续收发期间不让自动滚动替换目标。
   void _scrollToMessageAndHighlight(String messageID) {
+    final navigation = _NavToLoadedMessage();
+    _navigationState = navigation;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_itemScrollController.isAttached) return;
-
+      if (!mounted || !identical(_navigationState, navigation)) return;
       final targetIndex = _messages.indexWhere((m) => m.msgID == messageID);
-      if (targetIndex != -1) {
-        debugPrint(
-            'messageList, _scrollToMessageAndHighlight, jumpToIndex:$targetIndex');
-
-        _itemScrollController.jumpTo(index: targetIndex);
-
-        setState(() {
-          _highlightedMessageId = messageID;
-        });
+      if (targetIndex < 0 || !_itemScrollController.isAttached) {
+        _navigationState = const _NavIdle();
+        return;
       }
+      // 反向列表的零点贴近输入区，留出下方悬浮提示空间再展示目标。
+      _itemScrollController.jumpTo(index: targetIndex, alignment: 0.3);
+      setState(() => _highlightedMessageId = messageID);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !identical(_navigationState, navigation)) return;
+        _navigationState = const _NavIdle();
+        _scrollListener();
+      });
     });
   }
 
@@ -1881,11 +1909,15 @@ class _MessageListState extends State<MessageList>
             onUserLongPress: isGroup ? widget.onUserLongPress : null,
             onCallMessageClick: widget.onCallMessageClick,
             customActions: widget.customActions,
-            // 离线和归档预览从已展示窗口取得相邻媒体，归档图不依赖 SDK 媒体查询。
+            loadOlderMedia: widget.offlineMessages == null
+                ? widget.historyConfig?.load
+                : null,
+            // 离线和本机补齐消息从已展示窗口取得相邻媒体，缺少 SDK 原始消息时仍可翻页。
             mergedMediaMessages: (message.messageType == MessageType.image ||
-                        message.messageType == MessageType.video) &&
+                        message.messageType == MessageType.video ||
+                        message.messageType == MessageType.custom) &&
                     (widget.offlineMessages != null ||
-                        (_archiveLoaded &&
+                        ((_archiveLoaded || message.rawMessage == null) &&
                             _localWindow.isPending(message.msgID)))
                 ? mediaWindow
                 : null,
@@ -1927,19 +1959,18 @@ class _MessageListState extends State<MessageList>
       ),
     );
 
-    if (_shouldTrackVisibility(message)) {
-      return VisibilityDetector(
-        key: Key('visibility_${message.msgID}'),
-        onVisibilityChanged: (info) {
-          if (info.visibleFraction > 0.5) {
-            _handleMessageAppear(message);
-          }
-        },
-        child: messageWidget,
-      );
-    }
-
-    return messageWidget;
+    // 回执发送完成后只停用检测，保留菜单打开时要测量的原气泡。
+    return VisibilityDetector(
+      key: Key('visibility_${message.msgID}'),
+      onVisibilityChanged: _shouldTrackVisibility(message)
+          ? (info) {
+              if (info.visibleFraction > 0.5) {
+                _handleMessageAppear(message);
+              }
+            }
+          : null,
+      child: messageWidget,
+    );
   }
 
   bool _shouldTrackVisibility(MessageInfo message) {
@@ -1981,12 +2012,14 @@ class _MessageListState extends State<MessageList>
     // 每个窗口只合并一次回复索引，滚动复用同一份派生数据。
     final replies =
         widget.replyConfig?.project(_messages, _localWindow.isRevoked);
-    // 同一窗口只构造一次媒体快照，避免每个归档气泡反复扫描消息。
-    final mediaWindow = _archiveLoaded || widget.offlineMessages != null
+    // 同一窗口只构造一次媒体快照，供离线、归档和本机首屏的气泡复用。
+    final mediaWindow =
+        widget.offlineMessages != null || _localWindow.hasPendingMessages
         ? _messages.reversed
             .where((item) =>
                 item.messageType == MessageType.image ||
-                item.messageType == MessageType.video)
+                item.messageType == MessageType.video ||
+                item.messageType == MessageType.custom)
             .toList(growable: false)
         : null;
 
@@ -1994,7 +2027,7 @@ class _MessageListState extends State<MessageList>
       child: MessageOverlayAvoider(
         controller: widget.overlayController,
         child: Container(
-          color: colorsTheme.bgColorOperate,
+          color: widget.backgroundColor ?? colorsTheme.bgColorOperate,
           child: Stack(
             children: [
               Positioned.fill(
@@ -2012,6 +2045,10 @@ class _MessageListState extends State<MessageList>
                               bottom: 8,
                             ),
                             reverse: true,
+                            // 避让时由平移外层裁剪，原先超出滚动视口的气泡部分才能完整绘制。
+                            clipBehavior: widget.overlayController == null
+                                ? Clip.hardEdge
+                                : Clip.none,
                             // 短会话由外层顶部对齐；内容超出视口时仍保留反向分页与最新端锚点。
                             shrinkWrap: true,
                             // 内容未撑满时禁止回弹拖移，历史续查仍由可见索引触发。
@@ -2063,35 +2100,49 @@ class _MessageListState extends State<MessageList>
                         _atomicLocale.newMessageCount(count),
                   ),
                 ),
-              // Bottom-right tongue (back to latest / new messages / @mention)
-              //
-              // 右下角气泡（返回到最新/新的消息/@提及）
-              if (widget.config.isSupportTongue &&
-                  _tongueType != TongueType.none)
-                Positioned(
-                  bottom: 16,
-                  right: 16,
-                  child: MessageTongueWidget(
-                    tongueState: TongueState(
-                      type: _tongueType,
-                      newMessageCount: _newMessageCount,
-                      atMentionText: _remainingAtInfoList.isEmpty
-                          ? _atMentionText
-                          : '有${_remainingAtInfoList.length}条@你',
-                      atMessageSeq: _atMessageSeq,
-                      isLoading: _navigationState is _NavToAtMention ||
-                          _navigationState is _NavReloadingLatest,
-                    ),
-                    onTap: _onTongueTap,
-                    backToLatestText: _atomicLocale.backToLatest,
-                    newMessageCountText: (count) =>
-                        _atomicLocale.newMessageCount(count),
-                    backToQuoteText: _atomicLocale.backToQuotePosition,
-                  ),
-                ),
+              if (_buildFloatingActions() case final actions?) actions,
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// 独立入口与导航共用右下锚点，同时出现时在导航上方留出间距。
+  Widget? _buildFloatingActions() {
+    final action = widget.floatingMessageAction;
+    final showNavigation =
+        widget.config.isSupportTongue && _tongueType != TongueType.none;
+    if (action == null && !showNavigation) return null;
+    return Positioned(
+      bottom: 16,
+      right: 16,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        textDirection: TextDirection.ltr,
+        children: [
+          if (action != null) action,
+          if (action != null && showNavigation) const SizedBox(height: 12),
+          if (showNavigation)
+            MessageTongueWidget(
+              tongueState: TongueState(
+                type: _tongueType,
+                newMessageCount: _newMessageCount,
+                atMentionText: _remainingAtInfoList.isEmpty
+                    ? _atMentionText
+                    : '有${_remainingAtInfoList.length}条@你',
+                atMessageSeq: _atMessageSeq,
+                isLoading: _navigationState is _NavToAtMention ||
+                    _navigationState is _NavReloadingLatest,
+              ),
+              onTap: _onTongueTap,
+              backToLatestText: _atomicLocale.backToLatest,
+              newMessageCountText: (count) =>
+                  _atomicLocale.newMessageCount(count),
+              backToQuoteText: _atomicLocale.backToQuotePosition,
+            ),
+        ],
       ),
     );
   }
@@ -2848,12 +2899,17 @@ class _MessageListState extends State<MessageList>
     );
   }
 
+  /// 重查会话最新一页，SDK 异常时释放分页状态并保留可用消息。
   Future<void> _reloadLatestMessages() async {
     setState(() {
       isLoading = true;
     });
 
-    await _loadLatestMessages();
+    try {
+      await _loadLatestMessages();
+    } on Object catch (error) {
+      debugPrint('messageList, reload latest failed: $error');
+    }
 
     if (mounted) {
       setState(() {

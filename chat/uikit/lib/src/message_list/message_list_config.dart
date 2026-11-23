@@ -18,13 +18,27 @@ final class ChatMessageReactionConfig {
   /// 接收当前消息与跨端表情编码，提交后由宿主发布确认状态。
   final Future<void> Function(MessageInfo message, String code) select;
 
-  /// 使用消息列的可用宽度渲染表情条，旧群聊回应可沿用原生明细入口。
-  final Widget Function(BuildContext context, MessageInfo message, bool isLeft,
-      {VoidCallback? showNativeDetails}) buildBar;
+  /// 用当前表情条组装气泡；无可见条目时传空，避免改变正文尺寸和背景。
+  final Widget Function(
+    BuildContext context,
+    MessageInfo message,
+    bool isLeft, {
+    VoidCallback? showNativeDetails,
+    Widget Function(Widget? reactionBar)? buildBubble,
+  }) buildBar;
 }
 
 /// 约定消息列表的外观和可操作能力，具体默认值由聊天配置提供。
 abstract class MessageListConfigProtocol {
+  /// 宿主可渲染已识别的自定义正文；返回空值时继续用原有气泡。
+  Widget? Function(BuildContext, MessageInfo, double)? get customContentBuilder;
+
+  /// 宿主可在真实消息正文外观察视口，不能借此替代普通消息已读回执。
+  Widget Function(BuildContext, MessageInfo, Widget)? get messageContentWrapper;
+
+  /// 宿主为消息昵称增加业务标记，默认沿用原有昵称布局。
+  Widget Function(BuildContext, MessageInfo, Widget)? get senderNameWrapper;
+
   /// 宿主接管云端表情提交和对应展示，缺省时继续使用原生回应。
   ChatMessageReactionConfig? get reactionConfig;
 
@@ -46,6 +60,9 @@ abstract class MessageListConfigProtocol {
 
   /// 由宿主复核群权限后按提及 ID 打开名片。
   void Function(BuildContext context, String userId)? get onMentionTap;
+
+  /// 宿主接管群消息头像点击，目标为头像所代表的本人或其他成员。
+  void Function(BuildContext context, String userId)? get onGroupSenderAvatarTap;
 
   /// 宿主为消息中的单个提及成员提供行内回执指示。
   Widget? Function(MessageInfo message, String userId)?
@@ -129,6 +146,18 @@ abstract class MessageListConfigProtocol {
 
 /// 提供消息列表默认外观，并保留宿主显式传入的单项覆盖。
 class ChatMessageListConfig implements MessageListConfigProtocol {
+  /// 自定义正文仍由原消息行承载头像、菜单、状态和高亮。
+  @override
+  final Widget? Function(BuildContext, MessageInfo, double)? customContentBuilder;
+
+  /// 仅包裹气泡正文，避免把头像、时间分组和整行空白误算为正文可见区域。
+  @override
+  final Widget Function(BuildContext, MessageInfo, Widget)? messageContentWrapper;
+
+  /// 包装现有昵称内容，宿主负责标记语义与剩余宽度分配。
+  @override
+  final Widget Function(BuildContext, MessageInfo, Widget)? senderNameWrapper;
+
   /// 群聊宿主按已确认的群角色设置，独立 UIKit 实例沿用已有显示方式。
   @override
   final bool showGroupDepartureNotices;
@@ -167,6 +196,10 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
   /// 只在提及位置合法且绑定个人身份时交给宿主处理。
   @override
   final void Function(BuildContext context, String userId)? onMentionTap;
+
+  /// 缺省时保留 UIKit 原有的头像点击行为。
+  @override
+  final void Function(BuildContext context, String userId)? onGroupSenderAvatarTap;
 
   /// 缺省时正文只展示提及文字，不占用行内回执空间。
   @override
@@ -342,6 +375,9 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
   bool get isSupportQuote => _isSupportQuote;
 
   const ChatMessageListConfig({
+    this.messageContentWrapper,
+    this.customContentBuilder,
+    this.senderNameWrapper,
     this.showGroupDepartureNotices = true,
     this.groupMemberNoticeBuilder,
     this.groupSenderName,
@@ -352,6 +388,7 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
     this.forwardHandler,
     this.localDeleteHandler,
     this.onMentionTap,
+    this.onGroupSenderAvatarTap,
     this.mentionReceiptBuilder,
     this.onGroupAnnouncementTap,
     this.acceptedCallAttempt,

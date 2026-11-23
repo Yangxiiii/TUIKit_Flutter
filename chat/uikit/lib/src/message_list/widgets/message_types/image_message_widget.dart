@@ -1,7 +1,9 @@
 import 'package:atomic_x_core/api/message/message_action_store.dart';
+import '../../message_history_config.dart';
 import 'dart:io';
 
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
+import 'package:tencent_chat_uikit/src/image_viewer/image_element.dart';
 import 'package:tencent_chat_uikit/src/image_viewer/image_viewer.dart';
 import 'package:tencent_chat_uikit/src/message_list/message_list_config.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/image_viewer_manager.dart';
@@ -35,6 +37,9 @@ class ImageMessageWidget extends StatefulWidget {
   /// 合并转发、归档及离线窗口传入有序媒体快照，避免对当前来源发起实时历史分页。
   final List<MessageInfo>? mergedMediaMessages;
 
+  /// 在线会话到达 SDK 历史边缘后，沿用宿主的归档查询。
+  final ChatOlderMessagesLoader? loadOlderMedia;
+
   static const double kImageFixedHeight = 160.0;
 
   const ImageMessageWidget({
@@ -51,6 +56,7 @@ class ImageMessageWidget extends StatefulWidget {
     this.bubbleKey,
     this.isInMergedDetailView = false,
     this.mergedMediaMessages,
+    this.loadOlderMedia,
   });
 
   @override
@@ -285,24 +291,30 @@ class _ImageMessageWidgetState extends State<ImageMessageWidget>
           : ChatMediaPlaceholder(
               image: widget.config.imageLoadingPlaceholder, showLoading: true);
 
-  /// 点击时读取当前媒体窗口，展示后释放本次查看器分页状态。
+  /// 先打开预览，再补全点中的图片与相邻媒体，关闭后释放本次查看器。
   Future<void> _showImageViewer() async {
     if (_imageViewerManager != null) return;
+    final preset = widget.mergedMediaMessages ??
+        (widget.message.rawMessage == null ? [widget.message] : null);
     final manager = ImageViewerManager(
       conversationID: widget.conversationID,
       currentMessage: widget.message,
       context: context,
-      presetMediaMessages: widget.mergedMediaMessages ??
-          (widget.message.rawMessage == null ? [widget.message] : null),
+      presetMediaMessages: preset,
+      hiddenMessageIDs: widget.config.hiddenMessageIDs,
+      downloadRichVideo: widget.config.fileDownloader,
+      loadOlderMedia: widget.loadOlderMedia,
     );
     _imageViewerManager = manager;
     try {
-      await manager.showImageViewerIfAvailable();
-      if (manager.initialImageElements.isEmpty || !mounted) return;
       await ImageViewer.view(
         context,
-        imageElements: manager.initialImageElements,
-        initialIndex: manager.initialImageIndex,
+        imageElements: [
+          ImageElement(type: 0, imagePath: '', mediaId: widget.message.msgID),
+        ],
+        initialIndex: 0,
+        imageUpdates: manager.loadImageWindow(),
+        loadMoreOnOverscroll: manager.canPageAtEdge,
         onEventTriggered: manager.handleImageViewerEvent,
       );
     } finally {

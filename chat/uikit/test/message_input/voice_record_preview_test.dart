@@ -103,6 +103,7 @@ void main() {
   var closed = 0;
   bool sendResult = true;
   Completer<bool>? pendingSend;
+  late Completer<void> firstAudioSend;
   final texts = <String>[];
   final audios = <RecordInfo>[];
   const channel = MethodChannel('tencent_chat_uikit/audio_recorder');
@@ -115,6 +116,7 @@ void main() {
     closed = 0;
     sendResult = true;
     pendingSend = null;
+    firstAudioSend = Completer<void>();
     SharedPreferences.setMockInitialValues({});
     configureEmojiFixture();
     texts.clear();
@@ -152,6 +154,9 @@ void main() {
                         },
                         onSendAudio: (record) async {
                           audios.add(record);
+                          if (!firstAudioSend.isCompleted) {
+                            firstAudioSend.complete();
+                          }
                           return pendingSend?.future ?? sendResult;
                         },
                         onSendText: (text) async {
@@ -593,25 +598,80 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('原生60秒自动结束只进入预览，随后抬手不重复识别或发送', (tester) async {
+  testWidgets('达到60秒自动发送原音，随后松手或重复回调不会再次发送', (tester) async {
     await mount(tester);
     expect(recorder.limits.single, 60000);
+    pendingSend = Completer<bool>();
+    final recording = RecordInfo(path: recorder.paths.single, duration: 60);
     await tester.runAsync(() async {
       recorder.active = false;
-      recorder.complete!(RecordInfo(path: recorder.paths.single, duration: 60)
-        ..errorCode = AudioRecordResultCode.successExceedMaxDuration);
-      await asr.requests.first.future;
+      recorder.complete!(recording);
       key.currentState!.stopRecord();
-      asr.results.first.complete(const AiAsrSuccess('六十秒正文'));
-      await Future<void>.value();
+      recorder.complete!(recording);
+      await firstAudioSend.future.timeout(const Duration(seconds: 3));
     });
     await tester.pump();
+    expect(asr.results, isEmpty);
+    expect(texts, isEmpty);
+    expect(audios, [recording]);
+    pendingSend!.complete(true);
+    await tester.pump();
+    expect(closed, 1);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('续录达到上限时自动发送完整拼接音频，发送失败可手动重试', (tester) async {
+    await mount(tester);
+    await release(tester, const AiAsrSuccess('原文'));
+    sendResult = false;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      final args = call.arguments as Map;
+      final paths = (args['paths'] as List).cast<String>();
+      final output = args['destination'] as String;
+      File(output).writeAsStringSync(
+          [for (final path in paths) File(path).readAsStringSync()].join());
+      return {'filePath': output, 'durationMs': 59968};
+    });
+    final gesture = await tester.startGesture(
+        tester.getCenter(find.bySemanticsIdentifier('chat.voice.confirm')));
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(recorder.limits, [60000, 59000]);
+    await tester.runAsync(() async {
+      recorder.active = false;
+      recorder.complete!(RecordInfo(
+        path: recorder.paths.last,
+        duration: 58,
+        durationMs: 58968,
+      )..errorCode = AudioRecordResultCode.successExceedMaxDuration);
+      await firstAudioSend.future.timeout(const Duration(seconds: 3));
+    });
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+    expect(closed, 0);
     expect(asr.results, hasLength(1));
     expect(texts, isEmpty);
-    expect(audios, isEmpty);
-    await tester.longPress(find.bySemanticsIdentifier('chat.voice.confirm'));
+    expect(File(audios.single.path).readAsStringSync(), '01');
+    expect(audios.single.durationMs, 59968);
+    sendResult = true;
+    await tester.tap(find.bySemanticsIdentifier('chat.voice.audio_only'));
     await tester.pump();
-    expect(recorder.paths, hasLength(1));
+    expect(audios, [audios.first, audios.first]);
+    expect(closed, 1);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('录满时已上滑到取消区则丢弃录音', (tester) async {
+    await mount(tester);
+    key.currentState!.updatePointerPosition(const Offset(195, 690));
+    recorder.active = false;
+    recorder.complete!(RecordInfo(path: recorder.paths.single, duration: 60)
+      ..errorCode = AudioRecordResultCode.successExceedMaxDuration);
+    await tester.pump();
+    expect(closed, 1);
+    expect(audios, isEmpty);
+    expect(asr.results, isEmpty);
     await tester.pumpWidget(const SizedBox());
   });
 

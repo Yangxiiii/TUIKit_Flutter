@@ -7,11 +7,7 @@ import 'dart:math' as math;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
-/// A render object that is bigger on the inside.
-///
-/// Version of [Viewport] with some modifications to how extents are
-/// computed to allow scroll extents outside 0 to 1.  See [Viewport]
-/// for more information.
+/// 创建支持扩展锚点范围的普通滚动视口，并向渲染对象传递裁剪配置。
 class UnboundedViewport extends Viewport {
   UnboundedViewport({
     Key? key,
@@ -19,6 +15,7 @@ class UnboundedViewport extends Viewport {
     AxisDirection? crossAxisDirection,
     double anchor = 0.0,
     required ViewportOffset offset,
+    super.clipBehavior,
     Key? center,
     double? cacheExtent,
     List<Widget> slivers = const <Widget>[],
@@ -47,25 +44,21 @@ class UnboundedViewport extends Viewport {
           Viewport.getDefaultCrossAxisDirection(context, axisDirection),
       anchor: anchor,
       offset: offset,
+      clipBehavior: clipBehavior,
       cacheExtent: cacheExtent,
     );
   }
 }
 
-/// A render object that is bigger on the inside.
-///
-/// Version of [RenderViewport] with some modifications to how extents are
-/// computed to allow scroll extents outside 0 to 1.  See [RenderViewport]
-/// for more information.
-///
-// Differences from [RenderViewport] are marked with a //***** Differences
-// comment.
+/// 计算超出普通范围的滚动锚点，并由宿主指定绘制裁剪方式。
+/// 与 Flutter 原生实现不同的位置在布局代码中单独标注。
 class UnboundedRenderViewport extends RenderViewport {
   /// Creates a viewport for [RenderSliver] objects.
   UnboundedRenderViewport({
     AxisDirection axisDirection = AxisDirection.down,
     required AxisDirection crossAxisDirection,
     required ViewportOffset offset,
+    super.clipBehavior,
     double anchor = 0.0,
     List<RenderSliver>? children,
     RenderSliver? center,

@@ -4,6 +4,7 @@ import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show SemanticsAction;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart' show Toast;
 import 'package:tencent_chat_uikit/src/image_viewer/image_element.dart';
@@ -81,6 +82,44 @@ void main() {
     const fallback =
         ImageElement(type: 0, imagePath: image1, fallbackImagePaths: [image2]);
     expect(ImageElement.fromMap(fallback.toMap()), fallback);
+  });
+
+  testWidgets('选中图片已有预览地址时，等待相邻媒体期间不显示历史加载提示', (tester) async {
+    final cache = PaintingBinding.instance.imageCache;
+    addTearDown(cache.clear);
+    final image = (await tester.runAsync(createTestImage))!;
+    cache.putIfAbsent(
+      const CachedNetworkImageProvider(image1),
+      () => OneFrameImageStreamCompleter(Future.value(ImageInfo(image: image))),
+    );
+
+    for (final waitingForImage in [false, true]) {
+      final updates = StreamController<List<ImageElement>>();
+      await tester.pumpWidget(MaterialApp(
+        home: ImageViewerWidget(
+          key: ValueKey(waitingForImage),
+          imageElements: [
+            ImageElement(
+              type: 0,
+              mediaId: 'selected-image',
+              imagePath: waitingForImage ? '' : image1,
+            ),
+          ],
+          imageUpdates: updates.stream,
+          onEventTriggered: (_, complete) => complete(null),
+        ),
+      ));
+      await tester.pump();
+      expect(find.text('loading...'),
+          waitingForImage ? findsOneWidget : findsNothing);
+
+      updates.add(const [
+        ImageElement(type: 0, imagePath: image1, mediaId: 'selected-image'),
+      ]);
+      await tester.pumpAndSettle();
+      expect(find.text('loading...'), findsNothing);
+      await updates.close();
+    }
   });
 
   testWidgets('本机大图缺失时显示备用图，左右滑动定位其他照片', (tester) async {
@@ -168,11 +207,54 @@ void main() {
     await tester.tap(picture);
     await tester.pumpAndSettle();
     expect(tester.getRect(picture).width, greaterThan(before));
-    Navigator.of(tester.element(find.byType(ImageViewerWidget))).pop();
+    await tester.tap(picture);
+    await tester.pump(const Duration(milliseconds: 350));
     await tester.pumpAndSettle();
     expect(find.byType(ImageViewerWidget), findsNothing);
     expect(find.text('媒体说明', findRichText: true), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('双指放大和拖动图片后，单点仍能关闭预览', (tester) async {
+    final semantics = tester.ensureSemantics();
+    await mount(tester);
+    await tester.tap(
+        find.bySemanticsIdentifier('tim.rich.rich.image.${image2.hashCode}'));
+    await tester.pumpAndSettle();
+
+    final dismiss = find.bySemanticsIdentifier('tim.image_viewer.dismiss');
+    final picture = find.descendant(
+        of: dismiss,
+        matching: find.byWidgetPredicate((widget) =>
+            widget is Image &&
+            widget.image == const CachedNetworkImageProvider(image2)));
+    final before = tester.getRect(picture).width;
+    final center = tester.getCenter(dismiss);
+    // 两个指针先越过缩放阈值，再继续拉开，确保实际触发缩放更新。
+    final left = await tester.startGesture(center - const Offset(40, 0));
+    final right = await tester.startGesture(center + const Offset(40, 0));
+    await left.moveBy(const Offset(-40, 0));
+    await right.moveBy(const Offset(40, 0));
+    await left.moveBy(const Offset(-50, 0));
+    await right.moveBy(const Offset(50, 0));
+    await left.up();
+    await right.up();
+    await tester.pumpAndSettle();
+    expect(tester.getRect(picture).width, greaterThan(before));
+
+    await tester.dragFrom(center, const Offset(0, 70));
+    await tester.pumpAndSettle();
+    expect(dismiss, findsOneWidget);
+    expect(
+      tester.getSemantics(dismiss).getSemanticsData().hasAction(SemanticsAction.tap),
+      isTrue,
+    );
+
+    await tester.tapAt(center);
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pumpAndSettle();
+    expect(find.byType(ImageViewerWidget), findsNothing);
+    semantics.dispose();
   });
 
   testWidgets('点击富文本视频进入同一预览器，下载成功交给单独视频消息的播放器', (tester) async {

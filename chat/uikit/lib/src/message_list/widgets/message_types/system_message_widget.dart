@@ -1,4 +1,5 @@
-import 'package:app_ui/app_ui.dart' show AppColorBuildContext;
+import 'package:app_ui/app_ui.dart'
+    show AppColorBuildContext, AppUserAvatarScope;
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -37,7 +38,8 @@ class SystemMessageWidget extends StatelessWidget {
     // 单条群提示可合并多种变更，只移除聊天窗口中需要隐藏的部分。
     final tips = payload is TipsMessagePayload
         ? payload.groupTips
-                ?.where((tip) => !ConversationNotice.isHiddenInChatWindowTip(tip))
+                ?.where(
+                    (tip) => !ConversationNotice.isHiddenInChatWindowTip(tip))
                 .toList() ??
             const <GroupTipsInfo>[]
         : const <GroupTipsInfo>[];
@@ -46,7 +48,7 @@ class SystemMessageWidget extends StatelessWidget {
             ? MessageUtil.getRevokeDisplayString(message!, context)
             : MessageUtil.getSystemInfoDisplayString(tips, context));
     if (systemContent.isEmpty) return const SizedBox.shrink();
-    final actor = operator ?? _groupInfoOperator(tips);
+    final actor = operator ?? _groupInfoOperator(context, tips);
     final onTap = onOperatorTap;
 
     // 只有资料变更姓名可点，其他事件及撤回继续使用原系统提示样式。
@@ -109,7 +111,8 @@ class SystemMessageWidget extends StatelessWidget {
   }
 
   /// 只有首条可见事件的名称位于文案开头，可作为名片入口。
-  ({String id, String name})? _groupInfoOperator(List<GroupTipsInfo> tips) {
+  ({String id, String name})? _groupInfoOperator(
+      BuildContext context, List<GroupTipsInfo> tips) {
     final operator = switch (tips.firstOrNull) {
       ChangeGroupName(:final opUser) ||
       ChangeGroupIntroduction(:final opUser) =>
@@ -119,7 +122,7 @@ class SystemMessageWidget extends StatelessWidget {
     if (operator == null || operator.userID.isEmpty) return null;
     return (
       id: operator.userID,
-      name: UIKitUtil.memberDisplayName(operator),
+      name: UIKitUtil.memberDisplayName(operator, context: context),
     );
   }
 }
@@ -128,12 +131,16 @@ class SystemMessageWidget extends StatelessWidget {
 final class GroupCreationNotice extends StatefulWidget {
   const GroupCreationNotice({
     required this.notice,
+    this.groupId,
     required this.onPersonTap,
     super.key,
   });
 
   /// 当前行已校验的建群事件，姓名和名片 ID 均来自同一份载荷。
   final ConversationNotice notice;
+
+  /// 建群通知对应的群 ID，用于补齐成员群名片。
+  final String? groupId;
 
   /// 宿主按用户 ID 打开个人名片，未接入时仅展示通知。
   final void Function(BuildContext, String)? onPersonTap;
@@ -170,7 +177,8 @@ final class _GroupCreationNoticeState extends State<GroupCreationNotice> {
                 TextSpan(text: text)
               else
                 TextSpan(
-                  text: text,
+                  text: AppUserAvatarScope.personName(context, id,
+                      groupId: widget.groupId, fallback: text),
                   style: linkStyle,
                   semanticsIdentifier:
                       'tim.groupCreation.${widget.notice.eventId}.$id',
@@ -179,7 +187,8 @@ final class _GroupCreationNoticeState extends State<GroupCreationNotice> {
                       : _nameTaps.putIfAbsent(
                           id,
                           () => TapGestureRecognizer()
-                            ..onTap = () => widget.onPersonTap?.call(context, id),
+                            ..onTap =
+                                () => widget.onPersonTap?.call(context, id),
                         ),
                 ),
           ],

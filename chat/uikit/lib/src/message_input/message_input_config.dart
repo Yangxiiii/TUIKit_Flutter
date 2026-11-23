@@ -1,4 +1,4 @@
-import 'package:flutter/widgets.dart' show BuildContext;
+import 'package:flutter/widgets.dart' show BuildContext, VoidCallback, Widget;
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'mention/mention_info.dart';
 import 'package:app_core/app_core.dart';
@@ -13,6 +13,16 @@ typedef ChatMentionPicker = Future<List<MentionInfo>?> Function(
 /// 宿主接管通话流程；媒体为空时先选择语音或视频，再执行选人及权限校验。
 typedef ChatCallLauncher = Future<void> Function(
     BuildContext context, CallMediaType? mediaType);
+
+/// 在原会话中发送独立自定义消息；重试须传入同一个消息对象。
+typedef ChatMoreMessageSender = Future<bool> Function(MessageInfo message);
+
+/// 宿主提供更多面板的完整单屏内容，UIKit 转交当前会话的发送及关闭操作。
+typedef ChatMorePanelBuilder = Widget Function(
+  BuildContext context,
+  ChatMoreMessageSender send,
+  VoidCallback close,
+);
 
 /// 业务代发返回 SDK 中实际存在的消息，供原会话列表按消息 ID 合并。
 typedef ChatRichMentionSender = Future<MessageInfo> Function(
@@ -103,6 +113,9 @@ abstract class MessageInputConfigProtocol {
   /// 群通话使用宿主目录和权限；缺省时保留 UIKit 的原有入口。
   ChatCallLauncher? get callLauncher;
 
+  /// 配置后在普通输入工具栏展示更多入口，打开时使用宿主单屏内容。
+  ChatMorePanelBuilder? get morePanelBuilder;
+
   bool get isShowAudioRecorder;
   bool get isShowMore;
   bool get enableReadReceipt;
@@ -115,7 +128,7 @@ abstract class MessageInputConfigProtocol {
   ChatRichMentionSender? get richMentionSender;
   bool get enableVoiceToTextOnRecord;
 
-  /// 开启后先识别预览再确认发送，并支持在同一音频末尾继续录音；默认保留旧流程。
+  /// 开启后提前松手进入识别预览并支持续录；累计达到60秒时自动发送原音。
   bool get previewVoiceBeforeSend;
 
   /// More panel items (order matches the more panel UI)
@@ -151,6 +164,10 @@ class ChatMessageInputConfig implements MessageInputConfigProtocol {
 
   @override
   final ChatCallLauncher? callLauncher;
+
+  /// 替换当前会话的更多面板，独立发送动作不消费正在编辑的草稿。
+  @override
+  final ChatMorePanelBuilder? morePanelBuilder;
 
   /// 仅由宿主对本次语音预览范围开启，避免改变其他会话的发送行为。
   @override
@@ -228,6 +245,7 @@ class ChatMessageInputConfig implements MessageInputConfigProtocol {
     this.fileSelector,
     this.actionGuard,
     this.callLauncher,
+    this.morePanelBuilder,
     this.previewVoiceBeforeSend = false,
     this.mentionPicker,
     this.richMentionSender,

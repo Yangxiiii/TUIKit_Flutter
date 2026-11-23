@@ -1,14 +1,17 @@
+import 'package:app_ui/app_ui.dart' show AppUserAvatarScope;
 import 'package:tencent_chat_uikit/src/emoji_picker/emoji_manager.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
 import 'package:tuikit_atomic_x/base_component/base_component.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/recent_emoji_manager.dart';
 
-/// Bottom sheet showing reaction details with user list
-///
-/// 底部弹出显示带有用户列表的点赞详情
+/// 展示表情明细与回应者名单，群中使用各自的群名片。
 class ReactionDetailSheet extends StatefulWidget {
+  /// 消息的表情快照，切换标签时沿用提供的回应汇总。
   final List<MessageReaction> reactionList;
+
+  /// 表情来自群消息时使用的群 ID。
+  final String? groupId;
   final String? currentUserID;
   final void Function(String reactionID) onFetchUsers;
   final void Function(String reactionID) onRemoveReaction;
@@ -23,6 +26,7 @@ class ReactionDetailSheet extends StatefulWidget {
   const ReactionDetailSheet({
     super.key,
     required this.reactionList,
+    this.groupId,
     this.currentUserID,
     required this.onFetchUsers,
     required this.onRemoveReaction,
@@ -39,6 +43,7 @@ class ReactionDetailSheet extends StatefulWidget {
   static Future<void> show({
     required BuildContext context,
     required List<MessageReaction> reactionList,
+    String? groupId,
     String? currentUserID,
     required void Function(String reactionID) onFetchUsers,
     required void Function(String reactionID) onRemoveReaction,
@@ -75,6 +80,7 @@ class ReactionDetailSheet extends StatefulWidget {
             maxChildSize: 0.8,
             builder: (context, scrollController) => ReactionDetailSheet(
               reactionList: reactionList,
+              groupId: groupId,
               currentUserID: currentUserID,
               onFetchUsers: onFetchUsers,
               onRemoveReaction: onRemoveReaction,
@@ -88,6 +94,7 @@ class ReactionDetailSheet extends StatefulWidget {
   }
 }
 
+/// 维护当前表情选项，切换时向外层请求对应的名单。
 class _ReactionDetailSheetState extends State<ReactionDetailSheet> {
   String _selectedReactionID = '';
 
@@ -173,6 +180,7 @@ class _ReactionDetailSheetState extends State<ReactionDetailSheet> {
 
     return _ReactionUserList(
       reaction: selectedReaction,
+      groupId: widget.groupId,
       currentUserID: widget.currentUserID,
       onRemoveReaction: () => widget.onRemoveReaction(_selectedReactionID),
       scrollController: widget.scrollController,
@@ -282,7 +290,11 @@ class _ReactionTab extends StatelessWidget {
   }
 }
 
+/// 按原回应顺序展示用户，本人可移除时置于列表首位。
 class _ReactionUserList extends StatelessWidget {
+  /// 传给回应者姓名解析的会话范围。
+  final String? groupId;
+
   final MessageReaction reaction;
   final String? currentUserID;
   final VoidCallback onRemoveReaction;
@@ -291,6 +303,7 @@ class _ReactionUserList extends StatelessWidget {
 
   const _ReactionUserList({
     required this.reaction,
+    this.groupId,
     this.currentUserID,
     required this.onRemoveReaction,
     this.scrollController,
@@ -315,6 +328,7 @@ class _ReactionUserList extends StatelessWidget {
 
         return _ReactionUserItem(
           user: user,
+          groupId: groupId,
           isSelf: canRemove,
           onTap: canRemove ? onRemoveReaction : null,
         );
@@ -343,11 +357,15 @@ class _ReactionUserList extends StatelessWidget {
 /// 展示单个表情回应者的头像和资料，点击动作仍交给外层处理。
 class _ReactionUserItem extends StatelessWidget {
   final UserProfile user;
+
+  /// 群消息采用该群名片，单聊为空。
+  final String? groupId;
   final bool isSelf;
   final VoidCallback? onTap;
 
   const _ReactionUserItem({
     required this.user,
+    this.groupId,
     required this.isSelf,
     this.onTap,
   });
@@ -356,8 +374,12 @@ class _ReactionUserItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = SemanticColorScheme.of(context);
     final atomicLocal = AppLocalization.of(context);
-    final displayName =
-        (user.nickname?.isNotEmpty == true) ? user.nickname! : user.userID;
+    final displayName = AppUserAvatarScope.personName(
+      context,
+      user.userID,
+      groupId: groupId,
+      nickname: user.nickname,
+    );
 
     return GestureDetector(
       onTap: onTap,

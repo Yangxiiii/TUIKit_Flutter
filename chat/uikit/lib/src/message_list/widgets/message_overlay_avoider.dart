@@ -7,22 +7,24 @@ double messageOverlayLift(
 
 /// 聊天页提供实测浮层边界，列表临时平移绘制而不改动历史浏览和分页锚点。
 class MessageOverlayController extends ValueNotifier<
-    ({GlobalKey bubble, BuildContext? row, double top})?> {
+    ({GlobalKey bubble, BuildContext? bubbleContent, double top})?> {
   MessageOverlayController() : super(null);
 
-  /// 同一气泡与顶部边界只通知一次，避免布局测量形成无效重绘循环。
-  void avoid(GlobalKey bubble, double top, {BuildContext? row}) {
-    if (value?.bubble == bubble && value?.top == top && value?.row == row) {
+  /// 菜单测量含表情回应的气泡，编辑区可只传正文锚点；相同目标与边界只通知一次。
+  void avoid(GlobalKey bubble, double top, {BuildContext? bubbleContent}) {
+    if (value?.bubble == bubble &&
+        value?.top == top &&
+        value?.bubbleContent == bubbleContent) {
       return;
     }
-    value = (bubble: bubble, row: row, top: top);
+    value = (bubble: bubble, bubbleContent: bubbleContent, top: top);
   }
 
   /// 关闭浮层后移除临时位移，原始滚动位置不需要重建或重新定位。
   void clear() => value = null;
 }
 
-/// 裁剪并上移真实列表，保持逻辑视口及普通草稿不受浮层占位影响。
+/// 先平移真实列表，再按聊天视口裁剪，让原本被视口边缘截断的气泡移入可见区域。
 class MessageOverlayAvoider extends StatefulWidget {
   const MessageOverlayAvoider(
       {super.key, required this.controller, required this.child});
@@ -71,9 +73,9 @@ class _MessageOverlayAvoiderState extends State<MessageOverlayAvoider> {
         return;
       }
       final target = widget.controller?.value;
-      final row = target?.row;
-      final box = row?.mounted == true
-          ? row?.findRenderObject()
+      final content = target?.bubbleContent;
+      final box = content?.mounted == true
+          ? content?.findRenderObject()
           : target?.bubble.currentContext?.findRenderObject();
       var next = 0.0;
       if (target != null && box is RenderBox && box.attached && box.hasSize) {

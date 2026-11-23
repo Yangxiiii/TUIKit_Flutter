@@ -1,3 +1,4 @@
+import '../../chat_display_name.dart';
 import '../../message_list/utils/conversation_notice.dart';
 import '../../message_list/utils/group_announcement_message.dart';
 import 'package:app_ui/app_ui.dart' show AppColorBuildContext;
@@ -25,6 +26,10 @@ class ConversationItem extends StatefulWidget {
 
   /// 宿主传入的未读提及原消息。已指定但消息暂缺时，提醒后沿用常规会话摘要。
   final ({MessageInfo? message})? mentionPreview;
+
+  /// 宿主提供群通话摘要及发起人，仍由列表统一处理草稿、提及和省略。
+  final ({String sender, String content})? Function(MessageInfo message)?
+      groupCallPreview;
 
   /// 业务传入的精确未读前缀，仅在接收但不通知时使用；空值保留SDK默认格式。
   final String? mutedUnreadPrefix;
@@ -56,6 +61,7 @@ class ConversationItem extends StatefulWidget {
     this.backgroundColor,
     this.contentBuilder,
     this.mentionPreview,
+    this.groupCallPreview,
     this.mutedUnreadPrefix,
     this.draftIndicator,
     this.onTap,
@@ -123,7 +129,8 @@ class _ConversationItemState extends State<ConversationItem> {
                           children: [
                             Expanded(
                               child: Text(
-                                widget.conversation.title ?? '',
+                                chatConversationDisplayName(
+                                    context, widget.conversation),
                                 style: FontScheme.caption1Medium.copyWith(
                                   color: colorsTheme.textColorPrimary,
                                 ),
@@ -261,6 +268,8 @@ class _ConversationItemState extends State<ConversationItem> {
     final mention = atPrefix.isNotEmpty ? widget.mentionPreview : null;
     // 提及详情加载中、失败或离线缺失时，仍保留可用的常规摘要。
     final lastMessage = mention?.message ?? widget.conversation.lastMessage;
+    final callPreview =
+        lastMessage == null ? null : widget.groupCallPreview?.call(lastMessage);
     final style = FontScheme.caption2Regular.copyWith(
       color: colorsTheme.textColorSecondary,
     );
@@ -274,7 +283,15 @@ class _ConversationItemState extends State<ConversationItem> {
       lastMessage,
       widget.conversation.conversationID,
     );
-    String replaceText = announcement?.preview ??
+    final notice = lastMessage == null
+        ? null
+        : ConversationNotice.fromMessage(lastMessage);
+    // 欢迎语中的群名是纯文本快照，保留原样供会话摘要展示。
+    final welcomeText =
+        notice?.groupWelcomeParts == null ? null : notice!.textFor(null);
+    String replaceText = callPreview?.content ??
+        announcement?.preview ??
+        welcomeText ??
         (richPreview != null
             ? ''
             : EmojiManager.createLocalizedStringFromEmojiCodes(
@@ -294,21 +311,28 @@ class _ConversationItemState extends State<ConversationItem> {
     final unreadPrefix = _unreadPrefix();
     // 回退的摘要可能来自其他人，只有原消息能提供提及操作者。
     final senderMessage = mention == null ? lastMessage : mention.message;
-    // 管理员通知已含认证操作人，投递账号不再作为摘要前缀。
-    final adminNotice = senderMessage != null &&
-        ConversationNotice.fromMessage(senderMessage)?.isGroupAdminChange ==
-            true;
-    final sender = adminNotice || senderMessage?.status == MessageStatus.revoked
+    // 欢迎语与管理员通知的摘要由事件正文生成，省略 IM 投递账号。
+    final omitSender =
+        welcomeText != null || notice?.isGroupAdminChange == true;
+    final sender = omitSender || senderMessage?.status == MessageStatus.revoked
         ? null
         : senderMessage?.from;
-    // 普通群消息的昵称与未读状态无关；群公告和 UIKit 自带提及优先取群名片。
-    final nickname = sender?.nickname?.trim() ?? '';
-    final nameCard = sender?.nameCard?.trim() ?? '';
-    final useNameCard =
-        mention == null && (announcement != null || atPrefix.isNotEmpty);
-    final senderName = useNameCard && nameCard.isNotEmpty ? nameCard : nickname;
+    // 群摘要沿用实际发送者，通知与撤回消息维持自己的署名。
     final isGroupMessage = widget.conversation.type == ConversationType.group &&
         lastMessage?.messageType != MessageType.tips;
+    final showSender =
+        atPrefix.isNotEmpty || announcement != null || isGroupMessage;
+    final senderName = callPreview?.sender ??
+        (sender == null || senderMessage == null || !showSender
+            ? ''
+            : chatSenderDisplayName(
+                context,
+                senderMessage,
+                showUserId: false,
+                groupId: widget.conversation.conversationID.startsWith('group_')
+                    ? widget.conversation.conversationID.substring(6)
+                    : null,
+              ));
     final senderPrefix = senderName.isNotEmpty &&
             (atPrefix.isNotEmpty || announcement != null || isGroupMessage) &&
             (richPreview != null || replaceText.isNotEmpty)
@@ -440,20 +464,11 @@ class _ConversationItemState extends State<ConversationItem> {
       userID: widget.conversation.conversationID.startsWith('c2c_')
           ? widget.conversation.conversationID.substring(4)
           : null,
-      name: _getAvatarText(),
+      name: chatConversationDisplayName(context, widget.conversation),
       url: widget.conversation.avatarURL,
       badge: hasDot ? DotBadge() : NoBadge(),
       size: AvatarSize.l,
     );
-  }
-
-  String _getAvatarText() {
-    if (widget.conversation.title == null ||
-        widget.conversation.title!.isEmpty) {
-      return '?';
-    }
-
-    return widget.conversation.title!;
   }
 
   String _formatUnreadCount(int count) {

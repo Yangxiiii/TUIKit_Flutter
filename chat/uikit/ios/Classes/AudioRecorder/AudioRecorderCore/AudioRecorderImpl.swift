@@ -6,6 +6,7 @@ import Foundation
 import tuikit_atomic_x
 import os.log
 
+/// 协调系统与腾讯录音器，向平台桥接交付统一的录音结果。
 internal class AudioRecorderImpl: AudioRecorder {
     private let logger = Logger(subsystem: "AudioRecoder", category: "AudioRecorderControl")
     private static let kMinDuration:Int = 1000
@@ -14,8 +15,10 @@ internal class AudioRecorderImpl: AudioRecorder {
     private var recordedFilePath: String?
     private var recorder:AudioRecorderInternalProtocol?
     private var isCancelRecord:Bool = false
+    /// 录音开始后置位；手动停止或录音器主动结束后允许下一次录音。
     private var isRecording: Bool = false
     private var minDurationMs: Int = AudioRecorderImpl.kMinDuration
+    /// 当前原生片段的毫秒上限，续录时取整条语音的剩余额度。
     private var maxDurationMs: Int = AudioRecorderImpl.kMaxDuration
     private var currentTime:Int = 0
     
@@ -97,6 +100,7 @@ internal class AudioRecorderImpl: AudioRecorder {
         // logger.info("此接口暂不支持") logger.info("启用 AI 降噪。启用：(enable)")
     }
     
+    /// 在权限通过后预留录音路径，并把采音时长交给已选的录音器。
     private func startRecordInternal(_ filepath: String? = nil){
         logger.info("start record internal")
         if isRecording {
@@ -121,9 +125,10 @@ internal class AudioRecorderImpl: AudioRecorder {
             return
         }
         
-        recorder.startRecord(recordedFilePath, minDurationMs, maxDurationMs)
+        // 原生启动失败可能在 startRecord 内同步回调，先置位才能在终态正确复位。
         isRecording = true
         isCancelRecord = false
+        recorder.startRecord(recordedFilePath, minDurationMs, maxDurationMs)
     }
     
     private func createRecordedFilePath()->String {
@@ -149,10 +154,12 @@ internal class AudioRecorderImpl: AudioRecorder {
         completion(isGranted, false)
     }
     
+    /// 统一把终态和毫秒时长交给平台桥接；超时以原生上限为准，不依赖最后一次进度采样。
     private func notifyCompleteOnMainThread(_ retCode: AudioRecordResultCode) {
         executeOnMainThread {
             if !self.isCancelRecord {
-                self.onRecordingComplete?(retCode, self.recordedFilePath ?? "", self.currentTime)
+                let durationMs = retCode == .exceedMaxDuration ? self.maxDurationMs : self.currentTime
+                self.onRecordingComplete?(retCode, self.recordedFilePath ?? "", durationMs)
             } else {
                 DispatchQueue.global().async {
                     self.removeRecordFile(self.recordedFilePath)
@@ -162,8 +169,12 @@ internal class AudioRecorderImpl: AudioRecorder {
         }
     }
     
+    /// 原生自动停止与手动停止经过同一终态，避免录满一条后阻止后续录音。
     private func onComplete(_ retCode:AudioRecordResultCode) {
-        notifyCompleteOnMainThread(retCode);
+        executeOnMainThread {
+            self.isRecording = false
+            self.notifyCompleteOnMainThread(retCode)
+        }
     }
     
     private func removeRecordFile(_ path : String?) {

@@ -136,6 +136,12 @@ class _ReactionEmojiItem extends StatelessWidget {
 
 /// 展示常用和默认回应表情，面板高度由外层拖拽容器管理。
 class ReactionEmojiPickerSheet extends StatelessWidget {
+  /// 独立表情面板与消息操作共用的最大可用高度比例。
+  static const double maxHeightFraction = 0.95;
+
+  /// 完整目录顶部最多保留两行常用项。
+  static const int quickEmojiCount = 14;
+
   /// 选择任一表情后由外层关闭面板并提交回应。
   final void Function(EmojiPickerModelItem emoji) onEmojiClick;
 
@@ -159,43 +165,38 @@ class ReactionEmojiPickerSheet extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: colors.surface,
+        color: colors.referenceBackground,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Drag handle
-          //
-          // 拖拽手柄
-          Container(
-            margin: const EdgeInsets.only(top: 8),
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: colors.outline,
-              borderRadius: BorderRadius.circular(2),
+      child: CustomScrollView(
+        controller: scrollController,
+        slivers: [
+          // 手柄与表情网格共用滚动区，从面板顶端也能拖动高度。
+          SliverToBoxAdapter(
+            child: Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 8),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: colors.outline,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
             ),
           ),
           // 两组网格和标题属于同一滚动区，上滑先展开面板再翻阅其内容。
-          Expanded(
-            child: CustomScrollView(
-              controller: scrollController,
-              slivers: [
-                SliverPadding(
-                  padding: const EdgeInsets.all(16),
-                  sliver: SliverMainAxisGroup(slivers: [
-                    if (quickEmojis.isNotEmpty) ...[
-                      _heading('最常使用'),
-                      _grid(quickEmojis, 'recent'),
-                      const SliverToBoxAdapter(child: SizedBox(height: 20)),
-                    ],
-                    _heading('默认表情'),
-                    _grid(allEmojis, 'select'),
-                  ]),
-                ),
+          SliverPadding(
+            padding: const EdgeInsets.all(16),
+            sliver: SliverMainAxisGroup(slivers: [
+              if (quickEmojis.isNotEmpty) ...[
+                _heading('最常使用'),
+                _grid(quickEmojis, 'recent'),
+                const SliverToBoxAdapter(child: SizedBox(height: 20)),
               ],
-            ),
+              _heading('默认表情'),
+              _grid(allEmojis, 'select'),
+            ]),
           ),
         ],
       ),
@@ -221,6 +222,8 @@ class ReactionEmojiPickerSheet extends StatelessWidget {
         itemBuilder: (context, index) {
           final emoji = emojis[index];
           return GestureDetector(
+            // 图片加载期间整格也可点击，格子边缘沿用同一回应动作。
+            behavior: HitTestBehavior.opaque,
             onTap: () => onEmojiClick(emoji),
             child: Semantics(
               identifier: 'tim.reaction.$section.${emoji.name}',
@@ -243,14 +246,19 @@ class ReactionEmojiPickerSheet extends StatelessWidget {
       );
 
   /// 以底部面板展示常用表情和完整目录，近期缓存失效时以默认顺序补足。
-  static Future<EmojiPickerModelItem?> show(BuildContext context) async {
+  static Future<List<EmojiPickerModelItem>> loadQuickEmojis() async {
     final recent = await RecentEmojiManager.getRecentEmojiIds()
         .onError<Object>((_, __) => const <String>[]);
-    if (!context.mounted) return null;
-    final quickEmojis = {...recent, ...EmojiManager.emojis.map((e) => e.name)}
-        .take(14)
+    return {...recent, ...EmojiManager.emojis.map((e) => e.name)}
+        .take(quickEmojiCount)
         .map((id) => EmojiManager.getEmoji(id)!)
         .toList(growable: false);
+  }
+
+  /// 兼容独立气泡菜单入口；聊天页底部操作面板可直接嵌入表情内容。
+  static Future<EmojiPickerModelItem?> show(BuildContext context) async {
+    final quickEmojis = await loadQuickEmojis();
+    if (!context.mounted) return null;
     // 清除主焦点，以防面板关闭时恢复上一层的输入键盘。
     final currentFocus = FocusScope.of(context);
     if (!currentFocus.hasPrimaryFocus && currentFocus.focusedChild != null) {
@@ -270,7 +278,7 @@ class ReactionEmojiPickerSheet extends StatelessWidget {
         expand: false,
         initialChildSize: 0.5,
         minChildSize: 0.5,
-        maxChildSize: 0.95,
+        maxChildSize: maxHeightFraction,
         shouldCloseOnMinExtent: false,
         snap: true,
         builder: (context, scrollController) => ReactionEmojiPickerSheet(

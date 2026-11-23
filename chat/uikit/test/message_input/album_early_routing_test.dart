@@ -15,15 +15,18 @@ import 'package:tuikit_atomic_x/album_picker/album_picker_platform.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('安卓普通输入和富文本相册都向原生选择器开启拍照入口', (tester) async {
+  testWidgets('聊天和富文本相册均支持拍照，只有 iOS 在打开时传入最近项目类型', (tester) async {
     const method = MethodChannel('atomic_x/album_picker');
     const events = MethodChannel('atomic_x/album_picker_events');
     final messenger = tester.binding.defaultBinaryMessenger;
     final cameraFlags = <bool?>[];
+    final initialAlbums = <String?>[];
     messenger.setMockMethodCallHandler(events, (_) async => null);
     messenger.setMockMethodCallHandler(method, (call) async {
       expect(call.method, 'pickMedia');
       cameraFlags.add(call.arguments['showsCameraItem'] as bool?);
+      initialAlbums.add(call.arguments['iosInitialAlbum'] as String?);
+      expect(call.arguments.containsKey('preferRecentAlbum'), isFalse);
       return null;
     });
     addTearDown(() async {
@@ -46,7 +49,13 @@ void main() {
         find.bySemanticsIdentifier('tim.rich_content_overlay_toolbar.album'));
     await tester.pumpAndSettle();
     expect(cameraFlags, [true, true]);
-  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+    final expected = defaultTargetPlatform == TargetPlatform.iOS
+        ? 'smartAlbumRecentlyAdded'
+        : null;
+    expect(initialAlbums, [expected, expected]);
+  },
+      variant: const TargetPlatformVariant(
+          {TargetPlatform.android, TargetPlatform.iOS}));
 
   test('压缩时先显示文件占位，导出后按实际大小移交或清理', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;

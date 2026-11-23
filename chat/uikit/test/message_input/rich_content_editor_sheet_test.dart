@@ -23,7 +23,14 @@ import 'package:tuikit_atomic_x/base_component/base_component.dart'
 import 'package:tuikit_atomic_x/album_picker/album_picker.dart';
 
 void main() {
-  testWidgets('iOS 单聊展开页使用接收昵称，快捷栏只保留表情、相册、格式和发送', (tester) async {
+  final videoDurationIcon = find.descendant(
+    of: find.byType(RichContentVideoPreview),
+    matching: find.byIcon(AppIcons.cameraOn),
+  );
+
+  testWidgets('iOS 单聊展开页使用接收昵称，隐藏快捷图标后相册和格式依次前移', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(MaterialApp(
         theme: AppThemeFactory.create(
                 const AppNormalColorScheme(), Brightness.light)
@@ -32,8 +39,19 @@ void main() {
             body: Column(children: [
           Expanded(child: SizedBox()),
           MessageInput(
-              conversationID: 'c2c_peer', conversationDisplayName: '小明'),
+            conversationID: 'c2c_peer',
+            conversationDisplayName: '小明',
+            config: ChatMessageInputConfig(isShowVideoCall: true),
+          ),
         ]))));
+    expect(
+        find.descendant(
+            of: find.bySemanticsIdentifier('tim.message_input_toolbar.call'),
+            matching: find.byIcon(AppIcons.cameraOn)),
+        findsOneWidget);
+    final normalSend =
+        find.bySemanticsIdentifier('tim.message_input_toolbar.send');
+    final sendX = tester.getCenter(normalSend).dx;
     await tester.tap(find.byKey(const Key('open_rich_content_editor')));
     await tester.pumpAndSettle();
     expect(find.text('发送给 小明'), findsOneWidget);
@@ -44,8 +62,16 @@ void main() {
         findsNothing);
     expect(find.descendant(of: toolbar, matching: find.byTooltip('提及成员')),
         findsNothing);
-    expect(find.descendant(of: toolbar, matching: find.byTooltip('表情')),
-        findsOneWidget);
+    double shortcutX(String tooltip) => tester
+        .getCenter(
+            find.descendant(of: toolbar, matching: find.byTooltip(tooltip)))
+        .dx;
+    final emojiX = shortcutX('表情');
+    expect(shortcutX('插入图片/视频') - emojiX, 44);
+    expect(shortcutX('文字格式') - emojiX, 88);
+    final richSend =
+        find.bySemanticsIdentifier('tim.rich_content_overlay_toolbar.send');
+    expect(tester.getCenter(richSend).dx, sendX);
     await tester.pumpWidget(const SizedBox());
     expect(tester.takeException(), isNull);
   });
@@ -237,6 +263,10 @@ void main() {
         isFalse);
     expect(find.byType(EmojiPicker), findsOneWidget);
     expect(editor.showEmojiPanel, isTrue);
+    expect(_emojiControl('tim.emoji.send'), findsNothing);
+    expect(_emojiControl('tim.emoji.delete'), findsNothing);
+    expect(find.bySemanticsIdentifier('tim.rich_content_overlay_toolbar.send'),
+        findsOneWidget);
     expect(field.controller!.text, '前后');
     expect(field.focusNode!.hasFocus, isTrue);
     expect(tester.getRect(find.byType(EmojiPicker)).top,
@@ -251,11 +281,6 @@ void main() {
     expect(field.controller!.text, '前[ZDEmoji_Like]后');
     expect(field.controller!.selection.baseOffset, 15);
     expect(field.focusNode!.hasFocus, isTrue);
-    await tester.tap(_emojiControl('tim.emoji.delete'));
-    await tester.pumpAndSettle();
-    expect(field.controller!.text, '前后');
-    await tester.tap(_emojiControl('tim.emoji.quick.[ZDEmoji_Like]'));
-    await tester.pumpAndSettle();
     await tester
         .tap(find.descendant(of: toolbar, matching: find.byTooltip('显示键盘')));
     await tester.pumpAndSettle();
@@ -310,7 +335,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(field.controller!.text, '甲[ZDEmoji_Like]乙');
     expect(field.focusNode!.hasFocus, isTrue);
-    await tester.tap(_emojiControl('tim.emoji.send'));
+    expect(_emojiControl('tim.emoji.send'), findsNothing);
+    expect(_emojiControl('tim.emoji.delete'), findsNothing);
+    await tester
+        .tap(find.bySemanticsIdentifier('tim.rich_content_toolbar.send'));
     await tester.pumpAndSettle();
     expect((sent!.blocks.single as RichContentDraftTextBlock).text,
         '甲[ZDEmoji_Like]乙');
@@ -973,7 +1001,8 @@ void main() {
     await tester.pump();
     expect(scroll.position.pixels, greaterThan(0));
     await expectCoverPainted();
-    final icon = find.byIcon(AppIcons.cameraOn);
+    final icon =
+        find.descendant(of: preview, matching: find.byIcon(AppIcons.cameraOn));
     final paintedCenter =
         tester.getCenter(icon) - Offset(0, scroll.position.pixels);
     expect(tester.getRect(field).contains(paintedCenter), isTrue,
@@ -1011,17 +1040,17 @@ void main() {
             videoThumbnailPath: thumbnailPath),
         readSize: (_) async => const ImageSize(100, 60));
     await tester.pump();
-    expect(find.byIcon(AppIcons.cameraOn), findsOneWidget);
+    expect(videoDurationIcon, findsOneWidget);
     await tester.tap(find.byTooltip('收起富文本编辑器'));
     await tester.pumpAndSettle();
-    expect(find.byIcon(AppIcons.cameraOn), findsOneWidget);
+    expect(videoDurationIcon, findsOneWidget);
     final field = tester.widget<ExtendedTextField>(
         find.byKey(const Key('message_input_text_field')));
     expect(richContentAttachmentTokenPattern.allMatches(field.controller!.text),
         hasLength(1));
     await tester.tap(find.byKey(const Key('open_rich_content_editor')));
     await tester.pumpAndSettle();
-    expect(find.byIcon(AppIcons.cameraOn), findsOneWidget);
+    expect(videoDurationIcon, findsOneWidget);
     expect(find.byTooltip('删除附件'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -1108,9 +1137,6 @@ void main() {
     expect(video.status, RichContentAttachmentStatus.pending);
     expect(video.attachment.mimeType, 'video/quicktime');
     expect(restored.toMessage(), isNull);
-    final button = tester.widget<IconButton>(find.ancestor(
-        of: find.byTooltip('插入文件'), matching: find.byType(IconButton)));
-    expect(button.onPressed, isNull);
     // 重开草稿继续使用同一正文和封面，不能退回文件卡片。
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpWidget(_testApp(restored,
@@ -1178,36 +1204,31 @@ void main() {
     final second = editorKey.currentState!.insertProcessedMedia(media(22),
         readSize: (_) async => const ImageSize(100, 60));
     await tester.pump();
-    expect(find.byIcon(AppIcons.cameraOn), findsOneWidget);
+    expect(videoDurationIcon, findsOneWidget);
     await backspaceVideo();
     await second;
     await tester.pump();
-    expect(find.byIcon(AppIcons.cameraOn), findsNothing);
+    expect(videoDurationIcon, findsNothing);
     expect(
         current!.blocks.whereType<RichContentDraftAttachmentBlock>(), isEmpty);
     expect(editorKey.currentState!.canSend, isFalse);
   });
 
-  testWidgets('独立富文本编辑器文件入口保留位置但禁止点击', (tester) async {
+  testWidgets('独立富文本编辑器隐藏通话和文件入口', (tester) async {
     final semantics = tester.ensureSemantics();
     await tester.pumpWidget(_testApp(
       const RichContentDraft(),
       onSend: (_) async => false,
     ));
     await tester.pump();
-    final file = find.bySemanticsIdentifier('tim.rich_content_toolbar.file');
-    expect(file, findsOneWidget);
-    expect(
-        tester
-            .getSemantics(file)
-            .getSemanticsData()
-            .hasAction(SemanticsAction.tap),
-        isFalse);
-    final button = tester.widget<IconButton>(find.ancestor(
-        of: find.byTooltip('插入文件'), matching: find.byType(IconButton)));
-    expect(button.onPressed, isNull);
-    await tester.tap(file);
-    await tester.pump();
+    expect(find.byTooltip('插入文件'), findsNothing);
+    expect(find.byTooltip('视频通话'), findsNothing);
+    expect(find.bySemanticsIdentifier('tim.rich_content_toolbar.file'),
+        findsNothing);
+    expect(find.bySemanticsIdentifier('tim.rich_content_toolbar.call'),
+        findsNothing);
+    expect(find.bySemanticsIdentifier('tim.rich_content_toolbar.album'),
+        findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     semantics.dispose();

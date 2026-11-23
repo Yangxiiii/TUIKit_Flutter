@@ -17,6 +17,7 @@ import 'package:tencent_chat_uikit/src/message_input/message_clipboard.dart';
 import 'package:tencent_chat_uikit/src/message_input/widget/rich_content_editor_sheet.dart';
 import 'package:tencent_chat_uikit/src/message_input/utils/image_size_reader.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_message.dart';
+import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/rich_content_video_preview.dart';
 import 'package:tencent_cloud_chat_sdk/manager/v2_tim_conversation_manager.dart';
 import 'package:tencent_cloud_chat_sdk/manager/v2_tim_friendship_manager.dart';
 import 'package:tencent_cloud_chat_sdk/manager/v2_tim_manager.dart';
@@ -31,6 +32,10 @@ import 'package:tencent_cloud_chat_sdk/models/v2_tim_value_callback.dart';
 import 'package:tencent_cloud_chat_sdk/tencent_im_sdk_plugin.dart';
 
 void main() {
+  final videoDurationIcon = find.descendant(
+    of: find.byType(RichContentVideoPreview),
+    matching: find.byIcon(AppIcons.cameraOn),
+  );
   late V2TIMManager original;
   late _Sdk sdk;
   setUp(() {
@@ -357,7 +362,7 @@ void main() {
       expect(reads, 1);
       if (route == '外部同名剪贴板') {
         expect(field.controller!.text, previewText);
-        expect(find.byIcon(AppIcons.cameraOn), findsNothing);
+        expect(videoDurationIcon, findsNothing);
       } else if (isRichTextOnly) {
         expect(field.controller!.text, '前**加粗**、*斜体*后');
         final fieldContext =
@@ -382,7 +387,7 @@ void main() {
       } else {
         expect(
             field.controller!.text, '前**加粗**${richContentAttachmentToken(1)}后');
-        expect(find.byIcon(AppIcons.cameraOn), findsOneWidget);
+        expect(videoDurationIcon, findsOneWidget);
         expect(find.text('3:52'), findsOneWidget);
       }
       if (!isImage) expect(sendButton(tester).onPressed, isNotNull);
@@ -537,6 +542,9 @@ void main() {
       expect(tester.getRect(toolbar).bottom, closeTo(top, .01));
     }
     expect(tester.getSize(find.byType(EmojiPicker)).height, 320);
+    expect(find.bySemanticsIdentifier('tim.emoji.send'), findsNothing);
+    expect(find.bySemanticsIdentifier('tim.emoji.delete'), findsNothing);
+    expect(sendButton(tester).onPressed, isNotNull);
     // 模拟隐藏IME会关闭原生连接的平台，焦点与选区仍须保留，切回时重新建立客户端。
     tester
         .state<ExtendedEditableTextState>(find.byType(ExtendedEditableText))
@@ -670,10 +678,10 @@ void main() {
       expect(loading, findsNothing);
       expect(uploads, mode == 'delete' ? 0 : 2);
       if (mode == 'delete') {
-        expect(find.byIcon(AppIcons.cameraOn), findsNothing);
+        expect(videoDurationIcon, findsNothing);
         expect(sendButton(tester).onPressed, isNull);
       } else {
-        expect(find.byIcon(AppIcons.cameraOn), findsOneWidget);
+        expect(videoDurationIcon, findsOneWidget);
         expect(sendButton(tester).onPressed, isNotNull);
       }
       expect(tester.takeException(), isNull);
@@ -921,21 +929,25 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('富文本展开时文件按钮禁用，收起后恢复普通文件选择', (tester) async {
+  testWidgets('安卓展开富文本时隐藏通话和文件，收起后恢复普通文件选择', (tester) async {
     final semantics = tester.ensureSemantics();
     var requests = 0;
     await tester.pumpWidget(MaterialApp(
       theme: AppThemeFactory.create(
-          const AppNormalColorScheme(), Brightness.light),
+              const AppNormalColorScheme(), Brightness.light)
+          .copyWith(platform: TargetPlatform.android),
       home: Scaffold(
         body: Column(children: [
           const Expanded(child: SizedBox()),
           MessageInput(
             conversationID: 'c2c_test',
-            config: ChatMessageInputConfig(fileSelector: (_) async {
-              requests++;
-              return [];
-            }),
+            config: ChatMessageInputConfig(
+              isShowVideoCall: true,
+              fileSelector: (_) async {
+                requests++;
+                return [];
+              },
+            ),
           ),
         ]),
       ),
@@ -944,7 +956,10 @@ void main() {
     await tester.pump();
     final normalFile =
         find.bySemanticsIdentifier('tim.message_input_toolbar.file');
+    final normalCall =
+        find.bySemanticsIdentifier('tim.message_input_toolbar.call');
     expect(normalFile, findsOneWidget);
+    expect(normalCall, findsOneWidget);
     expect(
         tester
             .getSemantics(normalFile)
@@ -958,21 +973,16 @@ void main() {
     await tester.pumpAndSettle();
     final overlayFile =
         find.bySemanticsIdentifier('tim.rich_content_overlay_toolbar.file');
-    for (final file in [normalFile, overlayFile]) {
-      expect(file, findsOneWidget);
-      expect(
-          tester
-              .getSemantics(file)
-              .getSemanticsData()
-              .hasAction(SemanticsAction.tap),
-          isFalse);
-    }
-    await tester.tap(overlayFile);
-    await tester.pump();
-    expect(requests, 1);
+    final overlayCall =
+        find.bySemanticsIdentifier('tim.rich_content_overlay_toolbar.call');
+    expect(overlayFile, findsNothing);
+    expect(overlayCall, findsNothing);
+    expect(normalFile, findsNothing);
+    expect(normalCall, findsNothing);
     await tester.tap(find.byTooltip('收起富文本编辑器'));
     await tester.pumpAndSettle();
     expect(overlayFile, findsNothing);
+    expect(normalCall, findsOneWidget);
     expect(
         tester
             .getSemantics(normalFile)
@@ -1136,6 +1146,7 @@ void main() {
     final text = '${'字' * 3412}😀';
     await enter(tester, text);
     final send = find.bySemanticsIdentifier('tim.message_input_toolbar.send');
+    final staleSend = sendButton(tester).onPressed!;
     expect(send, findsOneWidget);
     expect(
         tester
@@ -1182,10 +1193,8 @@ void main() {
     await enter(tester, '$text甲');
     await tester.pumpAndSettle();
     expect(toast, findsOneWidget);
-    // 表情面板的回调也是实际发送入口，禁用态不能只由按钮外观保证。
-    final state = tester.state<MessageInputState>(find.byType(MessageInput));
-    await state.getEmojiPanelWidget();
-    (state.stickerWidget as EmojiPicker).onSendClick!();
+    // 即使触发超限前留下的发送回调，提交时也必须重新校验字节数。
+    staleSend();
     await tester.pump();
     expect(sdk.messages.created, 0);
     await enter(tester, text);
@@ -1237,10 +1246,8 @@ void main() {
     await tester.pump();
     await enter(tester, '待发送');
     await tester.tap(find.byTooltip('文字格式'));
-    await tester.pump(const Duration(milliseconds: 200));
-    final state = tester.state<MessageInputState>(find.byType(MessageInput));
-    await state.getEmojiPanelWidget();
-    final send = (state.stickerWidget as EmojiPicker).onSendClick!;
+    await tester.pumpAndSettle();
+    final send = sendButton(tester).onPressed!;
     send();
     send();
     await tester.pump();
@@ -1276,9 +1283,7 @@ void main() {
     sdk.conversations.completeDraft('');
     await tester.pump();
     await enter(tester, '失败前输入');
-    final state = tester.state<MessageInputState>(find.byType(MessageInput));
-    await state.getEmojiPanelWidget();
-    final send = (state.stickerWidget as EmojiPicker).onSendClick!;
+    final send = sendButton(tester).onPressed!;
     send();
     await tester.pump();
     sdk.messages.completeSend(code: 1);
@@ -1299,9 +1304,7 @@ void main() {
     sdk.conversations.completeDraft('');
     await tester.pump();
     await enter(tester, '异常前输入');
-    final state = tester.state<MessageInputState>(find.byType(MessageInput));
-    await state.getEmojiPanelWidget();
-    final send = (state.stickerWidget as EmojiPicker).onSendClick!;
+    final send = sendButton(tester).onPressed!;
     send();
     await tester.pump();
     sdk.messages.pending.removeAt(0).completeError(StateError('模拟SDK异常'));

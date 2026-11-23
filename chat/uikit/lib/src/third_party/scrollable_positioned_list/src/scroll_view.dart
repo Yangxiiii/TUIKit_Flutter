@@ -9,9 +9,9 @@ import 'package:flutter/widgets.dart';
 import 'wrapping.dart';
 import 'viewport.dart';
 
-/// A version of [CustomScrollView] that allows does not constrict the extents
-/// to be within 0 and 1. See [CustomScrollView] for more information.
+/// 构建支持扩展锚点范围的滚动视口，普通和按内容收缩两种布局共用裁剪配置。
 class UnboundedCustomScrollView extends CustomScrollView {
+  /// 保留宿主的收缩选项，由自定义视口处理带中心锚点的收缩布局。
   final bool _shrinkWrap;
 
   const UnboundedCustomScrollView({
@@ -22,6 +22,7 @@ class UnboundedCustomScrollView extends CustomScrollView {
     bool? primary,
     ScrollPhysics? physics,
     bool shrinkWrap = false,
+    super.clipBehavior,
     Key? center,
     double anchor = 0.0,
     double? cacheExtent,
@@ -52,7 +53,7 @@ class UnboundedCustomScrollView extends CustomScrollView {
   @override
   double get anchor => _anchor;
 
-  /// Build the viewport.
+  /// 按内容是否收缩选择视口，并传递同一套裁剪配置。
   @override
   @protected
   Widget buildViewport(
@@ -65,6 +66,7 @@ class UnboundedCustomScrollView extends CustomScrollView {
       return CustomShrinkWrappingViewport(
         axisDirection: axisDirection,
         offset: offset,
+        clipBehavior: clipBehavior,
         slivers: slivers,
         cacheExtent: cacheExtent,
         center: center,
@@ -74,6 +76,7 @@ class UnboundedCustomScrollView extends CustomScrollView {
     return UnboundedViewport(
       axisDirection: axisDirection,
       offset: offset,
+      clipBehavior: clipBehavior,
       slivers: slivers,
       cacheExtent: cacheExtent,
       center: center,
