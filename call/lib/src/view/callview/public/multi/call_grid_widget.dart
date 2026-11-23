@@ -20,11 +20,12 @@ import 'group_call_projection.dart';
 
 /// 群和临时多人通话的 SDK 适配页，媒体状态与邀请结果都来自当前场次。
 class CallGridWidget extends StatefulWidget {
-  const CallGridWidget(
-      {super.key,
-      required this.controller,
-      this.enableAITranscriber = false,
-      this.isCurrentPresentation});
+  const CallGridWidget({
+    super.key,
+    required this.controller,
+    this.enableAITranscriber = false,
+    this.isCurrentPresentation,
+  });
 
   /// 上层统一持有 SDK 控制器，群画面使用独立成员视频视图。
   final CallCoreController controller;
@@ -54,17 +55,17 @@ class _CallGridWidgetState extends State<CallGridWidget> {
   final Set<String> _inviting = {};
 
   Listenable get _updates => Listenable.merge([
-        CallStore.shared.state.activeCall,
-        CallStore.shared.state.selfInfo,
-        CallStore.shared.state.allParticipants,
-        CallStore.shared.state.speakerVolumes,
-        DeviceStore.shared.state.microphoneStatus,
-        DeviceStore.shared.state.cameraStatus,
-        DeviceStore.shared.state.currentAudioRoute,
-        GlobalState.instance.groupCall,
-        GlobalState.instance.groupControl,
-        GlobalState.instance.groupCallRecording,
-      ]);
+    CallStore.shared.state.activeCall,
+    CallStore.shared.state.selfInfo,
+    CallStore.shared.state.allParticipants,
+    CallStore.shared.state.speakerVolumes,
+    DeviceStore.shared.state.microphoneStatus,
+    DeviceStore.shared.state.cameraStatus,
+    DeviceStore.shared.state.currentAudioRoute,
+    GlobalState.instance.groupCall,
+    GlobalState.instance.groupControl,
+    GlobalState.instance.groupCallRecording,
+  ]);
 
   @override
   void initState() {
@@ -86,116 +87,153 @@ class _CallGridWidgetState extends State<CallGridWidget> {
         : null;
   }
 
-  List<GroupCallMember> _members() => projectGroupCallMembers(
+  /// 为本场成员按来源群解析姓名；临时多人通话只使用个人资料。
+  List<GroupCallMember> _members(BuildContext context) =>
+      projectGroupCallMembers(
         snapshot: GlobalState.instance.groupCall.value,
         call: CallStore.shared.state.activeCall.value,
         self: CallStore.shared.state.selfInfo.value,
         participants: CallStore.shared.state.allParticipants.value,
-        microphoneOn: _control?.microphoneOn ??
+        microphoneOn:
+            _control?.microphoneOn ??
             CallStore.shared.state.selfInfo.value.isMicrophoneOpened,
-        cameraOn: _control?.cameraOn ??
+        cameraOn:
+            _control?.cameraOn ??
             CallStore.shared.state.selfInfo.value.isCameraOpened,
         volumes: CallStore.shared.state.speakerVolumes.value,
+        resolveName: (id, nickname, fallback) => AppUserAvatarScope.personName(
+          context,
+          id,
+          nickname: nickname,
+          fallback: fallback,
+          groupId: CallStore.shared.state.activeCall.value.chatGroupId,
+        ),
       );
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: _updates,
-        builder: (context, _) {
-          final self = CallStore.shared.state.selfInfo.value;
-          final call = CallStore.shared.state.activeCall.value;
-          final snapshot = GlobalState.instance.groupCall.value;
-          final control = _control;
-          final microphoneOn = control?.microphoneOn ?? self.isMicrophoneOpened;
-          final cameraOn = control?.cameraOn ?? self.isCameraOpened;
-          final ended = snapshot?.ended ?? false;
-          final connected =
-              !ended && self.status == CallParticipantStatus.accept;
-          // 被叫本地 SDK 时钟可能从重入重新开始，录像偏移必须使用整场通话的起点。
-          final recording = GlobalState.instance.groupCallRecording;
-          final recordingStart = control?.connectedAtMs;
-          final isRecording = recording.isRecording(call.callId);
-          final canRecord = recording.available &&
-              call.callId.isNotEmpty &&
-              (isRecording || recordingStart != null);
-          final incoming = !ended &&
-              call.inviterId != self.id &&
-              self.status == CallParticipantStatus.waiting;
-          final members = _members();
-          final title = snapshot?.groupName.isNotEmpty == true
-              ? snapshot!.groupName
-              : snapshot?.groupId.isNotEmpty == true
-                  ? '群通话'
-                  : '多人通话';
-          return GroupCallScene(
-              key: ValueKey(snapshot?.callId ?? call.callId),
-              title: title,
-              status: connected
-                  ? const TimerWidget(fontSize: 12)
-                  : Text(
-                      ended
-                          ? snapshot?.canRetry == true
-                              ? '呼叫超时，无人接听'
-                              : '通话已结束'
-                          : incoming
-                              ? '等待接听'
-                              : '正在呼叫…',
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: context.appColors.onScrimSecondary)),
-              members: members,
-              inviterId: snapshot?.inviterId ?? call.inviterId,
-              selfId: self.id,
-              incoming: incoming,
-              video: call.mediaType == CallMediaType.video,
-              onManage: () => _management().open(),
-              videoBuilder: (id) => !ended &&
-                      self.id.isNotEmpty &&
-                      members.any((member) => member.id == id && member.joined)
-                  ? CallVideoView(
-                      key: _videoKeys.putIfAbsent(id, GlobalKey.new),
-                      userId: id,
-                      local: id == self.id,
-                      groupCallId: id == self.id ? call.callId : null)
-                  : const SizedBox.shrink(),
-              onRetry: !ended && call.callId.isNotEmpty ? _invite : null,
-              controls: GroupCallControls(
-                  incoming: incoming,
-                  connected: connected,
-                  ended: ended,
-                  retryable: snapshot?.canRetry ?? false,
-                  microphoneOn: !ended && microphoneOn,
-                  cameraOn: !ended && cameraOn,
-                  speakerOn: DeviceStore.shared.state.currentAudioRoute.value ==
-                      AudioRoute.speakerphone,
-                  canOpenMicrophone: control?.canOpenMicrophone == true,
-                  canOpenCamera: control?.canOpenCamera == true,
-                  microphonePending: control?.isDevicePending(
-                          self.id, GroupControlDevice.microphone) == true,
-                  cameraPending: control?.isDevicePending(
-                          self.id, GroupControlDevice.camera) == true,
-                  microphoneHint: groupDeviceHint(
-                      control, self.id, GroupControlDevice.microphone),
-                  cameraHint: groupDeviceHint(
-                      control, self.id, GroupControlDevice.camera),
-                  recording: isRecording,
-                  recordingPending: recording.isPending(call.callId),
-                  onRecord: canRecord
-                      ? () => _toggleRecording(call.callId, recordingStart)
-                      : null,
-                  canFlip: connected && cameraOn && (_cameraCount ?? 0) > 1,
-                  onEnd: () => _end(incoming: incoming, connected: connected),
-                  onAccept: CallManager.instance.accept,
-                  onMicrophone: () => _management().setDevice(
-                      self.id, GroupControlDevice.microphone, !microphoneOn),
-                  onCamera: () => _management()
-                      .setDevice(self.id, GroupControlDevice.camera, !cameraOn),
-                  onSpeaker: CallManager.instance.toggleSpeaker,
-                  onFlip: () => CallManager.instance.switchCamera(
-                      !DeviceStore.shared.state.isFrontCamera.value),
-                  onRetry: _retry));
-        },
+    listenable: _updates,
+    builder: (context, _) {
+      final self = CallStore.shared.state.selfInfo.value;
+      final call = CallStore.shared.state.activeCall.value;
+      final snapshot = GlobalState.instance.groupCall.value;
+      final control = _control;
+      final microphoneOn = control?.microphoneOn ?? self.isMicrophoneOpened;
+      final cameraOn = control?.cameraOn ?? self.isCameraOpened;
+      final ended = snapshot?.ended ?? false;
+      final connected = !ended && self.status == CallParticipantStatus.accept;
+      // 被叫本地 SDK 时钟可能从重入重新开始，录像偏移必须使用整场通话的起点。
+      final recording = GlobalState.instance.groupCallRecording;
+      final recordingStart = control?.connectedAtMs;
+      final isRecording = recording.isRecording(call.callId);
+      final canRecord =
+          recording.available &&
+          call.callId.isNotEmpty &&
+          (isRecording || recordingStart != null);
+      final incoming =
+          !ended &&
+          call.inviterId != self.id &&
+          self.status == CallParticipantStatus.waiting;
+      final members = _members(context);
+      final title = snapshot?.groupName.isNotEmpty == true
+          ? snapshot!.groupName
+          : snapshot?.groupId.isNotEmpty == true
+          ? '群通话'
+          : '多人通话';
+      return GroupCallScene(
+        key: ValueKey(snapshot?.callId ?? call.callId),
+        title: title,
+        status: connected
+            ? const TimerWidget(fontSize: 12)
+            : Text(
+                ended
+                    ? snapshot?.canRetry == true
+                          ? '呼叫超时，无人接听'
+                          : '通话已结束'
+                    : incoming
+                    ? '等待接听'
+                    : '正在呼叫…',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: context.appColors.onScrimSecondary,
+                ),
+              ),
+        members: members,
+        inviterId: snapshot?.inviterId ?? call.inviterId,
+        selfId: self.id,
+        incoming: incoming,
+        video: call.mediaType == CallMediaType.video,
+        onManage: () => _management().open(),
+        videoBuilder: (id) =>
+            !ended &&
+                self.id.isNotEmpty &&
+                members.any((member) => member.id == id && member.joined)
+            ? CallVideoView(
+                key: _videoKeys.putIfAbsent(id, GlobalKey.new),
+                userId: id,
+                local: id == self.id,
+                groupCallId: id == self.id ? call.callId : null,
+              )
+            : const SizedBox.shrink(),
+        onRetry: !ended && call.callId.isNotEmpty ? _invite : null,
+        controls: GroupCallControls(
+          incoming: incoming,
+          connected: connected,
+          ended: ended,
+          retryable: snapshot?.canRetry ?? false,
+          microphoneOn: !ended && microphoneOn,
+          cameraOn: !ended && cameraOn,
+          speakerOn:
+              DeviceStore.shared.state.currentAudioRoute.value ==
+              AudioRoute.speakerphone,
+          canOpenMicrophone: control?.canOpenMicrophone == true,
+          canOpenCamera: control?.canOpenCamera == true,
+          microphonePending:
+              control?.isDevicePending(
+                self.id,
+                GroupControlDevice.microphone,
+              ) ==
+              true,
+          cameraPending:
+              control?.isDevicePending(self.id, GroupControlDevice.camera) ==
+              true,
+          microphoneHint: groupDeviceHint(
+            control,
+            self.id,
+            GroupControlDevice.microphone,
+          ),
+          cameraHint: groupDeviceHint(
+            control,
+            self.id,
+            GroupControlDevice.camera,
+          ),
+          recording: isRecording,
+          recordingPending: recording.isPending(call.callId),
+          onRecord: canRecord
+              ? () => _toggleRecording(call.callId, recordingStart)
+              : null,
+          canFlip: connected && cameraOn && (_cameraCount ?? 0) > 1,
+          onEnd: () => _end(incoming: incoming, connected: connected),
+          onAccept: CallManager.instance.accept,
+          onMicrophone: () => _management().setDevice(
+            self.id,
+            GroupControlDevice.microphone,
+            !microphoneOn,
+          ),
+          onCamera: () => _management().setDevice(
+            self.id,
+            GroupControlDevice.camera,
+            !cameraOn,
+          ),
+          onSpeaker: CallManager.instance.toggleSpeaker,
+          onFlip: () => CallManager.instance.switchCamera(
+            !DeviceStore.shared.state.isFrontCamera.value,
+          ),
+          onRetry: _retry,
+        ),
       );
+    },
+  );
 
   /// 保存云端录制片段，换场或旧页面离开时不再显示关联提示。
   Future<void> _toggleRecording(String callId, int? connectedAtMs) {
@@ -208,34 +246,37 @@ class _CallGridWidgetState extends State<CallGridWidget> {
         CallStore.shared.state.activeCall.value.callId == callId &&
         CallStore.shared.state.selfInfo.value.status ==
             CallParticipantStatus.accept;
-    return AppServiceLocator.get<ActionGuard>()
-        .singleFlight(('tim.call.recording', epoch, callId), () async {
-      // 请求和结果提示共用守卫，快速重复点击也只产生一次提示。
-      if (!isCurrent()) return;
-      final recording = GlobalState.instance.groupCallRecording;
-      final stopping = recording.isRecording(callId);
-      try {
-        final finished = await recording.toggle(
-          callId: callId,
-          connectedAtMs: connectedAtMs,
-        );
-        if (finished && isCurrent()) AppToast.show('录制完成');
-      } catch (error, stack) {
-        appLogger.error('保存云端录制片段失败', error: error, stackTrace: stack);
-        if (isCurrent()) {
-          AppToast.show(stopping ? '结束录制失败，请重试' : '开始录制失败，请重试');
+    return AppServiceLocator.get<ActionGuard>().singleFlight(
+      ('tim.call.recording', epoch, callId),
+      () async {
+        // 请求和结果提示共用守卫，快速重复点击也只产生一次提示。
+        if (!isCurrent()) return;
+        final recording = GlobalState.instance.groupCallRecording;
+        final stopping = recording.isRecording(callId);
+        try {
+          final finished = await recording.toggle(
+            callId: callId,
+            connectedAtMs: connectedAtMs,
+          );
+          if (finished && isCurrent()) AppToast.show('录制完成');
+        } catch (error, stack) {
+          appLogger.error('保存云端录制片段失败', error: error, stackTrace: stack);
+          if (isCurrent()) {
+            AppToast.show(stopping ? '结束录制失败，请重试' : '开始录制失败，请重试');
+          }
         }
-      }
-    });
+      },
+    );
   }
 
   /// 导航和会控交互统一绑定当前浮层，确认返回后仍由编排层复核代次与策略。
   GroupCallManagementFlow _management() => GroupCallManagementFlow(
-      context: context,
-      updates: _updates,
-      readMembers: _members,
-      onRetry: _invite,
-      isCurrentPresentation: widget.isCurrentPresentation);
+    context: context,
+    updates: _updates,
+    readMembers: () => _members(context),
+    onRetry: _invite,
+    isCurrentPresentation: widget.isCurrentPresentation,
+  );
 
   /// 弹框之后复核场次，不能把旧页面的结束动作应用到新来电。
   Future<void> _end({required bool incoming, required bool connected}) async {
@@ -249,12 +290,13 @@ class _CallGridWidgetState extends State<CallGridWidget> {
     try {
       if (connected) {
         final confirmed = await AppDialog.showAlert(
-            title: '是否挂断当前通话？',
-            content: '挂断后，仍在进行中的通话可以重新加入；已结束的通话需重新发起。',
-            confirmText: '挂断',
-            cancelText: '取消',
-            semanticsIdentifier: 'call.group.hangupConfirm',
-            theme: Theme.of(context));
+          title: '是否挂断当前通话？',
+          content: '挂断后，仍在进行中的通话可以重新加入；已结束的通话需重新发起。',
+          confirmText: '挂断',
+          cancelText: '取消',
+          semanticsIdentifier: 'call.group.hangupConfirm',
+          theme: Theme.of(context),
+        );
         if (confirmed != true) return;
       }
       if (!mounted ||
@@ -276,8 +318,9 @@ class _CallGridWidgetState extends State<CallGridWidget> {
     if (!_inviting.add(id)) return;
     final callId = CallStore.shared.state.activeCall.value.callId;
     try {
-      final result =
-          await CallManager.instance.invite([id], expectedCallId: callId);
+      final result = await CallManager.instance.invite([
+        id,
+      ], expectedCallId: callId);
       if (mounted && result.errorCode != 0) {
         AppToast.show('重新呼叫失败（${result.errorCode}），请重试');
       }

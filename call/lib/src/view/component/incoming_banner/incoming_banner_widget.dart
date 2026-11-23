@@ -18,63 +18,63 @@ class IncomingBannerWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: Listenable.merge([
-          CallStore.shared.state.activeCall,
-          CallStore.shared.state.allParticipants,
-          GlobalState.instance.groupCall,
-        ]),
-        builder: (context, _) {
-          final call = CallStore.shared.state.activeCall.value;
-          if (call.callId.isEmpty) return const SizedBox.shrink();
-          final epoch = CallManager.instance.sessionEpoch;
-          bool isCurrent() =>
+    listenable: Listenable.merge([
+      CallStore.shared.state.activeCall,
+      CallStore.shared.state.allParticipants,
+      GlobalState.instance.groupCall,
+    ]),
+    builder: (context, _) {
+      final call = CallStore.shared.state.activeCall.value;
+      if (call.callId.isEmpty) return const SizedBox.shrink();
+      final epoch = CallManager.instance.sessionEpoch;
+      bool isCurrent() =>
+          context.mounted &&
+          epoch == CallManager.instance.sessionEpoch &&
+          call.callId == CallStore.shared.state.activeCall.value.callId;
+      final group = GlobalState.instance.groupCall.value;
+      // G21 展示邀请人资料；真实群名属于场次信息，不能替换邀请人姓名。
+      final inviter = CallStore.shared.state.allParticipants.value
+          .where((p) => p.id == call.inviterId)
+          .firstOrNull;
+      final name = AppUserAvatarScope.personName(
+        context,
+        call.inviterId,
+        nickname: inviter?.name,
+        groupId: call.chatGroupId,
+      );
+      return IncomingBannerContent(
+        userId: call.inviterId,
+        name: name,
+        avatarUrl: inviter?.avatarURL,
+        video: call.mediaType == CallMediaType.video,
+        multi:
+            call.chatGroupId.isNotEmpty ||
+            call.inviteeIds.length > 1 ||
+            (group != null && !group.ended && group.callId == call.callId),
+        onShowCalling: () {
+          if (isCurrent()) onShowCalling?.call();
+        },
+        onReject: () async {
+          if (!isCurrent()) return;
+          final rejected = await CallManager.instance.reject();
+          // SDK 可能先清空旧通话；迟到结果只能关闭旧场次或已清空的浮层。
+          final currentId = CallStore.shared.state.activeCall.value.callId;
+          if (rejected &&
               context.mounted &&
               epoch == CallManager.instance.sessionEpoch &&
-              call.callId == CallStore.shared.state.activeCall.value.callId;
-          final group = GlobalState.instance.groupCall.value;
-          // G21 展示邀请人资料；真实群名属于场次信息，不能替换邀请人姓名。
-          final inviter = CallStore.shared.state.allParticipants.value
-              .where((p) => p.id == call.inviterId)
-              .firstOrNull;
-          final name = inviter == null
-              ? call.inviterId
-              : inviter.remark.isNotEmpty
-                  ? inviter.remark
-                  : inviter.name.isNotEmpty
-                      ? inviter.name
-                      : inviter.id;
-          return IncomingBannerContent(
-            userId: call.inviterId,
-            name: name,
-            avatarUrl: inviter?.avatarURL,
-            video: call.mediaType == CallMediaType.video,
-            multi: call.chatGroupId.isNotEmpty ||
-                call.inviteeIds.length > 1 ||
-                (group != null && !group.ended && group.callId == call.callId),
-            onShowCalling: () {
-              if (isCurrent()) onShowCalling?.call();
-            },
-            onReject: () async {
-              if (!isCurrent()) return;
-              final rejected = await CallManager.instance.reject();
-              // SDK 可能先清空旧通话；迟到结果只能关闭旧场次或已清空的浮层。
-              final currentId = CallStore.shared.state.activeCall.value.callId;
-              if (rejected &&
-                  context.mounted &&
-                  epoch == CallManager.instance.sessionEpoch &&
-                  (currentId.isEmpty || currentId == call.callId)) {
-                onCloseAll?.call();
-              }
-            },
-            onAccept: () async {
-              if (!isCurrent()) return;
-              if (await CallManager.instance.accept() && isCurrent()) {
-                onShowCalling?.call();
-              }
-            },
-          );
+              (currentId.isEmpty || currentId == call.callId)) {
+            onCloseAll?.call();
+          }
+        },
+        onAccept: () async {
+          if (!isCurrent()) return;
+          if (await CallManager.instance.accept() && isCurrent()) {
+            onShowCalling?.call();
+          }
         },
       );
+    },
+  );
 }
 
 /// 单聊及多人来电横幅的共享布局，操作与邀请人资料由当前平台通话层提供。
@@ -109,7 +109,7 @@ class IncomingBannerContent extends StatelessWidget {
   /// 邀请人的 SDK 头像；缺失时保留基础头像组件的默认显示。
   final String? avatarUrl;
 
-  /// 当前邀请是否为视频，用于选择副标题。
+  /// 当前邀请是否为视频，用于选择副标题和接听图标。
   final bool video;
 
   /// 群来源或明确临时多人场景；只影响文案，不授予任何会控权限。
@@ -139,16 +139,35 @@ class IncomingBannerContent extends StatelessWidget {
             height: height,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(children: [
-                // 长名称在资料区截断，尾部两个操作始终各占 40 像素。
-                Expanded(child: _buildCaller(context)),
-                const SizedBox(width: 16),
-                _action(context, 'reject', text.callRejectAction,
-                    AppIcons.phone2, colors.danger, onReject),
-                const SizedBox(width: 16),
-                _action(context, 'accept', text.callAcceptAction,
-                    AppIcons.phone3, colors.success, onAccept),
-              ]),
+              child: Row(
+                children: [
+                  // 长名称在资料区截断，尾部两个操作始终各占 40 像素。
+                  Expanded(child: _buildCaller(context)),
+                  const SizedBox(width: 16),
+                  _action(
+                    'reject',
+                    text.callRejectAction,
+                    'call_assets/hangup.png',
+                    colors.danger,
+                    onReject,
+                  ),
+                  const SizedBox(width: 16),
+                  _action(
+                    'accept',
+                    text.callAcceptAction,
+                    'call_assets/dialing.png',
+                    colors.success,
+                    onAccept,
+                    icon: video
+                        ? Icon(
+                            AppIcons.cameraOn,
+                            size: 24,
+                            color: colors.onScrim,
+                          )
+                        : null,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -167,15 +186,17 @@ class IncomingBannerContent extends StatelessWidget {
       child: InkWell(
         excludeFromSemantics: true,
         onTap: onShowCalling,
-        child: Row(children: [
-          AppUserAvatar(userId: userId, name: name, url: avatarUrl, size: 40),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(name,
+        child: Row(
+          children: [
+            AppUserAvatar(userId: userId, name: name, url: avatarUrl, size: 40),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -183,52 +204,62 @@ class IncomingBannerContent extends StatelessWidget {
                       height: 1.5,
                       fontWeight: FontWeight.w500,
                       color: colors.onScrim,
-                    )),
-                Text(
+                    ),
+                  ),
+                  Text(
                     multi
                         ? video
-                            ? text.invitedToMultiVideoCall
-                            : text.invitedToMultiAudioCall
+                              ? text.invitedToMultiVideoCall
+                              : text.invitedToMultiAudioCall
                         : video
-                            ? text.callInvitedToVideoCall
-                            : text.callInvitedToAudioCall,
+                        ? text.callInvitedToVideoCall
+                        : text.callInvitedToAudioCall,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 12,
                       height: 1.5,
                       color: colors.onScrimSecondary,
-                    )),
-              ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ]),
+          ],
+        ),
       ),
     );
   }
 
-  /// 圆钮的视觉边界就是命中区域，标识直接挂在对应操作上。
-  Widget _action(BuildContext context, String id, String label, IconData icon,
-          Color background, VoidCallback onTap) =>
-      Semantics(
-        identifier: 'call.banner.$id',
-        label: label,
-        button: true,
+  /// 实心圆钮复用 40 像素命中区域和独立语义，视频接听可覆盖电话图样。
+  Widget _action(
+    String id,
+    String label,
+    String imagePath,
+    Color background,
+    VoidCallback onTap, {
+    Widget? icon,
+  }) => Semantics(
+    identifier: 'call.banner.$id',
+    label: label,
+    button: true,
+    onTap: onTap,
+    child: Material(
+      color: background,
+      shape: const CircleBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
         onTap: onTap,
-        child: Material(
-          color: background,
-          shape: const CircleBorder(),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: onTap,
-            excludeFromSemantics: true,
-            child: SizedBox.square(
-              dimension: 40,
-              child: Center(
-                child: Icon(icon, size: 24, color: context.appColors.onScrim),
+        excludeFromSemantics: true,
+        child: SizedBox.square(
+          dimension: 40,
+          child: icon ??
+              Ink.image(
+                image: AssetImage(imagePath, package: 'tuikit_atomic_x'),
+                fit: BoxFit.contain,
               ),
-            ),
-          ),
         ),
-      );
+      ),
+    ),
+  );
 }

@@ -34,6 +34,9 @@ enum GroupControlAckStatus { applied, rejected, failed, expired }
   includeIfNull: false,
 )
 class GroupControlMessage {
+  /// 主持同步和交接共用一小时预算，单位为毫秒。
+  static const _callWindowMs = 3600000;
+
   const GroupControlMessage({
     required this.kind,
     required this.callId,
@@ -161,6 +164,7 @@ class GroupControlMessage {
           return null;
         }
       }
+      _normalizeLegacyHarmonyTiming(payload);
       final message = _$GroupControlMessageFromJson(payload);
       if ([
             message.callId,
@@ -228,7 +232,7 @@ class GroupControlMessage {
               message.muteAll != null &&
               message.cameraAllClosed != null &&
               (message.connectedAtMs ?? 0) > 0 &&
-              message.deadlineMs == message.connectedAtMs! + 3600000 &&
+              message.deadlineMs == message.connectedAtMs! + _callWindowMs &&
               (message.kind == GroupControlMessageKind.transfer
                   ? message.sessions != null
                   : !payload.containsKey('sessions')),
@@ -237,5 +241,20 @@ class GroupControlMessage {
     } catch (_) {
       return null;
     }
+  }
+
+  /// 旧鸿蒙以秒广播接通时间，却直接加上一小时的毫秒数形成截止值。
+  static void _normalizeLegacyHarmonyTiming(Map<String, dynamic> payload) {
+    final start = payload['connectedAtMs'] as int?;
+    // 只迁移已知的旧格式。截止仍从原始接通时刻起算，晚加入不会延长通话。
+    if (start == null ||
+        start < 1000000000 ||
+        start >= 10000000000 ||
+        payload['deadlineMs'] != start + _callWindowMs) {
+      return;
+    }
+    final startMs = start * 1000;
+    payload['connectedAtMs'] = startMs;
+    payload['deadlineMs'] = startMs + _callWindowMs;
   }
 }

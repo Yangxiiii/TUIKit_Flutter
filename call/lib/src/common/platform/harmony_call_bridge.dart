@@ -8,7 +8,7 @@ import 'package:tuikit_atomic_x/base_component/utils/tui_event_bus.dart';
 
 import '../../state/group_call_metadata.dart';
 
-/// 管理鸿蒙通话的 Flutter 聊天与原生登录，并将业务和聊天入口转发给原生 CallKit。
+/// 管理鸿蒙原生通话登录及呼叫入口，兼容由宿主独立管理 Flutter 聊天的模式。
 final class HarmonyCallBridge implements TUIObserver {
   HarmonyCallBridge(
     this._logger, {
@@ -45,24 +45,27 @@ final class HarmonyCallBridge implements TUIObserver {
   /// 串行原生会话操作，保证登出发生在已经开始的登录完成后，避免原生状态逆序。
   Future<void> _sessionChanges = Future<void>.value();
 
-  /// 先登录 Flutter 聊天，再同步原生通话，两个 Store 就绪后才订阅聊天事件。
+  /// 同步原生通话并开放呼叫入口；宿主已管理聊天时仅操作原生 Store。
   Future<CompletionHandler> login({
     required int sdkAppId,
     required String userId,
     required String userSig,
+    bool includeChat = true,
   }) async {
     final epoch = ++_sessionEpoch;
     _clearLoginState();
     final operation = _sessionChanges.then((_) async {
       // 等待旧操作结束后只处理最新代次，避免过期凭证登录原生。
       _checkSession(epoch);
-      final chatResult = await _chatLoginStore.login(
-        sdkAppID: sdkAppId,
-        userID: userId,
-        userSig: userSig,
-      );
-      _checkSession(epoch);
-      if (!chatResult.isSuccess) return chatResult;
+      if (includeChat) {
+        final chatResult = await _chatLoginStore.login(
+          sdkAppID: sdkAppId,
+          userID: userId,
+          userSig: userSig,
+        );
+        _checkSession(epoch);
+        if (!chatResult.isSuccess) return chatResult;
+      }
       try {
         await _channel.invokeMethod<void>('harmonyLogin', {
           'sdkAppId': sdkAppId,
@@ -71,7 +74,7 @@ final class HarmonyCallBridge implements TUIObserver {
         });
       } catch (_) {
         // 原生登录失败时回收本次聊天登录；已有新操作排队时由新操作接管。
-        if (epoch == _sessionEpoch) {
+        if (includeChat && epoch == _sessionEpoch) {
           try {
             await _logoutChat();
           } catch (error, stack) {
@@ -86,23 +89,23 @@ final class HarmonyCallBridge implements TUIObserver {
       TUIEventBus.shared.subscribe('call.startCall', null, this);
       TUIEventBus.shared.subscribe('call.startJoin', null, this);
       _subscribed = true;
-      return chatResult;
+      return CompletionHandler();
     });
     // 当前调用保留失败结果，队尾吸收失败仅为了让后续登出或新登录仍可执行。
     _sessionChanges = operation.then<void>((_) {}, onError: (Object _) {});
     return operation;
   }
 
-  /// 停止接收呼叫事件，并清理 HarmonyOS 原生通话登录态。
-  Future<void> logout() async {
+  /// 撤销呼叫入口并清理原生会话，按登录模式决定是否退出 Flutter 聊天。
+  Future<void> logout({bool includeChat = true}) async {
     ++_sessionEpoch;
     _clearLoginState();
     final operation = _sessionChanges.then((_) async {
-      // 即使原生登出失败，也应尝试清理 Flutter 聊天登录。
+      // 联合登录模式下，即使原生登出失败也要退出由桥管理的聊天。
       try {
         await _channel.invokeMethod<void>('harmonyLogout');
       } finally {
-        await _logoutChat();
+        if (includeChat) await _logoutChat();
       }
     });
     _sessionChanges = operation.catchError((Object _) {});

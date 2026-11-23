@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -156,13 +158,42 @@ void main() {
       return snapshot;
     });
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: HarmonyCallOverlay(child: Scaffold(body: Text('聊天页'))),
+    var chatTaps = 0;
+    Future<void> pumpApp(ThemeMode mode) => tester.pumpWidget(
+      MaterialApp(
+        theme: AppThemeFactory.create(
+          const AppNormalColorScheme(),
+          Brightness.light,
+        ),
+        darkTheme: AppThemeFactory.create(
+          const AppDarkColorScheme(),
+          Brightness.dark,
+        ),
+        themeMode: mode,
+        themeAnimationDuration: Duration.zero,
+        home: HarmonyCallOverlay(
+          child: Scaffold(
+            body: Center(
+              child: TextButton(
+                onPressed: () => chatTaps++,
+                child: const Text('聊天页'),
+              ),
+            ),
+          ),
+        ),
       ),
     );
+    await pumpApp(ThemeMode.dark);
     await tester.pumpAndSettle();
     final banner = find.byType(IncomingBannerContent);
+    expect(
+      tester.element(banner).appColors.danger,
+      const AppNormalColorScheme().danger,
+    );
+    expect(
+      Theme.of(tester.element(find.text('聊天页'))).brightness,
+      Brightness.dark,
+    );
     expect(tester.getRect(banner), const Rect.fromLTWH(12, 50, 366, 74));
     expect(
       tester.getRect(find.bySemanticsIdentifier('call.banner.reject')),
@@ -172,16 +203,32 @@ void main() {
       tester.getRect(find.bySemanticsIdentifier('call.banner.accept')),
       const Rect.fromLTWH(322, 67, 40, 40),
     );
+    await tester.tap(find.text('聊天页'));
+    expect(chatTaps, 1);
 
     await tester.tap(find.bySemanticsIdentifier('call.banner.open'));
     await tester.pumpAndSettle();
     expect(actions.single, {'id': 'call-1', 'action': 'expand'});
-    expect(find.byType(CallScene), findsOneWidget);
+    final scene = find.byType(CallScene);
+    expect(
+      tester.element(scene).appColors.danger,
+      const AppNormalColorScheme().danger,
+    );
+    await pumpApp(ThemeMode.light);
+    expect(
+      tester.element(scene).appColors.danger,
+      const AppNormalColorScheme().danger,
+    );
 
     await tester.tap(find.bySemanticsIdentifier('call.minimize'));
     await tester.pumpAndSettle();
     expect(find.byType(CallScene), findsNothing);
     final card = find.byType(CallCompactAudioContent);
+    await pumpApp(ThemeMode.dark);
+    expect(
+      tester.element(card).appColors.surface,
+      const AppNormalColorScheme().surface,
+    );
     expect(tester.getRect(card), const Rect.fromLTWH(302, 118, 80, 80));
     expect(
       find.ancestor(of: card, matching: find.byType(CallCompactAudioSurface)),
@@ -299,6 +346,84 @@ void main() {
     expect(tester.getRect(card), rect);
     expect(find.text('02:05'), findsOneWidget);
     expect(cancel, findsNothing);
+  });
+
+  testWidgets('鸿蒙满一小时挂断，原生成功后只提示一次', (tester) async {
+    const channel = MethodChannel('tencent_calls_uikit/harmony_presentation');
+    final messenger = tester.binding.defaultBinaryMessenger;
+    final snapshot = <String, Object?>{
+      'id': 'duration-call',
+      'video': false,
+      'accepted': false,
+      'incoming': false,
+      'duration': 3600,
+      'self': {'id': 'self', 'name': '本人', 'avatar': '', 'camera': false},
+      'peer': {'id': 'peer', 'name': '对端', 'avatar': '', 'camera': false},
+    };
+    final actions = <Object?>[];
+    final hungUp = Completer<void>();
+    var active = true;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method != 'harmonyPresentationAction') {
+        return active ? snapshot : null;
+      }
+      actions.add(call.arguments);
+      if (actions.length == 1) {
+        throw PlatformException(code: 'CALL_ACTION_FAILED');
+      }
+      await hungUp.future;
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: AppDialog.init(),
+        home: const HarmonyCallOverlay(child: Scaffold(body: Text('聊天页'))),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(actions, isEmpty);
+    final toast = find.text('已达通话最长时长，通话结束');
+
+    snapshot.addAll({'accepted': true, 'duration': 3599});
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pump();
+    expect(actions, isEmpty);
+
+    snapshot['duration'] = 3600;
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(actions, hasLength(1));
+    expect(toast, findsNothing);
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(actions, hasLength(2));
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(
+      actions,
+      List.filled(2, {'id': 'duration-call', 'action': 'endAtDurationLimit'}),
+    );
+    expect(toast, findsNothing);
+
+    // 原生可能先发送通话结束事件，再回报挂断请求成功。
+    active = false;
+    await messenger.handlePlatformMessage(
+      channel.name,
+      const StandardMethodCodec().encodeMethodCall(
+        const MethodCall('harmonyPresentationChanged', false),
+      ),
+      (_) {},
+    );
+    await tester.pump();
+    expect(find.byType(CallScene), findsNothing);
+    hungUp.complete();
+    await tester.pumpAndSettle();
+    expect(toast, findsOneWidget);
+    expect(tester.getSemantics(toast).identifier, 'call.duration-limit');
+    await tester.pump(const Duration(seconds: 2));
+    expect(toast, findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(toast, findsNothing);
+    expect(actions, hasLength(2));
   });
 
   testWidgets('鸿蒙语音设备和结束按钮发送原通话操作，空快照清除残留页面', (tester) async {

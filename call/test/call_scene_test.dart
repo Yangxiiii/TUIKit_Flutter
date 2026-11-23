@@ -135,6 +135,43 @@ void main() {
             !video && incoming ? findsNothing : findsOneWidget);
         expect(find.bySemanticsIdentifier('call.swap'),
             video && accepted ? findsOneWidget : findsNothing);
+        final controls = find.byType(SingleCallControls);
+        expect(tester.getRect(controls).bottom, 844 - (video ? 50 : 84));
+        if (video) {
+          final rows = find.descendant(
+            of: controls,
+            matching: find.byType(Row),
+          );
+          expect(rows, findsNWidgets(2));
+          for (final row in [rows.first, rows.last]) {
+            final rect = tester.getRect(row);
+            expect(rect.left, 34);
+            expect(rect.right, 390 - 34);
+          }
+        }
+        // 按实际出现的按钮校验原版图片，并核对点击区尺寸。
+        const assets = {
+          'microphone': 'mute',
+          'speaker': 'handsfree',
+          'camera': 'camera_off',
+          'end': 'hangup',
+          'accept': 'dialing',
+          'flip': 'switch_camera',
+        };
+        for (final MapEntry(key: id, value: asset) in assets.entries) {
+          final button = find.bySemanticsIdentifier('call.$id');
+          if (button.evaluate().isNotEmpty) {
+            expect(tester.getSize(button), const Size(60, 60));
+            final ink = tester.widget<Ink>(
+              find.descendant(of: button, matching: find.byType(Ink)),
+            );
+            final image = (ink.decoration as BoxDecoration).image!.image;
+            expect(
+              image,
+              AssetImage('call_assets/$asset.png', package: 'tuikit_atomic_x'),
+            );
+          }
+        }
         if (video && accepted) {
           expect(
               tester
@@ -145,9 +182,9 @@ void main() {
         }
         if (incoming) {
           expect(tester.getCenter(find.bySemanticsIdentifier('call.end')).dx,
-              closeTo(video ? 79.67 : 97.5, 1));
+              closeTo(video ? 87.67 : 97.5, 1));
           expect(tester.getCenter(find.bySemanticsIdentifier('call.accept')).dx,
-              closeTo(video ? 310.33 : 292.5, 1));
+              closeTo(video ? 302.33 : 292.5, 1));
         }
         await tester.tap(find.bySemanticsIdentifier('call.end'));
         expect(end, 1);

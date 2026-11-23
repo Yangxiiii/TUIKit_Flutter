@@ -8,10 +8,13 @@ class RepositoryAssets extends CachingAssetBundle {
   Future<ByteData> load(String key) async {
     const prefix = 'packages/tuikit_atomic_x/';
     if (key.startsWith(prefix)) {
-      final bytes = await File(
-              'third_party/tencent_tuikit_flutter/atomic-x/${key.substring(prefix.length)}')
-          .readAsBytes();
-      return ByteData.sublistView(bytes);
+      final asset = File(
+        'third_party/tencent_tuikit_flutter/atomic-x/${key.substring(prefix.length)}',
+      );
+      // 从 SDK 包目录运行时，Flutter 已把依赖图片放进测试资源包。
+      if (asset.existsSync()) {
+        return ByteData.sublistView(await asset.readAsBytes());
+      }
     }
     return rootBundle.load(key);
   }

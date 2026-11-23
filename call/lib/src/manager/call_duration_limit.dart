@@ -1,3 +1,5 @@
+import 'package:app_core/app_core.dart' show maxCallDurationSeconds;
+
 /// 本端执行已验证的房间绝对截止点，SDK 时长作为补充；不替代服务端强制结束。
 class CallDurationLimit {
   CallDurationLimit({
@@ -13,7 +15,7 @@ class CallDurationLimit {
   final Future<void> Function() onLimit;
 
   /// 本场最长连接时长，单位为秒，不包含等待接听。
-  static const maxSeconds = 3600;
+  static const maxSeconds = maxCallDurationSeconds;
 
   /// 墙钟用于跨端统一 UTC 截止，Stopwatch 防止本端墙钟回退延长预算。
   final DateTime Function() _now;

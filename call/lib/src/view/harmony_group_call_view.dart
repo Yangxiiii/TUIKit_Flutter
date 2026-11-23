@@ -64,6 +64,7 @@ class HarmonyGroupCallView extends StatefulWidget {
   const HarmonyGroupCallView({
     super.key,
     required this.group,
+    this.groupId,
     required this.selfId,
     required this.duration,
     required this.incoming,
@@ -80,6 +81,9 @@ class HarmonyGroupCallView extends StatefulWidget {
   /// 鸿蒙原生 SDK 提供的群来源和成员状态。
   final HarmonyGroupCall group;
 
+  /// 原生场次的来源群 ID，临时多人通话为空。
+  final String? groupId;
+
   /// 只用于区分本端与远端，不能作为主持身份。
   final String selfId;
 
@@ -95,7 +99,7 @@ class HarmonyGroupCallView extends StatefulWidget {
   /// 同一个成员在布局切换时复用同一路纹理。
   final Widget Function(String) videoBuilder;
 
-  /// 同一场次的可信策略和命令结果；未获得明确限制时允许成员开麦。
+  /// 当前会控控制器提供的策略及命令结果，成员在收到明确限制前可自行开启设备。
   final GroupControlState? control;
 
   /// 由浮层统一校验场次并将操作交还 SDK。
@@ -128,7 +132,12 @@ class _HarmonyGroupCallViewState extends State<HarmonyGroupCallView> {
       for (final member in widget.group.members)
         GroupCallMember(
           id: member.id,
-          name: member.name,
+          name: AppUserAvatarScope.personName(
+            context,
+            member.id,
+            groupId: widget.groupId,
+            fallback: member.name,
+          ),
           avatarUrl: member.avatarUrl,
           status: member.joined
               ? GroupCallMemberStatus.joined

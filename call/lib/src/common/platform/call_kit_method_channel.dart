@@ -5,9 +5,10 @@ import 'package:flutter/services.dart';
 import 'package:tencent_calls_uikit/src/tui_call_kit_impl.dart';
 import 'package:tencent_calls_uikit/tencent_calls_uikit.dart';
 import 'call_kit_platform_interface.dart';
-import 'package:rtc_room_engine/rtc_room_engine.dart';
 
+/// 在 Flutter 和原生插件之间转发通话平台事件。
 class MethodChannelTUICallKit extends TUICallKitPlatform {
+  /// 通话插件使用的通道，负责转发 Android 初始化和平台通话事件。
   final methodChannel = const MethodChannel('tencent_calls_uikit');
   MethodChannelTUICallKit() {
     methodChannel.setMethodCallHandler((call) async {
@@ -87,7 +88,8 @@ class MethodChannelTUICallKit extends TUICallKitPlatform {
   void imSDKInitSuccess() {
     if (kIsWeb) return;
     if (Platform.isAndroid) {
-      methodChannel.invokeMethod<bool>('imSDKInitSuccess');
+      // 原生端只转发初始化事件，通道异常也不应逸出到应用会话。
+      methodChannel.invokeMethod<void>('imSDKInitSuccess').ignore();
     }
   }
 

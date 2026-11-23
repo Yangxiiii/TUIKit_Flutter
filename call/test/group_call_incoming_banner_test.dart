@@ -1,3 +1,4 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -33,9 +34,16 @@ void main() {
       GlobalState.instance.clearGroupCall();
       kit.enableIncomingBanner(false);
     });
-    await tester.pumpWidget(MaterialApp(
+    Future<void> pumpApp(ThemeMode mode) => tester.pumpWidget(MaterialApp(
+        theme: AppThemeFactory.create(
+            const AppNormalColorScheme(), Brightness.light),
+        darkTheme:
+            AppThemeFactory.create(const AppDarkColorScheme(), Brightness.dark),
+        themeMode: mode,
+        themeAnimationDuration: Duration.zero,
         navigatorObservers: [Bootloader.instance],
         home: const Scaffold(body: Text('首页'))));
+    await pumpApp(ThemeMode.light);
 
     for (final groupId in ['group', '']) {
       kit.pageRouter.closeAllPage();
@@ -54,6 +62,24 @@ void main() {
       expect(find.byType(IncomingBannerContent), findsOneWidget);
       expect(find.text('真实邀请人'), findsOneWidget);
       expect(find.text('邀请你加入多人语音通话…'), findsOneWidget);
+      final acceptButton = find.bySemanticsIdentifier('call.banner.accept');
+      final acceptInk = tester.widget<Ink>(
+        find.descendant(of: acceptButton, matching: find.byType(Ink)),
+      );
+      expect(
+        (acceptInk.decoration as BoxDecoration).image!.image,
+        const AssetImage('call_assets/dialing.png', package: 'tuikit_atomic_x'),
+      );
+
+      // 来电按钮保持原有配色，底层首页仍能切换到深色。
+      await pumpApp(ThemeMode.dark);
+      final rejectButton = tester.widget<Material>(find.descendant(
+          of: find.bySemanticsIdentifier('call.banner.reject'),
+          matching: find.byType(Material)));
+      expect(rejectButton.color, const AppNormalColorScheme().danger);
+      expect(Theme.of(tester.element(find.text('首页'))).brightness,
+          Brightness.dark);
+      await pumpApp(ThemeMode.light);
 
       // 补齐群标题不能替换邀请人姓名，也不能触发展开。
       GlobalState.instance.setGroupCallTitle(groupId, '真实群名');
@@ -80,8 +106,23 @@ void main() {
                 onReject: () => rejects++,
                 onAccept: () => accepts++))));
     expect(find.text('邀请你加入多人视频通话…'), findsOneWidget);
-    await tester.tap(find.bySemanticsIdentifier('call.banner.accept'));
-    await tester.tap(find.bySemanticsIdentifier('call.banner.reject'));
+    final accept = find.bySemanticsIdentifier('call.banner.accept');
+    final reject = find.bySemanticsIdentifier('call.banner.reject');
+    expect(tester.getSize(accept), const Size.square(40));
+    expect(tester.getSize(reject), const Size.square(40));
+    expect(
+      find.descendant(of: accept, matching: find.byIcon(AppIcons.cameraOn)),
+      findsOneWidget,
+    );
+    final rejectInk = tester.widget<Ink>(
+      find.descendant(of: reject, matching: find.byType(Ink)),
+    );
+    expect(
+      (rejectInk.decoration as BoxDecoration).image!.image,
+      const AssetImage('call_assets/hangup.png', package: 'tuikit_atomic_x'),
+    );
+    await tester.tap(accept);
+    await tester.tap(reject);
     await tester.tap(find.bySemanticsIdentifier('call.banner.open'));
     expect((accepts, rejects, expands), (1, 1, 1));
   });

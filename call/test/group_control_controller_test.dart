@@ -9,6 +9,7 @@ import 'package:tencent_calls_uikit/src/control/group_control_media.dart';
 import 'package:tencent_calls_uikit/src/control/group_control_message.dart';
 import 'package:tencent_calls_uikit/src/control/group_control_transport.dart';
 import 'package:tencent_calls_uikit/src/control/harmony_group_control_media.dart';
+import 'package:tencent_calls_uikit/src/manager/call_duration_limit.dart';
 import 'package:tencent_calls_uikit/src/manager/group_control_controller.dart';
 import 'package:tencent_calls_uikit/src/manager/group_control_lifecycle.dart';
 import 'package:tencent_calls_uikit/src/state/group_control_state.dart';
@@ -26,6 +27,7 @@ void main() {
     String? trustedHost,
     int epoch = 0,
     bool video = true,
+    int? connectedAtMs,
   }) {
     final device = _Media();
     media[id] = device;
@@ -42,6 +44,7 @@ void main() {
           await confirmations[id]?.call(device) ?? true,
       trustedHostId: trustedHost,
       trustedHostEpoch: epoch,
+      connectedAtMs: connectedAtMs,
       newId: () => '$id-${++serial}',
       random: Random(1),
       now: () => clock,
@@ -108,7 +111,7 @@ void main() {
     });
   }
 
-  test('被叫首次同步允许视频后默认开摄像头，禁止视频时保持关闭', () async {
+  test('首次同步沿用视频入会默认值，收到禁止后关闭被叫已开的摄像头', () async {
     final host = create('host');
     await host.start();
     final first = create('a');
@@ -117,16 +120,37 @@ void main() {
     expect(first.value.cameraOn, isTrue);
 
     await host.updatePolicy(allowVideo: false);
+    host.updateMembers(['host', 'a']);
     final lateMember = create('b');
     await lateMember.start();
     await flush();
+    expect(lateMember.value.policyKnown, isFalse);
+    expect(
+      (await lateMember.setSelfDevice(GroupControlDevice.camera, true)).success,
+      isTrue,
+    );
+    expect(lateMember.value.cameraOn, isTrue);
+
+    // 允许先手动开启，收到明确禁止后关停并保留限制。
+    host.updateMembers(['host', 'a', 'b']);
+    await lateMember.requestSync().timeout(const Duration(seconds: 3));
+    await flush();
     expect(lateMember.value.policyKnown, isTrue);
     expect(lateMember.value.cameraOn, isFalse);
+    expect(lateMember.value.canOpenCamera, isFalse);
+    lateMember.updateMembers(['a', 'b']);
+    expect(lateMember.value.policyKnown, isFalse);
+    expect(lateMember.value.canOpenCamera, isFalse);
+    expect(
+      (await lateMember.setSelfDevice(GroupControlDevice.camera, true)).status,
+      GroupControlStatus.denied,
+    );
   });
 
   test('首个握手早于主持端成员事件时重试，随后可控制两个设备', () async {
     final host = create('host')..updateMembers(['host']);
     await host.start();
+    await host.updatePolicy(allowVideo: true);
     final member = create('a');
     await member.start();
     await flush();
@@ -141,6 +165,15 @@ void main() {
       isTrue,
     );
 
+    expect(
+      (await member.setSelfDevice(GroupControlDevice.camera, true)).success,
+      isTrue,
+    );
+    final finishCameraClose = Completer<void>();
+    media['a']!.cameraDelay = finishCameraClose;
+    final close = member.setSelfDevice(GroupControlDevice.camera, false);
+    await flush();
+
     final synced = Completer<void>();
     void onPolicy() {
       if (member.value.policyKnown && !synced.isCompleted) synced.complete();
@@ -152,9 +185,22 @@ void main() {
       await synced.future.timeout(const Duration(seconds: 3));
     } finally {
       member.removeListener(onPolicy);
+      finishCameraClose.complete();
     }
+    // 允许策略到达时保留仍在等待设备回执的手动关摄像头。
+    expect(member.value.version, greaterThan(0));
+    expect((await close).success, isTrue);
     await flush();
     expect(media['a']!.microphoneOn, isFalse);
+    expect(media['a']!.cameraOn, isFalse);
+    expect(
+      (await host.setMemberDevice(
+        'a',
+        GroupControlDevice.camera,
+        true,
+      )).success,
+      isTrue,
+    );
     expect(media['a']!.cameraOn, isTrue);
     expect(
       (await member.setSelfDevice(GroupControlDevice.microphone, true)).success,
@@ -321,6 +367,36 @@ void main() {
     expect(late.value.deadlineMs, deadline);
   });
 
+  test('旧鸿蒙发送秒级接通时间，安卓接通后到真实截止才挂断', () async {
+    const connectedAtSeconds = 1795096869;
+    const connectedAtMs = connectedAtSeconds * 1000;
+    clock = DateTime.fromMillisecondsSinceEpoch(connectedAtMs + 82);
+    await create('host', connectedAtMs: connectedAtSeconds).start();
+    final android = create('a');
+    await android.start();
+    await flush();
+    expect(android.value.policyKnown, isTrue);
+    expect(android.value.connectedAtMs, connectedAtMs);
+    expect(android.value.deadlineMs, connectedAtMs + 3600000);
+
+    var hangups = 0;
+    final limit = CallDurationLimit(
+      onLimit: () async => hangups++,
+      now: () => clock,
+    );
+    Future<void> checkDeadline() => limit.update(
+      callId: android.callId,
+      seconds: 0,
+      connected: true,
+      deadlineMs: android.value.deadlineMs,
+    );
+    await checkDeadline();
+    expect(hangups, 0);
+    clock = DateTime.fromMillisecondsSinceEpoch(android.value.deadlineMs!);
+    await checkDeadline();
+    expect(hangups, 1);
+  });
+
   test('丢失ACK和系统权限拒绝均不是成功，真实发送成功不提前更新结果', () async {
     await joinAll();
     network.dropAckFrom = 'a';
@@ -342,14 +418,14 @@ void main() {
     expect(denied.success, isFalse);
   });
 
-  test('未同步时默认开麦且能自行开关，摄像头仍须等授权', () async {
+  test('未同步时麦克风和摄像头可自行开启，只有麦克风自动开启', () async {
     final member = create('a');
     await member.start();
     await flush();
     expect(member.value.policyKnown, isFalse);
     expect(member.value.microphoneOn, isTrue);
     expect(member.value.canManage, isFalse);
-    expect(member.value.canOpenCamera, isFalse);
+    expect(member.value.canOpenCamera, isTrue);
     expect(member.value.cameraOn, isFalse);
     expect(
       (await member.setSelfDevice(

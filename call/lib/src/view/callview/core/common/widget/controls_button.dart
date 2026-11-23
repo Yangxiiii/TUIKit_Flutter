@@ -24,13 +24,13 @@ class ControlsButton extends StatelessWidget {
     super.key,
   }) : assert(icon != null || imgUrl != '', '字体图标和既有图片至少提供一种');
 
-  /// 单聊字体图标；缺少同语义字形时沿用 SDK 已有位图，不以其他含义图标替代。
+  /// 以字体绘制的操作图标；为空时使用对应的 SDK 图片。
   final IconData? icon;
 
   /// 字体字面的尺寸；补偿字体内边距，使可见字形与设计对齐。
   final double iconSize;
 
-  /// 圆形点击区域的逻辑像素尺寸；单聊保留72，群通话采用设计的60。
+  /// 圆形点击区域的逻辑像素尺寸；单聊与定制群通话均显式传入 60。
   final double dimension;
 
   /// 标签与圆形按钮之间的逻辑像素间距，群通话使用设计的 8 像素。
@@ -45,8 +45,10 @@ class ControlsButton extends StatelessWidget {
   /// 实际点击节点的稳定标识。
   final String? semanticsIdentifier;
 
-  /// 群聊沿用的 SDK 位图路径；提供字体图标时可为空。
+  /// SDK 图片相对路径；提供字体图标时可为空。
   final String imgUrl;
+
+  /// 图片的逻辑像素边长；完整圆钮按点击区域绘制，未指定时沿用各布局的默认值。
   final double imgHeight;
   final Color? imgColor;
   final double imgOffsetX;
@@ -84,6 +86,7 @@ class ControlsButton extends StatelessWidget {
       return const SizedBox();
     }
     if (icon != null || semanticsIdentifier != null) {
+      // 完整圆钮图片与点击区等大，通过墨水层绘制以保留点击反馈。
       return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -105,7 +108,16 @@ class ControlsButton extends StatelessWidget {
                             ? Icon(icon, size: iconSize, color: imgColor)
                             : Center(
                                 child: SizedBox.square(
-                                    dimension: 32, child: _buildImage())))),
+                                    dimension: imgHeight > 0 ? imgHeight : 32,
+                                    child: Ink.image(
+                                      image: AssetImage(imgUrl,
+                                          package: 'tuikit_atomic_x'),
+                                      fit: BoxFit.contain,
+                                      colorFilter: imgColor == null
+                                          ? null
+                                          : ColorFilter.mode(
+                                              imgColor!, BlendMode.srcIn),
+                                    ))))),
               ),
             ),
           ),
@@ -123,6 +135,7 @@ class ControlsButton extends StatelessWidget {
         ],
       );
     }
+    // SDK 旧布局仍按调用方指定的偏移和图片动画绘制。
     return GestureDetector(
       behavior: HitTestBehavior.deferToChild,
       onTap: () {

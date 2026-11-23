@@ -29,8 +29,10 @@ import 'package:rtc_room_engine/rtc_room_engine.dart' hide CallEndReason;
 import 'bridge/voip/fcm_data_sync_handler.dart';
 import 'bridge/voip/voip_data_sync_handler.dart';
 import 'common/platform/harmony_call_bridge.dart';
+import 'common/platform/call_kit_platform_interface.dart';
 import 'common/utils/error_parser.dart';
 import 'feature/ios_pip_feature.dart';
+import 'view/callview/public/hint/call_hint_messages.dart';
 
 /// 协调通话界面与 IM 登录状态，并向上层传递 SDK 操作结果。
 class TUICallKitImpl implements TUICallKit {
@@ -68,10 +70,7 @@ class TUICallKitImpl implements TUICallKit {
     if (!await CallManager.instance.hangup(transferHost: false)) {
       throw StateError('Call duration limit hangup failed');
     }
-    AppToast.show(
-        AppLocalization.of(Global.appContext())
-            .resolve('chat.uikit.callDurationLimit', '已达通话最长时长，通话结束'),
-        duration: const Duration(seconds: 3));
+    showCallDurationLimitToast(Global.appContext());
   });
 
   /// 成员回调补齐 Store 会移除的邀请结果，不传输自定义会控协议。
@@ -318,6 +317,49 @@ class TUICallKitImpl implements TUICallKit {
     return completer.future;
   }
 
+  /// 复用宿主已有 IM 会话，仅初始化本平台通话并回传错误码。
+  @override
+  Future<CompletionHandler> loginCallOnly(
+    int sdkAppId,
+    String userId,
+    String userSig,
+  ) async {
+    if (_harmonyBridge case final harmony?) {
+      try {
+        return await harmony.login(
+          sdkAppId: sdkAppId,
+          userId: userId,
+          userSig: userSig,
+          includeChat: false,
+        );
+      } on PlatformException catch (error) {
+        return _harmonyFailure(error);
+      }
+    }
+
+    // 宿主通过 LoginStore 初始化 IM，补发旧 TUILogin 提供的原生初始化通知。
+    TUICallKitPlatform.instance.imSDKInitSuccess();
+    final result = await TUICallEngine.instance.init(sdkAppId, userId, userSig);
+    if (result.code == TUIError.success) {
+      await _attachCallSession();
+    }
+    return CompletionHandler()
+      ..errorCode = result.code.rawValue
+      ..errorMessage = result.message;
+  }
+
+  /// 仅释放通话资源，联合登录模式仍由原有登出事件清理聊天。
+  @override
+  Future<void> logoutCallOnly() async {
+    if (_harmonyBridge case final harmony?) {
+      _groupControlLifecycle.setTransport(null);
+      _groupControlLifecycle.clear(clearAuthority: true);
+      await harmony.logout(includeChat: false);
+      return;
+    }
+    await _detachCallSession();
+  }
+
   /// 登出当前平台使用的通话和 IM 会话。
   @override
   Future<void> logout() {
@@ -517,10 +559,16 @@ class TUICallKitImpl implements TUICallKit {
       userID: userId,
       userSig: userSig,
     );
+    unawaited(_attachCallSession());
+  }
+
+  /// 通话引擎就绪后绑定监听并启用平台能力。
+  Future<void> _attachCallSession() async {
     CallStore.shared.removeListener(callEventListener);
     CallStore.shared.addListener(callEventListener);
-    TUICallEngine.instance.removeObserver(_groupObserver);
-    TUICallEngine.instance.addObserver(_groupObserver);
+    // 先撤销旧观察者，避免同一会话重复收到群通话回调。
+    await TUICallEngine.instance.removeObserver(_groupObserver);
+    await TUICallEngine.instance.addObserver(_groupObserver);
     CallingBellFeature.instance.init();
     CallStore.shared.state.activeCall.removeListener(_checkDurationLimit);
     CallStore.shared.state.activeCall.addListener(_checkDurationLimit);
@@ -533,8 +581,18 @@ class TUICallKitImpl implements TUICallKit {
     }
   }
 
-  /// 先使异步操作失效并清理展示资料，再释放 SDK 与平台资源。
+  /// 兼容 TUILogin 联合登出事件，聊天退出仍由原通话入口发起。
   void handleLogoutSuccess() async {
+    try {
+      await _detachCallSession();
+    } finally {
+      await LoginStore.shared.logout();
+    }
+  }
+
+  /// 先使异步操作失效并清理通话状态，再发起原生引擎注销。
+  Future<void> _detachCallSession() async {
+    // 清理页面及待处理动作，防止其在下一次登录中重新进入旧通话。
     _acceptedCallAttempt.value = null;
     setGroupCallRecordingHandler(null);
     _groupControlLifecycle.clear(clearAuthority: true);
@@ -544,18 +602,29 @@ class TUICallKitImpl implements TUICallKit {
     _memberSubtitleCache.clear();
     GlobalState.instance.clearGroupCall();
     _closePage();
-    TUICallEngine.instance.removeObserver(_groupObserver);
     CallStore.shared.state.activeCall.removeListener(_checkDurationLimit);
     GlobalState.instance.groupControl.removeListener(_checkDurationLimit);
     AppLifecycle.instance.currentState.removeListener(_onDurationLifecycle);
     _durationLimit.reset();
-    TUICallEngine.instance.unInit();
     CallStore.shared.removeListener(callEventListener);
     CallingBellFeature.instance.dispose();
-    LoginStore.shared.logout();
     if (Platform.isIOS && pictureInPictureFeature != null) {
       pictureInPictureFeature!.dispose();
       pictureInPictureFeature = null;
+    }
+    // 即使平台监听移除失败，也要发出通话引擎注销请求。
+    try {
+      await TUICallEngine.instance.removeObserver(_groupObserver);
+    } finally {
+      // 原生引擎可能已注销却未返回回调，发出请求后继续清理会话。
+      unawaited(
+        TUICallEngine.instance.unInit().then<void>(
+          (_) {},
+          onError: (Object error) {
+            appLogger.warning('通话引擎注销失败（${error.runtimeType}）');
+          },
+        ),
+      );
     }
   }
 

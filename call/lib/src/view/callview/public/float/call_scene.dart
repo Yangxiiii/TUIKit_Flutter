@@ -3,30 +3,31 @@ import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
 import '../participant/call_participant_pane.dart';
 
-/// 单个画面的展示事实：用户标识、备注优先的名称、头像地址、独立机构职务子标题及对应端摄像头状态。
+/// 单个画面的展示事实：用户标识、用于资料未加载时的名称、头像地址、独立机构职务子标题及对应端摄像头状态。
 typedef CallSceneUser = ({
   String id,
   String name,
   String avatarUrl,
   String subtitle,
-  bool cameraOn
+  bool cameraOn,
 });
 
 /// 以已解析事实展示单聊画面；不订阅 SDK，使生产和本地预览共用同一布局。
 class CallScene extends StatelessWidget {
-  const CallScene(
-      {super.key,
-      required this.self,
-      this.remote,
-      required this.video,
-      required this.accepted,
-      required this.localInMainView,
-      required this.onSwap,
-      required this.videoBuilder,
-      this.combinedVideo,
-      required this.controls,
-      required this.hint,
-      required this.timer});
+  const CallScene({
+    super.key,
+    required this.self,
+    this.remote,
+    required this.video,
+    required this.accepted,
+    required this.localInMainView,
+    required this.onSwap,
+    required this.videoBuilder,
+    this.combinedVideo,
+    required this.controls,
+    required this.hint,
+    required this.timer,
+  });
 
   /// 本端展示资料与摄像头事实。
   final CallSceneUser self;
@@ -68,75 +69,101 @@ class CallScene extends StatelessWidget {
     final small = localInMainView ? remote : self;
     final padding = MediaQuery.paddingOf(context);
     // 画面位于底层；资料、状态、操作和小窗分别叠加，摄像头关闭不影响另一端。
-    return Stack(fit: StackFit.expand, children: [
-      if (combinedVideo == null)
-        _pane(main, remote,
-            video: video, main: true, showAvatar: accepted && video)
-      else
-        combinedVideo!,
-      if (video)
-        IgnorePointer(
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (combinedVideo == null)
+          _pane(
+            context,
+            main,
+            remote,
+            video: video,
+            main: true,
+            showAvatar: accepted && video,
+          )
+        else
+          combinedVideo!,
+        if (video)
+          IgnorePointer(
             child: DecoratedBox(
-                decoration: BoxDecoration(
-          gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                context.appColors.scrim.withValues(alpha: .8),
-                Colors.transparent,
-                Colors.transparent,
-                context.appColors.scrim.withValues(alpha: .8)
-              ],
-              stops: const [
-                0,
-                .2,
-                .4,
-                1
-              ]),
-        ))),
-      // 语音始终显示资料，视频接通后让主画面保持完整。
-      if (!video || !accepted) _userInfo(context, remote),
-      if (video && accepted && combinedVideo == null)
-        _CallSmallWindow(
-          onSwap: onSwap,
-          child:
-              _pane(small, remote, video: true, main: false, showAvatar: true),
-        ),
-      if (!accepted)
-        Positioned(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    context.appColors.scrim.withValues(alpha: .8),
+                    Colors.transparent,
+                    Colors.transparent,
+                    context.appColors.scrim.withValues(alpha: .8),
+                  ],
+                  stops: const [0, .2, .4, 1],
+                ),
+              ),
+            ),
+          ),
+        // 语音始终显示资料，视频接通后让主画面保持完整。
+        if (!video || !accepted) _userInfo(context, remote),
+        if (video && accepted && combinedVideo == null)
+          _CallSmallWindow(
+            onSwap: onSwap,
+            child: _pane(
+              context,
+              small,
+              remote,
+              video: true,
+              main: false,
+              showAvatar: true,
+            ),
+          ),
+        if (!accepted)
+          Positioned(
             top: video
                 ? (MediaQuery.sizeOf(context).height - 20) / 2
                 : MediaQuery.sizeOf(context).height * .578,
             left: 24,
             right: 24,
-            child: Center(child: hint)),
-      // 设备操作固定在底部；顶部计时仍取同一 SDK 连接时长。
-      Positioned(
+            child: Center(child: hint),
+          ),
+        // 视频操作区距底部至少 50 逻辑像素，底部安全区更大时优先避开系统手势区。
+        Positioned(
           left: 0,
           right: 0,
-          bottom: math.max(video ? 32 : 84, padding.bottom),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            // 用户确认网络不佳也保留操作区；提示随实际内容高度排在按钮上方，不互相覆盖。
-            if (accepted)
-              Padding(
+          bottom: math.max(video ? 50 : 84, padding.bottom),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 用户确认网络不佳也保留操作区；提示随实际内容高度排在按钮上方，不互相覆盖。
+              if (accepted)
+                Padding(
                   padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
-                  child: Center(child: hint)),
-            controls,
-          ])),
-      Positioned(
+                  child: Center(child: hint),
+                ),
+              controls,
+            ],
+          ),
+        ),
+        Positioned(
           top: padding.top + 16,
           left: 80,
           right: 80,
-          child: Center(child: timer)),
-    ]);
+          child: Center(child: timer),
+        ),
+      ],
+    );
   }
 
   /// 无画面背景取对方头像；本端与远端分别检查自己的摄像头，互换后仍遵守该规则。
-  Widget _pane(CallSceneUser? info, CallSceneUser? remote,
-      {required bool video, required bool main, required bool showAvatar}) {
+  Widget _pane(
+    BuildContext context,
+    CallSceneUser? info,
+    CallSceneUser? remote, {
+    required bool video,
+    required bool main,
+    required bool showAvatar,
+  }) {
     return CallParticipantPane(
       userId: info?.id ?? '',
-      name: _name(info),
+      name: _name(context, info),
       avatarUrl: info?.avatarUrl ?? '',
       hasVideo: video && info?.cameraOn == true,
       video: video && info != null && info.id.isNotEmpty
@@ -145,48 +172,60 @@ class CallScene extends StatelessWidget {
       isMainView: main,
       showAvatar: showAvatar,
       backgroundUserId: main ? remote?.id : null,
-      backgroundName: main ? _name(remote) : null,
+      backgroundName: main ? _name(context, remote) : null,
       backgroundAvatarUrl: main ? remote?.avatarUrl : null,
     );
   }
 
   /// 资料使用消息列表同源头像并独立展示子标题；缺少真实资料时保留布局空间。
   Widget _userInfo(BuildContext context, CallSceneUser? remote) => Positioned(
-        top: video
-            ? MediaQuery.paddingOf(context).top + 80
-            : MediaQuery.sizeOf(context).height * 250 / 844,
-        left: 24,
-        right: 24,
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          AppUserAvatar(
-              userId: remote?.id,
-              name: _name(remote),
-              url: remote?.avatarUrl,
-              size: video ? 72 : 96),
-          const SizedBox(height: 20),
-          Text(_name(remote),
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  fontSize: 20,
-                  height: 1.4,
-                  fontWeight: FontWeight.w500,
-                  color: context.appColors.onScrim)),
-          // 子标题独立展示；生产资料缺失时留白，不能用姓名或虚构机构补齐。
-          if (remote?.subtitle.isNotEmpty == true) ...[
-            const SizedBox(height: 16),
-            Text(remote!.subtitle,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontSize: 16,
-                    height: 22 / 16,
-                    fontWeight: FontWeight.w500,
-                    color: context.appColors.callStatusText)),
-          ] else
-            const SizedBox(height: 38),
-        ]),
-      );
+    top: video
+        ? MediaQuery.paddingOf(context).top + 80
+        : MediaQuery.sizeOf(context).height * 250 / 844,
+    left: 24,
+    right: 24,
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AppUserAvatar(
+          userId: remote?.id,
+          name: _name(context, remote),
+          url: remote?.avatarUrl,
+          size: video ? 72 : 96,
+        ),
+        const SizedBox(height: 20),
+        Text(
+          _name(context, remote),
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 20,
+            height: 1.4,
+            fontWeight: FontWeight.w500,
+            color: context.appColors.onScrim,
+          ),
+        ),
+        // 子标题独立展示；生产资料缺失时留白，不能用姓名或虚构机构补齐。
+        if (remote?.subtitle.isNotEmpty == true) ...[
+          const SizedBox(height: 16),
+          Text(
+            remote!.subtitle,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 16,
+              height: 22 / 16,
+              fontWeight: FontWeight.w500,
+              color: context.appColors.callStatusText,
+            ),
+          ),
+        ] else
+          const SizedBox(height: 38),
+      ],
+    ),
+  );
 
-  String _name(CallSceneUser? info) => info?.name ?? '';
+  /// 全屏画面与缩略头像使用当前登录账号解析出的同一姓名。
+  String _name(BuildContext context, CallSceneUser? info) =>
+      AppUserAvatarScope.personName(context, info?.id, fallback: info?.name);
 }
 
 /// 接通后统一处理小画面的拖动和互换，避免手势落到原生视频纹理。
@@ -227,8 +266,9 @@ class _CallSmallWindowState extends State<_CallSmallWindow> {
       height: height,
       child: Semantics(
         identifier: 'call.swap',
-        label: AppLocalization.of(context)
-            .resolve('chat.uikit.callSwapViews', '交换主次画面'),
+        label: AppLocalization.of(
+          context,
+        ).resolve('chat.uikit.callSwapViews', '交换主次画面'),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: widget.onSwap,

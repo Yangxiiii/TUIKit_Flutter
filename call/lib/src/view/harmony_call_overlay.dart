@@ -7,12 +7,14 @@ import 'package:flutter/services.dart';
 import 'package:tuikit_atomic_x/atomicx.dart' show LoginStore;
 
 import '../control/harmony_group_control_media.dart';
+import '../manager/call_duration_limit.dart';
 import '../manager/group_control_lifecycle.dart';
 import '../state/global_state.dart';
 import '../state/group_control_state.dart';
 import '../tui_call_kit.dart';
 import '../tui_call_kit_impl.dart';
 
+import 'call_presentation_theme.dart';
 import 'callview/public/controls/single_call_controls.dart';
 import 'callview/public/float/call_compact_widget.dart';
 import 'callview/public/float/call_minimize_button.dart';
@@ -69,8 +71,11 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
   /// 接通后只在用户主动点击时交换主次画面。
   bool _localInMainView = false;
 
-  /// 同一通话的一次设备操作完成前，不重复弹权限或发送动作。
+  /// 按展示会话和动作防重，手动挂断与到期挂断共用同一个标记。
   final Set<String> _pending = {};
+
+  /// 使用原生接通时长与可信群截止点，到期后同一展示会话只挂断一次。
+  late final _durationLimit = CallDurationLimit(onLimit: _endAtDurationLimit);
 
   /// 共享会控只在鸿蒙宿主注册，测试展示层无需初始化其他平台的通话引擎。
   GroupControlLifecycle? _groupControl;
@@ -160,29 +165,73 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
       final next = _HarmonyCallSnapshotCodec.fromMap(data, _call?.group);
       _startPolling();
       _syncGroupControl(next);
-      if (next == _call) return;
-      setState(() {
-        if (_call?.id != next.id) {
-          _compact = false;
-          _drag = Offset.zero;
-          _localInMainView = false;
-          _videoKeys.clear();
-        } else if (_compact &&
-            (!next.video || next.group != null) &&
-            next.incoming &&
-            _call?.accepted == false &&
-            next.accepted) {
-          // 被叫接听成功后才展开，权限拒绝时保留待接听浮窗。
-          _compact = false;
-        }
-        _call = next;
-      });
+      if (next != _call) {
+        setState(() {
+          if (_call?.id != next.id) {
+            _compact = false;
+            _drag = Offset.zero;
+            _localInMainView = false;
+            _videoKeys.clear();
+          } else if (_compact &&
+              (!next.video || next.group != null) &&
+              next.incoming &&
+              _call?.accepted == false &&
+              next.accepted) {
+            // 被叫接听成功后才展开，权限拒绝时保留待接听浮窗。
+            _compact = false;
+          }
+          _call = next;
+        });
+      }
+      // 快照无变化时也要复核群截止点，挂断失败可在下一次轮询重试。
+      _checkDurationLimit(next);
     } on PlatformException catch (error) {
       debugPrint('Harmony call state: ${error.code}');
     } on MissingPluginException {
       debugPrint('Harmony call state: presentation channel unavailable');
     } finally {
       _reading = false;
+    }
+  }
+
+  /// 仅本次接通可触发到期挂断，已开始手动结束时等待原请求结果。
+  void _checkDurationLimit(_HarmonyCallSnapshot call) {
+    if (!call.accepted || _pending.contains('${call.id}:end')) return;
+    final control = _groupControl?.controller?.value;
+    unawaited(
+      _durationLimit
+          .update(
+            callId: call.sdkCallId.isEmpty
+                ? 'presentation:${call.id}'
+                : '${call.self.id}:${call.sdkCallId}',
+            sessionId: call.id,
+            seconds: call.duration,
+            connected: call.accepted,
+            deadlineMs: control?.callId == call.sdkCallId
+                ? control?.deadlineMs
+                : null,
+          )
+          .catchError((Object error) {
+            debugPrint('鸿蒙通话到期挂断失败：$error');
+          }),
+    );
+  }
+
+  /// 与手动结束共用操作标记，原生确认成功后才提示，结束事件先回也能显示。
+  Future<void> _endAtDurationLimit() async {
+    final id = _call!.id;
+    final pendingKey = '$id:end';
+    _pending.add(pendingKey);
+    try {
+      await _channel.invokeMethod<void>('harmonyPresentationAction', {
+        'id': id,
+        'action': 'endAtDurationLimit',
+      });
+      if (mounted && (_call?.id ?? id) == id) {
+        showCallDurationLimitToast(context);
+      }
+    } finally {
+      _pending.remove(pendingKey);
     }
   }
 
@@ -320,7 +369,22 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
       fit: StackFit.expand,
       children: [
         widget.child,
-        if (call != null && call.banner)
+        // 仅在通话层固定配色，底层页面继续继承全局外观。
+        if (call != null)
+          CallPresentationTheme(
+            builder: (context) => _buildPresentation(context, call),
+          ),
+      ],
+    );
+  }
+
+  /// 按当前通话状态选择横幅、小窗或全屏，设备确认在最上层显示。
+  Widget _buildPresentation(BuildContext context, _HarmonyCallSnapshot call) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // 横幅仅占状态栏下方的固定区域，小窗及全屏复用各自的布局。
+        if (call.banner)
           Positioned(
             left: IncomingBannerContent.horizontalInset,
             right: IncomingBannerContent.horizontalInset,
@@ -329,7 +393,11 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
                 IncomingBannerContent.topGap,
             child: IncomingBannerContent(
               userId: call.peer.id,
-              name: call.peer.name,
+              name: AppUserAvatarScope.personName(
+                context,
+                call.peer.id,
+                fallback: call.peer.name,
+              ),
               avatarUrl: call.peer.avatarUrl,
               video: call.video,
               multi: call.group != null,
@@ -338,11 +406,12 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
               onAccept: () => _act('accept'),
             ),
           )
-        else if (call != null && _compact)
+        else if (_compact)
           _buildCompact(context, call)
-        else if (call != null)
+        else
           _buildFull(context, call),
-        if (_deviceRequest case final request? when call != null)
+        // 设备确认显示时阻挡通话层上的其他操作。
+        if (_deviceRequest case final request?)
           _buildDeviceRequest(context, request.device, request.response),
       ],
     );
@@ -364,6 +433,7 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
                 builder: (context, _) {
                   final control = GlobalState.instance.groupControl.value;
                   return HarmonyGroupCallView(
+                    groupId: call.groupId,
                     key: ValueKey(call.id),
                     group: group,
                     selfId: call.self.id,
@@ -486,7 +556,11 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
               : CallCompactAudioSurface(
                   child: CallCompactAudioContent(
                     id: call.peer.id,
-                    name: call.peer.name,
+                    name: AppUserAvatarScope.personName(
+                      context,
+                      call.peer.id,
+                      fallback: call.peer.name,
+                    ),
                     avatarUrl: call.peer.avatarUrl,
                     incoming: call.incoming,
                     duration: call.accepted ? call.duration : null,

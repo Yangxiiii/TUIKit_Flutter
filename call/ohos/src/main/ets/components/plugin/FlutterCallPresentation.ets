@@ -144,7 +144,10 @@ export class FlutterCallPresentation {
     if (group) {
       data.set('callId', call.callId);
       data.set('groupId', call.chatGroupId);
-      data.set('connectedAtMs', call.startTime > 0 ? call.startTime : this.connectedAt);
+      // 部分鸿蒙 SDK 在接通后返回十位 Unix 秒，桥接值统一为毫秒。
+      const start = call.startTime;
+      const startMs = start >= 1000000000 && start < 10000000000 ? start * 1000 : start;
+      data.set('connectedAtMs', startMs > 0 ? startMs : this.connectedAt);
       data.set('chatGroup', call.chatGroupId.length > 0);
       data.set('inviterId', call.inviterId);
       data.set('members', this.groupMembers(state, accepted));
@@ -191,6 +194,8 @@ export class FlutterCallPresentation {
   /** 将 Flutter 按钮转为当前通话的 SDK 操作，权限返回后再次校验通话标识。 */
   async action(presentationId: string, action: string): Promise<void> {
     if (!this.isCurrent(presentationId)) {
+      // 已结束或换场时不能把未执行的到期挂断回报为成功。
+      if (action === 'endAtDurationLimit') throw new Error('原通话已结束');
       Logger.warn('Flutter call action ignored for inactive call:', action);
       return;
     }
@@ -213,6 +218,21 @@ export class FlutterCallPresentation {
         CallingBellFeature.shared().stopAll();
         CallingVibratorFeature.shared().stop();
         RouterManager.showCallingView();
+        break;
+      }
+      case 'endAtDurationLimit': {
+        if (store.state.selfInfo.status !== CallParticipantStatus.accept) {
+          throw new Error('原通话未接通');
+        }
+        // 本端挂断由 Flutter 显示专用提示，避免原生再提示对方挂断。
+        CallEndedFlag().markSelfEnded();
+        try {
+          await store.hangup();
+        } catch (error) {
+          if (this.isCurrent(presentationId)) CallEndedFlag().clear();
+          // ArkTS 要求抛出明确的 Error，保留 SDK 消息供 Flutter 错误回调使用。
+          throw new Error((error as Error).message);
+        }
         break;
       }
       case 'end':

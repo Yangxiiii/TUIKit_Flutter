@@ -102,10 +102,10 @@ class GroupCallControls extends StatelessWidget {
           padding: const EdgeInsets.only(left: 60, right: 72),
           child:
               Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            _button(context, 'reject', AppIcons.phone2, '拒绝', onEnd,
-                background: context.appColors.danger),
-            _button(context, 'accept', AppIcons.phone3, '接听', onAccept,
-                background: context.appColors.success),
+            _button(context, 'reject', '拒绝', onEnd,
+                imagePath: 'call_assets/hangup.png'),
+            _button(context, 'accept', '接听', onAccept,
+                imagePath: 'call_assets/dialing.png'),
           ]));
     }
     return Column(mainAxisSize: MainAxisSize.min, children: [
@@ -114,31 +114,34 @@ class GroupCallControls extends StatelessWidget {
         _button(
             context,
             'microphone',
-            microphoneOn ? AppIcons.mic : AppIcons.micOff,
             microphoneOn ? '麦克风已开' : '麦克风已关',
             ended || microphonePending || (!microphoneOn && !canOpenMicrophone)
                 ? null
                 : onMicrophone,
-            active: microphoneOn,
+            imagePath: microphoneOn
+                ? 'call_assets/mute.png'
+                : 'call_assets/mute_on.png',
             pending: microphonePending,
             hint: microphoneHint),
         _button(
           context,
           'speaker',
-          speakerOn ? AppIcons.voiceOn : AppIcons.voiceOff,
           speakerOn ? l10n.callSpeakerIsOn : l10n.callSpeakerIsOff,
           ended ? null : onSpeaker,
-          active: speakerOn && !ended,
+          imagePath: speakerOn
+              ? 'call_assets/handsfree_on.png'
+              : 'call_assets/handsfree.png',
         ),
         _button(
             context,
             'camera',
-            cameraOn ? AppIcons.cameraOn : AppIcons.videoOff,
             cameraOn ? '摄像头已开' : '摄像头已关',
             ended || cameraPending || (!cameraOn && !canOpenCamera)
                 ? null
                 : onCamera,
-            active: cameraOn,
+            imagePath: cameraOn
+                ? 'call_assets/camera_on.png'
+                : 'call_assets/camera_off.png',
             pending: cameraPending,
             hint: cameraHint),
       ]),
@@ -149,9 +152,9 @@ class GroupCallControls extends StatelessWidget {
           _button(
             context,
             'record',
-            Icons.adjust,
             recording ? '结束录制' : '录制通话',
             connected && !ended && !recordingPending ? onRecord : null,
+            icon: Icons.adjust,
             background: recording ? context.appColors.danger : null,
             pending: recordingPending,
             pendingLabel: '正在保存录制',
@@ -161,7 +164,6 @@ class GroupCallControls extends StatelessWidget {
         _button(
           context,
           retryable ? 'retry' : 'end',
-          retryable ? AppIcons.phone3 : AppIcons.phone2,
           retryable
               ? '重新呼叫'
               : connected
@@ -170,8 +172,9 @@ class GroupCallControls extends StatelessWidget {
                       ? '关闭'
                       : '取消',
           retryable ? onRetry : onEnd,
-          background:
-              retryable ? context.appColors.success : context.appColors.danger,
+          imagePath: retryable
+              ? 'call_assets/dialing.png'
+              : 'call_assets/hangup.png',
         ),
         if (canFlip && connected && cameraOn && !ended)
           ControlsButton(
@@ -205,17 +208,25 @@ class GroupCallControls extends StatelessWidget {
             )),
       );
 
-  Widget _button(BuildContext context, String id, IconData icon, String label,
-      VoidCallback? onTap,
-      {bool active = false,
-      Color? background,
-      bool pending = false,
-      String pendingLabel = '正在等待设备确认',
-      String? hint}) {
+  /// 旧版设备和接挂操作使用自带圆底的资源，群通话专有的录制仍使用独立图标。
+  Widget _button(
+    BuildContext context,
+    String id,
+    String label,
+    VoidCallback? onTap, {
+    String imagePath = '',
+    IconData? icon,
+    Color? background,
+    bool pending = false,
+    String pendingLabel = '正在等待设备确认',
+    String? hint,
+  }) {
     final colors = context.appColors;
     final button = Opacity(
       opacity: onTap == null ? .45 : 1,
       child: ControlsButton(
+        imgUrl: imagePath,
+        imgHeight: 60,
         icon: icon,
         iconSize: 32,
         dimension: 60,
@@ -223,27 +234,38 @@ class GroupCallControls extends StatelessWidget {
         labelMaxLines: 1,
         tips: label,
         semanticsIdentifier: 'call.group.$id',
-        backgroundColor: background ??
-            (active ? colors.onScrim : colors.groupCallControlBackground),
-        imgColor: active ? colors.textPrimary : colors.onScrim,
+        backgroundColor: icon == null
+            ? Colors.transparent
+            : background ?? colors.groupCallControlBackground,
+        imgColor: icon == null ? null : colors.onScrim,
         textColor: colors.onScrim,
         onTap: onTap,
       ),
     );
+    // 等待设备或录制结果时，在原圆钮上叠加进度提示。
     return Tooltip(
-        message: hint ?? (pending ? pendingLabel : label),
-        child: Stack(alignment: Alignment.topCenter, children: [
+      message: hint ?? (pending ? pendingLabel : label),
+      child: Stack(
+        alignment: Alignment.topCenter,
+        children: [
           button,
           if (pending)
             Positioned(
-                top: 18,
-                child: Semantics(
-                    label: pendingLabel,
-                    liveRegion: true,
-                    child: SizedBox.square(
-                        dimension: 24,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: colors.onScrim)))),
-        ]));
+              top: 18,
+              child: Semantics(
+                label: pendingLabel,
+                liveRegion: true,
+                child: SizedBox.square(
+                  dimension: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: colors.onScrim,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }

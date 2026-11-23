@@ -59,43 +59,45 @@ class _CallCompactWidgetState extends State<CallCompactWidget> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: Listenable.merge([
-          CallStore.shared.state.activeCall,
-          CallStore.shared.state.selfInfo,
-          CallStore.shared.state.allParticipants,
-          DeviceStore.shared.state.cameraStatus
-        ]),
-        builder: (context, _) {
-          final state = CallStore.shared.state;
-          final self = state.selfInfo.value;
-          final call = state.activeCall.value;
-          final remote = state.allParticipants.value
-              .where((p) => p.id != self.id)
-              .firstOrNull;
-          final connected = self.status == CallParticipantStatus.accept;
-          final name = remote == null
-              ? ''
-              : remote.remark.isNotEmpty
-                  ? remote.remark
-                  : remote.name.isNotEmpty
-                      ? remote.name
-                      : remote.id;
-          if (call.mediaType == CallMediaType.video) {
-            return _buildVideo(context, call, self, remote, name);
-          }
-          return CallCompactAudioContent(
-            id: remote?.id ??
-                (call.inviterId == self.id
-                    ? call.inviteeIds.firstOrNull
-                    : call.inviterId),
-            name: name,
-            avatarUrl: remote?.avatarURL,
-            incoming: call.inviterId != self.id,
-            duration: connected ? call.duration.toInt() : null,
-            onWaitingAction: () => _handleWaitingAction(call.callId),
-          );
-        },
+    listenable: Listenable.merge([
+      CallStore.shared.state.activeCall,
+      CallStore.shared.state.selfInfo,
+      CallStore.shared.state.allParticipants,
+      DeviceStore.shared.state.cameraStatus,
+    ]),
+    builder: (context, _) {
+      final state = CallStore.shared.state;
+      final self = state.selfInfo.value;
+      final call = state.activeCall.value;
+      final remote = state.allParticipants.value
+          .where((p) => p.id != self.id)
+          .firstOrNull;
+      final connected = self.status == CallParticipantStatus.accept;
+      final name = AppUserAvatarScope.personName(
+        context,
+        remote?.id ??
+            (call.inviterId == self.id
+                ? call.inviteeIds.firstOrNull
+                : call.inviterId),
+        nickname: remote?.name,
       );
+      if (call.mediaType == CallMediaType.video) {
+        return _buildVideo(context, call, self, remote, name);
+      }
+      return CallCompactAudioContent(
+        id:
+            remote?.id ??
+            (call.inviterId == self.id
+                ? call.inviteeIds.firstOrNull
+                : call.inviterId),
+        name: name,
+        avatarUrl: remote?.avatarURL,
+        incoming: call.inviterId != self.id,
+        duration: connected ? call.duration.toInt() : null,
+        onWaitingAction: () => _handleWaitingAction(call.callId),
+      );
+    },
+  );
 
   /// 只操作卡片绑定的原通话。接听成功后展开，取消由 SDK 结束事件关闭浮层。
   Future<void> _handleWaitingAction(String callId) async {
@@ -133,24 +135,32 @@ class _CallCompactWidgetState extends State<CallCompactWidget> {
     String name,
   ) {
     // 邀请资料还未齐全时沿用头像，避免 SDK 使用空的受邀者列表。
-    final canRenderVideo = self.id.isNotEmpty &&
+    final canRenderVideo =
+        self.id.isNotEmpty &&
         call.inviterId.isNotEmpty &&
         call.inviteeIds.isNotEmpty &&
         self.status != CallParticipantStatus.none;
     final accepted = self.status == CallParticipantStatus.accept;
-    final localCameraOn = canRenderVideo &&
+    final localCameraOn =
+        canRenderVideo &&
         DeviceStore.shared.state.cameraStatus.value == DeviceStatus.on;
     final remoteCameraOn = canRenderVideo && remote?.isCameraOpened == true;
     // 接通后的悬浮窗固定主次位置，关闭摄像头只隐藏对应的纹理。
     if (accepted || !localCameraOn) {
       return CallCompactVideoContent(
-        main: _pane(remote, name,
-            cameraOn: accepted && remoteCameraOn,
-            bindVideo: accepted && canRenderVideo),
-        small: _pane(self, self.name,
-            cameraOn: localCameraOn,
-            bindVideo: accepted && canRenderVideo,
-            local: true),
+        main: _pane(
+          remote,
+          name,
+          cameraOn: accepted && remoteCameraOn,
+          bindVideo: accepted && canRenderVideo,
+        ),
+        small: _pane(
+          self,
+          self.name,
+          cameraOn: localCameraOn,
+          bindVideo: accepted && canRenderVideo,
+          local: true,
+        ),
       );
     }
 
@@ -174,27 +184,31 @@ class _CallCompactWidgetState extends State<CallCompactWidget> {
   }
 
   /// 每个画面只根据自己的摄像头决定显示头像还是视频。
-  Widget _pane(CallParticipantInfo? info, String name,
-          {required bool cameraOn,
-          required bool bindVideo,
-          bool local = false}) =>
-      CallParticipantPane(
-        userId: info?.id ?? '',
-        name: name,
-        avatarUrl: info?.avatarURL ?? '',
-        hasVideo: cameraOn,
-        isMainView: false,
-        video: bindVideo && info != null && info.id.isNotEmpty
-            ? CallVideoView(
-                key: ValueKey(info.id), userId: info.id, local: local)
-            : const SizedBox.shrink(),
-      );
+  Widget _pane(
+    CallParticipantInfo? info,
+    String name, {
+    required bool cameraOn,
+    required bool bindVideo,
+    bool local = false,
+  }) => CallParticipantPane(
+    userId: info?.id ?? '',
+    name: name,
+    avatarUrl: info?.avatarURL ?? '',
+    hasVideo: cameraOn,
+    isMainView: false,
+    video: bindVideo && info != null && info.id.isNotEmpty
+        ? CallVideoView(key: ValueKey(info.id), userId: info.id, local: local)
+        : const SizedBox.shrink(),
+  );
 }
 
 /// 共享应用内小窗的主次画面布局，两个位置可分别显示头像或视频。
 class CallCompactVideoContent extends StatelessWidget {
-  const CallCompactVideoContent(
-      {super.key, required this.main, required this.small});
+  const CallCompactVideoContent({
+    super.key,
+    required this.main,
+    required this.small,
+  });
 
   /// 对端画面填充主区域。
   final Widget main;
@@ -203,17 +217,19 @@ class CallCompactVideoContent extends StatelessWidget {
   final Widget small;
 
   @override
-  Widget build(BuildContext context) => Stack(fit: StackFit.expand, children: [
-        main,
-        Positioned(
-          right: 4,
-          top: 4,
-          width: 25,
-          height: 54,
-          child:
-              ClipRRect(borderRadius: BorderRadius.circular(4), child: small),
-        ),
-      ]);
+  Widget build(BuildContext context) => Stack(
+    fit: StackFit.expand,
+    children: [
+      main,
+      Positioned(
+        right: 4,
+        top: 4,
+        width: 25,
+        height: 54,
+        child: ClipRRect(borderRadius: BorderRadius.circular(4), child: small),
+      ),
+    ],
+  );
 }
 
 /// 绘制单聊语音小窗的卡片外壳，裁剪圆角内的画面并保留外侧阴影。
@@ -319,7 +335,10 @@ class CallCompactAudioContent extends StatelessWidget {
             Text(
               const TimerWidget().formatDuration(elapsed),
               style: TextStyle(
-                  fontSize: 12, height: 16 / 12, color: colors.primary),
+                fontSize: 12,
+                height: 16 / 12,
+                color: colors.primary,
+              ),
             )
           else
             _buildWaitingAction(context),
@@ -350,8 +369,11 @@ class CallCompactAudioContent extends StatelessWidget {
               // 字体图标自身带留白，放大字形而保持设计的 16 像素占位。
               Transform.scale(
                 scale: 1.25,
-                child: Icon(incoming ? AppIcons.phone3 : AppIcons.phone2,
-                    size: 16, color: color),
+                child: Icon(
+                  incoming ? AppIcons.phone3 : AppIcons.phone2,
+                  size: 16,
+                  color: color,
+                ),
               ),
               const SizedBox(width: 4),
               Flexible(

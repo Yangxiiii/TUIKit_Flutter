@@ -15,6 +15,7 @@ import 'package:tuikit_atomic_x/atomicx.dart';
 import 'package:tencent_calls_uikit/src/common/utils/app_lifecycle.dart';
 import '../common/metrics/key_metrics.dart';
 import '../view/call_main_widget.dart';
+import '../view/call_presentation_theme.dart';
 import '../view/callview/public/float/call_compact_widget.dart';
 import '../view/callview/public/multi/group_device_open_dialog.dart';
 import '../view/component/incoming_banner/incoming_banner_widget.dart';
@@ -310,7 +311,7 @@ class CallPageRouter {
     if (_callOverlayEntry == null) {
       _currentPageType = pageType;
       _callOverlayEntry = OverlayEntry(
-        builder: (context) => _buildCallNavigator(),
+        builder: (_) => CallPresentationTheme(builder: _buildCallNavigator),
       );
       overlay.insert(_callOverlayEntry!);
       return;
@@ -420,7 +421,8 @@ class CallPageRouter {
     }
   }
 
-  Widget _buildCallNavigator() {
+  /// 在通话主题内建立导航和小窗外壳，子路由及内嵌弹窗均继承同一配色。
+  Widget _buildCallNavigator(BuildContext _) {
     return _CallOverlayLayout(
       rectGetter: _getPageRect,
       borderRadiusGetter: _getPageBorderRadius,
@@ -646,7 +648,9 @@ class CallPageRouter {
       if (!completer.isCompleted) completer.complete(result);
     }
 
-    entry = OverlayEntry(builder: (context) {
+    // 权限提示单独插入宿主浮层，需在同样的通话主题下读取颜色。
+    Widget buildAlert(BuildContext context) {
+      // 无法跳转设置时改为手动开启指引，且不再提供跳转按钮。
       final text = AppLocalization.of(context);
       final device = camera ? 'camera' : 'microphone';
       final title = settingsFailed
@@ -676,7 +680,11 @@ class CallPageRouter {
             onCancel: () => finish(false),
             onConfirm: () => finish(!settingsFailed)),
       );
-    });
+    }
+
+    entry = OverlayEntry(
+      builder: (_) => CallPresentationTheme(builder: buildAlert),
+    );
     overlay.insert(entry);
     return completer.future;
   }

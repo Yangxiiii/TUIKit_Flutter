@@ -54,6 +54,16 @@ abstract class TUICallKit {
     throw UnimplementedError();
   }
 
+  /// 宿主已登录聊天时，仅启动通话引擎并返回结果，由宿主决定是否提示。
+  Future<CompletionHandler> loginCallOnly(
+    int sdkAppId,
+    String userId,
+    String userSig,
+  );
+
+  /// 释放通话引擎和监听，Flutter 聊天的退出由宿主负责。
+  Future<void> logoutCallOnly();
+
   /// logout TUICallKit
   ///
   ///

@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:atomic_x_core/impl/common/log.dart';
+import 'package:app_ui/app_ui.dart' show AppUserAvatarScope;
 import 'package:flutter/material.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:tencent_rtc_sdk/trtc_cloud.dart';
 import 'package:tencent_rtc_sdk/trtc_cloud_listener.dart';
 
+/// 展示实时通话转写，并使用当前会话的成员资料标注发言者。
 class AISubtitle extends StatefulWidget {
   final String userId;
 
@@ -15,10 +17,15 @@ class AISubtitle extends StatefulWidget {
   State<AISubtitle> createState() => _AISubtitleState();
 }
 
+/// 接收转写消息、管理滚动与自动隐藏，并随浮层一起销毁。
 class _AISubtitleState extends State<AISubtitle> {
   final List<TranslationInfo> _translationInfos = [];
+
+  /// 新转写到达时重置倒计时，离开浮层后取消。
   Timer? _hideTimer;
   bool _isVisible = false;
+
+  /// 最后一条转写后继续显示的秒数。
   final int _showDuration = 8;
   final ScrollController _scrollController = ScrollController();
 
@@ -205,7 +212,17 @@ class _AISubtitleState extends State<AISubtitle> {
                       return FutureBuilder<String?>(
                         future: _getUserDisplayName(info.sender),
                         builder: (context, snapshot) {
-                          final displayName = snapshot.data ?? info.sender;
+                          final displayName = AppUserAvatarScope.personName(
+                            context,
+                            info.sender,
+                            groupId: CallStore
+                                .shared
+                                .state
+                                .activeCall
+                                .value
+                                .chatGroupId,
+                            fallback: snapshot.data,
+                          );
                           final translationText = _sortLanguageType(info);
 
                           return Padding(
@@ -263,9 +280,7 @@ class _AISubtitleState extends State<AISubtitle> {
   }
 
   String _getDisplayName(CallParticipantInfo info) {
-    if (info.remark.isNotEmpty) {
-      return info.remark;
-    } else if (info.name.isNotEmpty) {
+    if (info.name.isNotEmpty) {
       return info.name;
     } else {
       return info.id;

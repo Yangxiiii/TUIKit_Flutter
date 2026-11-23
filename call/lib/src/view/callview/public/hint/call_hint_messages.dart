@@ -1,6 +1,16 @@
 import 'package:app_ui/app_ui.dart';
 import 'package:flutter/material.dart';
 
+/// 本端确认到期挂断后，各平台共用同一条提示和展示时长。
+void showCallDurationLimitToast(BuildContext context) {
+  AppToast.show(
+    AppLocalization.of(context).resolve(
+        LocaleKeys.chat_uikit_callDurationLimit, '已达通话最长时长，通话结束'),
+    semanticsIdentifier: 'call.duration-limit',
+    duration: const Duration(seconds: 3),
+  );
+}
+
 /// 只绘制等待文字或独立提示胶囊，生产网络事件与本地预览复用相同外观。
 class CallHintMessages extends StatelessWidget {
   const CallHintMessages(

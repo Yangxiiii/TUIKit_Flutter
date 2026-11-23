@@ -49,7 +49,7 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
             policyKnown: false,
             version: 0,
             allowSelfUnmute: true,
-            allowVideo: false,
+            allowVideo: true,
             muteAll: false,
             cameraAllClosed: false,
             microphoneOn: media.microphoneOn,
@@ -116,7 +116,7 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
   /// 同一场次的可信时间锚点；仅初始主持首次接通创建，后续只接受完全相同的值。
   int? _connectedAtMs, _deadlineMs;
 
-  /// 标记主持策略是否已验证，用于主持操作、摄像头和远端命令校验。
+  /// 标记主持策略是否已验证，用于主持操作和远端命令校验。
   bool _known = false;
 
   /// 权限与入会默认状态分别保存，个人设备命令不改变全员默认策略。
@@ -134,6 +134,9 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
 
   /// 成员收到的逐设备实际权限，优先于同步中的群体默认值。
   final Map<GroupControlDevice, bool> _memberPermissions = {};
+
+  /// 本次入会本人已选择摄像头状态，迟到的允许策略不能替用户重新打开。
+  bool _selfCameraSelected = false;
 
   /// 远端开启同意可能跨多个消息回调，执行中收到同 ID 时等待首个结果。
   final Set<String> _runningCommands = {};
@@ -205,15 +208,14 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
       }
     }
     _members = next;
-    // 未收到可信交接时撤销主持权限和摄像头授权，保留最近收到的开麦限制。
+    // 主持离场后撤销管理权限，保留已收到的设备限制和本机采集状态。
     if (_known && !_members.contains(_hostId)) {
       _known = false;
-      unawaited(_executeDevice(GroupControlDevice.camera, false));
     }
     _publish();
   }
 
-  /// 接通后按默认权限开麦，同时向主持同步策略；摄像头仍须等待可信权限。
+  /// 接通后按默认权限开麦，成员可手动开摄像头，同时向主持同步策略。
   Future<void> start() async {
     if (_disposed) return;
     if (_hostId == selfId) {
@@ -359,7 +361,7 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
         });
       });
 
-  /// 本人可自行关设备；麦克风默认允许开启，收到限制后须遵守当前权限。
+  /// 本人默认可开关设备，收到明确的开启限制后按当前权限执行。
   Future<GroupControlOutcome> setSelfDevice(
     GroupControlDevice device,
     bool enabled,
@@ -377,9 +379,19 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
             _publish();
             return denied;
           }
+          final isCamera = device == GroupControlDevice.camera;
+          if (isCamera) _selfCameraSelected = true;
+          final deviceVersion = _deviceVersions[device];
           final pending = _beginPending(selfId, device);
           try {
-            final result = await _executeDevice(device, enabled);
+            // 同步允许策略不中断手动开关摄像头，新指令或禁止开启仍有效。
+            final result = await _executeDevice(
+              device,
+              enabled,
+              isCommandCurrent: isCamera
+                  ? () => _deviceVersions[device] == deviceVersion
+                  : null,
+            );
             _finishPending(pending, result);
             return result;
           } finally {
@@ -738,11 +750,12 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
       if (wasKnown) {
         await _applyRestrictions();
       } else {
-        // 首次同步只按需关麦，避免允许策略重新打开成员已主动关闭的麦克风。
+        // 首次同步执行明确关停；允许策略保留本人已选的设备状态。
         await Future.wait([
           if (_muteAll || !_canOpen(GroupControlDevice.microphone))
             _executeDevice(GroupControlDevice.microphone, false),
-          _applyJoinCamera(),
+          if (!_selfCameraSelected || _cameraAllClosed || !value.canOpenCamera)
+            _applyJoinCamera(),
         ]);
       }
     }
@@ -870,10 +883,10 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
     ]);
   }
 
-  /// 语音及未获可信授权时保持关摄像头，视频接通后按主持策略开启。
+  /// 只在已知策略下按视频入会默认值自动开摄像头；手动开启单独按设备权限判断。
   Future<GroupControlOutcome> _applyJoinCamera() => _executeDevice(
         GroupControlDevice.camera,
-        video && !_cameraAllClosed && value.canOpenCamera,
+        video && _known && !_cameraAllClosed && value.canOpenCamera,
       );
 
   /// 默认准备、本人操作和远端命令按设备串行，旧版本不能覆盖后发策略。
@@ -1066,7 +1079,7 @@ class GroupControlController extends ValueNotifier<GroupControlState> {
       policyKnown: _known,
       version: _version,
       allowSelfUnmute: _canMemberUnmute,
-      allowVideo: _known && _canMemberOpenCamera,
+      allowVideo: _canMemberOpenCamera,
       muteAll: _muteAll,
       cameraAllClosed: _cameraAllClosed,
       microphoneOn: _media.microphoneOn,

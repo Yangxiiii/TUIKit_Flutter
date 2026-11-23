@@ -286,13 +286,23 @@ void main() {
             onRetry: () {}))));
 
     final speaker = find.bySemanticsIdentifier('call.group.speaker');
+    ImageProvider speakerImage() {
+      final ink = tester.widget<Ink>(
+        find.descendant(of: speaker, matching: find.byType(Ink)),
+      );
+      return (ink.decoration as BoxDecoration).image!.image;
+    }
+
     await showControls(incoming: true);
     expect(speaker, findsNothing);
 
     for (final connected in [false, true]) {
       await showControls(connected: connected);
       expect(speaker, findsOneWidget);
-      expect(find.byIcon(AppIcons.voiceOff), findsOneWidget);
+      expect(
+          speakerImage(),
+          const AssetImage('call_assets/handsfree.png',
+              package: 'tuikit_atomic_x'));
       await tester.tap(speaker);
       await tester.pump();
       expect(find.text('扬声器已关'), findsOneWidget);
@@ -314,7 +324,10 @@ void main() {
 
     route.value = true;
     await tester.pump();
-    expect(find.byIcon(AppIcons.voiceOn), findsOneWidget);
+    expect(
+        speakerImage(),
+        const AssetImage('call_assets/handsfree_on.png',
+            package: 'tuikit_atomic_x'));
     expect(find.text('扬声器已开'), findsOneWidget);
 
     await showControls(ended: true);

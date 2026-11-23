@@ -97,7 +97,8 @@ export struct TimerView {
         return TimerUtil.secondToHMSString(0);
       }
       const elapsedMs: number = Date.now() - this.startTimeMs;
-      const seconds: number = Math.max(0, Math.floor(elapsedMs / 1000));
+      // 挂断回调可能晚于本地计时，通话展示最多一小时。
+      const seconds: number = Math.min(3600, Math.max(0, Math.floor(elapsedMs / 1000)));
       return TimerUtil.secondToHMSString(seconds);
     }
     return TUICallKitLocalize('TUICallKit.waitAccept');

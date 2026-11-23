@@ -59,47 +59,62 @@ class SingleCallControls extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalization.of(context);
     final end = _button(
-        context,
-        'end',
-        AppIcons.phone2,
-        incoming
-            ? l10n.callRejectAction
-            : accepted
-                ? l10n.callHangUp
-                : l10n.callCancel,
-        onEnd,
-        background: context.appColors.danger,
-        iconSize: 42);
+      context,
+      'end',
+      'call_assets/hangup.png',
+      incoming
+          ? l10n.callRejectAction
+          : accepted
+              ? l10n.callHangUp
+              : l10n.callCancel,
+      onEnd,
+    );
     final accept = _button(
-        context, 'accept', AppIcons.phone3, l10n.callAcceptAction, onAccept,
-        background: context.appColors.success);
+      context,
+      'accept',
+      'call_assets/dialing.png',
+      l10n.callAcceptAction,
+      onAccept,
+    );
     // 语音被叫只提供接听和拒绝，视频被叫保留上排设备开关。
     if (!video) {
       return _row(
-          incoming
-              ? [end, accept]
-              : [_microphone(context), end, _speaker(context)],
-          horizontalPadding: incoming ? 0 : 22);
+        incoming
+            ? [end, accept]
+            : [_microphone(context), end, _speaker(context)],
+      );
     }
-    return Column(mainAxisSize: MainAxisSize.min, children: [
-      _row([_microphone(context), _speaker(context), _camera(context)]),
-      const SizedBox(height: 32),
-      _row(incoming
-          ? [end, const SizedBox(width: 72), accept]
-          : [
-              const SizedBox(width: 72),
-              end,
-              // shortcut: 字体库缺少双循环箭头，沿用 SDK 翻转图标，补齐 AppIcons 后替换。
-              _button(context, 'flip', null, l10n.callSwitchCamera,
-                  cameraOn ? onFlip : null,
-                  imagePath: 'call_assets/switch_camera.png'),
-            ]),
-    ]);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _row([_microphone(context), _speaker(context), _camera(context)]),
+        const SizedBox(height: 32),
+        _row(
+          incoming
+              ? [end, const SizedBox.shrink(), accept]
+              : [
+                  const SizedBox.shrink(),
+                  end,
+                  // 翻转图只包含字形，沿用现有独立圆底和 32 像素图标尺寸。
+                  _button(
+                    context,
+                    'flip',
+                    'call_assets/switch_camera.png',
+                    l10n.callSwitchCamera,
+                    cameraOn ? onFlip : null,
+                    background: context.appColors.scrim.withValues(alpha: .3),
+                    imageSize: 32,
+                  ),
+                ],
+        ),
+      ],
+    );
   }
 
-  Widget _row(List<Widget> children, {double horizontalPadding = 22}) =>
-      Padding(
-        padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+  /// 视频两排共用 34 逻辑像素边距，语音按来电角色保留原有列位。
+  Widget _row(List<Widget> children) => Padding(
+        padding: EdgeInsets.symmetric(
+            horizontal: video ? 34 : (incoming ? 0 : 22)),
         child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: children.map((child) => Expanded(child: child)).toList()),
@@ -108,57 +123,57 @@ class SingleCallControls extends StatelessWidget {
   Widget _microphone(BuildContext context) {
     final on = microphoneOn;
     final text = AppLocalization.of(context);
-    return _button(context, 'microphone', on ? AppIcons.mic : AppIcons.micOff,
-        on ? text.callMicrophoneIsOn : text.callMicrophoneIsOff, onMicrophone,
-        active: on);
+    return _button(
+      context,
+      'microphone',
+      on ? 'call_assets/mute.png' : 'call_assets/mute_on.png',
+      on ? text.callMicrophoneIsOn : text.callMicrophoneIsOff,
+      onMicrophone,
+    );
   }
 
   Widget _speaker(BuildContext context) {
     final on = speakerOn;
     final text = AppLocalization.of(context);
     return _button(
-        context,
-        'speaker',
-        on ? AppIcons.voiceOn : AppIcons.voiceOff,
-        on ? text.callSpeakerIsOn : text.callSpeakerIsOff,
-        onSpeaker,
-        active: on,
-        iconSize: 36);
+      context,
+      'speaker',
+      on ? 'call_assets/handsfree_on.png' : 'call_assets/handsfree.png',
+      on ? text.callSpeakerIsOn : text.callSpeakerIsOff,
+      onSpeaker,
+    );
   }
 
   Widget _camera(BuildContext context) {
     final on = cameraOn;
     final text = AppLocalization.of(context);
     return _button(
-        context,
-        'camera',
-        on ? AppIcons.cameraOn : AppIcons.videoOff,
-        on ? text.callCameraIsOn : text.callCameraIsOff,
-        onCamera,
-        active: on);
+      context,
+      'camera',
+      on ? 'call_assets/camera_on.png' : 'call_assets/camera_off.png',
+      on ? text.callCameraIsOn : text.callCameraIsOff,
+      onCamera,
+    );
   }
 
-  /// 开启设备使用白底深色图标，关闭设备使用半透明深底，始终取 SDK 实际状态。
-  Widget _button(BuildContext context, String id, IconData? icon, String label,
-      VoidCallback? onTap,
-      {bool active = false,
-      Color? background,
-      String imagePath = '',
-      double iconSize = 40}) {
+  /// 原版实心素材自带圆底，按当前通话页的 60 像素按钮绘制。
+  Widget _button(
+    BuildContext context,
+    String id,
+    String imagePath,
+    String label,
+    VoidCallback? onTap, {
+    Color background = Colors.transparent,
+    double imageSize = 60,
+  }) {
     final colors = context.appColors;
     return ControlsButton(
-      icon: icon,
       imgUrl: imagePath,
-      iconSize: iconSize,
+      imgHeight: imageSize,
+      dimension: 60,
       tips: label,
       semanticsIdentifier: 'call.$id',
-      backgroundColor: background ??
-          (active ? colors.onScrim : colors.scrim.withValues(alpha: .3)),
-      imgColor: icon == null
-          ? null
-          : active
-              ? colors.textPrimary
-              : colors.onScrim,
+      backgroundColor: background,
       textColor: colors.onScrim,
       onTap: onTap,
     );

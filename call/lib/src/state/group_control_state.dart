@@ -91,7 +91,7 @@ class GroupControlState {
   /// 经 SDK 初始邀请人或可信交接确认的主持人。
   final String hostId;
 
-  /// 主持权限与摄像头权限只在收到可信策略后生效。
+  /// 当前主持会话是否已验证，管理权限和远端设备命令据此生效。
   final bool policyKnown;
 
   /// 当前主持策略版本，确认弹窗返回后应复核此版本。
@@ -100,7 +100,7 @@ class GroupControlState {
   /// 自行开启麦克风的权限，默认允许，保留最近收到的有效限制。
   final bool allowSelfUnmute;
 
-  /// 自行开启摄像头权限，不代表当前摄像头已开。
+  /// 自行开启摄像头的权限，默认允许，保留最近收到的有效限制。
   final bool allowVideo;
 
   /// 当前全员静音策略，决定新入会默认麦克风状态。
@@ -137,6 +137,6 @@ class GroupControlState {
   /// 主持可自行开麦，普通成员按当前开麦权限执行，不等待策略同步。
   bool get canOpenMicrophone => canManage || allowSelfUnmute;
 
-  /// 摄像头权限与设备实际状态分离，UI 应另读 cameraOn。
-  bool get canOpenCamera => policyKnown && (canManage || allowVideo);
+  /// 成员可在策略同步前自行开启摄像头，实际采集状态由 cameraOn 提供。
+  bool get canOpenCamera => canManage || allowVideo;
 }

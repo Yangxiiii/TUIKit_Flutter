@@ -14,13 +14,10 @@ String groupControlOutcomeText(GroupControlOutcome outcome) =>
       GroupControlStatus.failed => outcome.error ?? '设备执行失败',
     };
 
-/// 显示对应设备的失败；未同步时仍可开麦，仅摄像头需要提示等待。
+/// 显示对应设备的失败，等待策略同步时成员仍可自行开启设备。
 String? groupDeviceHint(
     GroupControlState? state, String userId, GroupControlDevice device) {
-  if (state == null ||
-      (!state.policyKnown && device == GroupControlDevice.camera)) {
-    return '会控权限尚未同步，暂不可开启设备';
-  }
+  if (state == null) return null;
   final result = state.resultsByDevice[(userId, device)];
   return result != null && !result.success ? groupControlOutcomeText(result) : null;
 }

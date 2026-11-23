@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'package:tencent_calls_uikit/src/common/constants.dart';
 import 'package:tencent_cloud_uikit_core/tencent_cloud_uikit_core.dart';
 import 'package:tencent_rtc_sdk/trtc_cloud.dart';
+import 'package:tuikit_atomic_x/atomicx.dart';
 import 'key_metrics.dart';
 
+/// 记录通话 SDK 的使用事件，使用实际登录的应用标识归属指标。
 class TRTCMetricsChannel {
   final String _tag = "TRTCMetrics";
 
@@ -28,12 +30,15 @@ class TRTCMetricsChannel {
     await _flushMetrics();
   }
 
+  /// 将已记录的事件归到当前登录的 SDK 应用。
   Future<void> _flushMetrics() async {
     try {
       final trtcCloud = await TRTCCloud.sharedInstance();
 
+      // 宿主独立管理 IM 时应用标识由 LoginStore 提供，保留联合登录的旧来源。
+      final sdkAppId = LoginStore.shared.sdkAppID;
       final paramsJson = {
-        "sdkAppId": TUILogin.instance.sdkAppId,
+        "sdkAppId": sdkAppId > 0 ? sdkAppId : TUILogin.instance.sdkAppId,
         "report": "report",
       };
 

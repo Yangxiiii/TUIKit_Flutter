@@ -97,12 +97,13 @@ void main() {
     expect(calls, 1);
   });
 
-  test('计时保留累计分钟与输入下界', () {
+  test('计时满一小时显示时分秒，挂断回调迟到时保持上限', () {
     const timer = TimerWidget();
     expect(timer.formatDuration(-1), '00:00');
-    expect(timer.formatDuration(3), '00:03');
-    expect(timer.formatDuration(599), '09:59');
-    expect(timer.formatDuration(3600), '60:00');
-    expect(timer.formatDuration(3600, showHours: true), '01:00:00');
+    expect(timer.formatDuration(5), '00:05');
+    expect(timer.formatDuration(930), '15:30');
+    expect(timer.formatDuration(3599), '59:59');
+    expect(timer.formatDuration(3600), '1:00:00');
+    expect(timer.formatDuration(3601), '1:00:00');
   });
 }

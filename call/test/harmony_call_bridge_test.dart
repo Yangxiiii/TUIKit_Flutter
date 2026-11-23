@@ -11,6 +11,33 @@ import 'package:tuikit_atomic_x/base_component/utils/tui_event_bus.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('独立通话登录失败和退出均不改变 Flutter 聊天 Store', () async {
+    const channel = MethodChannel('harmony_isolated_call_test');
+    final events = <String>[];
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      events.add(call.method);
+      if (call.method == 'harmonyLogin') {
+        throw PlatformException(code: 'LOGIN_FAILED');
+      }
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final kit = TUICallKitImpl(
+      harmonyBridge: HarmonyCallBridge(
+        _TestLogger(),
+        guard: ActionGuard(),
+        chatLoginStore: _ChatLoginStore(events),
+        channel: channel,
+      ),
+    );
+
+    expect((await kit.loginCallOnly(123, 'self', 'sig')).isSuccess, isFalse);
+    await kit.logoutCallOnly();
+    expect(events, ['harmonyLogin', 'harmonyLogout']);
+  });
+
   test('CallKit 的鸿蒙入口复用聊天登录、群呼结果和真实场次', () async {
     const channel = MethodChannel('harmony_public_callkit_test');
     final events = <String>[];
