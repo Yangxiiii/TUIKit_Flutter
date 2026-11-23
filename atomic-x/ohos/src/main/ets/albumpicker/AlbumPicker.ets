@@ -1,6 +1,8 @@
 import {
+  AbilityPluginBinding,
   EventChannel,
   EventSink,
+  FlutterManager,
   FlutterPluginBinding,
   MethodCall,
   MethodCallHandler,
@@ -8,39 +10,65 @@ import {
   MethodResult,
   StreamHandler,
 } from '@ohos/flutter_ohos';
-import { common } from '@kit.AbilityKit';
-import AlbumPickerHelper, { AlbumPickResult } from './AlbumPickerHelper';
+import { UIAbility } from '@kit.AbilityKit';
+import { ComponentContent, PromptAction, window } from '@kit.ArkUI';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
+import { AlbumPickMode } from './AlbumPickerHelper';
+import { AlbumPickerOutput, AlbumPickerSelection } from './AlbumPickerOutput';
+import { AlbumPickerView } from './AlbumPickerView';
 
-/**
- * OHOS 端 album_picker channel bridge。
- * Dart 契约(见 album_picker_platform.dart):
- *   MethodChannel : 'atomic_x/album_picker'
- *     - pickMedia({ sessionId, pickMode, maxCount, ...theme/style 忽略 })
- *   EventChannel  : 'atomic_x/album_picker_events'
- *     - onPickConfirm     { sessionId, pickedAlbumMedias: [AlbumMedia], textMessage? }
- *     - onMediaProcessing { sessionId, data: AlbumMedia, progress, error }
- *     - onMediaProcessed  { sessionId }
- *     - onCancel          { sessionId }
- *
- * ⚠ Dart 上层 AlbumPickerMediaSendManager 是"两阶段发送"模型:
- *   1) onPickConfirm     -> 只创建黑图占位符消息(status=sending) 供 UI 立刻回显
- *   2) onMediaProcessing (progress==1.0) -> 移除占位符 & 真正发出图片/视频消息
- *   3) onMediaProcessed  -> cleanup session
- * 所以 onMediaProcessing 事件 MUST 触发,否则消息永远卡在 sending 状态。
- *
- * 鸿蒙 photoAccessHelper 拿到的是最终媒体文件,不做转码/压缩,
- * 因此为每一个已拷贝到沙盒的媒体直接 emit 一次 processing 100%,信息流:
- *   picker.select() -> 有结果 -> emit onPickConfirm
- *                                  -> for each media: emit onMediaProcessing(progress=1.0)
- *                                  -> emit onMediaProcessed
- *                    -> 空结果 -> emit onCancel
- */
+interface AlbumPickerDialogOptions {
+  /// 媒体范围同时限制网格和相册列表。
+  mediaType: photoAccessHelper.PhotoViewMIMETypes;
+  /// 宿主允许的单次选择上限。
+  maxCount: number;
+  /// 是否展示拍摄入口，具体权限由系统组件处理。
+  showsCameraItem: boolean;
+  /// 宿主传入的选中色，缺省时由相册采用默认值。
+  primaryColor: string | undefined;
+  /// 主窗口沉浸布局的系统栏避让尺寸，单位为 vp。
+  systemInsets: Padding;
+  /// 导出完成后关闭相册并移交沙盒文件。
+  onConfirm: (selection: AlbumPickerSelection[]) => void;
+  /// 关闭相册并释放 Dart 选择会话。
+  onCancel: () => void;
+}
 
-/** onPickConfirm/onMediaProcessing 之间共享的 media 视图(id 必须一致)。 */
+@Builder
+function buildAlbumPicker(options: AlbumPickerDialogOptions) {
+  // Flutter 主窗口铺到系统栏下方，相册标题和底栏在可点击区域内布局。
+  Column() {
+    AlbumPickerView({
+      mediaType: options.mediaType,
+      maxCount: options.maxCount,
+      showsCameraItem: options.showsCameraItem,
+      primaryColor: options.primaryColor ?? '#0370ED',
+      onConfirm: options.onConfirm,
+      onCancel: options.onCancel,
+    })
+  }.width('100%').height('100%').padding(options.systemInsets)
+}
+
+interface AlbumPickerSession {
+  /// 与 Dart 回调关联，在弹层关闭前独占当前窗口的相册入口。
+  id: string;
+  prompt: PromptAction;
+  content: ComponentContent<AlbumPickerDialogOptions>;
+  /// Dart 请求原件资料时才在媒体事件中附带文件名和大小。
+  includeSourceMetadata: boolean;
+  /// 关闭过程中拒绝同一窗口重复打开或重复确认。
+  closing: boolean;
+  /// 仅在确认后暂存导出结果，弹层退出后才交给调用方。
+  selection?: AlbumPickerSelection[];
+}
+
+/// 同一媒体在选择确认和处理完成事件中使用相同的标识。
 interface MediaWithId {
   id: number;
-  item: AlbumPickResult;
+  selection: AlbumPickerSelection;
 }
+
+/// 在 Flutter 主窗口展示鸿蒙相册，把确认、导出完成或取消交还给发起选择的 Dart 会话。
 export default class AlbumPicker implements MethodCallHandler, StreamHandler {
   private static readonly TAG = 'AtomicX.AlbumPicker';
   private static readonly METHOD_CHANNEL_NAME = 'atomic_x/album_picker';
@@ -49,19 +77,11 @@ export default class AlbumPicker implements MethodCallHandler, StreamHandler {
   private methodChannel: MethodChannel | null = null;
   private eventChannel: EventChannel | null = null;
   private eventSink: EventSink | null = null;
-  /**
-   * 应用沙盒缓存目录绝对路径,onAttachedToEngine 里从 ApplicationContext 拿。
-   * 参考 file_picker,选中的媒体必须先拷贝到本沙盒才能被 IMSDK FFI 读取。
-   */
-  private cacheDir: string | null = null;
-  /**
-   * ApplicationContext,photoAccessHelper.getPhotoAccessHelper() 用。
-   * 从这个 context 拿 asset(duration/orientation/thumbnail),纯视频 metadata 快路径,
-   * 详见 AlbumPickerHelper.resolveVideoMetadataFromAsset 注释。
-   */
-  private appContext: common.Context | null = null;
-
-  // 单调递增,给 pickedAlbumMedias.id 用
+  /// 当前 Flutter 宿主的 Ability，绑定期间用于定位自己的主窗口。
+  private ability: UIAbility | null = null;
+  /// 当前占用主窗口的选择会话，系统关闭弹层后释放。
+  private activePicker: AlbumPickerSession | null = null;
+  /// 按确认顺序递增的事件标识，供 Dart 将进度关联到确认时的媒体。
   private mediaIdCounter: number = 0;
 
   constructor(binding: FlutterPluginBinding) {
@@ -69,12 +89,23 @@ export default class AlbumPicker implements MethodCallHandler, StreamHandler {
     this.methodChannel.setMethodCallHandler(this);
     this.eventChannel = new EventChannel(binding.getBinaryMessenger(), AlbumPicker.EVENT_CHANNEL_NAME);
     this.eventChannel.setStreamHandler(this);
-    try {
-      const appCtx = binding.getApplicationContext();
-      this.cacheDir = appCtx.cacheDir;
-      this.appContext = appCtx;
-    } catch (e) {
-      console.warn(`${AlbumPicker.TAG} read applicationContext failed`, (e as Error).message);
+  }
+
+  /// 记录所属 Flutter 窗口，避免使用通知或通话浮窗的 UIContext。
+  onAttachedToAbility(binding: AbilityPluginBinding): void {
+    this.ability = binding.getAbility();
+  }
+
+  /// 宿主窗口退出时收起相册并放弃尚未交付的文件。
+  onDetachedFromAbility(): void {
+    this.ability = null;
+    const session = this.activePicker;
+    if (session !== null) {
+      if (session.selection !== undefined) {
+        void AlbumPickerOutput.discard(session.selection);
+        session.selection = undefined;
+      }
+      this.closePicker(session.id);
     }
   }
 
@@ -96,73 +127,150 @@ export default class AlbumPicker implements MethodCallHandler, StreamHandler {
     result.notImplemented();
   }
 
+  /// 方法调用只回执启动请求，确认或取消均经事件通道交付。
   private handlePickMedia(call: MethodCall, result: MethodResult): void {
     const sessionId = call.argument('sessionId') as string | null;
-    if (sessionId === null || sessionId === undefined) {
+    if (typeof sessionId !== 'string' || sessionId.length === 0) {
       result.error('INVALID_ARGUMENT', 'sessionId is required', null);
       return;
     }
-    // Dart 侧 pickMode = AlbumPickerMediaFilter.index (imageOnly=0/videoOnly=1/imageAndVideo=2)
-    const pickModeRaw = call.argument('pickMode') as number | null;
-    const pickMode = (pickModeRaw === null || pickModeRaw === undefined) ? 2 : pickModeRaw;
-    const maxCountRaw = call.argument('maxCount') as number | null;
-    const maxCount = (maxCountRaw === null || maxCountRaw === undefined) ? 1 : maxCountRaw;
-
-    // Dart 侧希望 pickMedia 立刻返回 void,结果通过 EventChannel 推回
     result.success(null);
+    void this.openPicker(call, sessionId);
+  }
 
-    AlbumPickerHelper.pickMedia(pickMode, maxCount, this.cacheDir, this.appContext).then((items: AlbumPickResult[]) => {
-      if (items.length === 0) {
-        this.emitCancel(sessionId);
-        return;
-      }
-      // 先给每个 item 分配 id — pickConfirm 和 onMediaProcessing 必须共享同一 id,
-      // Dart 侧 mediaStates 是按 media.id 索引 placeholder 的。
-      const medias: MediaWithId[] = items.map((it: AlbumPickResult) => {
-        const m: MediaWithId = { id: ++this.mediaIdCounter, item: it };
-        return m;
-      });
-      this.emitPickConfirm(sessionId, medias);
-      // 鸿蒙不做转码,拷贝到沙盒的一刻就是"处理完成",直接报 progress=1.0
-      // 触发 Dart 侧 _handleImageProcessing / _handleVideoProcessing 发真实消息
-      for (const m of medias) {
-        this.emitMediaProcessing(sessionId, m, 1.0, false);
-      }
-      this.emitProcessed(sessionId);
-    }).catch((e: Error) => {
-      console.error(`${AlbumPicker.TAG} pickMedia failed`, e.message);
+  /// 在主窗口的安全区内挂载原生图库，保持当前 Flutter 路由和聊天草稿。
+  private async openPicker(call: MethodCall, sessionId: string): Promise<void> {
+    const ability = this.ability;
+    if (ability === null || this.activePicker !== null) {
+      // 并发请求或宿主尚未绑定时结束本次会话，避免 Dart 等待一个没有界面的选择。
       this.emitCancel(sessionId);
+      return;
+    }
+
+    let session: AlbumPickerSession | undefined;
+    try {
+      const hostWindow = FlutterManager.getInstance().getWindowStage(ability).getMainWindowSync();
+      const context = hostWindow.getUIContext();
+      const prompt = context.getPromptAction();
+      const pickMode = call.argument('pickMode') as number | null;
+      const primaryColor = call.argument('primaryColor') as string | null;
+      const bars = hostWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
+      const indicator = hostWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR);
+      const options: AlbumPickerDialogOptions = {
+        mediaType: pickMode === AlbumPickMode.IMAGE ? photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE :
+          (pickMode === AlbumPickMode.VIDEO ? photoAccessHelper.PhotoViewMIMETypes.VIDEO_TYPE :
+            photoAccessHelper.PhotoViewMIMETypes.IMAGE_VIDEO_TYPE),
+        maxCount: (call.argument('maxCount') as number | null) ?? 1,
+        showsCameraItem: call.argument('showsCameraItem') === true,
+        // Dart 传入 0xAARRGGBB，ArkUI 使用带井号的颜色字符串。
+        primaryColor: typeof primaryColor === 'string' && /^0x[\da-f]{8}$/i.test(primaryColor) ?
+          `#${primaryColor.slice(2)}` : undefined,
+        systemInsets: {
+          top: context.px2vp(bars.topRect.height),
+          bottom: context.px2vp(Math.max(bars.bottomRect.height, indicator.bottomRect.height)),
+        },
+        onConfirm: (selection: AlbumPickerSelection[]) => this.closePicker(sessionId, selection),
+        onCancel: () => this.closePicker(sessionId),
+      };
+      const content = new ComponentContent(context, wrapBuilder(buildAlbumPicker), options);
+      const picker: AlbumPickerSession = {
+        id: sessionId,
+        prompt,
+        content,
+        includeSourceMetadata: call.argument('includeSourceMetadata') === true,
+        closing: false,
+      };
+      session = picker;
+      this.activePicker = picker;
+      // 系统返回和主动关闭走同一个退出回调，确认结果在退出后再触发发送流程。
+      await prompt.openCustomDialog(content, {
+        alignment: DialogAlignment.Center,
+        autoCancel: false,
+        maskColor: Color.Transparent,
+        onDidDisappear: () => this.finishPicker(picker),
+      });
+    } catch (_) {
+      console.error(`${AlbumPicker.TAG} 无法打开相册`);
+      if (session !== undefined) {
+        this.finishPicker(session, false);
+      } else {
+        this.emitCancel(sessionId);
+      }
+    }
+  }
+
+  /// 仅由当前弹层接受确认；已失去归属的结果立即回收。
+  private closePicker(sessionId: string, selection?: AlbumPickerSelection[]): void {
+    const session = this.activePicker;
+    if (session === null || session.id !== sessionId || session.closing) {
+      if (selection !== undefined) {
+        void AlbumPickerOutput.discard(selection);
+      }
+      return;
+    }
+    session.closing = true;
+    session.selection = selection;
+    void session.prompt.closeCustomDialog(session.content).catch(() => {
+      console.error(`${AlbumPicker.TAG} 无法关闭相册`);
+      this.finishPicker(session, false);
     });
   }
 
-  /** 构造单个 AlbumMedia payload,pickConfirm/mediaProcessing 都用这个函数保证字段一致。 */
-  private buildMediaPayload(m: MediaWithId): Record<string, ESObject> {
-    // 视频的 duration/thumbnail 由 AlbumPickerHelper 用双路径提取:
-    // 首选 photoAccessHelper.asset(方向永远正确),兜底 AVMetadataExtractor(swap 存储宽高)。
-    // 图片恒为 0/空串。
-    const thumb = m.item.videoThumbnailPath;
+  /// 释放原生组件后结束会话，确认和处理事件按 Dart 创建与替换占位的顺序送达。
+  private finishPicker(session: AlbumPickerSession, deliver: boolean = true): void {
+    if (this.activePicker !== session) {
+      return;
+    }
+    this.activePicker = null;
+    session.content.dispose();
+    const selection = session.selection;
+    if (selection === undefined || selection.length === 0 || this.eventSink === null || !deliver) {
+      if (selection !== undefined) {
+        void AlbumPickerOutput.discard(selection);
+      }
+      this.emitCancel(session.id);
+      return;
+    }
+
+    // 此时文件已在沙盒内可读，同一快照用于确认和每个媒体的完成事件。
+    const medias = selection.map((item: AlbumPickerSelection): MediaWithId =>
+      ({ id: ++this.mediaIdCounter, selection: item }));
+    this.emitPickConfirm(session.id, medias, session.includeSourceMetadata);
+    for (const m of medias) {
+      this.emitMediaProcessing(session.id, m, session.includeSourceMetadata);
+    }
+    this.emitProcessed(session.id);
+  }
+
+  /// 确认和逐项完成共用媒体映射，确保路径、原图状态、大小和标识一致。
+  private buildMediaPayload(m: MediaWithId, includeSourceMetadata: boolean): Record<string, ESObject> {
+    const item = m.selection.media;
+    const thumb = item.videoThumbnailPath;
     const payload: Record<string, ESObject> = {
       'id': m.id,
-      'uri': m.item.filePath,
-      'mediaType': m.item.mediaTypeIndex,
-      'mediaPath': m.item.filePath,
-      'fileExtension': m.item.extension,
-      'fileSize': m.item.fileSize,
-      // 鸿蒙选择器直接复制原件，不经过腾讯相册压缩。
-      'isOriginal': true,
-      'videoThumbnailPath': (thumb !== undefined && thumb.length > 0) ? thumb : null,
-      'duration': m.item.durationMs,
+      'uri': item.filePath,
+      'mediaType': item.mediaTypeIndex,
+      'mediaPath': item.filePath,
+      'fileExtension': item.extension,
+      'fileSize': item.fileSize,
+      'isOriginal': m.selection.isOriginal,
+      'videoThumbnailPath': thumb.length > 0 ? thumb : null,
+      'duration': item.durationMs,
     };
+    if (includeSourceMetadata && m.selection.sourceName !== undefined) {
+      payload['sourceFileName'] = m.selection.sourceName;
+      payload['sourceFileSize'] = m.selection.sourceSize;
+    }
     return payload;
   }
 
-  private emitPickConfirm(sessionId: string, medias: MediaWithId[]): void {
+  private emitPickConfirm(sessionId: string, medias: MediaWithId[], includeSourceMetadata: boolean): void {
     const sink = this.eventSink;
     if (sink === null) {
       console.warn(`${AlbumPicker.TAG} emitPickConfirm dropped: no listener`);
       return;
     }
-    const list: Record<string, ESObject>[] = medias.map((m: MediaWithId) => this.buildMediaPayload(m));
+    const list = medias.map((m: MediaWithId) => this.buildMediaPayload(m, includeSourceMetadata));
     const payload: Record<string, ESObject> = {
       'type': 'onPickConfirm',
       'sessionId': sessionId,
@@ -172,15 +280,11 @@ export default class AlbumPicker implements MethodCallHandler, StreamHandler {
     sink.success(payload);
   }
 
-  /**
-   * emit 单个 media 的处理进度事件。
-   * Dart 侧只在 progress==1.0 && mediaPath 非空时才真正发消息、移除 placeholder。
-   */
+  /// 导出已在图库授权有效时完成，发送层收到完成事件才会替换占位并上传。
   private emitMediaProcessing(
     sessionId: string,
     m: MediaWithId,
-    progress: number,
-    error: boolean,
+    includeSourceMetadata: boolean,
   ): void {
     const sink = this.eventSink;
     if (sink === null) {
@@ -190,9 +294,9 @@ export default class AlbumPicker implements MethodCallHandler, StreamHandler {
     const payload: Record<string, ESObject> = {
       'type': 'onMediaProcessing',
       'sessionId': sessionId,
-      'data': this.buildMediaPayload(m),
-      'progress': progress,
-      'error': error,
+      'data': this.buildMediaPayload(m, includeSourceMetadata),
+      'progress': 1.0,
+      'error': false,
     };
     sink.success(payload);
   }
@@ -221,7 +325,9 @@ export default class AlbumPicker implements MethodCallHandler, StreamHandler {
     sink.success(payload);
   }
 
+  /// 引擎断开时释放未交付的选图结果和通道引用。
   dispose(): void {
+    this.onDetachedFromAbility();
     if (this.methodChannel !== null) {
       this.methodChannel.setMethodCallHandler(null);
       this.methodChannel = null;

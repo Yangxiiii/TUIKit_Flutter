@@ -1,4 +1,5 @@
 import { fileIo } from '@kit.CoreFileKit';
+import { drawing } from '@kit.ArkGraphics2D';
 import { image } from '@kit.ImageKit';
 import { AlbumImageEditCanvas } from './AlbumImageEditCanvas';
 import { AlbumImageEditGeometry as Geometry } from './AlbumImageEditGeometry';
@@ -19,9 +20,16 @@ const PEN_COLORS: Swatch[] = [
   { label: '灰色', value: '#969696' },
 ];
 
+// 保留原始图标的透明度，将各库的单色图标统一染白以适配深色工具栏。
+const TOOLBAR_ICON_FILTER = drawing.ColorFilter.createBlendModeColorFilter(
+  { alpha: 255, red: 255, green: 255, blue: 255 }, drawing.BlendMode.SRC_IN);
+
 @Extend(Button)
 function albumEditorButton() {
   .type(ButtonType.Normal)
+  .width(48)
+  .height(48)
+  .padding(0)
   .fontSize(15)
   .fontColor(Color.White)
   .backgroundColor(Color.Transparent)
@@ -37,8 +45,11 @@ export struct AlbumImageEditor {
   /// 接收保存成功的沙盒 PNG 绝对路径。
   onSave: (path: string) => void = () => {};
 
+  /// 涂鸦工具选中时显示调色板，并将单指拖动交给画笔或橡皮擦。
   @State private drawing: boolean = false;
+  /// 裁剪期间切换到独立的工具栏，应用后才将裁剪写入编辑历史。
   @State private cropping: boolean = false;
+  /// 橡皮擦只影响涂鸦，选取新颜色时恢复画笔。
   @State private eraser: boolean = false;
   @State private penColor: string = PEN_COLORS[0].value;
   @State private canUndo: boolean = false;
@@ -187,18 +198,41 @@ export struct AlbumImageEditor {
   }
 
   @Builder
+  private toolbarIcon(icon: Resource, mirrored: boolean = false) {
+    Image(icon)
+      .width(24)
+      .height(24)
+      .objectFit(ImageFit.Contain)
+      .colorFilter(TOOLBAR_ICON_FILTER)
+      .scale({ x: mirrored ? -1 : 1 })
+      .accessibilityLevel('no')
+  }
+
+  @Builder
   private header() {
     Row() {
-      Button('取消').albumEditorButton().id('atomic.album.editor.cancel')
+      Button() {
+        this.toolbarIcon($r('app.media.album_picker_ic_close'))
+      }.albumEditorButton()
+        .id('atomic.album.editor.cancel').accessibilityText('取消')
         .enabled(!this.saving).onClick(() => this.onCancel())
       Blank()
-      Button('撤销').albumEditorButton().id('atomic.album.editor.undo')
+      // iOS AlbumPickerCore 1.0.8 的历史操作图标均朝左，重做沿用撤销资源并水平镜像。
+      Button() {
+        this.toolbarIcon($r('app.media.album_picker_ic_edit_undo'))
+      }.albumEditorButton()
+        .id('atomic.album.editor.undo').accessibilityText('撤销')
+        .opacity(this.canUndo && !this.saving ? 1 : 0.4)
         .enabled(this.canUndo && !this.saving)
         .onClick(() => {
           this.session.undoEdit();
           this.refreshHistory();
         })
-      Button('重做').albumEditorButton().id('atomic.album.editor.redo')
+      Button() {
+        this.toolbarIcon($r('app.media.album_picker_ic_edit_undo'), true)
+      }.albumEditorButton()
+        .id('atomic.album.editor.redo').accessibilityText('重做')
+        .opacity(this.canRedo && !this.saving ? 1 : 0.4)
         .enabled(this.canRedo && !this.saving)
         .onClick(() => {
           this.session.redoEdit();
@@ -233,8 +267,12 @@ export struct AlbumImageEditor {
   @Builder
   private palette() {
     Row() {
-      Button('橡皮擦').albumEditorButton().id('atomic.album.editor.eraser')
-        .fontColor(this.eraser ? '#79AEFF' : Color.White)
+      Button() {
+        this.toolbarIcon($r('app.media.album_picker_ic_edit_eraser'))
+      }.albumEditorButton()
+        .id('atomic.album.editor.eraser').accessibilityText('橡皮擦')
+        .accessibilitySelected(this.eraser)
+        .backgroundColor(this.eraser ? '#4079AEFF' : Color.Transparent)
         .enabled(!this.saving).onClick(() => { this.eraser = !this.eraser; })
       Scroll() {
         Row({ space: 12 }) {
@@ -261,16 +299,27 @@ export struct AlbumImageEditor {
   @Builder
   private editorActions() {
     Row() {
-      Button('涂鸦').albumEditorButton().id('atomic.album.editor.draw')
-        .fontColor(this.drawing ? '#79AEFF' : Color.White)
+      // 编辑工具沿用 Android AlbumPickerCore 1.0.0.9 的同名 drawable。
+      Button() {
+        this.toolbarIcon($r('app.media.album_picker_ic_edit_graffiti'))
+      }.albumEditorButton()
+        .id('atomic.album.editor.draw').accessibilityText('涂鸦')
+        .accessibilitySelected(this.drawing)
+        .backgroundColor(this.drawing ? '#4079AEFF' : Color.Transparent)
+        .opacity(this.ready && !this.saving ? 1 : 0.4)
         .enabled(this.ready && !this.saving).onClick(() => { this.drawing = !this.drawing; })
-      Button('裁剪').albumEditorButton().id('atomic.album.editor.crop')
+      Button() {
+        this.toolbarIcon($r('app.media.album_picker_ic_edit_crop'))
+      }.albumEditorButton()
+        .id('atomic.album.editor.crop').accessibilityText('裁剪')
+        .opacity(this.ready && !this.saving ? 1 : 0.4)
         .enabled(this.ready && !this.saving).onClick(() => {
           this.cropping = true;
           this.session.beginCrop();
           this.paint();
         })
       Blank()
+      // 保存整张图片时保留文字，以便显示正在写入文件的状态。
       Button(this.saving ? '保存中…' : '完成')
         .id('atomic.album.editor.save')
         .type(ButtonType.Normal)
@@ -286,14 +335,21 @@ export struct AlbumImageEditor {
   @Builder
   private cropActions() {
     Row() {
-      Button('取消').albumEditorButton().id('atomic.album.editor.crop.cancel')
+      // 左侧退出本次裁剪，中间工具只修改待应用的取景结果。
+      Button() {
+        this.toolbarIcon($r('app.media.album_picker_ic_close'))
+      }.albumEditorButton()
+        .id('atomic.album.editor.crop.cancel').accessibilityText('取消裁剪')
         .onClick(() => {
           this.session.endCrop(false);
           this.cropping = false;
           this.paint();
         })
       Blank()
-      Button('旋转').albumEditorButton().id('atomic.album.editor.crop.rotate')
+      Button() {
+        this.toolbarIcon($r('app.media.album_picker_ic_edit_rotate'))
+      }.albumEditorButton()
+        .id('atomic.album.editor.crop.rotate').accessibilityText('旋转')
         .onClick(() => {
           this.session.rotateCrop();
           this.paint();
@@ -304,7 +360,11 @@ export struct AlbumImageEditor {
           this.paint();
         })
       Blank()
-      Button('应用').albumEditorButton().id('atomic.album.editor.crop.apply')
+      // 对勾提交本次裁剪，保存文件仍由编辑页的完成按钮触发。
+      Button() {
+        this.toolbarIcon($r('app.media.album_picker_ic_done'))
+      }.albumEditorButton()
+        .id('atomic.album.editor.crop.apply').accessibilityText('应用裁剪')
         .onClick(() => {
           this.session.endCrop(true);
           this.cropping = false;

@@ -69,6 +69,7 @@ class AlbumPickerHandler: NSObject {
         presenter.present(controller, animated: true)
     }
 
+    /// 读取本次入口的相册和导出选项，已有选择会话先完成清理。
     func handlePickMedia(call: FlutterMethodCall, result: @escaping FlutterResult) {
         print("[AlbumPickerHandler] handlePickMedia called")
 
@@ -97,8 +98,23 @@ class AlbumPickerHandler: NSObject {
 
     // MARK: - Argument Parsing
 
+    /// 在初始化选择器前解析 PhotoKit 类型，仅在省略新参数时兼容旧开关。
+    private func parseInitialAlbumSubtype(from args: [String: Any]) -> PHAssetCollectionSubtype? {
+        switch args["iosInitialAlbum"] {
+        case let name as String where name == "smartAlbumRecentlyAdded":
+            return .smartAlbumRecentlyAdded
+        case nil:
+            return (args["preferRecentAlbum"] as? Bool == true) ? .smartAlbumRecentlyAdded : nil
+        default:
+            // 无法识别的类型由 SDK 决定默认相册。
+            return nil
+        }
+    }
+
+    /// 将平台通道参数转换为选择器配置，缺省项继续使用选择器默认值。
     private func buildConfig(from args: [String: Any]) -> AlbumPickerConfig {
         var config = AlbumPickerConfig()
+        config.initialAlbumSubtype = parseInitialAlbumSubtype(from: args)
 
         if let pickModeInt = args["pickMode"] as? Int {
             switch pickModeInt {
@@ -154,6 +170,7 @@ class AlbumPickerHandler: NSObject {
 
     // MARK: - Presentation
 
+    /// 在主线程初始化带本次相册配置的选择器，再呈现全屏宿主。
     private func presentAlbumPicker(config: AlbumPickerConfig, theme: AlbumPickerTheme, sessionId: String,
                                     includeSourceMetadata: Bool) {
         print("[AlbumPickerHandler] presentAlbumPicker sessionId=\(sessionId)")
@@ -185,10 +202,8 @@ class AlbumPickerHandler: NSObject {
             )
             self.delegateProxies[sessionId] = proxy
             albumPickerView.delegate = proxy
-            proxy.pickerView = albumPickerView
 
             albumPickerView.initialize(config: config, theme: theme)
-
             let hostVC = AlbumPickerHostViewController(albumPickerView: albumPickerView)
             hostVC.modalPresentationStyle = .fullScreen
             viewController.present(hostVC, animated: true)
@@ -410,9 +425,6 @@ class AlbumPickerHandler: NSObject {
 class AlbumPickerDelegateProxy: NSObject, AlbumPickerDelegate {
     let sessionId: String
     private weak var handler: AlbumPickerHandler?
-    /// 仅在确认时访问原选择界面，不延长其生命周期。
-    weak var pickerView: AlbumPickerView?
-
     private let serialQueue: DispatchQueue
     /// 只有聊天分流需要查询原件，其他入口沿用原有回调。
     private let includeSourceMetadata: Bool
@@ -423,19 +435,6 @@ class AlbumPickerDelegateProxy: NSObject, AlbumPickerDelegate {
         self.serialQueue = DispatchQueue(label: "com.albumpicker.event-queue.\(sessionId)", qos: .userInitiated)
         self.includeSourceMetadata = includeSourceMetadata
         super.init()
-    }
-
-    /// 腾讯当前回调未公开勾选状态；按 Store 类型读取，结构变更时回退到导出大小。
-    private func isSendingOriginal() -> Bool {
-        guard let picker = pickerView else { return false }
-        for view in picker.subviews {
-            for field in Mirror(reflecting: view).children {
-                if let store = field.value as? AlbumPickerStore {
-                    return store.state.isOriginalSelected
-                }
-            }
-        }
-        return false
     }
 
     /// 并行读取本地照片资料；云端原件或超时不阻塞相册导出。
@@ -472,9 +471,10 @@ class AlbumPickerDelegateProxy: NSObject, AlbumPickerDelegate {
         return metadata
     }
 
+    /// 读取选择器确认时记录的原图状态，并在导出前回传分流所需的资料。
     func onPickConfirm(pickedAlbumMedias: [AlbumMedia], textMessage: String?) {
         print("[AlbumPickerHandler] onPickConfirm: \(pickedAlbumMedias.count) items, sessionId=\(sessionId)")
-        let original = includeSourceMetadata && isSendingOriginal()
+        let original = includeSourceMetadata && pickedAlbumMedias.first?.isOriginal == true
 
         DispatchQueue.main.async { [weak handler] in
             handler?.viewController?.dismiss(animated: true)
@@ -567,6 +567,7 @@ class AlbumPickerDelegateProxy: NSObject, AlbumPickerDelegate {
 
 // MARK: - AlbumPickerHostViewController
 
+/// 全屏承载已按入口参数初始化的原生相册选择器。
 private class AlbumPickerHostViewController: UIViewController {
     private let albumPickerView: AlbumPickerView
 

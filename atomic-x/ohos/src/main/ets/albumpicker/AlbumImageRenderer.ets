@@ -30,14 +30,15 @@ export interface EditorCrop {
   height: number;
 }
 
-/// 将本地授权图片解码为可编辑位图，按相册编辑坐标渲染独立副本。
+/// 解码本地授权图片供编辑和压缩使用，并按相册编辑坐标渲染独立副本。
 export class AlbumImageRenderer {
   /// 限制长边像素和总像素，避免高分辨率照片的画布和临时位图同时占用过多内存。
   private static readonly MAX_EDGE = 4096;
   private static readonly MAX_PIXELS = 12000000;
 
-  /// 读取沙盒路径或图库选中项授予的 URI。调用方负责释放返回的位图。
-  static async load(path: string): Promise<image.PixelMap> {
+  /// 将沙盒路径或已授权 URI 解码为正向位图。指定正整数短边上限时按发送档位缩放，
+  /// 其余情况使用画布的内存限制。调用方负责释放返回的位图。
+  static async load(path: string, maxShortEdge?: number): Promise<image.PixelMap> {
     let file: fileIo.File | undefined;
     let source: image.ImageSource | undefined;
     let bitmap: image.PixelMap | undefined;
@@ -48,13 +49,13 @@ export class AlbumImageRenderer {
       const info = await source.getImageInfo();
       const width = info.size.width;
       const height = info.size.height;
-      if (!(width > 0 && height > 0)) {
+      if (!(width > 0 && height > 0) ||
+        (maxShortEdge !== undefined && (!Number.isInteger(maxShortEdge) || maxShortEdge <= 0))) {
         throw new Error('图片尺寸无效');
       }
-      const scale = Math.min(1, AlbumImageRenderer.MAX_EDGE / Math.max(width, height),
-        Math.sqrt(AlbumImageRenderer.MAX_PIXELS / (width * height)));
+      const desiredSize = AlbumImageRenderer.decodingSize(width, height, maxShortEdge);
       const options: image.DecodingOptions = {
-        desiredSize: { width: Math.max(1, Math.floor(width * scale)), height: Math.max(1, Math.floor(height * scale)) },
+        desiredSize,
         editable: true,
         desiredDynamicRange: image.DecodingDynamicRange.SDR,
       };
@@ -73,6 +74,21 @@ export class AlbumImageRenderer {
         await fileIo.close(file).catch(() => {});
       }
     }
+  }
+
+  /// 发送按短边等比缩小且不放大，编辑按长边和总像素限制画布的内存占用。
+  private static decodingSize(width: number, height: number, maxShortEdge?: number): image.Size {
+    if (maxShortEdge !== undefined) {
+      const shortEdge = Math.min(width, height);
+      const targetShortEdge = Math.min(shortEdge, maxShortEdge);
+      return {
+        width: Math.floor(width * targetShortEdge / shortEdge),
+        height: Math.floor(height * targetShortEdge / shortEdge),
+      };
+    }
+    const scale = Math.min(1, AlbumImageRenderer.MAX_EDGE / Math.max(width, height),
+      Math.sqrt(AlbumImageRenderer.MAX_PIXELS / (width * height)));
+    return { width: Math.max(1, Math.floor(width * scale)), height: Math.max(1, Math.floor(height * scale)) };
   }
 
   /// 编辑预览与导出共用同一画法。画布原点和宽高须对应未旋转图像的位置和尺寸。

@@ -187,6 +187,8 @@ class AlbumPickerPlatform {
       onCancel: onCancel,
     );
 
+    final isIos = defaultTargetPlatform == TargetPlatform.iOS;
+    final iosInitialAlbum = config?.iosInitialAlbum;
     try {
       await _methodChannel.invokeMethod(
         'pickMedia',
@@ -206,6 +208,11 @@ class AlbumPickerPlatform {
           'maxVideoDurationInSeconds': config?.maxVideoDurationInSeconds,
           'maxOutputFileSizeInMB': config?.maxOutputFileSizeInMB,
           'includeSourceMetadata': config?.includeSourceMetadata ?? false,
+          // 显式的 iOS 相册类型优先，旧调用方仍可使用布尔参数。
+          if (isIos && iosInitialAlbum != null)
+            'iosInitialAlbum': iosInitialAlbum.name
+          else if (isIos && config?.preferRecentAlbum == true)
+            'preferRecentAlbum': true,
           'primaryColor': _convertColor(theme?.primaryColor),
           'backgroundColor': _convertColor(theme?.backgroundColor),
           'backgroundColorSecondary':

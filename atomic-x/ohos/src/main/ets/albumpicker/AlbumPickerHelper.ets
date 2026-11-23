@@ -348,17 +348,25 @@ export default class AlbumPickerHelper {
     }
   }
 
+  /// 从调用方持有的文件描述符读取视频元数据，释放提取器后仍由调用方关闭文件。
+  static async readVideoMetadata(source: media.AVFileDescriptor): Promise<media.AVMetadata> {
+    const extractor = await media.createAVMetadataExtractor();
+    try {
+      extractor.fdSrc = source;
+      return await extractor.fetchMetadata();
+    } finally {
+      await extractor.release().catch(() => {});
+    }
+  }
+
+  /// 缩略图生成失败时返回空元数据，允许调用方继续交付沙盒中的视频。
   private static async extractVideoInfo(videoPath: string): Promise<VideoInfoOut> {
     const fallback: VideoInfoOut = { durationMs: 0, width: 0, height: 0, orientation: 0 };
     let file: fs.File | null = null;
-    let extractor: media.AVMetadataExtractor | null = null;
     try {
       file = await fs.open(videoPath, fs.OpenMode.READ_ONLY);
       const stat = await fs.stat(videoPath);
-      extractor = await media.createAVMetadataExtractor();
-      const fdSrc: media.AVFileDescriptor = { fd: file.fd, offset: 0, length: stat.size };
-      extractor.fdSrc = fdSrc;
-      const meta = await extractor.fetchMetadata();
+      const meta = await AlbumPickerHelper.readVideoMetadata({ fd: file.fd, offset: 0, length: stat.size });
       return {
         durationMs: AlbumPickerHelper.parsePositiveInt(meta.duration),
         width: AlbumPickerHelper.parsePositiveInt(meta.videoWidth),
@@ -369,18 +377,11 @@ export default class AlbumPickerHelper {
       console.warn(`${AlbumPickerHelper.TAG} extractVideoInfo failed`, (e as BusinessError).message);
       return fallback;
     } finally {
-      if (extractor !== null) {
-        try {
-          await extractor.release();
-        } catch (_) {
-          // ignore
-        }
-      }
       if (file !== null) {
         try {
           await fs.close(file);
         } catch (_) {
-          // ignore
+          // 即使关闭失败，调用方也可继续使用已经取得的元数据。
         }
       }
     }

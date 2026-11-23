@@ -103,6 +103,12 @@ class AlbumMedia {
   }
 }
 
+/// iOS 原生选择器可在打开前指定的智能相册。
+enum AlbumPickerIosInitialAlbum {
+  /// 对应 PhotoKit 的「最近项目」智能相册。
+  smartAlbumRecentlyAdded,
+}
+
 /// 配置腾讯相册的选择界面和本地导出。
 class AlbumPickerConfig {
   /// 原生接收的最大正整数，将实际大小限制交给发送层。
@@ -121,6 +127,12 @@ class AlbumPickerConfig {
   /// 在选择确认事件补充原件资料，供聊天在创建占位前分流。
   final bool includeSourceMetadata;
 
+  /// iOS 打开时优先选中的相册。为空时读取 [preferRecentAlbum]。
+  final AlbumPickerIosInitialAlbum? iosInitialAlbum;
+
+  /// 兼容旧调用方，仅在 iOS 未指定 [iosInitialAlbum] 时选择「最近项目」。
+  final bool preferRecentAlbum;
+
   const AlbumPickerConfig({
     this.mediaFilter,
     this.maxSelectionCount,
@@ -132,6 +144,8 @@ class AlbumPickerConfig {
     this.maxVideoDurationInSeconds,
     this.maxOutputFileSizeInMB,
     this.includeSourceMetadata = false,
+    this.iosInitialAlbum,
+    this.preferRecentAlbum = false,
   });
 }
 
