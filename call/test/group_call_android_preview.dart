@@ -127,6 +127,7 @@ class _PreviewPageState extends State<_PreviewPage> {
           inviterId: incoming ? 'user1' : 'self',
           selfId: 'self',
           incoming: incoming,
+          showMemberOrganizations: _preview == _Preview.nineWaiting,
           video: !incoming,
           initialFocusedId: focused ? 'self' : null,
           videoBuilder: (id) => _offlineVideo(members, id),
@@ -153,8 +154,8 @@ class _PreviewPageState extends State<_PreviewPage> {
       Positioned.fill(
           child: GroupCallHeaderActions(
               incoming: incoming,
-              showMinimize: !ended,
-              showInvite: !incoming && !ended,
+              showMinimize: true,
+              showInvite: !incoming,
               inviteEnabled: true,
               onMinimize: () => _notice('离线预览：最小化通话'),
               onInvite: () => _notice('离线预览：添加成员'))),

@@ -232,7 +232,7 @@ class CallCompactVideoContent extends StatelessWidget {
   );
 }
 
-/// 绘制单聊语音小窗的卡片外壳，裁剪圆角内的画面并保留外侧阴影。
+/// 绘制语音小窗或超时小卡的外壳，裁剪圆角内的画面并保留外侧阴影。
 class CallCompactAudioSurface extends StatelessWidget {
   const CallCompactAudioSurface({super.key, required this.child});
 

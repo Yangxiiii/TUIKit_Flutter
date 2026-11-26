@@ -10,11 +10,12 @@ import 'callview/public/multi/group_call_member.dart';
 import 'callview/public/multi/group_call_scene.dart';
 import 'callview/public/multi/group_camera_capability.dart';
 
-/// 原生 SDK 当前成员的只读快照，保留值相等性以免轮询重建宫格。
+/// 原生 SDK 成员及宿主组织资料的只读快照，按值比较以免轮询重建宫格。
 typedef HarmonyGroupMember = ({
   String id,
   String name,
   String avatarUrl,
+  String organization,
   bool joined,
   bool microphone,
   bool camera,
@@ -43,6 +44,7 @@ HarmonyGroupCall? decodeHarmonyGroup(
             id: id,
             name: row['name'] as String? ?? id,
             avatarUrl: row['avatar'] as String? ?? '',
+            organization: row['organization'] as String? ?? '',
             joined: row['joined'] == true,
             microphone: row['microphone'] == true,
             camera: row['camera'] == true,
@@ -64,6 +66,7 @@ class HarmonyGroupCallView extends StatefulWidget {
   const HarmonyGroupCallView({
     super.key,
     required this.group,
+    this.inviterOrganization = '',
     this.groupId,
     required this.selfId,
     required this.duration,
@@ -80,6 +83,9 @@ class HarmonyGroupCallView extends StatefulWidget {
 
   /// 鸿蒙原生 SDK 提供的群来源和成员状态。
   final HarmonyGroupCall group;
+
+  /// 鸿蒙通话快照中已经按场次校验的发起人组织岗位。
+  final String inviterOrganization;
 
   /// 原生场次的来源群 ID，临时多人通话为空。
   final String? groupId;
@@ -139,6 +145,9 @@ class _HarmonyGroupCallViewState extends State<HarmonyGroupCallView> {
             fallback: member.name,
           ),
           avatarUrl: member.avatarUrl,
+          subtitle: member.id == widget.group.inviterId && widget.incoming
+              ? widget.inviterOrganization
+              : member.organization,
           status: member.joined
               ? GroupCallMemberStatus.joined
               : GroupCallMemberStatus.waiting,
@@ -163,6 +172,8 @@ class _HarmonyGroupCallViewState extends State<HarmonyGroupCallView> {
       inviterId: widget.group.inviterId,
       selfId: widget.selfId,
       incoming: widget.incoming,
+      showMemberOrganizations:
+          !widget.accepted && widget.group.inviterId == widget.selfId,
       video: widget.video,
       videoBuilder: (id) =>
           widget.video &&

@@ -134,6 +134,7 @@ class _CallGridWidgetState extends State<CallGridWidget> {
           !ended &&
           call.inviterId != self.id &&
           self.status == CallParticipantStatus.waiting;
+      final inviterId = snapshot?.inviterId ?? call.inviterId;
       final members = _members(context);
       final title = snapshot?.groupName.isNotEmpty == true
           ? snapshot!.groupName
@@ -159,9 +160,13 @@ class _CallGridWidgetState extends State<CallGridWidget> {
                 ),
               ),
         members: members,
-        inviterId: snapshot?.inviterId ?? call.inviterId,
+        inviterId: inviterId,
         selfId: self.id,
         incoming: incoming,
+        showMemberOrganizations:
+            !ended &&
+            inviterId == self.id &&
+            self.status == CallParticipantStatus.waiting,
         video: call.mediaType == CallMediaType.video,
         onManage: () => _management().open(),
         videoBuilder: (id) =>
@@ -226,9 +231,7 @@ class _CallGridWidgetState extends State<CallGridWidget> {
             !cameraOn,
           ),
           onSpeaker: CallManager.instance.toggleSpeaker,
-          onFlip: () => CallManager.instance.switchCamera(
-            !DeviceStore.shared.state.isFrontCamera.value,
-          ),
+          onFlip: CallManager.instance.flipCamera,
           onRetry: _retry,
         ),
       );

@@ -99,6 +99,10 @@ export class FlutterCallPresentation {
     if (this.presentationId.length === 0) return null;
     const state = CallStore.shared().state;
     const call = state.activeCall;
+    const self = state.selfInfo;
+    // SDK 状态可先于结束事件回到空闲，原生收起后立即停止投影旧场次。
+    CallStatusObserver().notify(self.status);
+    if (this.presentationId.length === 0 || ViewState().router === CallRoute.none) return null;
     // 原生回退模式下，SDK 补齐早期缺失的媒体类型后仍须交还窗口。
     if (this.usesNativeVideoWindow(ViewState().router, call.mediaType)) {
       RouterManager.showCallingView();
@@ -108,11 +112,9 @@ export class FlutterCallPresentation {
       Logger.info('Flutter call signaling identifier updated within the same presentation');
       this.observedSdkCallId = call.callId;
     }
-    const self = state.selfInfo;
     const device = DeviceStore.shared().state;
-    // 接通后沿用 SDK 状态停止原生铃声，并为时长缺失的 SDK 版本补齐本地时钟。
+    // 为接通后时长暂未更新的 SDK 版本补齐本地时钟。
     const accepted = self.status === CallParticipantStatus.accept;
-    CallStatusObserver().notify(self.status);
     if (accepted && this.connectedAt === 0) {
       this.connectedAt = Date.now() - call.duration * 1000;
       // 从系统通知接听也应进入全屏，并初始化本通话的媒体设备。
@@ -123,10 +125,15 @@ export class FlutterCallPresentation {
     }
     const group = this.isGroupCall(state);
     const targetId = call.inviterId === self.id ? call.inviteeIds[0] ?? '' : call.inviterId;
-    // 多人横幅始终展示邀请人，不能取成员列表中的任意一人。
+    // 用信令的对端标识绑定姓名和组织；只有标识尚未下发的单聊才回退到参与者列表。
     const peer = state.allParticipants.find((user: CallParticipantInfo): boolean =>
-      group ? user.id === targetId : user.id !== self.id);
+      targetId.length > 0 ? user.id === targetId : !group && user.id !== self.id);
     const peerId = peer?.id ?? targetId;
+    // Flutter 接管时没有原生子窗观察者，轮询快照也需补齐身份资料。
+    const view = ViewState();
+    view.refreshPeerOrganization(call, self, true);
+    const peerData = this.user(peer, peerId, peer?.isCameraOpened === true);
+    peerData.set('organization', view.organizationFor(self.id, call.callId, peerId));
     // 平台通道只传共享组件所需的只读值，不传登录凭证或 SDK 对象。
     const data = new Map<string, Object>();
     data.set('id', this.presentationId);
@@ -140,7 +147,7 @@ export class FlutterCallPresentation {
     data.set('selfPoor', this.isPoor(state.networkQualities.get(self.id)));
     data.set('peerPoor', this.isPoor(state.networkQualities.get(peerId)));
     data.set('self', this.user(self, self.id, device.cameraStatus === DeviceStatus.on));
-    data.set('peer', this.user(peer, peerId, peer?.isCameraOpened === true));
+    data.set('peer', peerData);
     if (group) {
       data.set('callId', call.callId);
       data.set('groupId', call.chatGroupId);
@@ -182,6 +189,7 @@ export class FlutterCallPresentation {
       const joined = member?.status === CallParticipantStatus.accept;
       const data = this.user(member, id, joined &&
         (local ? device.cameraStatus === DeviceStatus.on : member?.isCameraOpened === true));
+      data.set('organization', ViewState().organizationFor(self.id, call.callId, id));
       data.set('joined', joined);
       data.set('microphone', joined &&
         (local ? device.microphoneStatus === DeviceStatus.on : member?.isMicrophoneOpened === true));
@@ -260,11 +268,11 @@ export class FlutterCallPresentation {
         if (devices.state.cameraStatus === DeviceStatus.on) {
           devices.closeLocalCamera();
         } else if (await Permission.requestCameraInCall(this.context) && this.isCurrent(presentationId)) {
-          await devices.openLocalCamera(devices.state.isFrontCamera);
+          await devices.openLocalCamera(ViewState().isFrontCamera);
         }
         break;
       case 'flip':
-        if (devices.state.cameraStatus === DeviceStatus.on) devices.switchCamera(!devices.state.isFrontCamera);
+        if (devices.state.cameraStatus === DeviceStatus.on) ViewState().flipCamera();
         break;
     }
   }
@@ -284,7 +292,7 @@ export class FlutterCallPresentation {
     if (enabled === on) return true;
     if (camera) {
       if (enabled) {
-        await devices.openLocalCamera(devices.state.isFrontCamera);
+        await devices.openLocalCamera(ViewState().isFrontCamera);
       } else {
         devices.closeLocalCamera();
       }
@@ -318,7 +326,9 @@ export class FlutterCallPresentation {
       const devices = DeviceStore.shared();
       this.setDefaultAudioRoute(mediaType);
       await devices.openLocalMicrophone();
-      if (mediaType === CallMediaType.video && this.isCurrent(presentationId)) await devices.openLocalCamera(true);
+      if (mediaType === CallMediaType.video && this.isCurrent(presentationId)) {
+        await devices.openLocalCamera(ViewState().isFrontCamera);
+      }
     } catch (error) {
       Logger.warn('Flutter call media setup failed', error);
     }

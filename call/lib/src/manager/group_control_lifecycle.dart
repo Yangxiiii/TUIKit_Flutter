@@ -7,6 +7,7 @@ import '../control/group_control_media.dart';
 import '../control/group_control_transport.dart';
 import '../state/global_state.dart';
 import '../state/group_control_state.dart';
+import 'call_manager.dart';
 import 'group_control_controller.dart';
 
 /// 将 SDK 已接通/离开事实映射为会控入会生命周期，重入必定创建新 session。
@@ -121,6 +122,7 @@ class GroupControlLifecycle {
       joinedIds: joinedIds,
       confirm: confirmDeviceOpen,
       media: () => _media = SdkGroupControlMedia(
+        isFrontCamera: () => CallManager.instance.isFrontCamera,
         localVideoViewChanges: call.mediaType == CallMediaType.video
             ? localVideoView
             : null,

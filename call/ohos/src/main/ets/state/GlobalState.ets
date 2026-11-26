@@ -4,6 +4,7 @@ export enum CallOrientation {
   landscapeRight = 2,
 }
 
+/** 保存鸿蒙通话组件共用的显示与设备设置。 */
 @Observed
 export class GlobalStateClass {
   enableMuteMode: boolean = false;
@@ -13,10 +14,6 @@ export class GlobalStateClass {
 
   /* v1 待办事项：虚拟背景超出当前范围。 */
   enableVirtualBackground: boolean = false;
-  /** v1 TODO: atomicxcore for HarmonyOS does not yet expose enableMultiDeviceAbility. */
-
-  /* v1 待办事项：HarmonyOS 的 atomicxcore 还没有暴露 enableMultiDeviceAbility。 */
-  enableMultiDeviceAbility: boolean = false;
   orientation: CallOrientation = CallOrientation.portrait;
 }
 

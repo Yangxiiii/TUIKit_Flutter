@@ -1,10 +1,12 @@
+import 'package:app_ui/app_ui.dart';
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
 import 'package:tencent_calls_uikit/src/manager/call_manager.dart';
+import 'package:tencent_calls_uikit/src/state/global_state.dart';
 
 import '../float/call_compact_widget.dart';
 
-/// 群和临时多人统一使用 80 像素白卡，等待时提供取消或接听，接通后展示时长。
+/// 群及临时多人共用小窗，超时结果只展示状态并由外层手势恢复全屏。
 class GroupCallCompactWidget extends StatelessWidget {
   const GroupCallCompactWidget(
       {super.key,
@@ -22,9 +24,14 @@ class GroupCallCompactWidget extends StatelessWidget {
         listenable: Listenable.merge([
           CallStore.shared.state.activeCall,
           CallStore.shared.state.selfInfo,
-          CallStore.shared.state.allParticipants
+          CallStore.shared.state.allParticipants,
+          GlobalState.instance.groupCall,
         ]),
         builder: (context, _) {
+          final result = GlobalState.instance.groupCall.value;
+          if (result case final timeout? when timeout.canRetry) {
+            return _buildTimeoutCard(context, timeout);
+          }
           final state = CallStore.shared.state;
           final call = state.activeCall.value;
           final self = state.selfInfo.value;
@@ -43,6 +50,37 @@ class GroupCallCompactWidget extends StatelessWidget {
               onWaitingAction: () => _waitingAction(call.callId));
         },
       );
+
+  /// 已结束的 SDK 通话不再显示等待动画、接听按钮或计时。
+  Widget _buildTimeoutCard(BuildContext context, GroupCallSnapshot result) {
+    final caller = result.members
+        .where((member) => member.id == result.inviterId)
+        .firstOrNull;
+    final name = AppUserAvatarScope.personName(
+      context,
+      result.inviterId,
+      fallback: caller?.name,
+      groupId: result.groupId,
+    );
+    return CallCompactAudioSurface(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          AppUserAvatar(
+            userId: result.inviterId,
+            name: name,
+            url: caller?.avatarURL,
+            size: 36,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '呼叫超时',
+            style: TextStyle(fontSize: 12, color: context.appColors.textPrimary),
+          ),
+        ],
+      ),
+    );
+  }
 
   /// 操作前后都复核原浮层；已接通状态不再执行等待按钮动作。
   Future<void> _waitingAction(String callId) async {

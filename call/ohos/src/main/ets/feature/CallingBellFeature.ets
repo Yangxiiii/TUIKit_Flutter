@@ -32,6 +32,7 @@ enum BellKind {
   hangup,
 }
 
+/** 随本机通话状态播放和停止拨号音、来电铃声及挂断音。 */
 export class CallingBellFeature {
   private static instance: CallingBellFeature | null = null;
   private context: common.Context | null = null;
@@ -41,6 +42,8 @@ export class CallingBellFeature {
   private customRingPath: string = '';
   private pendingRing: boolean = false;
   private appStateUnsubscribe: (() => void) | null = null;
+  /** 停止或重新播放时废弃旧的播放器创建、文件读取及状态回调。 */
+  private playbackGeneration: number = 0;
 
   static shared(): CallingBellFeature {
     if (!CallingBellFeature.instance) {
@@ -164,12 +167,14 @@ export class CallingBellFeature {
     }
   }
 
+  /** 只允许仍有效的播放请求启动铃声，已停止的请求会释放迟到的播放器。 */
   private async startBell(kind: BellKind, loop: boolean): Promise<void> {
     if (!this.context) {
       Logger.warn('CallingBellFeature.startBell: context not initialized');
       return;
     }
     this.releasePlayer();
+    const generation = this.playbackGeneration;
     this.currentKind = kind;
     this.looping = loop;
 
@@ -189,12 +194,19 @@ export class CallingBellFeature {
 
     try {
       const player = await media.createAVPlayer();
+      if (generation !== this.playbackGeneration) {
+        await player.release();
+        return;
+      }
       this.player = player;
       const fileName = CallingBellFeature.fileNameFor(kind, this.customRingPath);
       const fd = await this.context.resourceManager.getRawFd(fileName);
+      // 读取铃声文件期间可能已取消来电，不能再启动已释放的播放器。
+      if (this.player !== player) return;
       player.fdSrc = { fd: fd.fd, offset: fd.offset, length: fd.length };
 
       player.on('stateChange', (state: media.AVPlayerState): void => {
+        if (this.player !== player) return;
         if (state === 'initialized') {
           void player.prepare();
         } else if (state === 'prepared') {
@@ -208,12 +220,13 @@ export class CallingBellFeature {
         }
       });
       player.on('error', (err: Object): void => {
+        if (this.player !== player) return;
         Logger.error('CallingBellFeature: AVPlayer error', err);
         this.releasePlayer();
       });
     } catch (e) {
       Logger.error('CallingBellFeature.startBell failed', e);
-      this.releasePlayer();
+      if (generation === this.playbackGeneration) this.releasePlayer();
     }
   }
 
@@ -253,7 +266,9 @@ export class CallingBellFeature {
     }
   }
 
+  /** 同步撤销当前播放器和还在初始化的播放请求，再异步释放系统资源。 */
   private releasePlayer(): void {
+    this.playbackGeneration++;
     const p = this.player;
     this.player = null;
     this.currentKind = null;

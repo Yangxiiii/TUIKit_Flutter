@@ -33,7 +33,7 @@ class SdkGroupControlMedia extends ChangeNotifier implements GroupControlMedia {
   })  : _storeOverride = store,
         _engineOverride = engine,
         _permissionOverride = requestPermission,
-        _frontCameraOverride = isFrontCamera,
+        _readFrontCamera = isFrontCamera,
         _readLocalVideoView = readLocalVideoView,
         _localVideoViewChanges = localVideoViewChanges {
     final self = _store.state.selfInfo.value;
@@ -57,8 +57,8 @@ class SdkGroupControlMedia extends ChangeNotifier implements GroupControlMedia {
   /// 仅替换系统权限边界，权限异步完成后仍复核入会有效性。
   final Future<bool> Function(GroupControlDevice)? _permissionOverride;
 
-  /// 测试可替换本端镜头方向，生产使用 DeviceStore 当前选择。
-  final bool Function()? _frontCameraOverride;
+  /// 读取本场镜头方向，未提供时首次开启使用前置。
+  final bool Function()? _readFrontCamera;
   CallStore get _store => _storeOverride ?? CallStore.shared;
   TUICallEngine get _engine => _engineOverride ?? TUICallEngine.instance;
 
@@ -195,8 +195,6 @@ class SdkGroupControlMedia extends ChangeNotifier implements GroupControlMedia {
     if (device == GroupControlDevice.microphone) {
       return _engine.openMicrophone().timeout(confirmationTimeout);
     }
-    final isFront = _frontCameraOverride?.call() ??
-        DeviceStore.shared.state.isFrontCamera.value;
     final viewId = await _waitForLocalVideoView(isCurrent);
     if (_disposed || !isCurrent()) return null;
     if (viewId != null && viewId != 0) {
@@ -208,6 +206,7 @@ class SdkGroupControlMedia extends ChangeNotifier implements GroupControlMedia {
     if (_disposed || !isCurrent()) return null;
     // 绑定期间视图可能销毁或替换，重新读取句柄；无预览时传空值。
     final currentViewId = _readLocalVideoView?.call();
+    final isFront = _readFrontCamera?.call() ?? true;
     return _engine
         .openCamera(isFront ? TUICamera.front : TUICamera.back,
             currentViewId == 0 ? null : currentViewId)

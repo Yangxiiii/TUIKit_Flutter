@@ -1,6 +1,6 @@
 import {
   CallStore, DeviceStore, CallMediaType, CallParticipantStatus,
-  CallParticipantInfo, CallInfo, DeviceState, NetworkQuality,
+  CallParticipantInfo, CallInfo, DeviceState, DeviceStatus, NetworkQuality,
 } from '@tencentcloud/atomicxcore';
 import { CallCoreView, CallCoreController, CallLayoutTemplate, VolumeLevel } from '@tencentcloud/atomicxcore';
 import { CallConstants } from '../../../common/CallConstants';
@@ -14,7 +14,10 @@ import { MultiCallControlsView } from './controls/MultiCallControlsView';
 import { SmartCellularSwitchRecommendationView } from './smartCellularSwitchRecommendation/SmartCellularSwitchRecommendationView';
 import { Logger } from '../../../common/utils/Logger';
 import { ViewStateClass } from '../../../state/ViewState';
+import { UserManager } from '../../../manager/UserManager';
+import { HarmonyParticipantSurface } from '../../../components/plugin/HarmonyVideoView';
 
+/** 组合 SDK 媒体、通话资料和原生接听控制，资料加载独立于通话。 */
 @Component
 export struct CallView {
   @State controller: CallCoreController = new CallCoreController();
@@ -40,22 +43,37 @@ export struct CallView {
     Stack({ alignContent: Alignment.TopStart }) {
       this.backgroundAvatar();
 
-      CallCoreView({ controller: this.controller })
-        .width('100%')
-        .height('100%')
-        .padding({ top: this.isGroupCall() ? this.viewState.statusBarHeight + 50 : 0 })
-        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-        .visibility(this.shouldHideCoreView() ? Visibility.Hidden : Visibility.Visible);
+      // 单聊资料区替换 SDK 内置头像姓名；等待视频仍绑定本机真实镜头。
+      if (this.shouldShowSingleIdentity()) {
+        if (this.callState_activeCall.mediaType === CallMediaType.video &&
+          this.deviceState.cameraStatus === DeviceStatus.on) {
+          HarmonyParticipantSurface({
+            userId: this.callState_selfInfo.id,
+            viewName: 'oa_native_waiting_local_video',
+          }).expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM]);
+        }
+        this.singleIdentity();
+      } else {
+        CallCoreView({ controller: this.controller })
+          .width('100%')
+          .height('100%')
+          .padding({ top: this.isGroupCall() ? this.viewState.statusBarHeight + 50 : 0 })
+          .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+          .visibility(this.shouldHideCoreView() ? Visibility.Hidden : Visibility.Visible);
+      }
 
       if (this.shouldShowWaitingRoster()) {
         WaitingParticipantsView({
           activeCall: this.callState_activeCall,
           allParticipants: this.callState_allParticipants,
           selfId: this.callState_selfInfo.id,
+          peerOrganization: this.viewState.organizationFor(
+            this.callState_selfInfo.id, this.callState_activeCall.callId, this.callState_activeCall.inviterId),
         })
           .margin({ top: this.viewState.statusBarHeight + 80 });
       }
 
+      // 时长和状态提示叠在媒体上方，底部设备控制独立处理手势。
       Column() {
         TimerView({
           selfInfo: this.callState_selfInfo,
@@ -132,6 +150,80 @@ export struct CallView {
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM]);
   }
 
+  /** 单聊头像、姓名与组织在同一栏，视频接通后把空间留给双路画面。 */
+  @Builder
+  singleIdentity() {
+    Column() {
+      if (this.findPeerForAvatar()?.avatarURL) {
+        Image(this.findPeerForAvatar()!.avatarURL!)
+          .width(this.singleAvatarSize())
+          .height(this.singleAvatarSize())
+          .borderRadius(this.singleAvatarSize() / 2)
+          .objectFit(ImageFit.Cover);
+      } else {
+        Image($r('app.media.default_user_icon'))
+          .width(this.singleAvatarSize())
+          .height(this.singleAvatarSize())
+          .borderRadius(this.singleAvatarSize() / 2);
+      }
+      Text(this.singlePeerName())
+        .fontColor(CallConstants.Color_White)
+        .fontSize(20)
+        .lineHeight(28)
+        .fontWeight(FontWeight.Medium)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .margin({ top: 20 });
+      if (this.singlePeerOrganization().length > 0) {
+        Text(this.singlePeerOrganization())
+          .fontColor(CallConstants.Color_CallSecondaryText)
+          .fontSize(16)
+          .lineHeight(22)
+          .fontWeight(FontWeight.Medium)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .margin({ top: 16 });
+      }
+    }
+    .width('100%')
+    .padding({ left: 24, right: 24 })
+    .margin({ top: this.callState_activeCall.mediaType === CallMediaType.video
+      ? this.viewState.statusBarHeight + 80 : this.screenHeightVp * 250 / 844 })
+    .hitTestBehavior(HitTestMode.None);
+  }
+
+  /** 单聊资料区根据媒体形态保留现有的头像层级。 */
+  private singleAvatarSize(): number {
+    return this.callState_activeCall.mediaType === CallMediaType.video ? 72 : 96;
+  }
+
+  /** 成员对象还没补齐时，以当前场次标识暂时代替姓名。 */
+  private singlePeerName(): string {
+    const peer = this.findPeerForAvatar();
+    if (peer !== undefined) return UserManager.getUserDisplayName(peer);
+    return this.singlePeerId();
+  }
+
+  /** 单聊邀请两端使用同一 SDK 标识选择资料，等待阶段也能独立解析对端。 */
+  private singlePeerId(): string {
+    return this.isCaller()
+      ? this.callState_activeCall.inviteeIds[0] ?? '' : this.callState_activeCall.inviterId;
+  }
+
+  /** 对端资料按当前账号和场次读取，避免换场时误用上一位来电人的组织。 */
+  private singlePeerOrganization(): string {
+    return this.viewState.organizationFor(
+      this.callState_selfInfo.id, this.callState_activeCall.callId, this.singlePeerId());
+  }
+
+  /** 单聊语音和等待中的视频显示完整资料，接通的视频仍由 SDK 布局。 */
+  private shouldShowSingleIdentity(): boolean {
+    return !this.isGroupCall() &&
+      this.callState_selfInfo.status !== CallParticipantStatus.none &&
+      (this.callState_activeCall.mediaType === CallMediaType.audio ||
+        this.callState_activeCall.mediaType === CallMediaType.video && this.isInWaitingState());
+  }
+
   @Builder
   backgroundAvatar() {
     Stack() {
@@ -183,7 +275,7 @@ export struct CallView {
     // 与 iOS 的 CallView.swift:73 对齐 —— chatGroupId 非空或受邀者多于一个（覆盖 2 人参与群组通话的情况，否则 allParticipants.length ===
     // 2 会被错误分类为一对一）。
     return (this.callState_activeCall.chatGroupId?.length ?? 0) > 0
-      || (this.callState_activeCall.inviteeIds?.length ?? 0) > 1;
+      || (this.callState_activeCall.inviteeIds?.length ?? 0) > 1 || this.viewState.temporaryMulti;
   }
 
   private isInWaitingState(): boolean {
@@ -209,7 +301,7 @@ export struct CallView {
     }
     if (!this.isGroupCall()) {
       return this.callState_allParticipants
-        .find((p: CallParticipantInfo): boolean => p.id !== this.callState_selfInfo.id);
+        .find((p: CallParticipantInfo): boolean => p.id === this.singlePeerId());
     }
     return this.callState_allParticipants
       .find((p: CallParticipantInfo): boolean => p.id === this.callState_activeCall.inviterId);

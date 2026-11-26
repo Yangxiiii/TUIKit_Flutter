@@ -11,6 +11,103 @@ import 'package:tencent_calls_uikit/src/view/component/incoming_banner/incoming_
 import 'package:tencent_calls_uikit/src/view/harmony_call_overlay.dart';
 
 void main() {
+  testWidgets('鸿蒙原生提示与应用提示共用同一底部浮层', (tester) async {
+    const channel = MethodChannel('tencent_calls_uikit/harmony_presentation');
+    final messenger = tester.binding.defaultBinaryMessenger;
+    Map<String, Object?>? snapshot;
+    messenger.setMockMethodCallHandler(channel, (_) async => snapshot);
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: AppDialog.init(),
+        home: const HarmonyCallOverlay(
+          child: Scaffold(
+            body: Text('聊天页'),
+            bottomNavigationBar: AppToastBottomBar(child: SizedBox(height: 90)),
+          ),
+        ),
+      ),
+    );
+    AppToast.show('应用提示');
+    await tester.pumpAndSettle();
+    final height = tester.getSize(find.byType(Scaffold)).height;
+    expect(tester.getBottomLeft(find.text('应用提示')).dy, height - 124);
+    snapshot = {
+      'id': 'native-toast',
+      'duration': 0,
+      'self': {'id': 'self', 'name': '本人', 'avatar': ''},
+      'peer': {'id': 'peer', 'name': '对端', 'avatar': ''},
+    };
+    await messenger.handlePlatformMessage(
+      channel.name,
+      const StandardMethodCodec().encodeMethodCall(
+        const MethodCall('harmonyPresentationChanged', true),
+      ),
+      (_) {},
+    );
+    await tester.pump();
+    expect(find.byType(CallScene), findsOneWidget);
+    await messenger.handlePlatformMessage(
+      channel.name,
+      const StandardMethodCodec().encodeMethodCall(
+        const MethodCall('harmonyToast', {'message': '通话已结束', 'durationMs': 2000}),
+      ),
+      (_) {},
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('应用提示'), findsNothing);
+    expect(find.text('通话已结束'), findsOneWidget);
+    expect(
+      tester.getBottomLeft(find.text('通话已结束')).dy,
+      height - 90,
+    );
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('鸿蒙群呼叫从原生快照按受邀者展示组织岗位', (tester) async {
+    const channel = MethodChannel('tencent_calls_uikit/harmony_presentation');
+    final messenger = tester.binding.defaultBinaryMessenger;
+    final members = [
+      {'id': 'self', 'name': '本人', 'avatar': '', 'organization': '本人部门'},
+      {'id': 'a', 'name': '受邀者甲', 'avatar': '', 'organization': '研发部 I 工程师'},
+      {'id': 'b', 'name': '受邀者乙', 'organization': '产品部 I 产品经理'},
+      {'id': 'c', 'name': '受邀者丙'},
+    ];
+    final snapshot = <String, Object?>{
+      'id': 'outgoing-group',
+      'chatGroup': true,
+      'inviterId': 'self',
+      'duration': 0,
+      'self': members.first,
+      'peer': members[1],
+      'members': members,
+    };
+    messenger.setMockMethodCallHandler(channel, (_) async => snapshot);
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: HarmonyCallOverlay(child: Scaffold(body: Text('聊天页'))),
+      ),
+    );
+    for (final video in [false, true]) {
+      snapshot['video'] = video;
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump();
+      final scene = tester.widget<GroupCallScene>(find.byType(GroupCallScene));
+      expect(scene.video, video);
+      expect(find.text('本人部门'), findsNothing);
+      for (final (id, subtitle) in [('a', '研发部 I 工程师'), ('b', '产品部 I 产品经理')]) {
+        expect(
+          find.descendant(
+            of: find.bySemanticsIdentifier('call.group.member.$id'),
+            matching: find.text(subtitle),
+          ),
+          findsOneWidget,
+        );
+      }
+    }
+  });
+
   testWidgets('鸿蒙多人来电、宫格和小窗复用共享界面，动作仍发送给原生场次', (tester) async {
     const channel = MethodChannel('tencent_calls_uikit/harmony_presentation');
     final messenger = tester.binding.defaultBinaryMessenger;

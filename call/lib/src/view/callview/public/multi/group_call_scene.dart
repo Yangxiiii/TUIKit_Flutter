@@ -19,6 +19,7 @@ class GroupCallScene extends StatelessWidget {
       required this.video,
       required this.controls,
       required this.videoBuilder,
+      this.showMemberOrganizations = false,
       this.initialFocusedId,
       this.onManage,
       this.onRetry});
@@ -37,6 +38,9 @@ class GroupCallScene extends StatelessWidget {
 
   /// 被叫未接听时使用邀请资料布局。
   final bool incoming;
+
+  /// 主叫等待接听时在受邀成员姓名下展示组织岗位。
+  final bool showMemberOrganizations;
 
   /// 邀请显示语音或视频类型。
   final bool video;
@@ -93,6 +97,9 @@ class GroupCallScene extends StatelessWidget {
                             initialFocusedId: initialFocusedId,
                             members: members,
                             videoBuilder: videoBuilder,
+                            showOrganizationFor: showMemberOrganizations
+                                ? (id) => id != selfId
+                                : null,
                             onRetry: onRetry))),
             Padding(
                 padding: EdgeInsets.only(top: 12, bottom: incoming ? 50 : 16),

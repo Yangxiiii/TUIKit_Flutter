@@ -15,6 +15,7 @@ protocol VoIPDataSyncHandlerDelegate: NSObject {
     func callMethodVoipAccept()
 }
 
+/// 在通话引擎、Flutter 与系统来电界面之间同步操作和状态。
 class VoIPDataSyncHandler: NSObject, TUIServiceProtocol, TUICallObserver {
     let TUICore_TUICore_TUIVoIPExtensionNotify_MuteSubKey_IsMuteKey = "TUICore_TUICore_TUIVoIPExtensionNotify_MuteSubKey_IsMuteKey"
     let TUICore_TUICore_TUIVoIPExtensionNotify_UpdateInfoSubKey_InviterIdKey = "TUICore_TUICore_TUIVoIPExtensionNotify_UpdateInfoSubKey_InviterIdKey"
@@ -100,6 +101,19 @@ class VoIPDataSyncHandler: NSObject, TUIServiceProtocol, TUICallObserver {
     
     func onCallCancelled(callerId: String) {
         closeVoIP()
+    }
+
+    /// 其他设备接听属于本端未接通场景，需要关闭已展示的系统来电。
+    func onCallNotConnected(
+        callId: String,
+        mediaType: TUICallMediaType,
+        reason: TUICallEndReason,
+        userId: String,
+        info: TUICallObserverExtraInfo
+    ) {
+        if reason == .otherDeviceAccepted {
+            closeVoIP()
+        }
     }
     
     func onCallEnd(roomId: TUIRoomId, callMediaType: TUICallMediaType, callRole: TUICallRole, totalTime: Float) {

@@ -13,22 +13,22 @@ class GroupCallHeaderActions extends StatelessWidget {
     this.onInvite,
   });
 
-  /// 跟随宿主浮窗能力，已结束结果页不再最小化。
+  /// 跟随宿主浮窗能力，允许缩小有效通话及可重呼结果。
   final bool showMinimize;
 
-  /// 被叫待接听与已结束阶段不追加邀请。
+  /// 通话中的主界面和可重呼结果页均可显示选人入口。
   final bool showInvite;
 
   /// 待接听页沿用重叠窗口图标，接通场景使用收缩箭头。
   final bool incoming;
 
-  /// SDK 分配有效场次标识后才允许打开选人器。
+  /// 有效通话可追加邀请，已超时的场次只为下一次呼叫选人。
   final bool inviteEnabled;
 
   /// 路由或预览提供动作，本组件不调用 SDK。
   final VoidCallback onMinimize;
 
-  /// 由具备追加成员能力的平台提供，展示层不会自行邀请。
+  /// 由上层决定追加邀请或暂存重呼名单，展示层只转交点击。
   final VoidCallback? onInvite;
 
   @override

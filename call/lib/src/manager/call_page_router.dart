@@ -56,8 +56,8 @@ class InviteUserCallbacks {
 
 /// 以单一浮层协调通话、来电横幅与小窗，权限返回后核对邀请仍有效。
 class CallPageRouter {
-  final GlobalKey<NavigatorState> _callNavigatorKey =
-      GlobalKey<NavigatorState>();
+  /// 每次浮层关闭后换键，防止同一帧的新浮层继承上一场的导航栈。
+  GlobalKey<NavigatorState> _callNavigatorKey = GlobalKey<NavigatorState>();
   final NavigatorState? Function() _navigatorGetter;
   final AndroidPipFeature pipController = AndroidPipFeature();
 
@@ -177,13 +177,61 @@ class CallPageRouter {
       _showPage(CallPageType.floating, isManualSwitch: true);
   void showPipPage() => _showPage(CallPageType.pip, isManualSwitch: true);
 
-  /// 宿主选人与群默认选人共用当前场次，返回时再次验证账号、代次和容量。
+  /// 通话中追加邀请；全员未接时通过同一个宿主选人入口准备下次呼叫。
   void showInvitePage() {
     final callId = CallStore.shared.state.activeCall.value.callId;
     final epoch = CallManager.instance.sessionEpoch;
+    final result = GlobalState.instance.groupCall.value;
+    if (result case final retry? when retry.canRetry) {
+      unawaited(AppServiceLocator.get<ActionGuard>().singleFlight(
+          ('tim.call.picker', epoch, retry.callId),
+          () => _pickRetryInvitees(retry, epoch)));
+      return;
+    }
     unawaited(AppServiceLocator.get<ActionGuard>().singleFlight(
         ('tim.call.picker', epoch, callId),
         () => _pickInvitees(callId, epoch)));
+  }
+
+  /// 选人只更新下一次呼叫参数，返回时确认仍在原结果页及登录代次。
+  Future<void> _pickRetryInvitees(GroupCallSnapshot result, int epoch) async {
+    final context = _callNavigatorKey.currentContext;
+    final presentation = _callOverlayEntry;
+    final manager = CallManager.instance;
+    final excluded = manager.groupRetryParticipantIds(result.callId);
+    if (context == null || presentation == null || excluded == null) return;
+    final text = AppLocalization.of(context);
+    final picker = GlobalState.instance.groupMemberPicker;
+    if (picker == null) {
+      AppToast.show(text.resolve(
+          'chat.uikit.groupCallPickerUnavailable', '暂时无法添加成员，请稍后重试'));
+      return;
+    }
+    final remaining = CallManager.maxParticipants - excluded.length;
+    if (remaining <= 0) {
+      AppToast.show(text.resolve('chat.uikit.groupCallFull', '通话人数已达9人上限'));
+      return;
+    }
+    bool isCurrent() =>
+        context.mounted &&
+        identical(presentation, _callOverlayEntry) &&
+        epoch == manager.sessionEpoch &&
+        manager.groupRetryParticipantIds(result.callId) != null;
+    try {
+      // 原场次已经结束，选人确认后只保存名单，由「重新呼叫」发起新场次。
+      final selected = await picker(context,
+          result.groupId.isEmpty ? null : result.groupId, excluded, remaining);
+      if (selected == null || selected.isEmpty || !isCurrent()) return;
+      if (manager.addGroupRetryInvitees(result.callId, selected)) {
+        AppToast.show(text.resolve(
+            'chat.uikit.groupCallRetryMembersAdded', '已加入下次呼叫名单'));
+      }
+    } on Object {
+      if (isCurrent()) {
+        AppToast.show(text.resolve(
+            'chat.uikit.groupCallPickerUnavailable', '暂时无法添加成员，请稍后重试'));
+      }
+    }
   }
 
   /// 临时多人必须由宿主提供组织选人；缺少入口时明确提示，不查询空群 ID。
@@ -319,6 +367,7 @@ class CallPageRouter {
 
     final previousPageType = _currentPageType;
     final targetPageType = pageType;
+    final navigatorKey = _callNavigatorKey;
     final isFromSmallToFull =
         _isSmallWindow(previousPageType) && !_isSmallWindow(targetPageType);
 
@@ -331,7 +380,7 @@ class CallPageRouter {
       _currentPageType = targetPageType;
       _callOverlayEntry?.markNeedsBuild();
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _navigateToPage(targetPageType);
+        _navigateToPage(targetPageType, navigatorKey);
       });
       // Reset after AnimatedPositioned finishes (250ms), so subsequent
       // rebuilds (e.g. drag updates) use Duration.zero instead of animating.
@@ -353,7 +402,7 @@ class CallPageRouter {
       _currentPageType = targetPageType;
       _callOverlayEntry?.markNeedsBuild();
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _navigateToPage(targetPageType);
+        _navigateToPage(targetPageType, navigatorKey);
       });
       if (_shouldAnimateRect) {
         Future.delayed(const Duration(milliseconds: 250), () {
@@ -384,11 +433,17 @@ class CallPageRouter {
     _cancelDeviceOpen?.call();
     _callOverlayEntry?.remove();
     _callOverlayEntry = null;
+    _callNavigatorKey = GlobalKey<NavigatorState>();
     _currentPageType = CallPageType.none;
   }
 
-  void _navigateToPage(CallPageType pageType) {
-    final navigator = _callNavigatorKey.currentState;
+  /// 帧末切页只操作发起切换的原浮层，避免旧场次的动画跳转覆盖新来电。
+  void _navigateToPage(
+      CallPageType pageType, GlobalKey<NavigatorState> navigatorKey) {
+    if (navigatorKey != _callNavigatorKey || pageType != _currentPageType) {
+      return;
+    }
+    final navigator = navigatorKey.currentState;
     if (navigator == null) return;
 
     final routeName = _getRouteName(pageType);

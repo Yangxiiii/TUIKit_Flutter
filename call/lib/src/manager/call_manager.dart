@@ -15,22 +15,23 @@ import 'package:rtc_room_engine/rtc_room_engine.dart' show TUICallEngine;
 
 /// 统一校验通话入口、权限及设备操作，SDK 负责信令与通话状态。
 class CallManager {
-  CallManager._();
+  CallManager._() : _switchCameraOverride = null;
 
   /// 测试通过显式依赖验证权限等待、账号切换及 SDK 失败，不连接真实媒体。
   @visibleForTesting
-  CallManager.testing(
-      {required CallStore store,
-      required String Function() accountId,
-      required Future<PermissionType?> Function(CallMediaType)
-          requestPermission,
-      Future<String?> Function(String)? queryGroupTitle,
-      Future<void> Function()? suspendGroupDevices})
-      : _storeOverride = store,
+  CallManager.testing({
+    required CallStore store,
+    required String Function() accountId,
+    required Future<PermissionType?> Function(CallMediaType) requestPermission,
+    Future<String?> Function(String)? queryGroupTitle,
+    Future<void> Function()? suspendGroupDevices,
+    void Function(bool)? switchCamera,
+  })  : _storeOverride = store,
         _accountOverride = accountId,
         _permissionOverride = requestPermission,
         _groupTitleOverride = queryGroupTitle,
-        _suspendGroupDevicesOverride = suspendGroupDevices ?? (() async {});
+        _suspendGroupDevicesOverride = suspendGroupDevices ?? (() async {}),
+        _switchCameraOverride = switchCamera;
 
   /// 当前真实入会的会控入口；无策略时仍允许关闭设备，但不得自行开启。
   GroupControlController? get groupControl =>
@@ -75,6 +76,9 @@ class CallManager {
   /// 测试注入真实关闭动作的延迟或失败，不跳过生产入会前的媒体关闭阶段。
   Future<void> Function()? _suspendGroupDevicesOverride;
 
+  /// 测试记录提交给 SDK 的镜头方向，不启动摄像头。
+  final void Function(bool)? _switchCameraOverride;
+
   CallStore get _store => _storeOverride ?? CallStore.shared;
 
   /// 每次读取当前已登录身份，异步操作前后均以此核对账号。
@@ -89,12 +93,12 @@ class CallManager {
   /// 主叫发起有效群通话或独立多人后通知宿主，入会和追加邀请不经过此回调。
   GroupCallStartedHandler? onGroupCallStarted;
 
-  /// 仅用于重新发起的参数副本；不保存或恢复已结束的 SDK callId。
+  /// 重新发起的参数副本，超时后可补选受邀者；不保存已结束的 SDK callId。
   ({
     String accountId,
     List<String> ids,
     CallMediaType mediaType,
-    CallParams params
+    CallParams params,
   })? _lastGroupRequest;
 
   /// 跨发起和加入共用准入锁；不同入口不能把对方的成功结果误当作自己的成功。
@@ -112,10 +116,17 @@ class CallManager {
   /// 仅记录本次邀请中是否主动操作过设备；开关值始终取 DeviceStore，不复制设备状态。
   final Set<String> _selectedDevices = {};
 
+  /// SDK 的镜头状态可跨通话保留，本场的首次开启和后续重开使用自己的方向。
+  bool _isFrontCamera = true;
+
+  /// 单聊和会控均从前置开始，通话内沿用用户最后一次切换的方向。
+  bool get isFrontCamera => _isFrontCamera;
+
   /// 新来电、结束及登出使先前尚未完成的设备准备失效。
   void invalidateDevicePreparation() {
     _deviceEpoch++;
     _selectedDevices.clear();
+    _isFrontCamera = true;
     _joiningCallId = null;
   }
 
@@ -380,6 +391,44 @@ class CallManager {
     });
   }
 
+  /// 返回当前超时结果下次重呼的只读占位名单，含主叫；结果已失效时返回空值。
+  Set<String>? groupRetryParticipantIds(String resultCallId) {
+    final request = _lastGroupRequest;
+    final result = GlobalState.instance.groupCall.value;
+    if (_admissionRunning ||
+        result?.canRetry != true ||
+        result?.callId != resultCallId ||
+        request == null ||
+        request.accountId != _accountId) {
+      return null;
+    }
+    return Set.unmodifiable({request.accountId, ...request.ids});
+  }
+
+  /// 超时后选中的人只补入下次重呼的名单，历史结果仍保留原参与者。
+  bool addGroupRetryInvitees(String resultCallId, List<String> userIds) {
+    final occupied = groupRetryParticipantIds(resultCallId);
+    final request = _lastGroupRequest;
+    if (occupied == null ||
+        request == null ||
+        userIds.any((id) => id.isEmpty || id != id.trim())) {
+      return false;
+    }
+    // 选人期间可能已换场或用掉名额，写入前重新按包含主叫的总人数校验。
+    final additions = userIds.toSet().difference(occupied);
+    if (additions.isEmpty ||
+        occupied.length + additions.length > maxParticipants) {
+      return false;
+    }
+    _lastGroupRequest = (
+      accountId: request.accountId,
+      ids: List.unmodifiable([...request.ids, ...additions]),
+      mediaType: request.mediaType,
+      params: request.params,
+    );
+    return true;
+  }
+
   /// 全员未接后的重呼重新创建通话，不能对已经结束的 callId 执行 invite。
   Future<CompletionHandler> retryGroupCall() async {
     final request = _lastGroupRequest;
@@ -570,7 +619,9 @@ class CallManager {
       final control = groupControl;
       if (control != null) {
         await control.setSelfDevice(
-            GroupControlDevice.camera, !control.value.cameraOn);
+          GroupControlDevice.camera,
+          !control.value.cameraOn,
+        );
       } else {
         await closeLocalCamera();
       }
@@ -580,7 +631,7 @@ class CallManager {
     if (DeviceStore.shared.state.cameraStatus.value == DeviceStatus.on) {
       await closeLocalCamera();
     } else {
-      await openLocalCamera(DeviceStore.shared.state.isFrontCamera.value);
+      await _openLocalCamera();
     }
   }
 
@@ -603,7 +654,7 @@ class CallManager {
   }
 
   /// 摄像头权限结果只作用于触发操作的当前通话。
-  Future<void> openLocalCamera(bool isFront) async {
+  Future<void> _openLocalCamera() async {
     if (_groupPolicyRequired) {
       await groupControl?.setSelfDevice(GroupControlDevice.camera, true);
       return;
@@ -614,10 +665,11 @@ class CallManager {
     if (epoch != _deviceEpoch || _activeCallMatching(callId) == null) return;
     if (!hasPermission) {
       await _pageManager?.handleNoPermissionAndEndCall(
-          type: PermissionType.camera);
+        type: PermissionType.camera,
+      );
       return;
     }
-    _checkResult(await DeviceStore.shared.openLocalCamera(isFront));
+    _checkResult(await DeviceStore.shared.openLocalCamera(isFrontCamera));
   }
 
   /// 关闭摄像头始终允许，不以权限开关或当前主持状态阻止资源释放。
@@ -629,10 +681,12 @@ class CallManager {
     DeviceStore.shared.closeLocalCamera();
   }
 
-  /// 该 SDK 的镜头切换为无返回值接口，只能捕获同步异常，不能确认硬件成功。
-  Future<void> switchCamera(bool isFront) async {
+  /// SDK 不返回切换结果，保留本场已提交的方向供重开使用。
+  Future<void> flipCamera() async {
+    final isFront = !isFrontCamera;
     try {
-      DeviceStore.shared.switchCamera(isFront);
+      (_switchCameraOverride ?? DeviceStore.shared.switchCamera)(isFront);
+      _isFrontCamera = isFront;
     } catch (_) {
       _checkResult(_failure(-3301, 'Camera switch failed'));
     }
@@ -685,7 +739,7 @@ class CallManager {
         _activeCallMatching(callId) == null) {
       return;
     }
-    _checkResult(await DeviceStore.shared.openLocalCamera(true));
+    _checkResult(await DeviceStore.shared.openLocalCamera(isFrontCamera));
   }
 
   CallInfo? _activeCallMatching(String expectedCallId) {
@@ -716,8 +770,10 @@ class CallManager {
   }
 
   /// 设备准备跟随当前通话代次和 callId，保留等待期间的主动选择，拒绝旧权限结果。
-  Future<bool> _openDevices(CallMediaType mediaType,
-      {bool preserveSelections = true}) async {
+  Future<bool> _openDevices(
+    CallMediaType mediaType, {
+    bool preserveSelections = true,
+  }) async {
     if (_groupPolicyRequired) {
       // 快速接通时，迟到的准备任务不能关闭已由会控初始化的设备。
       final controller = groupControl;
@@ -743,15 +799,19 @@ class CallManager {
       return false;
     }
     if (!(preserveSelections && _selectedDevices.contains('speaker'))) {
-      await setAudioRoute(mediaType == CallMediaType.audio
-          ? AudioRoute.earpiece
-          : AudioRoute.speakerphone);
+      await setAudioRoute(
+        mediaType == CallMediaType.audio
+            ? AudioRoute.earpiece
+            : AudioRoute.speakerphone,
+      );
     }
     if (mediaType == CallMediaType.video) {
       if (preserveSelections && _selectedDevices.contains('camera')) {
         return true;
       }
-      return _checkResult(await DeviceStore.shared.openLocalCamera(true));
+      return _checkResult(
+        await DeviceStore.shared.openLocalCamera(isFrontCamera),
+      );
     }
     await closeLocalCamera();
     return true;

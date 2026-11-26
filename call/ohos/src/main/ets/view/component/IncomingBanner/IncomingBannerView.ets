@@ -43,6 +43,7 @@ const BTN_SIZE: number = 36;
 const BTN_GAP: number = 22;
 const BTN_TRAILING_INSET: number = 16;
 
+/** 展示来电人资料和接拒操作，点击资料后展开同一场通话。 */
 @Component
 export struct IncomingBannerView {
   @ObjectLink viewState: ViewStateClass;
@@ -55,9 +56,7 @@ export struct IncomingBannerView {
       // Avatar.
       this.avatarSlot();
 
-      // Name + tip column (takes remaining space).
-      //
-      // 姓名 + 提示列（占用剩余空间）。
+      // 组织和来电提示各占一行，长组织名不挤压接拒按钮。
       Column() {
         Text(this.callerName())
           .fontColor(CallConstants.Color_OweWhite)
@@ -67,6 +66,16 @@ export struct IncomingBannerView {
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .textAlign(TextAlign.Start)
           .width('100%');
+
+        if (this.callerOrganization().length > 0) {
+          Text(this.callerOrganization())
+            .fontColor(CallConstants.Color_CallSecondaryText)
+            .fontSize(TIP_FONT_SIZE)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .textAlign(TextAlign.Start)
+            .width('100%');
+        }
 
         Text(this.tipText())
           .fontColor(TIP_COLOR)
@@ -178,6 +187,11 @@ export struct IncomingBannerView {
 
   private callerName(): string {
     return UserManager.getUserDisplayName(this.findCaller());
+  }
+
+  /** 同一通话的账号和发起人一致才能读取已补齐的企业资料。 */
+  private callerOrganization(): string {
+    return this.viewState.organizationFor(this.selfInfo.id, this.activeCall.callId, this.activeCall.inviterId);
   }
 
   private tipText(): string {

@@ -179,7 +179,7 @@ abstract class TUICallKit {
   /// 注册群与独立多人通话的追加选人入口；返回 null 表示取消。
   void setGroupMemberPicker(GroupMemberPicker? picker);
 
-  /// 注册只读成员资料来源；传 null 清除已缓存的机构岗位，不影响邀请或会控权限。
+  /// 为单聊对端及多人通话成员注册机构岗位来源；传 null 清除展示资料。
   void setGroupMemberSubtitleLoader(GroupMemberSubtitleLoader? loader);
 
   /// 注册已登录 IM 的在线会控通道；null 立即撤销旧 session 并清理待执行命令。

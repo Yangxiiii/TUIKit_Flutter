@@ -39,6 +39,7 @@ import { TUICallKitLocalize, setLocalizedContext } from './common/Localized';
 import { Constants, FrameworkConstants } from './common/Constants';
 import { AppStateObserver } from './feature/AppStateObserver';
 import { CallEndedFlag } from './state/CallEndedFlag';
+import { CallStatusObserver } from './feature/CallStatusObserver';
 
 /** Flutter 群通话透传的场景和版本，只用于选择展示。 */
 interface TemporaryMultiMetadata {
@@ -122,6 +123,12 @@ class TUICallKitImpl extends TUICallKit {
    */
   private avSessionManager: AVSessionManager = new AVSessionManager();
   private pendingNotificationAction: PendingNotificationAction | null = null;
+  /** 当前等待接听的来电标识，用于将空闲状态和清理限定在同一通来电。 */
+  private incomingCallId: string = '';
+  /** 必须先见到待接听，避免 SDK 刚收到邀请、状态尚未补齐时关闭来电。 */
+  private observedIncomingWaiting: boolean = false;
+  /** 状态先于结束事件完成清理时，迟到的同场回调不得关闭下一通。 */
+  private reconciledIncomingCallId: string = '';
 
   constructor(context: common.UIAbilityContext) {
     super();
@@ -134,6 +141,9 @@ class TUICallKitImpl extends TUICallKit {
     CallingVibratorFeature.shared().init();
     PipManager().init(context);
     IncomingNotificationFeature.shared().init(context);
+    CallStatusObserver().addListener((status: CallParticipantStatus): void => {
+      this.handleIncomingStatus(status);
+    });
     this.installCallEventListener();
     Logger.info('TUICallKitImpl initialized, version=', Constants.TUICALL_VERSION);
   }
@@ -353,6 +363,11 @@ class TUICallKitImpl extends TUICallKit {
   /** 单聊和多人共用来电横幅，展示元数据不会授予入会或主持权限。 */
   private handleCallReceived(callId: string, _mediaType: CallMediaType, userData: string): void {
     Logger.info('onCallReceived', callId);
+    this.incomingCallId = callId;
+    const state = CallStore.shared().state;
+    this.observedIncomingWaiting = state.activeCall.callId === callId &&
+      state.selfInfo.status === CallParticipantStatus.waiting;
+    if (this.observedIncomingWaiting) CallStatusObserver().notify(CallParticipantStatus.waiting);
     CallEndedFlag().clear();
     void ScreenStateManager().beginCall();
     void this.avSessionManager.start();
@@ -374,6 +389,26 @@ class TUICallKitImpl extends TUICallKit {
     }
   }
 
+  /** Flutter 快照和原生窗口均上报 SDK 状态，补收未先收到结束事件的来电。 */
+  private handleIncomingStatus(status: CallParticipantStatus): void {
+    const callId = this.incomingCallId;
+    if (callId.length === 0) return;
+    const state = CallStore.shared().state;
+    const sdkCallId = state.activeCall.callId;
+    if (state.selfInfo.status !== status || (sdkCallId.length > 0 && sdkCallId !== callId)) return;
+    if (status === CallParticipantStatus.waiting) {
+      if (sdkCallId === callId) this.observedIncomingWaiting = true;
+    } else if (status === CallParticipantStatus.accept) {
+      this.incomingCallId = '';
+    } else if (this.observedIncomingWaiting) {
+      // SDK 可保留最终场次资料。本机从等待回到空闲后，来电已经不可接听。
+      this.reconciledIncomingCallId = callId;
+      Logger.info('incoming call returned to idle before end callback', callId);
+      this.finishCall(callId);
+    }
+  }
+
+  /** 优先按 SDK 的结束事件收尾，只为尚未清理的场次展示结束原因。 */
   private handleCallEnded(
     callId: string,
     _mediaType: CallMediaType,
@@ -381,6 +416,32 @@ class TUICallKitImpl extends TUICallKit {
     userId: string,
   ): void {
     Logger.info('onCallEnded', callId, reason);
+    if (callId.length > 0 && callId === this.reconciledIncomingCallId) return;
+    const state = CallStore.shared().state;
+    const activeCall = state.activeCall;
+    // 迟到的其他场次事件不能清理 SDK 已明确切换到的新来电。
+    if (callId.length > 0 && this.incomingCallId.length > 0 && this.incomingCallId !== callId &&
+      this.incomingCallId === activeCall.callId) return;
+
+    const selfId = state.selfInfo.id;
+    const isSelfEnded = CallEndedFlag().consumeAndClear() || selfId.length === 0 || userId === selfId;
+    const isGroupCall = (activeCall.chatGroupId?.length ?? 0) > 0 ||
+      activeCall.inviteeIds.length > 1 || ViewState().temporaryMulti;
+    this.finishCall(callId);
+    if (!isSelfEnded && !isGroupCall) {
+      const msgKey = TUICallKitImpl.endReasonToastKey(reason);
+      if (msgKey.length > 0) {
+        Toast.show(TUICallKitLocalize(msgKey));
+      }
+    }
+  }
+
+  /** 让结束回调和空闲状态共用界面、铃声、通知及原生会话的回收路径。 */
+  private finishCall(callId: string): void {
+    // 先作废本场，路由变更或迟到事件就不会再次清理。
+    this.incomingCallId = '';
+    this.observedIncomingWaiting = false;
+    CallEndedFlag().clear();
     CallingBellFeature.shared().stopAll();
     CallingVibratorFeature.shared().stop();
     NetworkQualityToastManager.stop();
@@ -390,22 +451,6 @@ class TUICallKitImpl extends TUICallKit {
     void this.avSessionManager.stop();
     if (this.pendingNotificationAction?.callId === callId) {
       this.pendingNotificationAction = null;
-    }
-
-
-    const selfId = CallStore.shared().state.selfInfo.id;
-    const activeCall = CallStore.shared().state.activeCall;
-    const flagWasSelfEnded = CallEndedFlag().consumeAndClear();
-    const isSelfEnded = flagWasSelfEnded
-        || selfId.length === 0
-        || userId === selfId;
-    const isGroupCall = (activeCall.chatGroupId?.length ?? 0) > 0
-        || activeCall.inviteeIds.length > 1 || ViewState().temporaryMulti;
-    if (!isSelfEnded && !isGroupCall) {
-      const msgKey = TUICallKitImpl.endReasonToastKey(reason);
-      if (msgKey.length > 0) {
-        Toast.show(TUICallKitLocalize(msgKey));
-      }
     }
     RouterManager.closeView();
   }

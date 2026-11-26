@@ -36,6 +36,30 @@ void main() {
     GlobalState.instance.groupControlController = null;
   });
 
+  test('镜头翻转沿用本场方向，发起或加入新视频通话时恢复前置', () async {
+    final switched = <bool>[];
+    manager = CallManager.testing(
+      store: store,
+      accountId: () => account,
+      requestPermission: (_) async => null,
+      switchCamera: switched.add,
+    );
+
+    expect(manager.isFrontCamera, isTrue);
+    await manager.flipCamera();
+    expect(manager.isFrontCamera, isFalse);
+    await manager.flipCamera();
+    await manager.flipCamera();
+    expect(switched, [false, true, false]);
+
+    expect((await manager.calls(['peer'], CallMediaType.video)).errorCode, 0);
+    expect(manager.isFrontCamera, isTrue);
+    await manager.flipCamera();
+    expect(manager.isFrontCamera, isFalse);
+    expect((await manager.join('room')).errorCode, 0);
+    expect(manager.isFrontCamera, isTrue);
+  });
+
   test('关闭媒体等待期间场次失效或关闭失败均不能继续 SDK join', () async {
     final suspended = Completer<void>();
     manager = CallManager.testing(
@@ -309,6 +333,45 @@ void main() {
     store.operation = null;
     expect((await manager.retryGroupCall()).errorCode, 0);
     expect(GlobalState.instance.groupCall.value!.ended, isFalse);
+  });
+
+  test('超时选人暂存到重呼名单，确认新呼叫后才提交 SDK', () async {
+    await manager.calls(['a', 'b'], CallMediaType.audio);
+    final history = GlobalState.instance.groupCallSession;
+    history.end('ended-call', CallEndReason.noResponse, isCaller: true);
+    expect(manager.groupRetryParticipantIds('ended-call'), {'self', 'a', 'b'});
+    expect(manager.addGroupRetryInvitees('different-call', ['c']), isFalse);
+    expect(
+      manager.addGroupRetryInvitees('ended-call', [
+        'c',
+        'd',
+        'e',
+        'f',
+        'g',
+        'h',
+        'i',
+      ]),
+      isFalse,
+    );
+    expect(manager.addGroupRetryInvitees('ended-call', ['a', 'c']), isTrue);
+    expect(manager.groupRetryParticipantIds('ended-call'), {
+      'self',
+      'a',
+      'b',
+      'c',
+    });
+    expect(history.value!.members.map((member) => member.id), [
+      'self',
+      'a',
+      'b',
+    ]);
+    expect(store.starts, hasLength(1));
+    expect(store.invitations, isEmpty);
+
+    expect((await manager.retryGroupCall()).errorCode, 0);
+    expect(store.starts.last, ['a', 'b', 'c']);
+    expect(store.invitations, isEmpty);
+    expect(manager.addGroupRetryInvitees('ended-call', ['d']), isFalse);
   });
 
   test('全员未接重呼创建新请求，既不沿用 roomId 也不邀请已结束场次', () async {

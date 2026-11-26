@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import '../tui_call_kit.dart' show GroupMemberPicker;
 import 'group_call_snapshot.dart';
 import 'group_control_state.dart';
+import '../manager/call_peer_organization.dart';
 import '../manager/group_control_controller.dart';
 import '../manager/group_call_recording.dart';
 
@@ -38,6 +39,9 @@ class GlobalState {
 
   /// 仅保留当前群场次的显示状态，由 CallKit 监听真实 SDK 事件更新。
   final GroupCallSession groupCallSession = GroupCallSession();
+
+  /// 单聊来电横幅与全屏共享当前对端的机构岗位。
+  final CallPeerOrganization callPeerOrganization = CallPeerOrganization();
 
   /// 云端录制片段随 SDK 通话生命周期收尾，浮窗和全屏共享。
   final groupCallRecording = GroupCallRecording();

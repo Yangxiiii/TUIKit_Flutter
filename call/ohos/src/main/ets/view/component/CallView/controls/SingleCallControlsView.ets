@@ -43,6 +43,7 @@ import { CallConstants } from '../../../../common/CallConstants';
 import { Constants } from '../../../../common/Constants';
 import { Logger } from '../../../../common/utils/Logger';
 import { CallEndedFlag } from '../../../../state/CallEndedFlag';
+import { ViewState } from '../../../../state/ViewState';
 import { CallingBellFeature } from '../../../../feature/CallingBellFeature';
 import { CallingVibratorFeature } from '../../../../feature/CallingVibratorFeature';
 
@@ -75,6 +76,7 @@ const BOTTOM_INSET: number = 40;
 /* video_accept 中主行和挂断行之间的垂直间距。 */
 const ROW_GAP: number = 20;
 
+/** 按主叫、被叫和接通状态展示单聊控件，镜头切换沿用本场选择。 */
 @Component
 export struct SingleCallControlsView {
   @ObjectLink selfInfo: CallParticipantInfo;
@@ -348,7 +350,7 @@ export struct SingleCallControlsView {
         if (this.deviceState.cameraStatus === DeviceStatus.on) {
           DeviceStore.shared().closeLocalCamera();
         } else {
-          void DeviceStore.shared().openLocalCamera(this.deviceState.isFrontCamera);
+          void DeviceStore.shared().openLocalCamera(ViewState().isFrontCamera);
         }
       },
     });
@@ -370,7 +372,7 @@ export struct SingleCallControlsView {
       bgColor: CallConstants.Color_BgMask,
       imageSize: BTN_LARGE,
       onTap: (): void => {
-        DeviceStore.shared().switchCamera(!this.deviceState.isFrontCamera);
+        ViewState().flipCamera();
       },
     });
   }
@@ -386,7 +388,7 @@ export struct SingleCallControlsView {
       bgColor: CallConstants.Color_BgMask,
       imageSize: BTN_SMALL,
       onTap: (): void => {
-        DeviceStore.shared().switchCamera(!this.deviceState.isFrontCamera);
+        ViewState().flipCamera();
       },
     });
   }

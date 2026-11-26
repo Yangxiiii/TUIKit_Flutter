@@ -1,6 +1,8 @@
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/material.dart';
 
+import '../../../../manager/call_peer_organization.dart';
+import '../../../../state/global_state.dart';
 import '../controls/single_call_controls_widget.dart';
 import '../hint/hint_widget.dart';
 import '../hint/timer_widget.dart';
@@ -41,14 +43,21 @@ class _CallFloatWidgetState extends State<CallFloatWidget> {
       CallStore.shared.state.selfInfo,
       CallStore.shared.state.allParticipants,
       DeviceStore.shared.state.cameraStatus,
+      GlobalState.instance.callPeerOrganization,
     ]),
     builder: (context, _) {
       final state = CallStore.shared.state;
       final self = state.selfInfo.value;
       final call = state.activeCall.value;
+      final targetId = CallPeerOrganization.peerId(call, self.id);
       final remote = state.allParticipants.value
-          .where((p) => p.id != self.id)
+          .where(
+            (participant) => targetId.isEmpty
+                ? participant.id != self.id
+                : participant.id == targetId,
+          )
           .firstOrNull;
+      final remoteId = remote?.id ?? targetId;
       final video = call.mediaType == CallMediaType.video;
       final accepted = self.status == CallParticipantStatus.accept;
       // 腾讯单聊模板通过邀请资料查找远端，等参与者标识齐全后再挂载。
@@ -59,14 +68,24 @@ class _CallFloatWidgetState extends State<CallFloatWidget> {
           call.inviteeIds.isNotEmpty &&
           self.status != CallParticipantStatus.none;
       final selfUser = _user(
+        self.id,
         self,
         cameraOn:
             canRenderVideo &&
             DeviceStore.shared.state.cameraStatus.value == DeviceStatus.on,
       );
-      final remoteUser = remote == null
+      // 主叫可先从邀请里得到对端标识，列表稍后补齐昵称和头像。
+      final remoteUser = remoteId.isEmpty
           ? null
-          : _user(remote, cameraOn: canRenderVideo && remote.isCameraOpened);
+          : _user(
+              remoteId,
+              remote,
+              cameraOn: canRenderVideo && remote?.isCameraOpened == true,
+              subtitle: GlobalState.instance.callPeerOrganization.forPeer(
+                call.callId,
+                remoteId,
+              ),
+            );
       return CallScene(
         key: ValueKey(call.callId),
         self: selfUser,
@@ -97,12 +116,16 @@ class _CallFloatWidgetState extends State<CallFloatWidget> {
   );
 
   /// 映射 SDK 资料，画面尚不可渲染时按头像状态展示。
-  CallSceneUser _user(CallParticipantInfo info, {required bool cameraOn}) => (
-    id: info.id,
-    name: info.name.isEmpty ? info.id : info.name,
-    avatarUrl: info.avatarURL,
-    // 腾讯基础资料没有可核实的机构职务字段，不映射猜测的自定义键。
-    subtitle: '',
+  CallSceneUser _user(
+    String id,
+    CallParticipantInfo? info, {
+    required bool cameraOn,
+    String subtitle = '',
+  }) => (
+    id: id,
+    name: info?.name.isNotEmpty == true ? info!.name : id,
+    avatarUrl: info?.avatarURL ?? '',
+    subtitle: subtitle,
     cameraOn: cameraOn,
   );
 }

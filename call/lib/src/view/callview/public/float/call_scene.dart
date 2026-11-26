@@ -210,6 +210,8 @@ class CallScene extends StatelessWidget {
           Text(
             remote!.subtitle,
             textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 16,
               height: 22 / 16,

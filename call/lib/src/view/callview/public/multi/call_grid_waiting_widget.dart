@@ -47,17 +47,22 @@ class CallGridWaitingWidget extends StatelessWidget {
                                 height: 28 / 20))),
                     if (inviter.subtitle.isNotEmpty) ...[
                       const SizedBox(height: 8),
-                      Text(inviter.subtitle,
-                          style: TextStyle(
-                              color: colors.onScrimSecondary,
-                              fontSize: 16,
-                              height: 22 / 16,
-                              letterSpacing: 0)),
+                      Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          child: Text(inviter.subtitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                  color: colors.onScrimSecondary,
+                                  fontSize: 16,
+                                  height: 22 / 16,
+                                  letterSpacing: 0))),
                     ],
                     const SizedBox(height: 48),
                     Text('邀请你${video ? '视频' : '语音'}通话',
                         style: TextStyle(
-                            color: colors.onScrim,
+                            color: colors.onScrimSecondary,
                             fontSize: 16,
                             height: 20 / 16,
                             letterSpacing: 0)),
@@ -67,7 +72,7 @@ class CallGridWaitingWidget extends StatelessWidget {
                       const SizedBox(height: 60),
                       Text('通话成员',
                           style: TextStyle(
-                              color: colors.onScrim,
+                              color: colors.onScrimSecondary,
                               fontSize: 16,
                               height: 20 / 16,
                               letterSpacing: 0)),

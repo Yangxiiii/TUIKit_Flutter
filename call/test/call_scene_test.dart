@@ -94,7 +94,7 @@ void main() {
               id: 'peer',
               name: '对端',
               avatarUrl: '',
-              subtitle: '',
+              subtitle: '众德家族-众森磊-再遇欢 I 主播',
               cameraOn: false
             ),
             video: video,
@@ -121,11 +121,26 @@ void main() {
         ));
         await tester.pump();
         expect(tester.takeException(), isNull);
+        final organization = find.text('众德家族-众森磊-再遇欢 I 主播');
         if (!video || !accepted) {
           expect(
               find.byWidgetPredicate((widget) =>
                   widget is AppUserAvatar && widget.size == (video ? 72 : 96)),
               findsOneWidget);
+          expect(organization, findsOneWidget);
+          final name = find.byWidgetPredicate(
+            (widget) =>
+                widget is Text &&
+                widget.data == '对端' &&
+                widget.style?.fontSize == 20,
+          );
+          expect(
+            tester.getTopLeft(organization).dy -
+                tester.getBottomLeft(name).dy,
+            16,
+          );
+        } else {
+          expect(organization, findsNothing);
         }
         expect(find.bySemanticsIdentifier('call.accept'),
             incoming ? findsOneWidget : findsNothing);

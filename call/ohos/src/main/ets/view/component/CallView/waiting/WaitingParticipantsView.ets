@@ -4,11 +4,14 @@ import { TUICallKitLocalize } from '../../../../common/Localized';
 import { UserManager } from '../../../../manager/UserManager';
 import { WaitingParticipantsCell } from './WaitingParticipantsCell';
 
+/** 展示群来电发起人资料及等待接听的参与者。 */
 @Component
 export struct WaitingParticipantsView {
   @ObjectLink activeCall: CallInfo;
   @ObjectLink allParticipants: CallParticipantInfo[];
   selfId: string = '';
+  /** 宿主查询到的发起人组织岗位，来自当前通话。 */
+  @Prop peerOrganization: string = '';
 
   build() {
     Column({ space: 16 }) {
@@ -16,7 +19,7 @@ export struct WaitingParticipantsView {
 
       if (this.otherParticipants().length > 0) {
         Text(TUICallKitLocalize('TUICallKit.calleeTip'))
-          .fontColor(CallConstants.Color_White)
+          .fontColor(CallConstants.Color_CallSecondaryText)
           .fontSize(12)
           .margin({ top: 16 });
 
@@ -53,8 +56,19 @@ export struct WaitingParticipantsView {
         .fontColor(CallConstants.Color_White)
         .fontSize(18)
         .fontWeight(FontWeight.Bold);
+      if (this.peerOrganization.length > 0) {
+        Text(this.peerOrganization)
+          .fontColor(CallConstants.Color_CallSecondaryText)
+          .fontSize(16)
+          .lineHeight(22)
+          .fontWeight(FontWeight.Medium)
+          .textAlign(TextAlign.Center)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .constraintSize({ maxWidth: '90%' });
+      }
       Text(TUICallKitLocalize('TUICallKit.Group.inviteToGroupCall'))
-        .fontColor(CallConstants.Color_OweWhite)
+        .fontColor(CallConstants.Color_CallSecondaryText)
         .fontSize(13);
     }
     .alignItems(HorizontalAlign.Center);

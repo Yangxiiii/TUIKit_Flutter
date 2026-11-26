@@ -7,7 +7,9 @@ import 'package:tencent_calls_uikit/src/view/callview/core/common/widget/control
 
 import '../../core/common/call_colors.dart';
 
+/// 按接听状态显示多人操作区，设备请求交给通话管理器和会控处理。
 class MultiCallControlsWidget extends StatefulWidget {
+  /// 展开或收起时向宿主报告新的操作区高度。
   final ValueChanged<double>? onHeightChanged;
 
   const MultiCallControlsWidget({super.key, this.onHeightChanged});
@@ -17,6 +19,7 @@ class MultiCallControlsWidget extends StatefulWidget {
       _MultiCallControlsWidgetState();
 }
 
+/// 保存多人操作区的展开状态，媒体状态仍由通话组件提供。
 class _MultiCallControlsWidgetState extends State<MultiCallControlsWidget> {
   final double bigBtnHeight = 56;
   final double smallBtnHeight = 42;
@@ -190,22 +193,13 @@ class _MultiCallControlsWidgetState extends State<MultiCallControlsWidget> {
   }
 
   Widget _getSwitchCameraSmallButton() {
-    return ValueListenableBuilder(
-      valueListenable: DeviceStore.shared.state.isFrontCamera,
-      builder: (context, value, child) {
-        return ControlsButton(
-          imgUrl: "call_assets/switch_camera.png",
-          tips: '',
-          textColor: CallColors.colorG7,
-          imgHeight: 28,
-          imgOffsetX: -16,
-          onTap: () {
-            CallManager.instance.switchCamera(
-              !DeviceStore.shared.state.isFrontCamera.value,
-            );
-          },
-        );
-      },
+    return ControlsButton(
+      imgUrl: "call_assets/switch_camera.png",
+      tips: '',
+      textColor: CallColors.colorG7,
+      imgHeight: 28,
+      imgOffsetX: -16,
+      onTap: CallManager.instance.flipCamera,
     );
   }
 
@@ -317,15 +311,7 @@ class _MultiCallControlsWidgetState extends State<MultiCallControlsWidget> {
               : '',
           textColor: CallColors.colorG7,
           imgHeight: isFunctionExpand ? bigBtnHeight : smallBtnHeight,
-          onTap: () {
-            if (value == DeviceStatus.on) {
-              CallManager.instance.closeLocalCamera();
-            } else {
-              CallManager.instance.openLocalCamera(
-                DeviceStore.shared.state.isFrontCamera.value,
-              );
-            }
-          },
+          onTap: CallManager.instance.toggleCamera,
           useAnimation: true,
           duration: Duration(milliseconds: duration),
         );

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:app_core/app_core.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +11,59 @@ import 'package:tuikit_atomic_x/base_component/utils/tui_event_bus.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('鸿蒙来电使用当前登录者查询对端，登出后丢弃迟到资料', () async {
+    const channel = MethodChannel('harmony_call_organization_login_test');
+    const organization = MethodChannel('harmony_call_organization_test');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (_) async => null);
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final bridge = HarmonyCallBridge(
+      _TestLogger(),
+      guard: ActionGuard(),
+      channel: channel,
+      organizationChannel: organization,
+    );
+    final started = Completer<void>();
+    final profile = Completer<Map<String, String>>();
+    bridge.setOrganizationLoader((account, users) {
+      expect(account, 'self');
+      expect(users, ['caller']);
+      started.complete();
+      return profile.future;
+    });
+    addTearDown(() => bridge.setOrganizationLoader(null));
+    await bridge.login(
+      sdkAppId: 123,
+      userId: 'self',
+      userSig: 'sig',
+      includeChat: false,
+    );
+
+    Future<Object?> lookup(String account) async {
+      final message = organization.codec.encodeMethodCall(
+        MethodCall('loadPeerOrganization', {
+          'accountId': account,
+          'userId': 'caller',
+        }),
+      );
+      final response = Completer<ByteData?>();
+      await messenger.handlePlatformMessage(
+        organization.name,
+        message,
+        response.complete,
+      );
+      return organization.codec.decodeEnvelope((await response.future)!);
+    }
+
+    expect(await lookup('old-account'), '');
+    final pending = lookup('self');
+    await started.future;
+    await bridge.logout(includeChat: false);
+    profile.complete({'caller': '研发部'});
+    expect(await pending, '');
+  });
 
   test('独立通话登录失败和退出均不改变 Flutter 聊天 Store', () async {
     const channel = MethodChannel('harmony_isolated_call_test');

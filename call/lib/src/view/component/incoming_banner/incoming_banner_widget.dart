@@ -22,6 +22,7 @@ class IncomingBannerWidget extends StatelessWidget {
       CallStore.shared.state.activeCall,
       CallStore.shared.state.allParticipants,
       GlobalState.instance.groupCall,
+      GlobalState.instance.callPeerOrganization,
     ]),
     builder: (context, _) {
       final call = CallStore.shared.state.activeCall.value;
@@ -46,6 +47,12 @@ class IncomingBannerWidget extends StatelessWidget {
         userId: call.inviterId,
         name: name,
         avatarUrl: inviter?.avatarURL,
+        organization: group?.callId == call.callId && group?.ended == false
+            ? group?.subtitleById[call.inviterId] ?? ''
+            : GlobalState.instance.callPeerOrganization.forPeer(
+                call.callId,
+                call.inviterId,
+              ),
         video: call.mediaType == CallMediaType.video,
         multi:
             call.chatGroupId.isNotEmpty ||
@@ -84,6 +91,7 @@ class IncomingBannerContent extends StatelessWidget {
     required this.userId,
     required this.name,
     required this.avatarUrl,
+    this.organization = '',
     required this.video,
     this.multi = false,
     required this.onShowCalling,
@@ -108,6 +116,9 @@ class IncomingBannerContent extends StatelessWidget {
 
   /// 邀请人的 SDK 头像；缺失时保留基础头像组件的默认显示。
   final String? avatarUrl;
+
+  /// 来电人的组织与岗位，由宿主查询，空值不占横幅空间。
+  final String organization;
 
   /// 当前邀请是否为视频，用于选择副标题和接听图标。
   final bool video;
@@ -160,7 +171,7 @@ class IncomingBannerContent extends StatelessWidget {
                     onAccept,
                     icon: video
                         ? Icon(
-                            AppIcons.cameraOn,
+                            AppIcons.cameraOnFilled,
                             size: 24,
                             color: colors.onScrim,
                           )
@@ -175,7 +186,7 @@ class IncomingBannerContent extends StatelessWidget {
     );
   }
 
-  /// 资料区单独响应展开通话，头像和两行文案保持设计稿的左对齐。
+  /// 资料区单独响应展开通话，组织岗位插在姓名和来电提示之间。
   Widget _buildCaller(BuildContext context) {
     final text = AppLocalization.of(context);
     final colors = context.appColors;
@@ -206,6 +217,17 @@ class IncomingBannerContent extends StatelessWidget {
                       color: colors.onScrim,
                     ),
                   ),
+                  if (organization.isNotEmpty)
+                    Text(
+                      organization,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.5,
+                        color: colors.onScrimSecondary,
+                      ),
+                    ),
                   Text(
                     multi
                         ? video
@@ -253,7 +275,8 @@ class IncomingBannerContent extends StatelessWidget {
         excludeFromSemantics: true,
         child: SizedBox.square(
           dimension: 40,
-          child: icon ??
+          child:
+              icon ??
               Ink.image(
                 image: AssetImage(imagePath, package: 'tuikit_atomic_x'),
                 fit: BoxFit.contain,

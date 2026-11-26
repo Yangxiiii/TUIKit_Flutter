@@ -43,8 +43,7 @@ class SingleCallControlsWidget extends StatelessWidget {
             onMicrophone: CallManager.instance.toggleMicrophone,
             onSpeaker: CallManager.instance.toggleSpeaker,
             onCamera: CallManager.instance.toggleCamera,
-            onFlip: () => CallManager.instance
-                .switchCamera(!DeviceStore.shared.state.isFrontCamera.value),
+            onFlip: CallManager.instance.flipCamera,
           );
         },
       );

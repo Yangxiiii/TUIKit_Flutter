@@ -3,6 +3,7 @@ import {
   CallStore, DeviceStore, CallParticipantInfo, DeviceState, CallMediaType,
   CallParticipantStatus, DeviceStatus, AudioRoute,
 } from '@tencentcloud/atomicxcore';
+import { NativeToastOverlay } from 'tuikit_atomic_x';
 import { ControlsButton } from '../../../../common/widgets/ControlsButton';
 import { CallKitBundle } from '../../../../common/CallKitBundle';
 import { TUICallKitLocalize } from '../../../../common/Localized';
@@ -10,8 +11,8 @@ import { CallConstants } from '../../../../common/CallConstants';
 import { Constants } from '../../../../common/Constants';
 import { Logger } from '../../../../common/utils/Logger';
 import { Permission } from '../../../../common/utils/Permission';
-import { Toast } from '../../../../common/widgets/Toast';
 import { CallEndedFlag } from '../../../../state/CallEndedFlag';
+import { ViewState } from '../../../../state/ViewState';
 import { CallingBellFeature } from '../../../../feature/CallingBellFeature';
 import { CallingVibratorFeature } from '../../../../feature/CallingVibratorFeature';
 
@@ -28,6 +29,7 @@ const ROW_GAP: number = 40;              // Flutter `edge`
 const BUTTON_LIFT: number = 12;
 const ANIM_DURATION: number = 300;
 
+/** 为原生多人通话显示接听和媒体控件，镜头切换沿用本场选择。 */
 @Component
 export struct MultiCallControlsView {
   @ObjectLink selfInfo: CallParticipantInfo;
@@ -41,10 +43,20 @@ export struct MultiCallControlsView {
   enableVirtualBackground: boolean = true;
   bottomExtension: number = 0;
 
+  /** 权限提示属于当前通话子窗口，权限请求返回时需确认此窗口仍可见。 */
+  private readonly toast: NativeToastOverlay = new NativeToastOverlay();
+  private active: boolean = false;
+
   aboutToAppear(): void {
+    this.active = true;
     this.controlsHeight = this.expanded
       ? CallConstants.groupFunctionViewHeight
       : CallConstants.groupSmallFunctionViewHeight;
+  }
+
+  aboutToDisappear(): void {
+    this.active = false;
+    this.toast.clear();
   }
 
   build() {
@@ -195,7 +207,7 @@ export struct MultiCallControlsView {
           .opacity(this.expanded ? 1 : 0)
           .hitTestBehavior(this.expanded ? HitTestMode.Default : HitTestMode.None)
           .onClick((): void => {
-            DeviceStore.shared().switchCamera(!this.deviceState.isFrontCamera);
+            ViewState().flipCamera();
           });
       }
     }
@@ -376,10 +388,13 @@ export struct MultiCallControlsView {
           .then((granted: boolean): void => {
             if (!granted) {
               Logger.warn('MultiCallControlsView: camera permission denied');
-              Toast.showOnTop(TUICallKitLocalize('TUICallKit.FailedToGetCameraPermission.Title'));
+              if (this.active) {
+                this.toast.show(this.getUIContext(),
+                  TUICallKitLocalize('TUICallKit.FailedToGetCameraPermission.Title'), 2000, 0);
+              }
               return;
             }
-            DeviceStore.shared().openLocalCamera(this.deviceState.isFrontCamera).catch((err: Object): void => {
+            DeviceStore.shared().openLocalCamera(ViewState().isFrontCamera).catch((err: Object): void => {
               Logger.warn('MultiCallControlsView: openLocalCamera failed', err);
             });
           })

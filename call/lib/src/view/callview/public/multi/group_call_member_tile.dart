@@ -16,6 +16,7 @@ class GroupCallMemberTile extends StatelessWidget {
     this.thumbnail = false,
     this.mainView = false,
     this.showVideo = true,
+    this.showOrganization = false,
   });
 
   /// 从当前场次事实映射的成员资料。
@@ -41,6 +42,9 @@ class GroupCallMemberTile extends StatelessWidget {
 
   /// 大画面的同人缩略卡只绘头像，避免争抢同一原生纹理。
   final bool showVideo;
+
+  /// 主叫等待时，当前成员有真实组织资料才追加一行副标题。
+  final bool showOrganization;
 
   @override
   Widget build(BuildContext context) {
@@ -116,24 +120,38 @@ class GroupCallMemberTile extends StatelessWidget {
     );
   }
 
-  /// 姓名蒙层在左下角随文字收缩，长姓名最多占卡片宽度并省略。
+  /// 左下角蒙层随资料宽度收缩，姓名与组织分别只占一行。
   Widget _nameStrip(BuildContext context) => Container(
         color: context.appColors.scrim.withValues(alpha: .5),
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Flexible(
-              child: Text(member.name,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              Flexible(
+                  child: Text(member.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: context.appColors.onScrim,
+                          fontSize: 12,
+                          height: 16 / 12))),
+              if (mainView && member.joined) ...[
+                const SizedBox(width: 8),
+                _microphone(context),
+              ],
+            ]),
+            if (showOrganization && member.subtitle.isNotEmpty)
+              Text(member.subtitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      color: context.appColors.onScrim,
-                      fontSize: 12,
-                      height: 16 / 12))),
-          if (mainView && member.joined) ...[
-            const SizedBox(width: 8),
-            _microphone(context),
+                      color: context.appColors.callStatusText,
+                      fontSize: 10,
+                      height: 14 / 10)),
           ],
-        ]),
+        ),
       );
 
   /// 终态与重呼动作分别呈现，重呼的标识、读屏名称和操作保持在同一节点。

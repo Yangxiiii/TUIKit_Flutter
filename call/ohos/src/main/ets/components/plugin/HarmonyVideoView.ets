@@ -9,6 +9,7 @@ import {
 import { CallVideoManager } from '@tencentcloud/atomicxcore/src/main/ets/impl/view/call/CallVideoManager';
 import { EngineBridge } from '@tencentcloud/atomicxcore/src/main/ets/engine/EngineBridge';
 import { Logger } from '../../common/utils/Logger';
+import { ViewState } from '../../state/ViewState';
 
 export const HARMONY_VIDEO_VIEW: string = 'oa.harmony.call.video';
 
@@ -20,17 +21,17 @@ function buildVideo(params: Params) {
   });
 }
 
-/** 从当前通话查找真实成员，Flutter 持有视频槽位置和头像。 */
+/** 从当前通话查找真实成员，Flutter 视频槽和原生等待预览共用渲染绑定。 */
 @Component
-struct HarmonyParticipantSurface {
+export struct HarmonyParticipantSurface {
   /** 创建参数指定绑定的真实参与者。 */
   userId: string = '';
-  /** 每个 Flutter 平台视图独享一个腾讯渲染目标。 */
+  /** 每个视图独享一个腾讯渲染目标。 */
   viewName: string = '';
 
   /** 从 SDK 的当前通话读取成员，避免绑定上一通残留的用户。 */
   @State private callState: CallState = CallStore.shared().state;
-  /** 本机镜头开关和朝向由 SDK 提供。 */
+  /** 本机镜头开关由 SDK 提供，以实际采集状态决定是否绑定。 */
   @State private deviceState: DeviceState = DeviceStore.shared().state;
 
   /** 原生订阅绑定 SDK 当前会话中的真实参与者对象。 */
@@ -87,9 +88,9 @@ struct HarmonyCallTexture {
       state.selfInfo.status === CallParticipantStatus.none) return;
     if (this.isLocal) {
       if (state.selfInfo.id !== this.participant.id || this.deviceState.cameraStatus !== DeviceStatus.on) return;
-      // SDK 的单路视图也是通过此接口绑定预览，但其默认前置镜头会覆盖当前方向。
+      // SDK 绑定纹理时会重新传入朝向，使用本场选择避免切换布局时翻回另一侧。
       void EngineBridge.call('DeviceModule.openLocalCamera', JSON.stringify({
-        isFront: this.deviceState.isFrontCamera,
+        isFront: ViewState().isFrontCamera,
         view: this.viewName,
       })).catch((error: Object): void => {
         Logger.warn('Flutter video texture local bind failed', error);

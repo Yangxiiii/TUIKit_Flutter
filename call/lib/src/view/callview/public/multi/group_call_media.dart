@@ -11,6 +11,7 @@ class GroupCallMedia extends StatefulWidget {
       {super.key,
       required this.members,
       required this.videoBuilder,
+      this.showOrganizationFor,
       this.initialFocusedId,
       this.onRetry});
 
@@ -22,6 +23,9 @@ class GroupCallMedia extends StatefulWidget {
 
   /// 外层为每个用户持有稳定视频Key，移动画面不会创建第二路订阅。
   final Widget Function(String userId) videoBuilder;
+
+  /// 主叫等待期间由上层指定哪些成员展示组织，切换大小画面沿用相同规则。
+  final bool Function(String userId)? showOrganizationFor;
 
   /// 拒绝、超时等成员在有效场次内的追加邀请入口。
   final ValueChanged<String>? onRetry;
@@ -125,7 +129,7 @@ class _GroupCallMediaState extends State<GroupCallMedia> {
         // 最多九人，保留视口外本端纹理，避免切大画面时无法确认本地开摄像头。
         cacheExtent: 9 * 98,
         itemCount: members.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 4),
+        separatorBuilder: (_, _) => const SizedBox(width: 4),
         itemBuilder: (context, index) {
           final member = members[index];
           final selected = member.id == focusedId;
@@ -133,6 +137,8 @@ class _GroupCallMediaState extends State<GroupCallMedia> {
               width: 94,
               child: GroupCallMemberTile(
                 member: member,
+                showOrganization:
+                    widget.showOrganizationFor?.call(member.id) == true,
                 thumbnail: true,
                 selected: selected,
                 showVideo: !selected,
@@ -149,6 +155,7 @@ class _GroupCallMediaState extends State<GroupCallMedia> {
       GroupCallMemberTile(
         key: ValueKey(member.id),
         member: member,
+        showOrganization: widget.showOrganizationFor?.call(member.id) == true,
         mainView: mainView,
         video: widget.videoBuilder(member.id),
         onTap: onTap ??

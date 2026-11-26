@@ -6,7 +6,7 @@ import { common, wantAgent, WantAgent } from '@kit.AbilityKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { image } from '@kit.ImageKit';
 import { http } from '@kit.NetworkKit';
-import { CallStore, CallInfo, CallParticipantInfo, CallMediaType } from '@tencentcloud/atomicxcore';
+import { CallStore, CallInfo, CallParticipantInfo, CallMediaType, CallParticipantStatus } from '@tencentcloud/atomicxcore';
 import { TUICallKitLocalize } from '../common/Localized';
 import { Logger } from '../common/utils/Logger';
 import { UserManager } from '../manager/UserManager';
@@ -23,6 +23,7 @@ export const NOTIFICATION_CALL_ID_KEY: string = 'callkitCallId';
 export const NOTIFICATION_CALL_ACTION_ACCEPT: string = 'accept';
 export const NOTIFICATION_CALL_ACTION_REJECT: string = 'reject';
 
+/** 在后台发布当前来电的系统通知，通话结束后撤回同一个通知。 */
 export class IncomingNotificationFeature {
   private static _instance: IncomingNotificationFeature | null = null;
 
@@ -34,7 +35,12 @@ export class IncomingNotificationFeature {
   }
 
   private context: common.UIAbilityContext | null = null;
+  /** 记录系统已确认发布的通知，供串行撤回使用。 */
   private hasPublished: boolean = false;
+  /** 每次更换或取消来电通知都废弃尚在准备资料的旧请求。 */
+  private revision: number = 0;
+  /** 序列化系统发布与撤回，避免旧通知晚到或撤掉下一通来电。 */
+  private notificationTask: Promise<void> = Promise.resolve();
 
   init(context: common.UIAbilityContext): void {
     if (this.context) {
@@ -57,7 +63,8 @@ export class IncomingNotificationFeature {
     }
     const state = CallStore.shared().state;
     const activeCall: CallInfo = state.activeCall;
-    if (!activeCall.callId || activeCall.callId.length === 0) {
+    const callId = activeCall.callId;
+    if (callId.length === 0) {
       Logger.warn('IncomingNotificationFeature.publish: no active call');
       return;
     }
@@ -65,19 +72,20 @@ export class IncomingNotificationFeature {
       .find((p: CallParticipantInfo): boolean => p.id === activeCall.inviterId);
     const callerName: string = UserManager.getUserDisplayName(caller);
     const tipKey: string = this.tipKey(activeCall);
+    const revision = ++this.revision;
 
     try {
       const acceptAgent = await this.buildWantAgent(
         NOTIFICATION_CALL_ACTION_ACCEPT,
-        activeCall.callId,
+        callId,
         1,
       );
       const rejectAgent = await this.buildWantAgent(
         NOTIFICATION_CALL_ACTION_REJECT,
-        activeCall.callId,
+        callId,
         2,
       );
-      const tapAgent = await this.buildWantAgent('', activeCall.callId, 0);
+      const tapAgent = await this.buildWantAgent('', callId, 0);
       const largeIcon: image.PixelMap | undefined = await this.tryLoadAvatarPixelMap(caller?.avatarURL);
 
       const request: notificationManager.NotificationRequest = {
@@ -102,24 +110,34 @@ export class IncomingNotificationFeature {
         ],
       };
 
-      await notificationManager.publish(request);
-      this.hasPublished = true;
-      Logger.info('IncomingNotificationFeature.publish: posted', activeCall.callId);
+      // 头像或系统动作准备期间可能已经取消来电，提交系统前复核场次与本机状态。
+      this.notificationTask = this.notificationTask.then(async (): Promise<void> => {
+        const current = CallStore.shared().state;
+        if (revision !== this.revision || current.activeCall.callId !== callId ||
+          current.selfInfo.status !== CallParticipantStatus.waiting || !AppStateObserver().isBackground()) return;
+        await notificationManager.publish(request);
+        this.hasPublished = true;
+        Logger.info('IncomingNotificationFeature.publish: posted', callId);
+      }).catch((error: Object): void => {
+        Logger.warn('IncomingNotificationFeature.publish failed', error);
+      });
+      await this.notificationTask;
     } catch (e) {
       Logger.warn('IncomingNotificationFeature.publish failed', e);
     }
   }
 
-  async cancel(): Promise<void> {
-    if (!this.hasPublished) {
-      return;
-    }
-    this.hasPublished = false;
-    try {
+  /** 取消准备中的请求，并在已提交系统的发布结束后撤回通知。 */
+  cancel(): Promise<void> {
+    this.revision++;
+    this.notificationTask = this.notificationTask.then(async (): Promise<void> => {
+      if (!this.hasPublished) return;
       await notificationManager.cancel(NOTIFICATION_ID);
-    } catch (e) {
-      Logger.warn('IncomingNotificationFeature.cancel failed', e);
-    }
+      this.hasPublished = false;
+    }).catch((error: Object): void => {
+      Logger.warn('IncomingNotificationFeature.cancel failed', error);
+    });
+    return this.notificationTask;
   }
 
   async destroy(): Promise<void> {

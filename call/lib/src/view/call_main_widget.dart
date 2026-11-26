@@ -256,26 +256,40 @@ class _CallMainWidgetState extends State<CallMainWidget>
         builder: (context, _) {
           final call = CallStore.shared.state.activeCall.value;
           final self = CallStore.shared.state.selfInfo.value;
-          final group = GlobalState.instance.groupCall.value != null ||
+          final result = GlobalState.instance.groupCall.value;
+          final group = result != null ||
               call.chatGroupId.isNotEmpty ||
               call.inviteeIds.length > 1;
           if (!group) return Stack(children: [_buildFloatingWindowBtnWidget()]);
-          final incoming = call.inviterId != self.id &&
+          final incoming = result?.ended != true &&
+              call.inviterId != self.id &&
               self.status == CallParticipantStatus.waiting;
-          final ended = GlobalState.instance.groupCall.value?.ended == true;
+          // 全员未接结果页仍可缩成小卡片，并为下一次重呼选人。
+          final showsActions = result?.ended != true || result?.canRetry == true;
           return GroupCallHeaderActions(
               incoming: incoming,
-              showMinimize: GlobalState.instance.enableFloatWindow && !ended,
-              showInvite: !incoming && !ended,
-              inviteEnabled: call.callId.isNotEmpty,
+              showMinimize:
+                  GlobalState.instance.enableFloatWindow && showsActions,
+              showInvite: !incoming && showsActions,
+              inviteEnabled: call.callId.isNotEmpty || result?.canRetry == true,
               onMinimize: _openFloatWindow,
               onInvite: _openInviteUser);
         },
       );
 
-  /// 安卓在系统授权后继续当前通话的最小化流程，其他平台直接切换。
+  /// 活跃通话按平台处理权限，可重呼结果直接缩成应用内卡片。
   Future<void> _openFloatWindow() => AppServiceLocator.get<ActionGuard>()
           .singleFlight('tim.call.minimize', () async {
+        // 超时卡片只留在应用内，SDK 媒体已结束，无需系统悬浮权限。
+        final result = GlobalState.instance.groupCall.value;
+        if (result?.canRetry == true) {
+          if (mounted &&
+              (_currentPageType ?? CallPageType.calling) == CallPageType.calling &&
+              widget.callbacks?.isCurrentPresentation?.call() == true) {
+            widget.callbacks?.onShowFloating?.call();
+          }
+          return;
+        }
         final callId = CallStore.shared.state.activeCall.value.callId;
         if (!_canMinimize(callId)) return;
         if (Platform.isAndroid &&

@@ -113,6 +113,22 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
 
   /// 开始时立即取一帧，结束时先隐藏旧 UI，再作废在途读操作。
   Future<Object?> _onNativeEvent(MethodCall event) async {
+    if (event.method == 'harmonyToast') {
+      final data = event.arguments;
+      // 原生事件可能在卸载边缘到达，只有当前页面的有效文字进入根提示层。
+      if (!mounted || data is! Map) return null;
+      final message = data['message'];
+      if (message is! String || message.trim().isEmpty) return null;
+      final durationMs = data['durationMs'];
+      AppToast.show(
+        message,
+        context: context,
+        duration: durationMs is int && durationMs > 0
+            ? Duration(milliseconds: durationMs)
+            : AppToast.defaultDuration,
+      );
+      return null;
+    }
     if (event.method != 'harmonyPresentationChanged') {
       throw MissingPluginException(event.method);
     }
@@ -368,7 +384,11 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
     return Stack(
       fit: StackFit.expand,
       children: [
-        widget.child,
+        // 全屏通话遮住底层，保留页面状态但停止绘制主页底栏，避免 Toast 误避让。
+        Offstage(
+          offstage: call != null && !call.banner && !_compact,
+          child: widget.child,
+        ),
         // 仅在通话层固定配色，底层页面继续继承全局外观。
         if (call != null)
           CallPresentationTheme(
@@ -399,6 +419,7 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
                 fallback: call.peer.name,
               ),
               avatarUrl: call.peer.avatarUrl,
+              organization: call.peer.subtitle,
               video: call.video,
               multi: call.group != null,
               onShowCalling: () => _act('expand'),
@@ -436,6 +457,9 @@ class _HarmonyCallOverlayState extends State<HarmonyCallOverlay>
                     groupId: call.groupId,
                     key: ValueKey(call.id),
                     group: group,
+                    inviterOrganization: call.peer.id == group.inviterId
+                        ? call.peer.subtitle
+                        : '',
                     selfId: call.self.id,
                     duration: call.duration,
                     incoming: call.incoming,
@@ -715,7 +739,7 @@ extension _HarmonyCallSnapshotCodec on _HarmonyCallSnapshot {
     id: map['id'] as String,
     name: map['name'] as String,
     avatarUrl: map['avatar'] as String,
-    subtitle: '',
+    subtitle: map['organization'] as String? ?? '',
     cameraOn: map['camera'] == true,
   );
 }

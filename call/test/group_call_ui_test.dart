@@ -492,13 +492,26 @@ void main() {
     expect(taps, 2);
   });
 
-  testWidgets('来电预览仅展示前三头像与真实溢出数量', (tester) async {
+  testWidgets('来电预览使用设计稿的文字颜色并展示真实溢出数量', (tester) async {
     await tester.pumpWidget(_app(CallGridWaitingWidget(
-        inviter: _member(0),
+        inviter: const GroupCallMember(
+          id: '0',
+          name: '发起人',
+          subtitle: '产品运营部',
+          status: GroupCallMemberStatus.joined,
+        ),
         members: List.generate(8, (index) => _member(index + 1)),
         video: false)));
     await tester.pump();
     expect(find.text('+5'), findsOneWidget);
+    for (final label in ['产品运营部', '邀请你语音通话', '通话成员']) {
+      expect(tester.widget<Text>(find.text(label)).style?.color,
+          const Color(0xFFAEAEB2), reason: label);
+    }
+    for (final label in ['发起人', '+5']) {
+      expect(tester.widget<Text>(find.text(label)).style?.color,
+          Colors.white, reason: label);
+    }
     expect(
         find.byWidgetPredicate(
             (widget) => widget is AppUserAvatar && widget.size == 40),
@@ -517,8 +530,13 @@ void main() {
     expect(find.byType(GroupCallMedia), findsOneWidget);
     expect(find.bySemanticsIdentifier('call.minimize'), findsOneWidget);
     expect(find.bySemanticsIdentifier('call.group.invite'), findsOneWidget);
-    // 成员宫格只有单行姓名；机构字段只属于独立的成员管理资料。
-    expect(find.text('开发部'), findsNothing);
+    final invitee = find.bySemanticsIdentifier('call.group.member.user1');
+    final name = find.descendant(of: invitee, matching: find.text('测试成员1'));
+    final subtitle = find.descendant(of: invitee, matching: find.text('开发部'));
+    expect(find.text('开发部'), findsNWidgets(8));
+    expect(tester.getTopLeft(subtitle).dy,
+        greaterThanOrEqualTo(tester.getBottomLeft(name).dy));
+    expect(tester.widget<Text>(subtitle).style?.color, const Color(0xFFAEAEB2));
     expect(find.text('已拒绝'), findsOneWidget);
     expect(find.bySemanticsIdentifier('call.group.reinvite.user5'),
         findsOneWidget);
@@ -528,6 +546,7 @@ void main() {
     await tester.tap(find.text('大画面'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('开发部'), findsNothing);
     expect(find.bySemanticsIdentifier('call.group.thumbnail.user1'),
         findsOneWidget);
     expect(find.text('摄像头已开'), findsOneWidget);

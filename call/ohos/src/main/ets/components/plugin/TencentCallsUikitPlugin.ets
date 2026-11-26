@@ -10,12 +10,14 @@ import {
   MethodChannel,
   MethodResult,
 } from '@ohos/flutter_ohos';
-import { CallMediaType, CallParams, CloudRecordPolicy, LoginStore } from '@tencentcloud/atomicxcore';
+import { CallMediaType, CallParams, CallStore, CloudRecordPolicy, LoginStore } from '@tencentcloud/atomicxcore';
 import { TUICallKit } from '../../TUICallKit';
 import { RouterManager } from '../../manager/RouterManager';
 import { Logger } from '../../common/utils/Logger';
+import { Toast } from '../../common/widgets/Toast';
 import { FlutterCallPresentation } from './FlutterCallPresentation';
 import { HarmonyVideoViewFactory, HARMONY_VIDEO_VIEW } from './HarmonyVideoView';
+import { CallRoute, ViewState } from '../../state/ViewState';
 
 /** 在 Flutter 与 HarmonyOS 原生 TUICallKit 之间转发登录和呼叫命令。 */
 export default class TencentCallsUikitPlugin implements FlutterPlugin, MethodCallHandler, AbilityAware {
@@ -35,10 +37,22 @@ export default class TencentCallsUikitPlugin implements FlutterPlugin, MethodCal
     this.channel.setMethodCallHandler(this);
     this.presentationChannel = new MethodChannel(binding.getBinaryMessenger(), 'tencent_calls_uikit/harmony_presentation');
     this.presentationChannel.setMethodCallHandler(this);
+    // 资料走独立通道，和呼叫控制及展示快照互不覆盖。
+    const organizationChannel = new MethodChannel(binding.getBinaryMessenger(), 'tencent_calls_uikit/harmony_organization');
+    ViewState().setPeerOrganizationLoader((accountId: string, userId: string): Promise<string> =>
+      new Promise<string>((resolve): void => {
+        organizationChannel.invokeMethod('loadPeerOrganization',
+          new Map<string, string>([['accountId', accountId], ['userId', userId]]), {
+            success: (result: ESObject): void => resolve(typeof result === 'string' ? result as string : ''),
+            error: (): void => resolve(''),
+            notImplemented: (): void => resolve(''),
+          });
+      }));
     binding.getPlatformViewRegistry().registerViewFactory(HARMONY_VIDEO_VIEW, new HarmonyVideoViewFactory());
   }
 
   onDetachedFromEngine(_binding: FlutterPluginBinding): void {
+    ViewState().setPeerOrganizationLoader(null);
     this.detachPresentation();
     this.channel?.setMethodCallHandler(null);
     this.channel = null;
@@ -91,6 +105,11 @@ export default class TencentCallsUikitPlugin implements FlutterPlugin, MethodCal
           const presentation = new FlutterCallPresentation(channel, context, call.argument('nativeVideo') !== false);
           this.presentation = presentation;
           RouterManager.bindFlutterPresenter((route): boolean => presentation.present(route));
+          // 通话窗口关闭后 Dart 浮层仍存在，可安全呈现结束提示。
+          Toast.bindPresenter((message: string, durationMs: number): void => {
+            channel.invokeMethod('harmonyToast',
+              new Map<string, Object>([['message', message], ['durationMs', durationMs]]));
+          });
         }
         result.success(this.presentation.snapshot());
         return;
@@ -132,9 +151,21 @@ export default class TencentCallsUikitPlugin implements FlutterPlugin, MethodCal
         return;
       }
       case 'harmonyLogin':
+        ViewState().clearPeerOrganization();
         this.login(call, context, result);
         return;
+      case 'harmonyResetPeerOrganization': {
+        const view = ViewState();
+        view.clearPeerOrganization();
+        if (view.router !== CallRoute.none) {
+          const state = CallStore.shared().state;
+          view.refreshPeerOrganization(state.activeCall, state.selfInfo);
+        }
+        result.success(null);
+        return;
+      }
       case 'harmonyLogout':
+        ViewState().clearPeerOrganization();
         LoginStore.shared().logout()
           .then((): void => result.success(null))
           .catch((error: Error): void => result.error('LOGOUT_FAILED', error.message, null));
@@ -154,18 +185,35 @@ export default class TencentCallsUikitPlugin implements FlutterPlugin, MethodCal
   private detachPresentation(): void {
     if (this.presentation !== null) {
       RouterManager.bindFlutterPresenter(null);
+      Toast.bindPresenter(null);
       this.presentation = null;
     }
   }
 
-  /** 同步原生通话登录态，使 IM 上传和 Flutter 相册共用应用级缓存。 */
+  /** 同步原生通话登录态，并在鉴权完成后开启同账号的多端接听。 */
   private login(call: MethodCall, context: common.UIAbilityContext, result: MethodResult): void {
     const sdkAppId = call.argument('sdkAppId') as number;
     const userId = call.argument('userId') as string;
     const userSig = call.argument('userSig') as string;
     LoginStore.shared().login(sdkAppId, userId, userSig, context.getApplicationContext())
+      .then((): Promise<void> => this.enableMultiDeviceCalls())
       .then((): void => result.success(null))
       .catch((error: Error): void => result.error('LOGIN_FAILED', error.message, null));
+  }
+
+  /** 鸿蒙 SDK 通过实验接口启用多端信令，收到其他设备接听后由原生结束当前邀请。 */
+  private async enableMultiDeviceCalls(): Promise<void> {
+    const params: Record<string, Object> = { 'enabled': true };
+    const request: Record<string, Object> = { 'api': 'enableMultiDeviceAbility', 'params': params };
+    // SDK 会把顶层 api 当作引擎命令，使用 jsonStr 进入通话实验接口的分发入口。
+    const payload: Record<string, string> = { 'jsonStr': JSON.stringify(request) };
+    try {
+      await CallStore.shared().callExperimentalAPI(JSON.stringify(payload));
+      Logger.info('Multi-device call ability enabled');
+    } catch (error) {
+      // 套餐或 SDK 拒绝多端能力时，保留已经成功的原生登录和单端通话。
+      Logger.warn('Multi-device call ability unavailable', error);
+    }
   }
 
   /** 把 Flutter 通话参数交给原生 CallKit，群归属必须在第一次呼叫时设置。 */

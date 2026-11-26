@@ -11,6 +11,7 @@ import 'package:tencent_rtc_sdk/trtc_cloud.dart';
 import 'package:tencent_rtc_sdk/tx_audio_effect_manager.dart';
 import 'package:tencent_calls_uikit/src/common/platform/call_kit_platform_interface.dart';
 
+/// 依据本机通话状态控制铃声和振动，停止时作废尚在准备的铃声。
 class CallingBellFeature {
   static CallingBellFeature instance = CallingBellFeature._();
 
@@ -30,6 +31,9 @@ class CallingBellFeature {
 
   VoidCallback? _selfInfoListener;
   bool _initialized = false;
+
+  /// 用于区分异步准备中的铃声，防止上一通结束后开始响铃。
+  int _ringGeneration = 0;
 
   CallingBellFeature._();
 
@@ -69,6 +73,7 @@ class CallingBellFeature {
     }
   }
 
+  /// 等铃声文件就绪后仅启动当前场次仍有效的提示。
   Future<void> _startRing() async {
     if (isPlaying) {
       return;
@@ -76,14 +81,16 @@ class CallingBellFeature {
 
     Logger.info('CallingBellFeature startRing');
     isPlaying = true;
+    final generation = ++_ringGeneration;
 
     final filePath = await _getRingFilePath();
+    if (generation != _ringGeneration) return;
     if (filePath.isEmpty) {
       isPlaying = false;
       return;
     }
 
-    _playByTRTC(filePath);
+    _playByTRTC(filePath, generation);
 
     if (_isCalled()) {
       TUICallKitPlatform.instance.startVibration();
@@ -91,6 +98,7 @@ class CallingBellFeature {
     }
   }
 
+  /// 先作废未完成的准备，再停止当前的铃声与振动。
   Future<void> _stopRing() async {
     if (!isPlaying) {
       return;
@@ -98,6 +106,7 @@ class CallingBellFeature {
 
     Logger.info('CallingBellFeature stopRing');
     isPlaying = false;
+    _ringGeneration++;
 
     _stopByTRTC();
 
@@ -160,8 +169,10 @@ class CallingBellFeature {
     return await getAssetsFilePath(assetPath);
   }
 
-  Future<void> _playByTRTC(String filePath) async {
+  /// SDK 音频实例异步就绪时再次校验，避免刚结束的来电重新响铃。
+  Future<void> _playByTRTC(String filePath, int generation) async {
     final trtcCloud = await TRTCCloud.sharedInstance();
+    if (generation != _ringGeneration) return;
     final audioEffectManager = trtcCloud.getAudioEffectManager();
 
     final param = AudioMusicParam(

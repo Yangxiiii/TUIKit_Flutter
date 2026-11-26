@@ -10,6 +10,7 @@ import { PipManager, PipState } from '../manager/PipManager';
 import { Logger } from '../common/utils/Logger';
 import { Permission } from '../common/utils/Permission';
 
+/** 原生回退页面负责权限和首次媒体准备，镜头方向由当前通话共享。 */
 @Component
 export struct CallMainPage {
   @ObjectLink viewState: ViewStateClass;
@@ -84,17 +85,8 @@ export struct CallMainPage {
   }
 
   /**
-   * One-shot bootstrap on entering the call page:
-   *   1) Permission check + auto-reject (callee path) on denial.
-   *   2) Default audio route (video → speakerphone, audio → earpiece).
-   *   3) Open mic + (if video) front camera.
-   *
-   * Fire-and-forget: any failure is logged but the page still renders so the
-   * user can retry / open Settings via the in-call buttons.
-   *
-   * 进入通话页面的一次性初始化：1) 权限检查 + 拒绝时自动拒接（被叫路径）。2) 默认音频路由（视频 → 扬声器，音频 → 听筒）。3) 打开麦克风 + （如果有视频）前置摄像头。
-   *
-   * 即发即忘：任何失败都会被记录，但页面仍会渲染，所以用户可以重试或通过通话中的按钮打开设置。
+   * 进入通话页面时检查权限并设置音频路由，视频按本场镜头方向启动预览。
+   * 媒体启动失败时继续显示页面，用户仍可通过通话控件重试。
    */
   private bootstrapMediaForCall(): void {
     const mediaType = this.callState_activeCall.mediaType;
@@ -127,7 +119,7 @@ export struct CallMainPage {
         });
 
         if (mediaType === CallMediaType.video) {
-          DeviceStore.shared().openLocalCamera(true).catch((err: Object): void => {
+          DeviceStore.shared().openLocalCamera(this.viewState.isFrontCamera).catch((err: Object): void => {
             Logger.warn('CallMainPage: openLocalCamera failed', err);
           });
         }

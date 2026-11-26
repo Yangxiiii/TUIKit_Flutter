@@ -57,13 +57,23 @@ export struct TUICallKitOverlayPage {
   }
 }
 
+/** 绑定原生通话窗口和当前 SDK 场次，资料补齐时更新可见的来电信息。 */
 @Component
 struct OverlayRouter {
   @ObjectLink viewState: ViewStateClass;
-  @ObjectLink callState_activeCall: CallInfo;
+  @ObjectLink @Watch('refreshOrganization') callState_activeCall: CallInfo;
   @ObjectLink @Watch('onSelfInfoChanged') callState_selfInfo: CallParticipantInfo;
   @ObjectLink callState_allParticipants: CallParticipantInfo[];
   @ObjectLink deviceState: DeviceState;
+
+  aboutToAppear(): void {
+    this.refreshOrganization();
+  }
+
+  /** 来电回调后 SDK 可能才补齐主叫和本机身份，此处复用同场请求。 */
+  refreshOrganization(): void {
+    this.viewState.refreshPeerOrganization(this.callState_activeCall, this.callState_selfInfo);
+  }
 
   /**
    * Status-watcher hook. `@ObjectLink + @Watch` is the canonical ArkUI
@@ -76,6 +86,7 @@ struct OverlayRouter {
    * CallStatusObserver 内部按状态去重（`lastStatus` 缓存），所以一些无关触发（比如 avatarURL 变化）不会有实际效果。
    */
   onSelfInfoChanged(): void {
+    this.refreshOrganization();
     const status = this.callState_selfInfo.status;
     CallStatusObserver().notify(status);
 

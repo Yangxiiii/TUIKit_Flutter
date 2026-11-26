@@ -23,6 +23,8 @@ export class CallConstants {
 
   static readonly Color_White: string = '#FFFFFF';
   static readonly Color_OweWhite: string = '#CCFFFFFF';
+  /** 暗底通话页面上的辅助文案使用同一灰色。 */
+  static readonly Color_CallSecondaryText: string = '#AEAEB2';
   static readonly Color_Black: string = '#000000';
   static readonly Color_HangupRed: string = '#FF584C';
   static readonly Color_AnswerGreen: string = '#29CC85';

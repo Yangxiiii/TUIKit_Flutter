@@ -7,6 +7,7 @@ import 'package:app_core/app_core.dart';
 import 'package:app_service/app_service.dart';
 import 'package:app_ui/app_ui.dart';
 import 'manager/call_duration_limit.dart';
+import 'manager/call_peer_organization.dart';
 import 'manager/group_member_subtitle_cache.dart';
 import 'manager/group_control_lifecycle.dart';
 import 'control/group_control_transport.dart';
@@ -106,20 +107,42 @@ class TUICallKitImpl implements TUICallKit {
     GlobalState.instance.groupCallSession.updateMember(userId, status);
   }
 
-  /// 从 SDK 补齐群标识和资料，空状态及已结束旧场次不会重新打开结果。
+  /// 从 SDK 补齐单聊对端或群成员资料，已结束的旧场次不再进入展示流程。
   void _syncGroupCall({String? attemptId}) {
-    final call = CallStore.shared.state.activeCall.value;
-    if (call.mediaType == null) return;
-    final session = GlobalState.instance.groupCallSession;
+    final state = CallStore.shared.state;
+    final call = state.activeCall.value;
+    final global = GlobalState.instance;
+    if (call.mediaType == null) {
+      global.callPeerOrganization.clear();
+      return;
+    }
+    final session = global.groupCallSession;
     final previous = session.value;
-    if (previous?.ended == true && previous?.callId == call.callId) return;
+    if (previous case final result? when result.ended) {
+      if (call.callId.isEmpty || result.callId == call.callId) return;
+      // 新场次资料可能先于来电事件到达，替换快照前要先关闭旧的超时界面。
+      CallManager.instance.dismissGroupCallResult();
+    }
     // 只在 SDK 已给出群或多人事实时创建快照；两人临时多人由明确展示元数据创建。
-    final participants = CallStore.shared.state.allParticipants.value;
+    final participants = state.allParticipants.value;
     final group = call.chatGroupId.isNotEmpty ||
         call.inviteeIds.length > 1 ||
         participants.length > 2;
-    if (previous == null ||
-        (previous.ended && previous.callId != call.callId)) {
+    // 多人名单已批量读取资料，单聊只查询邀请人或唯一受邀人。
+    final self = state.selfInfo.value;
+    if (group ||
+        (previous?.callId == call.callId && call.callId.isNotEmpty) ||
+        self.status == CallParticipantStatus.none ||
+        (call.callId.isEmpty && call.inviterId != self.id)) {
+      global.callPeerOrganization.clear();
+    } else {
+      global.callPeerOrganization.refresh(
+        self.id,
+        call.callId,
+        CallPeerOrganization.peerId(call, self.id),
+      );
+    }
+    if (session.value == null) {
       if (!group) return;
       session.begin(
           attemptId: attemptId,
@@ -154,7 +177,12 @@ class TUICallKitImpl implements TUICallKit {
     onCallReceived:
         (String callId, CallMediaType mediaType, String userData) async {
       CallManager.instance.invalidateDevicePreparation();
-      CallManager.instance.clearGroupRequest();
+      // 来电事件先到时也要清掉旧超时界面，等新场次资料驱动展示。
+      if (GlobalState.instance.groupCall.value?.ended == true) {
+        CallManager.instance.dismissGroupCallResult();
+      } else {
+        CallManager.instance.clearGroupRequest();
+      }
       _acceptedCallAttempt.value = null;
       // 腾讯真实群来源优先；展示标识只能补充独立多人，不能改写群关系或权限。
       final call = CallStore.shared.state.activeCall.value;
@@ -184,6 +212,9 @@ class TUICallKitImpl implements TUICallKit {
       }
     },
     onCallEnded: (callId, mediaType, reason, userId) {
+      if (CallStore.shared.state.activeCall.value.callId == callId) {
+        GlobalState.instance.callPeerOrganization.clear();
+      }
       CallManager.instance.finishGroupRecording(callId);
       _groupControlLifecycle.clear();
       CallManager.instance.invalidateDevicePreparation();
@@ -214,6 +245,10 @@ class TUICallKitImpl implements TUICallKit {
         pageRouter.showCallingPage();
       } else {
         _closePage();
+        if (reason == CallEndReason.otherDeviceAccepted) {
+          AppServiceLocator.maybeGet<AppLogger>()
+              ?.info('通话 SDK 已收到其他设备接听事件并清理本端来电');
+        }
       }
       ForegroundService.stop();
       if (_durationLimit.isEnding(callId)) return;
@@ -339,10 +374,7 @@ class TUICallKitImpl implements TUICallKit {
 
     // 宿主通过 LoginStore 初始化 IM，补发旧 TUILogin 提供的原生初始化通知。
     TUICallKitPlatform.instance.imSDKInitSuccess();
-    final result = await TUICallEngine.instance.init(sdkAppId, userId, userSig);
-    if (result.code == TUIError.success) {
-      await _attachCallSession();
-    }
+    final result = await _initializeCallEngine(sdkAppId, userId, userSig);
     return CompletionHandler()
       ..errorCode = result.code.rawValue
       ..errorMessage = result.message;
@@ -486,7 +518,13 @@ class TUICallKitImpl implements TUICallKit {
 
   @override
   void setGroupMemberSubtitleLoader(GroupMemberSubtitleLoader? loader) {
+    if (_harmonyBridge case final harmony?) {
+      harmony.setOrganizationLoader(loader);
+      return;
+    }
     _memberSubtitleCache.setLoader(loader);
+    GlobalState.instance.callPeerOrganization.setLoader(loader);
+    _syncGroupCall();
   }
 
   /// 鸿蒙展示层以原生接通快照驱动同一会控生命周期。
@@ -553,13 +591,25 @@ class TUICallKitImpl implements TUICallKit {
 
   /// 登录后绑定本端通话和成员观察者，重复登录先移除旧注册以避免重复通知。
   void handleLoginSuccess(int sdkAppID, String userId, String userSig) {
-    TUICallEngine.instance.init(sdkAppID, userId, userSig);
+    unawaited(_initializeCallEngine(sdkAppID, userId, userSig));
     LoginStore.shared.login(
       sdkAppID: sdkAppID,
       userID: userId,
       userSig: userSig,
     );
-    unawaited(_attachCallSession());
+  }
+
+  /// 两种登录入口都等通话鉴权成功后才注册监听及开启多端能力。
+  Future<TUIActionCallback> _initializeCallEngine(
+    int sdkAppId,
+    String userId,
+    String userSig,
+  ) async {
+    final result = await TUICallEngine.instance.init(sdkAppId, userId, userSig);
+    if (result.code == TUIError.success) {
+      await _attachCallSession();
+    }
+    return result;
   }
 
   /// 通话引擎就绪后绑定监听并启用平台能力。
@@ -578,6 +628,20 @@ class TUICallKitImpl implements TUICallKit {
     AppLifecycle.instance.currentState.addListener(_onDurationLifecycle);
     if (Platform.isIOS) {
       pictureInPictureFeature = IosPipFeature();
+    }
+
+    // 先注册结束监听，再开启跨端信令，确保其他设备接听时本端能收尾。
+    final logger = AppServiceLocator.maybeGet<AppLogger>();
+    try {
+      final result = await TUICallEngine.instance.enableMultiDeviceAbility(true);
+      if (result.code == TUIError.success) {
+        logger?.info('通话 SDK 已启用多端接听');
+      } else {
+        logger?.warning('通话 SDK 未启用多端接听（${result.code.rawValue}）');
+      }
+    } on Exception catch (error) {
+      // 配置失败只影响跨端联动，保留已完成的通话登录。
+      logger?.warning('通话 SDK 多端接听配置失败（${error.runtimeType}）');
     }
   }
 
@@ -600,6 +664,7 @@ class TUICallKitImpl implements TUICallKit {
     CallManager.instance.invalidateDevicePreparation();
     CallManager.instance.clearGroupRequest();
     _memberSubtitleCache.clear();
+    GlobalState.instance.callPeerOrganization.clear();
     GlobalState.instance.clearGroupCall();
     _closePage();
     CallStore.shared.state.activeCall.removeListener(_checkDurationLimit);
@@ -656,6 +721,7 @@ class TUICallKitImpl implements TUICallKit {
     CallStore.shared.state.activeCall.addListener(_syncGroupCall);
     CallStore.shared.state.allParticipants.addListener(_syncGroupCall);
     CallStore.shared.state.selfInfo.addListener(() async {
+      _syncGroupCall();
       final activeCall = CallStore.shared.state.activeCall.value;
       if (activeCall.mediaType == null) {
         return;

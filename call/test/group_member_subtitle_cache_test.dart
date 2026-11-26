@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tencent_calls_uikit/src/manager/call_peer_organization.dart';
 import 'package:tencent_calls_uikit/src/manager/group_member_subtitle_cache.dart';
 import 'package:tencent_calls_uikit/src/state/group_call_snapshot.dart';
 import 'package:tuikit_atomic_x/atomicx.dart';
@@ -8,6 +9,34 @@ import 'package:tuikit_atomic_x/atomicx.dart';
 import 'support/call_fakes.dart';
 
 void main() {
+  test('单聊横幅和全屏共用对端资料，换场后忽略上一场回包', () async {
+    final organization = CallPeerOrganization();
+    addTearDown(organization.dispose);
+    final pending = <Completer<Map<String, String>>>[];
+    organization.setLoader((account, ids) {
+      expect(account, 'self');
+      expect(ids, ['peer']);
+      final result = Completer<Map<String, String>>();
+      pending.add(result);
+      return result.future;
+    });
+
+    organization.refresh('self', 'first', 'peer');
+    organization.refresh('self', 'first', 'peer');
+    expect(pending, hasLength(1));
+    organization.refresh('self', 'second', 'peer');
+    expect(pending, hasLength(2));
+    pending.first.complete({'peer': '旧组织'});
+    pending.last.complete({'peer': '  新组织 I 研发  '});
+    await Future<void>.delayed(Duration.zero);
+    expect(organization.forPeer('first', 'peer'), isEmpty);
+    expect(organization.forPeer('second', 'other'), isEmpty);
+    expect(organization.forPeer('second', 'peer'), '新组织 I 研发');
+
+    organization.clear();
+    expect(organization.forPeer('second', 'peer'), isEmpty);
+  });
+
   late GroupCallSession session;
   late GroupMemberSubtitleCache cache;
   late String account;

@@ -7,6 +7,7 @@ import 'package:tuikit_atomic_x/atomicx.dart';
 import 'package:tuikit_atomic_x/base_component/utils/tui_event_bus.dart';
 
 import '../../state/group_call_metadata.dart';
+import '../../tui_call_kit.dart' show GroupMemberSubtitleLoader;
 
 /// 管理鸿蒙原生通话登录及呼叫入口，兼容由宿主独立管理 Flutter 聊天的模式。
 final class HarmonyCallBridge implements TUIObserver {
@@ -15,14 +16,21 @@ final class HarmonyCallBridge implements TUIObserver {
     required ActionGuard guard,
     LoginStore? chatLoginStore,
     MethodChannel channel = const MethodChannel('tencent_calls_uikit'),
+    MethodChannel organizationChannel = const MethodChannel(
+      'tencent_calls_uikit/harmony_organization',
+    ),
   }) : _guard = guard,
        _chatLoginStore = chatLoginStore ?? LoginStore.shared,
-       _channel = channel;
+       _channel = channel,
+       _organizationChannel = organizationChannel;
 
   final AppLogger _logger;
 
   /// 与鸿蒙插件共用方法名和参数格式；媒体采集与渲染在原生侧。
   final MethodChannel _channel;
+
+  /// 原生窗口只请求当前来电人的组织副标题，不通过通道共享业务凭证。
+  final MethodChannel _organizationChannel;
 
   /// 聊天和原生通话使用两个 Store，登录代次须一致。
   final LoginStore _chatLoginStore;
@@ -42,8 +50,59 @@ final class HarmonyCallBridge implements TUIObserver {
   /// 登录和登出共同递增，迟到的原生登录不能恢复旧账号或订阅。
   int _sessionEpoch = 0;
 
+  /// 更换宿主查询器时，旧数据来源不再交付已发起的请求。
+  GroupMemberSubtitleLoader? _organizationLoader;
+
   /// 串行原生会话操作，保证登出发生在已经开始的登录完成后，避免原生状态逆序。
   Future<void> _sessionChanges = Future<void>.value();
+
+  /// 为原生窗口注册宿主资料查询，换号和登出后拒绝旧账号的结果。
+  void setOrganizationLoader(GroupMemberSubtitleLoader? loader) {
+    if (identical(loader, _organizationLoader)) return;
+    _organizationLoader = loader;
+    _organizationChannel.setMethodCallHandler(
+      loader == null ? null : (event) => _loadOrganization(event, loader),
+    );
+    // 原生已有可见资料时先清理，再由当前窗口按新配置重新请求。
+    unawaited(
+      _channel
+          .invokeMethod<void>('harmonyResetPeerOrganization')
+          .catchError((Object _) {}),
+    );
+  }
+
+  /// 只有当前已登录账号可以查询指定对端，查不到时返回空副标题。
+  Future<String> _loadOrganization(
+    MethodCall event,
+    GroupMemberSubtitleLoader loader,
+  ) async {
+    if (event.method != 'loadPeerOrganization') {
+      throw MissingPluginException(event.method);
+    }
+    final arguments = event.arguments;
+    if (arguments is! Map) return '';
+    final account = _accountId;
+    final userId = arguments['userId'];
+    if (account == null ||
+        arguments['accountId'] != account ||
+        userId is! String ||
+        userId.isEmpty ||
+        userId == account) {
+      return '';
+    }
+    final epoch = _sessionEpoch;
+    try {
+      final result = await loader(account, [userId]);
+      return epoch == _sessionEpoch &&
+              account == _accountId &&
+              identical(loader, _organizationLoader)
+          ? result[userId]?.trim() ?? ''
+          : '';
+    } on Object {
+      // 查询失败只省略组织，原生接听、拒绝及媒体操作独立运行。
+      return '';
+    }
+  }
 
   /// 同步原生通话并开放呼叫入口；宿主已管理聊天时仅操作原生 Store。
   Future<CompletionHandler> login({
