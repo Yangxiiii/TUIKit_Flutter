@@ -1,98 +1,78 @@
-// Toast wrapper that always renders on the HOST app's main Window.
-//
-// `promptAction.showToast` is a static API — without an explicit UIContext
-// it picks the currently-focused window. When the SDK's SubWindow is in
-// `fullView`, it captures focus, so a toast issued at call-end (e.g.
-// "对方拒绝了你的通话请求") would be parented to the SubWindow and silently
-// disappear when SubWindowManager.teardown destroys it ~immediately
-// afterwards.
-//
-// Fix: capture the host's main-window UIContext at SDK `attach(windowStage)`
-// time and route every toast through it. The host main Window outlives the
-// SubWindow, so toasts survive the SubWindow tear-down.
-//
-// Toast 容器，总是在 HOST 应用的主窗口中渲染。
-//
-// `promptAction.showToast` 是一个静态 API — 如果没有显式的 UIContext，它会选择当前聚焦的窗口。当 SDK 的子窗口处于 `fullView`
-// 时，它会捕获焦点，所以在调用结束时发出的 toast（例如
-//
-// 当 SubWindowManager.teardown 销毁它时会~立即消失。
-//
-// 修复：在 SDK `attach(windowStage)` 时捕获主机的主窗口 UIContext，并通过它路由每个 toast。主机主窗口寿命长于子窗口，因此 toast
-// 能在子窗口销毁后继续存在。
-
 import window from '@ohos.window';
-import { UIContext, promptAction } from '@kit.ArkUI';
+import { UIContext } from '@kit.ArkUI';
+import { NativeToastOverlay } from 'tuikit_atomic_x';
 import { Logger } from '../utils/Logger';
 
+/** 通话反馈优先进入应用浮层，独立原生通话使用主窗口保留挂断提示。 */
 export class Toast {
-  private static _hostUIContext: UIContext | null = null;
+  /** 主窗口独立于通话子窗口的生命周期，挂断后仍可展示提示。 */
+  private static hostWindow: window.Window | null = null;
+  private static hostContext: UIContext | null = null;
+  private static readonly overlay: NativeToastOverlay = new NativeToastOverlay();
 
-  /**
-   * Bind the host's main-window UIContext. Called by
-   * `TUICallKit.attach(windowStage)`.
-   *
-   * 绑定主机的主窗口 UIContext。由 `TUICallKit.attach(windowStage)` 调用。
-   */
+  /** Flutter 接管通话时，原生信令提示也交给宿主的统一浮层。 */
+  private static presenter: ((message: string, durationMs: number) => void) | null = null;
+
+  /** 更新原生提示的键盘避让位置，同一回调随 WindowStage 释放。 */
+  private static readonly keyboardChanged = (change: window.AvoidAreaOptions): void => {
+    const context = Toast.hostContext;
+    if (context !== null && change.type === window.AvoidAreaType.TYPE_KEYBOARD) {
+      Toast.overlay.setKeyboardInset(context.px2vp(change.area.bottomRect.height));
+    }
+  };
+
+  /** 通话展示的连接和卸载与 Flutter 引擎生命周期保持一致。 */
+  static bindPresenter(presenter: ((message: string, durationMs: number) => void) | null): void {
+    Toast.presenter = presenter;
+    if (presenter !== null) Toast.overlay.clear();
+  }
+
+  /** 在通话接入 WindowStage 时保留主窗口与键盘避让信息。 */
   static bindHost(windowStage: window.WindowStage): void {
     try {
-      const mainWin: window.Window = windowStage.getMainWindowSync();
-      Toast._hostUIContext = mainWin.getUIContext();
-      Logger.info('Toast.bindHost: host UIContext captured');
-    } catch (e) {
-      Logger.warn('Toast.bindHost failed', e);
+      const mainWindow = windowStage.getMainWindowSync();
+      if (mainWindow === Toast.hostWindow) return;
+      Toast.unbindHost();
+      Toast.hostWindow = mainWindow;
+      Toast.hostContext = mainWindow.getUIContext();
+      mainWindow.on('avoidAreaChange', Toast.keyboardChanged);
+    } catch (error) {
+      Logger.warn('Toast.bindHost failed', error);
     }
   }
 
-  /** Drop the cached UIContext on `TUICallKit.detach()`. */
-
-  /* 在 `TUICallKit.detach()` 时清除缓存的 UIContext。 */
+  /** 通话组件卸载时同时注销窗口回调并清空提示。 */
   static unbindHost(): void {
-    Toast._hostUIContext = null;
+    try {
+      Toast.hostWindow?.off('avoidAreaChange', Toast.keyboardChanged);
+      Toast.overlay.clear();
+    } catch (error) {
+      Logger.warn('Toast.unbindHost failed', error);
+    } finally {
+      Toast.hostWindow = null;
+      Toast.hostContext = null;
+    }
   }
 
+  /** 向宿主派发文字反馈；Flutter 未接管时仍复用原生底部浮层。 */
   static show(message: string, durationMs: number = 2000): void {
-    if (!message) {
-      return;
-    }
-    const opts: promptAction.ShowToastOptions = {
-      message,
-      duration: durationMs,
-      bottom: '10%',
-    };
+    if (!message) return;
     try {
-      if (Toast._hostUIContext) {
-        Toast._hostUIContext.getPromptAction().showToast(opts);
-      } else {
-        // Fallback: SDK was never bound (e.g. error toast fires before
-        // attach). The static API picks whichever window is currently
-        // focused — tolerable when the SubWindow isn't up yet.
-        //
-        // 备用：SDK 从未绑定（例如在 attach 之前触发错误 toast）。静态 API 会选择当前聚焦的窗口——当子窗口还未弹出时，这种情况可以接受。
-        promptAction.showToast(opts);
+      if (Toast.presenter !== null) {
+        Toast.presenter(message, durationMs);
+        return;
       }
-    } catch (e) {
-      Logger.warn('Toast.show failed', e);
-    }
-  }
-
-  static showOnTop(message: string, durationMs: number = 2000): void {
-    if (!message) {
-      return;
-    }
-    const opts: promptAction.ShowToastOptions = {
-      message,
-      duration: durationMs,
-      bottom: '10%',
-    };
-    try {
-      promptAction.showToast(opts);
-    } catch (e) {
-      Logger.warn('Toast.showOnTop failed', e);
+      const host = Toast.hostWindow;
+      const context = Toast.hostContext;
+      if (host === null || context === null) return;
+      const keyboard = host.getWindowAvoidArea(window.AvoidAreaType.TYPE_KEYBOARD);
+      Toast.overlay.show(context, message, durationMs, context.px2vp(keyboard.bottomRect.height));
+    } catch (error) {
+      Logger.warn('Toast.show failed', error);
     }
   }
 
   static showError(message: string): void {
-    Toast.show(message, 2500);
+    Toast.show(message);
   }
 }

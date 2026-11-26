@@ -8,7 +8,6 @@ import android.view.MotionEvent;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import android.widget.Toast;
 import androidx.annotation.NonNull;
 import com.tencent.imsdk.base.ThreadUtils;
 import com.tencent.cloud.tuikit.flutter.tuichatkit.videorecorder.RecordMode;
@@ -25,6 +24,7 @@ import com.tencent.cloud.tuikit.flutter.tuichatkit.videorecorder.view.VideoRecor
 import com.tencent.cloud.tuikit.flutter.tuichatkit.videorecorder.view.recordview.beauty.data.RecordInfo;
 import com.tencent.cloud.tuikit.flutter.tuichatkit.videorecorder.view.recordview.beauty.data.RecordInfo.RecordStatus;
 
+/** 根据录像状态显示录制操作栏、进度和录像失败反馈。 */
 @SuppressLint("ViewConstructor")
 public class RecordOperationView extends LinearLayout {
 
@@ -32,6 +32,8 @@ public class RecordOperationView extends LinearLayout {
     private final Context mContext;
     private final VideoRecorderRecordCore mRecordCore;
     private final RecordInfo mRecordInfo;
+    /** 原生录像窗口的提示随操作栏销毁，避免返回聊天后继续显示。 */
+    private final RecordToast recordToast = new RecordToast();
 
     private RecordButtonView mRecordButtonView;
     private TextView mRecordOperationTipsView;
@@ -59,7 +61,8 @@ public class RecordOperationView extends LinearLayout {
                         mRecordCore.takePhoto(
                                 VideoRecorderFileUtil.generateRecodeFilePath(VideoRecodeFileType.PICTURE_FILE));
                     } else {
-                        Toast.makeText(mContext, R.string.video_recorder_recode_time_short_tips, Toast.LENGTH_SHORT).show();
+                        recordToast.show(RecordOperationView.this,
+                                mContext.getString(R.string.video_recorder_recode_time_short_tips));
                     }
                 }
                 showRecordOperationButton(true);
@@ -94,6 +97,7 @@ public class RecordOperationView extends LinearLayout {
 
     @Override
     public void onDetachedFromWindow() {
+        recordToast.clear();
         super.onDetachedFromWindow();
         removeObserver();
         removeAllViews();
