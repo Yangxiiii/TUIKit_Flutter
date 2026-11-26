@@ -1,5 +1,4 @@
-import 'package:app_ui/app_ui.dart'
-    show AppColorBuildContext, AppUserAvatarScope;
+import 'package:app_ui/app_ui.dart' show AppColorBuildContext;
 import 'package:atomic_x_core/atomicxcore.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -127,30 +126,32 @@ class SystemMessageWidget extends StatelessWidget {
   }
 }
 
-/// 按建群通知样式居中排列文案，姓名跨行时仍可打开对应成员的名片。
-final class GroupCreationNotice extends StatefulWidget {
-  const GroupCreationNotice({
-    required this.notice,
-    this.groupId,
+/// 居中排列带个人名片入口的系统通知，姓名可与正文在同一段落换行。
+final class ConversationPeopleNotice extends StatefulWidget {
+  const ConversationPeopleNotice({
+    required this.parts,
+    required this.semanticsPrefix,
     required this.onPersonTap,
     super.key,
   });
 
-  /// 当前行已校验的建群事件，姓名和名片 ID 均来自同一份载荷。
-  final ConversationNotice notice;
+  /// 按正文顺序排列的文本片段，仅带有效用户 ID 的姓名可以打开名片。
+  final List<({String text, String? userId})> parts;
 
-  /// 建群通知对应的群 ID，用于补齐成员群名片。
-  final String? groupId;
+  /// 通知类型与事件标识组成的前缀，用于区分同一会话内的名片入口。
+  final String semanticsPrefix;
 
   /// 宿主按用户 ID 打开个人名片，未接入时仅展示通知。
   final void Function(BuildContext, String)? onPersonTap;
 
   @override
-  State<GroupCreationNotice> createState() => _GroupCreationNoticeState();
+  State<ConversationPeopleNotice> createState() =>
+      _ConversationPeopleNoticeState();
 }
 
 /// 管理同一条通知各姓名的手势，列表回收行时同时释放。
-final class _GroupCreationNoticeState extends State<GroupCreationNotice> {
+final class _ConversationPeopleNoticeState
+    extends State<ConversationPeopleNotice> {
   /// 按事件中的成员身份复用手势，消息列表重建不会中断正在按下的链接。
   final _nameTaps = <String, TapGestureRecognizer>{};
 
@@ -171,17 +172,14 @@ final class _GroupCreationNoticeState extends State<GroupCreationNotice> {
       child: Text.rich(
         TextSpan(
           children: [
-            for (final (text: text, userId: id)
-                in widget.notice.groupCreationParts())
+            for (final (text: text, userId: id) in widget.parts)
               if (id == null)
                 TextSpan(text: text)
               else
                 TextSpan(
-                  text: AppUserAvatarScope.personName(context, id,
-                      groupId: widget.groupId, fallback: text),
+                  text: text,
                   style: linkStyle,
-                  semanticsIdentifier:
-                      'tim.groupCreation.${widget.notice.eventId}.$id',
+                  semanticsIdentifier: '${widget.semanticsPrefix}.$id',
                   recognizer: widget.onPersonTap == null
                       ? null
                       : _nameTaps.putIfAbsent(

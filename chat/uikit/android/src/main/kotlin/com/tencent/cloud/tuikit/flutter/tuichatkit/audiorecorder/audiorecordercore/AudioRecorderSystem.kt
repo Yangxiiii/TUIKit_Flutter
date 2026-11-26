@@ -9,7 +9,6 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.media.MediaRecorder
 import android.os.SystemClock
-import android.widget.Toast
 import com.tencent.cloud.tuikit.flutter.tuichatkit.R
 import com.tencent.cloud.tuikit.flutter.tuichatkit.audiorecorder.ResultCode
 import com.tencent.cloud.tuikit.flutter.tuichatkit.audiorecorder.audiorecorderimpl.RecorderListener
@@ -25,7 +24,7 @@ import kotlinx.coroutines.launch
 /// 单路采集PCM，同时计算真实音量并编码为AAC；麦克风、编码器和文件均由采集任务释放。
 class AudioRecorderSystem(private val context: Context) : AudioRecorderInternalInterface {
     private var listener: RecorderListener? = null
-    /// 系统实现不支持AI降噪，只在腾讯录音器不可用且请求降噪时提示调试用户。
+    /// 系统实现不支持 AI 降噪，请求降噪时只在调试版本记录日志。
     private var isEnableAIDeNoise = false
     private val coroutineScope = CoroutineScope(Dispatchers.IO)
     private var job: Job? = null
@@ -53,7 +52,8 @@ class AudioRecorderSystem(private val context: Context) : AudioRecorderInternalI
         }
         if (isEnableAIDeNoise &&
             context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
-            Toast.makeText(context, R.string.audio_authorization_prompter, Toast.LENGTH_SHORT).show()
+            // 降噪能力只在调试版本记录，录音反馈继续由 Flutter 输入区统一展示。
+            android.util.Log.w("AudioRecorderSystem", context.getString(R.string.audio_authorization_prompter))
         }
         recording = true
         job = coroutineScope.launch { capture(filePath, minRecordDurationMs, maxRecordDurationMs) }

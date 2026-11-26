@@ -4,7 +4,7 @@ import os.log
 import AVFoundation
 import Foundation
 
-/// 使用系统录音器按采音时长截断文件，并统一交付手动停止和限时结束的结果。
+/// 使用系统录音器限制采音时长，定时交付波形音量，并统一停止结果。
 internal class AudioRecorderSystem: NSObject, AudioRecorderInternalProtocol, AVAudioRecorderDelegate {
     let logger = Logger(subsystem: "AudioRecoder", category: "AudioRecorderSystem")
     
@@ -58,8 +58,10 @@ internal class AudioRecorderSystem: NSObject, AudioRecorderInternalProtocol, AVA
             return
         }
         
-        recordTimer = Timer.scheduledTimer(timeInterval: 0.2, target: self, selector: #selector(onRecordTimer), userInfo: nil, repeats: true)
-        RunLoop.current.add(recordTimer!, forMode: .common)
+        // 每 100 毫秒采样一次，与 Android 保持一致；长按跟踪期间也要刷新波形。
+        let timer = Timer(timeInterval: 0.1, target: self, selector: #selector(onRecordTimer), userInfo: nil, repeats: true)
+        recordTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
         logger.info("start system recording")
     }
     

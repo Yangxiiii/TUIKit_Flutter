@@ -7,7 +7,9 @@ import 'package:tencent_chat_uikit/src/message_input/widget/voice_microphone_not
 import 'package:tencent_chat_uikit/src/message_list/message_list_config.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/asr_display_manager.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_action_sheet.dart';
+import 'package:tencent_chat_uikit/src/message_list/widgets/message_actions_scope.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_attachments.dart';
+import 'package:tencent_chat_uikit/src/message_list/widgets/message_bubble.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_item.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_tooltip.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_types/sound_message_widget.dart';
@@ -140,6 +142,44 @@ void main() {
       tester.getTopLeft(find.byIcon(AppIcons.read)).dx,
       greaterThan(tester.getTopRight(find.byType(SoundMessageWidget)).dx),
     );
+  });
+
+  testWidgets('群聊长按语音提供播放方式，可以隐藏和恢复已有识别结果', (tester) async {
+    final state = AsrDisplayManager();
+    addTearDown(state.dispose);
+    const conversationId = 'group_g';
+    final store = MessageListStore.create(conversationID: conversationId);
+    var items = <MessageMenuItem>[];
+    await tester.pumpWidget(_host(MessageActionsScope(
+      config: null,
+      onMessagesChanged: (_) {},
+      showActions: (_, __, ___, actions, ____) => items = actions,
+      child: MessageBubble(
+        message: _voice(2, conversation: ConversationType.group, asr: '识别正文'),
+        isSelf: false,
+        maxWidth: 310,
+        conversationID: conversationId,
+        messageListStore: store,
+        asrDisplayManager: state,
+        config: const ChatMessageListConfig(),
+      ),
+    )));
+    final bubble = find.text('2″');
+    await tester.longPress(bubble);
+    expect(items.singleWhere((item) => item.id == 'audio-route').title, '听筒播放');
+    final cancel = items.singleWhere((item) => item.id == 'voice-text');
+    expect(cancel.title, '取消转文字');
+    cancel.onTap();
+    await tester.pump();
+    expect(state.isHidden('voice'), isTrue);
+
+    await tester.longPress(bubble);
+    final restore = items.singleWhere((item) => item.id == 'voice-text');
+    expect(restore.title, '语音转文字');
+    restore.onTap();
+    await tester.pump();
+    expect(state.isHidden('voice'), isFalse);
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('语音路由和转文字在撤回分组之前，点击回调只执行一次', (tester) async {

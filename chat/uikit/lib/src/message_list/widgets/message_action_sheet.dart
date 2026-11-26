@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:app_ui/app_ui.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:tencent_chat_uikit/src/emoji_picker/emoji_manager.dart';
 import '../../emoji_picker/emoji_picker_model.dart';
@@ -15,6 +17,7 @@ class MessageActionSheet extends StatefulWidget {
     required this.items,
     required this.onClose,
     required this.onBounds,
+    this.showStickyAction = true,
     this.onReaction,
     this.editExpiresAt,
     this.recallExpiresAt,
@@ -23,6 +26,9 @@ class MessageActionSheet extends StatefulWidget {
 
   /// 以稳定动作标识匹配已有复制、转发、回复等能力，不通过翻译后的文字推断。
   final List<MessageMenuItem> items;
+
+  /// 无置顶权限时省略整个置顶行，包括默认的禁用占位。
+  final bool showStickyAction;
 
   /// 点击动作前关闭面板，防止异步导航仍被底部路由遮挡。
   final VoidCallback onClose;
@@ -43,10 +49,13 @@ class MessageActionSheet extends StatefulWidget {
   final DateTime? recallExpiresAt;
 
   /// 打开唯一的底部路由，切换内容期间持续报告气泡避让边界。
+  /// 背景滑动开始收起面板时，通知聊天页释放气泡避让。
   static Future<void> show(
     BuildContext context, {
     required List<MessageMenuItem> items,
     required ValueChanged<Rect> onBounds,
+    VoidCallback? onDismissByBackgroundDrag,
+    ValueListenable<bool>? stickyActionVisibility,
     ValueChanged<EmojiPickerModelItem>? onReaction,
     DateTime? editExpiresAt,
     DateTime? recallExpiresAt,
@@ -56,20 +65,31 @@ class MessageActionSheet extends StatefulWidget {
     late final _MessageActionSheetRoute route;
     route = _MessageActionSheetRoute(
       scrim: context.appColors.scrim,
+      onDismissByBackgroundDrag: onDismissByBackgroundDrag,
       capturedThemes:
           InheritedTheme.capture(from: context, to: navigator.context),
       barrierLabel: localizations.scrimLabel,
       barrierOnTapHint:
           localizations.scrimOnTapHint(localizations.bottomSheetLabel),
-      builder: (sheetContext) => MessageActionSheet(
-        items: items,
-        onClose: () => Navigator.of(sheetContext).pop(),
-        onBounds: onBounds,
-        onReaction: onReaction,
-        editExpiresAt: editExpiresAt,
-        recallExpiresAt: recallExpiresAt,
-        onExpansionChanged: route.updateExpansion,
-      ),
+      builder: (_) {
+        MessageActionSheet sheet(bool showStickyAction) => MessageActionSheet(
+              items: items,
+              onClose: route._dismiss,
+              onBounds: onBounds,
+              showStickyAction: showStickyAction,
+              onReaction: onReaction,
+              editExpiresAt: editExpiresAt,
+              recallExpiresAt: recallExpiresAt,
+              onExpansionChanged: route.updateExpansion,
+            );
+        // 路由独立于聊天页重建，订阅权限后可以及时隐藏已打开菜单中的置顶项。
+        return stickyActionVisibility == null
+            ? sheet(true)
+            : ValueListenableBuilder(
+                valueListenable: stickyActionVisibility,
+                builder: (_, visible, __) => sheet(visible),
+              );
+      },
     );
     return navigator.push(route);
   }
@@ -78,15 +98,17 @@ class MessageActionSheet extends StatefulWidget {
   State<MessageActionSheet> createState() => _MessageActionSheetState();
 }
 
-/// 复用 Flutter 底部路由的进退场和关闭手势，按实际展开进度更新原生遮罩。
+/// 保留底部路由的动画和返回行为，让遮罩上的纵向拖动继续交给消息列表。
 class _MessageActionSheetRoute extends ModalBottomSheetRoute<void> {
   _MessageActionSheetRoute({
     required Color scrim,
+    required VoidCallback? onDismissByBackgroundDrag,
     required super.builder,
     required super.capturedThemes,
     required super.barrierLabel,
     required super.barrierOnTapHint,
   })  : _scrim = scrim,
+        _onDismissByBackgroundDrag = onDismissByBackgroundDrag,
         super(
           backgroundColor: Colors.transparent,
           enableDrag: false,
@@ -101,8 +123,78 @@ class _MessageActionSheetRoute extends ModalBottomSheetRoute<void> {
   /// 面板当前介于紧凑与最高位置之间的比例。
   double _expansion = 0;
 
+  /// 背景开始滑动时清除临时避让，使列表按原有视口继续滚动。
+  final VoidCallback? _onDismissByBackgroundDrag;
+
+  /// 记录当前背景手指的起点，面板隐藏后仍跟踪同一次手势直到结束。
+  ({int id, Offset origin})? _backgroundPointer;
+
   @override
   Color get barrierColor => _scrim.withValues(alpha: _scrim.a * _expansion);
+
+  @override
+  Widget buildModalBarrier() => BlockSemantics(
+        child: Semantics(
+          identifier: 'tim.message.action.dismiss',
+          label: barrierLabel,
+          onTapHint: barrierOnTapHint,
+          onTap: _dismiss,
+          onDismiss: _dismiss,
+          excludeSemantics: true,
+          // 遮罩只负责绘制，外层监听同一触点，允许列表同时参与手势识别。
+          child: Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: (event) {
+              if (event.buttons == kPrimaryButton) {
+                _backgroundPointer ??=
+                    (id: event.pointer, origin: event.position);
+              }
+            },
+            onPointerMove: _handleBackgroundMove,
+            onPointerUp: _handleBackgroundEnd,
+            onPointerCancel: _handleBackgroundEnd,
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              excludeFromSemantics: true,
+              onTap: _dismiss,
+              onLongPressUp: _dismiss,
+              child: IgnorePointer(child: super.buildModalBarrier()),
+            ),
+          ),
+        ),
+      );
+
+  /// 越过纵向拖动阈值就开始退场。此时出栈会让 Navigator 取消列表的触点。
+  void _handleBackgroundMove(PointerMoveEvent event) {
+    final pointer = _backgroundPointer;
+    if (pointer == null ||
+        pointer.id != event.pointer ||
+        !isCurrent ||
+        animation?.isForwardOrCompleted != true) {
+      return;
+    }
+    final delta = event.position - pointer.origin;
+    final settings = MediaQuery.maybeGestureSettingsOf(navigator!.context);
+    if (delta.dy.abs() > delta.dx.abs() &&
+        delta.dy.abs() > computeHitSlop(event.kind, settings)) {
+      controller!.reverse();
+      _onDismissByBackgroundDrag?.call();
+    }
+  }
+
+  /// 松手或取消事件先交给列表，随后才结束已经退场的菜单路由。
+  void _handleBackgroundEnd(PointerEvent event) {
+    if (_backgroundPointer?.id != event.pointer) return;
+    _backgroundPointer = null;
+    if (animation?.isForwardOrCompleted == false) {
+      scheduleMicrotask(_dismiss);
+    }
+  }
+
+  /// 只移除当前菜单，避免迟到的回调误关后续页面。
+  void _dismiss() {
+    if (isCurrent) navigator!.pop();
+  }
 
   /// 由面板在布局后报告，沿用路由的遮罩动画与关闭语义。
   void updateExpansion(double expansion) {
@@ -229,13 +321,13 @@ class _MessageActionSheetState extends State<MessageActionSheet> {
   /// 避让沿用菜单打开时的高度，拖拽产生的实际高度只用于遮罩渐变。
   void _scheduleBounds() {
     if (_boundsScheduled ||
-        _routeAnimation?.status == AnimationStatus.reverse) {
+        _routeAnimation?.isForwardOrCompleted == false) {
       return;
     }
     _boundsScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _boundsScheduled = false;
-      if (!mounted || _routeAnimation?.status == AnimationStatus.reverse) {
+      if (!mounted || _routeAnimation?.isForwardOrCompleted == false) {
         return;
       }
       final box = _bounds.currentContext?.findRenderObject();
@@ -455,8 +547,9 @@ class _MessageActionSheetState extends State<MessageActionSheet> {
         _action('multiSelect', '多选', AppIcons.multipleChoice),
       ],
       [
-        _action('top', sticky?.title ?? '置顶消息',
-            sticky?.icon ?? AppIcons.topMessage),
+        if (widget.showStickyAction)
+          _action('top', sticky?.title ?? '置顶消息',
+              sticky?.icon ?? AppIcons.topMessage),
         _action('pin', 'Pin', AppIcons.pin),
         _action('delete', '删除', AppIcons.delete),
       ],

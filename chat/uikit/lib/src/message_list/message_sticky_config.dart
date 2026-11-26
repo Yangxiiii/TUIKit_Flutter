@@ -12,12 +12,16 @@ final class ChatMessageStickyConfig {
       required this.bannerBuilder,
       required this.onMessagesChanged,
       required this.onMessagesDeleted,
+      this.canModify = true,
       this.groupPinnedMessageIds = const {},
       this.unpinGroupMessage,
       this.onInitialLoadFinished});
 
   /// 首屏消息请求结束后启动辅助查询；成功、空窗口和失败都会通知，不用于清未读。
   final VoidCallback? onInitialLoadFinished;
+
+  /// 宿主确认允许置顶和取消置顶时才显示菜单入口；已置顶横幅仍由宿主提供。
+  final bool canModify;
 
   /// 提交置顶；返回null表示成功，否则由页面显示业务反馈。
   final Future<String?> Function(MessageInfo message) pin;

@@ -116,6 +116,9 @@ class MessageInput extends StatefulWidget {
   /// 展开富文本编辑器时通知宿主，同一次展开只触发一次。
   final VoidCallback? onRichContentEditorOpened;
 
+  /// 系统输入法修改正文时通知宿主；程序恢复草稿不会触发。
+  final VoidCallback? onPlatformInput;
+
   const MessageInput({
     super.key,
     required this.conversationID,
@@ -126,6 +129,7 @@ class MessageInput extends StatefulWidget {
     this.sendMuted = false,
     this.onLocalMessageSent,
     this.onRichContentEditorOpened,
+    this.onPlatformInput,
     this.replyConfig,
   });
 
@@ -347,9 +351,10 @@ class MessageInputState extends State<MessageInput>
 
   bool get _isGroupChat => _groupID != null;
 
-  /// 键盘提交完整的剪贴板预览时，只替换此次插入的内容。
+  /// 将系统键盘的实际编辑上报宿主，再尝试还原本次粘贴的富文本。
   void _onPlatformTextChanged(TextEditingValue before,
       TextEditingValue submitted, TextEditingValue applied) {
+    widget.onPlatformInput?.call();
     final preview =
         MessageClipboard.richPreviewSelection(before, submitted, applied);
     if (preview != null) unawaited(_restoreCopiedMessage(selection: preview));
@@ -928,7 +933,6 @@ class MessageInputState extends State<MessageInput>
     final reply = _quotedMessage == null ? null : widget.replyConfig;
     AppToast.show(
       reply?.contentTooLongMessage ?? atomicLocale.messageTextLimitExceeded,
-      pill: reply != null,
       semanticsIdentifier:
           reply == null ? 'tim.input.text_limit' : 'tim.reply.error',
     );
@@ -1781,7 +1785,7 @@ class MessageInputState extends State<MessageInput>
           Toast.error(context, atomicLocale.sendMessageFail);
         } else {
           AppToast.show(failure.message,
-              pill: true, semanticsIdentifier: 'tim.reply.error');
+              semanticsIdentifier: 'tim.reply.error');
           if (failure.reset && identical(_quotedMessage, quotedMsg)) {
             _textEditingController.clear();
             _clearDraft();

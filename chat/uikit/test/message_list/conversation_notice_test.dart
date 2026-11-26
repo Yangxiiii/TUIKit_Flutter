@@ -36,6 +36,116 @@ MessageInfo _custom(String id, String data, {MessageSenderInfo? from}) =>
     );
 
 void main() {
+  testWidgets('手机号查看提示的两个同名用户打开各自的名片', (tester) async {
+    const name = '杨洋阳(一只羊)';
+    const text = '$name 查看了 $name 的手机号';
+    const operatorId = 7050000000000000019;
+    final message = _custom(
+      'phone-view',
+      jsonEncode({
+        'businessID': 'oa_view_phone',
+        'version': 1,
+        'payload': {
+          'operatorUserId': operatorId,
+          'operatorName': name,
+          'targetUserId': 'recipient',
+          'targetName': name,
+          'phone': '额外字段不会进入提示',
+        },
+      }),
+      from: MessageSenderInfo(userID: 'system'),
+    )
+      ..status = MessageStatus.sendSuccess
+      ..conversationType = ConversationType.c2c
+      ..timestamp = 1700000000
+      ..to = 'system';
+    final tapped = <String>[];
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: MessageItem(
+          message: message,
+          conversationID: 'c2c_system',
+          maxWidth: 360,
+          config: ChatMessageListConfig(
+            onPhoneViewPersonTap: (_, id) => tapped.add(id),
+          ),
+          messageListStore: _NoticeListStore(),
+          isHighlighted: false,
+        ),
+      ),
+    ));
+
+    final notification = find.byWidgetPredicate(
+      (widget) => widget is RichText && widget.text.toPlainText() == text,
+    );
+    expect(tester.widget<RichText>(notification).textAlign, TextAlign.center);
+    final paragraph = tester.renderObject<RenderParagraph>(notification);
+    final semantics = tester
+        .getSemantics(notification)
+        .debugListChildrenInOrder(DebugSemanticsDumpOrder.traversalOrder);
+    // 整数长 ID 和字符串 ID 都必须按载荷原值跳转，同名也不能跳错。
+    for (final (offset, id) in [
+      (0, '7050000000000000019'),
+      (text.lastIndexOf(name), 'recipient')
+    ]) {
+      final node = semantics.singleWhere(
+        (node) => node.identifier == 'tim.phoneView.phone-view.$id',
+      );
+      expect(node.getSemanticsData().hasAction(SemanticsAction.tap), isTrue);
+      final boxes = paragraph.getBoxesForSelection(
+        TextSelection(baseOffset: offset, extentOffset: offset + name.length),
+      );
+      await tester.tapAt(paragraph.localToGlobal(boxes.first.toRect().center));
+    }
+    expect(tapped, ['7050000000000000019', 'recipient']);
+    expect(
+        MessageUtil.getMessageAbstract(message, tester.element(notification)),
+        text);
+    expect(ConversationNotice.fromMessage(message)?.occurredAt,
+        DateTime.fromMillisecondsSinceEpoch(1700000000000, isUtc: true));
+    expect(canSelectChatMessage(message), isFalse);
+  });
+
+  test('手机号查看协议仅接受完整姓名，按 SDK ID 区分重复查看', () {
+    const names = {'operatorName': '查看人', 'targetName': '被查看人'};
+    String raw(Object? payload, {int version = 1}) => jsonEncode({
+          'businessID': 'oa_view_phone',
+          'version': version,
+          'payload': payload,
+        });
+
+    for (final invalid in [
+      raw(names, version: 2),
+      raw({'operatorName': '查看人'}),
+      raw({'operatorName': '查看人', 'targetName': ' '}),
+      raw({'operatorName': 1, 'targetName': '被查看人'}),
+      raw([names]),
+    ]) {
+      expect(ConversationNotice.tryParse(invalid), isNull);
+    }
+    final first = _custom('first-view', raw(names));
+    final second = _custom('second-view', raw(names));
+    expect(
+        ConversationNotice.visibleMessages([second, first]), [second, first]);
+    expect(ConversationNotice.visibleMessages([first, first]), [first]);
+    final notice = ConversationNotice.fromMessage(first)!;
+    expect(notice.textFor('recipient'), '查看人 查看了 被查看人 的手机号');
+    expect(
+        notice.phoneViewParts().every((part) => part.userId == null), isTrue);
+    final invalidIds = ConversationNotice.tryParse(raw({
+      ...names,
+      'operatorUserId': 100023.5,
+      'targetUserId': ' ',
+    }))!;
+    expect(invalidIds.phoneViewParts(), notice.phoneViewParts());
+    final nullableIds = ConversationNotice.tryParse(raw({
+      ...names,
+      'operatorUserId': null,
+      'targetUserId': null,
+    }))!;
+    expect(nullableIds.phoneViewParts(), notice.phoneViewParts());
+  });
+
   testWidgets('旧建群通知从历史和摘要过滤，直接构建也不占位', (tester) async {
     final legacy = _custom(
       'legacy-create',

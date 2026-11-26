@@ -19,6 +19,7 @@ import 'package:tencent_chat_uikit/src/message_list/widgets/message_status_mixin
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_read_receipt_view.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_tooltip.dart';
 import 'message_types/oa_announcement_message_card.dart';
+import 'message_location_widgets.dart';
 
 /// 组合消息头像、正文与回执；多选切换保留气泡锚点，消息项间距由列表负责。
 class MessageItem extends StatelessWidget with MessageStatusMixin {
@@ -43,11 +44,11 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   /// 在线会话的媒体加载和消息操作入口，离线时只读取本地展示数据。
   final MessageListStore? messageListStore;
 
-  /// 定位命中时播放气泡高亮，不改变消息本身的发送状态。
+  /// 定位命中时绘制整行背景，正文配色和消息状态照常显示。
   final bool isHighlighted;
 
-  /// 高亮结束后通知列表释放定位状态。
-  final VoidCallback? onHighlightComplete;
+  /// 内容到列表边缘的横向内边距，独立嵌入时由其宿主管理。
+  final double horizontalPadding;
 
   /// 头像点击交给会话页打开资料。
   final OnUserClick? onUserClick;
@@ -144,7 +145,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     this.maxWidth = 200,
     required this.messageListStore,
     required this.isHighlighted,
-    this.onHighlightComplete,
+    this.horizontalPadding = 0,
     this.onUserClick,
     this.onUserLongPress,
     this.onCallMessageClick,
@@ -169,7 +170,14 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => MessageLocationRow(
+        highlighted: isHighlighted,
+        horizontalPadding: horizontalPadding,
+        child: _buildRow(context),
+      );
+
+  /// 先识别消息身份和方向，再将正文放入相应的头像与状态布局。
+  Widget _buildRow(BuildContext context) {
     // isSelf 只决定气泡方向；个人通话报告的实际发送者可能是显示在左侧的被叫。
     bool isSelf = message.isSentBySelf;
     // SDK 创建及发送回调中的 faceUrl 可能为空或滞后，不能覆盖已填充的发送者头像。
@@ -516,8 +524,6 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         maxWidth: maxWidth,
         config: config,
         messageListStore: messageListStore,
-        isHighlighted: isHighlighted,
-        onHighlightComplete: onHighlightComplete,
         customActions: customActions,
         menuCallbacks: _buildMenuCallbacks(context),
         isInMergedDetailView: isInMergedDetailView,
@@ -590,16 +596,21 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     );
   }
 
+  /// 卡片仍沿用双侧消息的头像、回执和多选入口。
   Widget _buildTwoSidedLayout(
       BuildContext context, Widget messageBubble, bool isSelf,
       [String? avatarUrl, String? senderName]) {
+    final standaloneCard =
+        config.useStandaloneCardLayout?.call(message) ?? false;
     return Row(
       mainAxisAlignment:
           isSelf ? MainAxisAlignment.end : MainAxisAlignment.start,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: isSelf
-          ? _buildSelfMessage(context, messageBubble, avatarUrl, senderName)
-          : _buildOtherMessage(context, messageBubble, avatarUrl, senderName),
+          ? _buildSelfMessage(context, messageBubble, avatarUrl, senderName,
+              standaloneCard: standaloneCard)
+          : _buildOtherMessage(context, messageBubble, avatarUrl, senderName,
+              standaloneCard: standaloneCard),
     );
   }
 
@@ -615,15 +626,16 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
       BuildContext context, String? avatarUrl, String senderName,
       {required bool isSelf}) {
     final userID = _displaySenderId;
-    final openGroupContact = isGroup ? config.onGroupSenderAvatarTap : null;
+    final openContact = isGroup
+        ? config.onGroupSenderAvatarTap
+        : config.onDirectSenderAvatarTap;
     final fallbackTap = isSelf ? null : onUserClick;
-    // 转发详情只读，多选优先勾选消息，普通群聊才交给宿主打开名片。
+    // 转发详情只读，多选优先勾选消息，普通聊天由宿主打开名片。
     final tap = switch ((isInMergedDetailView, isMultiSelectMode)) {
       (true, _) => null,
       (_, true) => onToggleSelection,
       _ when userID.trim().isEmpty => null,
-      _ when openGroupContact != null => () =>
-          openGroupContact(context, userID),
+      _ when openContact != null => () => openContact(context, userID),
       _ when fallbackTap != null => () => fallbackTap(userID),
       _ => null,
     };
@@ -648,9 +660,7 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     return _groupAvatar(
       message.msgID.isNotEmpty &&
               (mention != null ||
-                  (openGroupContact != null &&
-                      tap != null &&
-                      !isMultiSelectMode))
+                  (openContact != null && tap != null && !isMultiSelectMode))
           ? Semantics(
               identifier: 'tim.message.avatar.${message.msgID}',
               child: avatar,
@@ -851,8 +861,10 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     );
   }
 
+  /// 己方消息共用头像列，发送状态和回执由正文旁的空间承载。
   List<Widget> _buildSelfMessage(BuildContext context, Widget messageBubble,
-      [String? avatarUrl, String? senderName]) {
+      String? avatarUrl, String? senderName,
+      {required bool standaloneCard}) {
     final displayAvatarUrl = avatarUrl ?? message.from.avatarURL;
     final displaySenderName =
         senderName ?? ChatUtil.getMessageSenderName(message);
@@ -869,8 +881,9 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         isSelf: true,
         beforeBubble: true);
 
-    // 普通消息按对侧头像对齐，回复可以使用这段留白，实际头像和回执继续独立排列。
-    final needLeftSpacer = config.isShowLeftAvatar && replyQuote == null;
+    // 普通消息按对侧头像对齐，独立卡片和回复可以使用这段留白。
+    final needLeftSpacer =
+        !standaloneCard && config.isShowLeftAvatar && replyQuote == null;
     final leftSpacerWidth =
         needLeftSpacer ? AvatarSize.s.value + config.avatarSpacing : 0.0;
 
@@ -880,7 +893,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            if (config.isShowRightNickname &&
+            if (!standaloneCard &&
+                config.isShowRightNickname &&
                 _showsSenderName &&
                 displaySenderName.isNotEmpty)
               _buildSenderLabel(context, displaySenderName, isSelf: true),
@@ -910,8 +924,10 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
     ];
   }
 
+  /// 对方卡片以头像列为起点，正文可用宽度由发送侧头像和状态决定。
   List<Widget> _buildOtherMessage(BuildContext context, Widget messageBubble,
-      [String? avatarUrl, String? senderName]) {
+      String? avatarUrl, String? senderName,
+      {required bool standaloneCard}) {
     final displayAvatarUrl = avatarUrl ?? message.from.avatarURL;
     final displaySenderName =
         senderName ?? ChatUtil.getMessageSenderName(message);
@@ -928,7 +944,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (config.isShowLeftNickname &&
+            if (!standaloneCard &&
+                config.isShowLeftNickname &&
                 _showsSenderName &&
                 displaySenderName.isNotEmpty)
               _buildSenderLabel(context, displaySenderName, isSelf: false),
@@ -954,8 +971,8 @@ class MessageItem extends StatelessWidget with MessageStatusMixin {
           ],
         ),
       ),
-      // 对方普通消息按己方头像对齐，回复摘要可使用这段留白。
-      if (config.isShowRightAvatar && replyQuote == null)
+      // 对方普通消息按己方头像对齐，独立卡片和回复可以使用这段留白。
+      if (!standaloneCard && config.isShowRightAvatar && replyQuote == null)
         SizedBox(width: AvatarSize.s.value + config.avatarSpacing),
     ];
   }

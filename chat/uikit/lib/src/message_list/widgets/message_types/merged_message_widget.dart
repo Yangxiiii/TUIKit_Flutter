@@ -33,11 +33,7 @@ class MergedMessageWidget extends StatefulWidget {
   /// 合并详情不显示包外发送回执，媒体使用包内静态集合。
   final bool isInMergedDetailView;
 
-  /// Optional override for bubble background color — used by the
-  /// "highlight after navigate" animation in `MessageBubble`. Matches
-  /// the same hook on [SoundMessageWidget] / [FileMessageWidget].
-  ///
-  /// 气泡背景颜色的可选覆盖 — 用于 `MessageBubble` 中的“导航后高亮”动画。与 [SoundMessageWidget] / [FileMessageWidget] 上的同样钩子匹配。
+  /// 可选的合并记录气泡底色；未提供时沿用收发方向的主题色。
   final Color? bubbleColor;
 
   const MergedMessageWidget({

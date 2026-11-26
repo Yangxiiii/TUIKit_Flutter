@@ -2,7 +2,6 @@ package com.tencent.cloud.tuikit.flutter.tuichatkit.audiorecorder.audiorecorderc
 import android.content.Context;
 import android.util.Log;
 
-import android.widget.Toast;
 
 import com.tencent.cloud.tuikit.flutter.tuichatkit.R;
 import com.tencent.cloud.tuikit.flutter.tuichatkit.audiorecorder.ResultCode;
@@ -13,6 +12,7 @@ import com.tencent.cloud.tuikit.flutter.tuichatkit.audiorecorder.audiorecorderco
 import com.tencent.cloud.tuikit.flutter.tuichatkit.audiorecorder.audiorecordercore.TXUGCAudioRecorderReflector.RecordResult;
 import com.tencent.cloud.tuikit.flutter.tuichatkit.audiorecorder.audiorecordercore.TXUGCAudioRecorderReflector.TXUGCAudioRecorderReflectorListener;
 
+/** 使用腾讯录音器采集声音，降噪授权失败后回退到普通录音。 */
 public class AudioRecorderTXUGC implements AudioRecorderInternalInterface, TXUGCAudioRecorderReflectorListener {
     private final static String TAG = "TXUGCAudioRecorder";
     private final static int ERROR_LESS_THAN_MIN_DURATION = 1;
@@ -120,7 +120,8 @@ public class AudioRecorderTXUGC implements AudioRecorderInternalInterface, TXUGC
 
         mEnableAiDeNoise = false;
         if (isAppDebuggable()) {
-            Toast.makeText(mContext, R.string.audio_authorization_prompter, Toast.LENGTH_SHORT).show();
+            // 降噪授权失败后仍会用普通录音重试，调试诊断无需占用用户提示。
+            Log.w(TAG, mContext.getString(R.string.audio_authorization_prompter));
         }
 
         startRecord(mFilePath, mMinRecordDurationMs, mMaxRecordDurationMs);

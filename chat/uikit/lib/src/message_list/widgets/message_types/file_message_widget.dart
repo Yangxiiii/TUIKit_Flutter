@@ -51,7 +51,7 @@ class FileMessageWidget extends StatefulWidget {
   /// 合并消息详情继续复用同一卡片。
   final bool isInMergedDetailView;
 
-  /// 定位高亮时覆盖背景，不改变文件信息布局。
+  /// 可选的文件气泡底色；未提供时沿用收发方向的主题色。
   final Color? bubbleColor;
 
   /// 已校验的独立大文件协议，提供 SDK 文件元素以外的下载信息。
@@ -129,7 +129,9 @@ class _FileMessageWidgetState extends State<FileMessageWidget> {
       _localPath = path;
       // 页面已离开时保留下载缓存，跳过系统打开动作。
       if (!mounted) return;
-      if (!await FilePicker.openFile(path, fileName: _name) && mounted) {
+      if (!await FilePicker.openFile(path,
+              fileName: _name, canOpen: () => mounted) &&
+          mounted) {
         AppToast.show(AppLocalization.of(context).appFileOpenFailed);
       }
     } on ChatFileExpiredException {

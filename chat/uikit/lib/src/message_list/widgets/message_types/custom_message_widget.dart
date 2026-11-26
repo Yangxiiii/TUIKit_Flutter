@@ -70,13 +70,31 @@ class CustomMessageWidget extends StatelessWidget {
     final notice = ConversationNotice.fromMessage(message);
     if (notice != null) {
       if (notice.type == 'group.created') {
-        return GroupCreationNotice(
+        final groupId = message.conversationType == ConversationType.group
+            ? message.to
+            : null;
+        return ConversationPeopleNotice(
           key: ValueKey(notice.eventId),
-          notice: notice,
-          groupId: message.conversationType == ConversationType.group
-              ? message.to
-              : null,
+          parts: [
+            for (final (text: text, userId: id) in notice.groupCreationParts())
+              (
+                text: id == null
+                    ? text
+                    : app.AppUserAvatarScope.personName(context, id,
+                        groupId: groupId, fallback: text),
+                userId: id,
+              ),
+          ],
+          semanticsPrefix: 'tim.groupCreation.${notice.eventId}',
           onPersonTap: config.onGroupInfoOperatorTap,
+        );
+      }
+      // 手机号查看沿用建群通知的姓名样式，显示服务端提供的姓名快照。
+      if (notice.isPhoneView) {
+        return ConversationPeopleNotice(
+          parts: notice.phoneViewParts(),
+          semanticsPrefix: 'tim.phoneView.${message.msgID}',
+          onPersonTap: config.onPhoneViewPersonTap,
         );
       }
       // 欢迎语随聊天列表居中排版，群名仅用主题色强调。

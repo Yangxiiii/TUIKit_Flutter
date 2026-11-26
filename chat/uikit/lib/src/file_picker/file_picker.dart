@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:tencent_chat_uikit/tencent_chat_uikit.dart' hide AlertDialog;
 import 'package:flutter/material.dart';
 
+import 'file_open_cache.dart';
 import 'file_picker_platform.dart';
 
 class PickerResult {
@@ -87,33 +88,20 @@ class FilePicker {
     }
   }
 
-  /// Open file with system default application
-  ///
-  /// Returns true if the file was successfully opened, false otherwise.
-  /// On Android, uses Intent.ACTION_VIEW to open the file.
-  /// On iOS, uses UIDocumentInteractionController to open the file.
-  /// On HarmonyOS, uses startAbility with implicit want (viewData).
-  ///
-  /// 用系统默认应用打开文件
-  ///
-  /// 如果文件成功打开返回 true，否则返回 false。在 Android 上，使用 Intent.ACTION_VIEW 打开文件。在 iOS 上，使用
-  /// UIDocumentInteractionController 打开文件。在 HarmonyOS 上，使用带有隐式 want（viewData）的 startAbility。
-  /// [fileName] 仅用于恢复鸿蒙 UUID 缓存中的 Word 扩展名。
-  static Future<bool> openFile(String filePath, {String? fileName}) async {
+  /// 用平台文档预览或外部应用打开文件；传入 [fileName] 时使用消息里的文件名。
+  /// 文件准备结束后由 [canOpen] 复核页面和消息是否仍允许拉起系统应用。
+  static Future<bool> openFile(
+    String filePath, {
+    String? fileName,
+    bool Function()? canOpen,
+  }) async {
     try {
       if (!Platform.isAndroid && !Platform.isIOS && !_isOhos) {
         throw UnsupportedError(
             'File opening only supports Android, iOS and HarmonyOS');
       }
 
-      // On Android/iOS `filePath` is an absolute sandbox path, so dart:io File
-      // can pre-validate existence cheaply. On HarmonyOS `filePath` is typically
-      // a `file://docs/...` URI returned by DocumentViewPicker — dart:io File
-      // cannot resolve such URIs, so we skip the check and let the native layer
-      // decide.
-      //
-      // 在 Android/iOS 上，`filePath` 是绝对沙箱路径，所以 dart:io File 可以廉价地预验证文件是否存在。在 HarmonyOS 上，`filePath` 通常是由
-      // DocumentViewPicker 返回的 `file://docs/...` URI — dart:io File 无法解析这样的 URI，因此我们跳过检查，让原生层处理。
+      // 鸿蒙文档选择器可能返回系统 URI，交给原生层处理。Android 和 iOS 使用本地路径。
       if (!_isOhos) {
         final file = File(filePath);
         if (!file.existsSync()) {
@@ -122,36 +110,10 @@ class FilePicker {
         }
       }
 
-      // 鸿蒙按落盘后缀匹配文档应用，普通IM文件的SDK缓存名可能只有UUID。
-      // 只从消息名提取已知文档后缀，外部文件名不能参与路径拼接。
-      if (_isOhos && fileName != null && filePath.startsWith('/')) {
-        final suffix = RegExp(r'\.(docx?)$', caseSensitive: false)
-            .firstMatch(fileName)?[0]
-            ?.toLowerCase();
-        if (suffix != null && !filePath.toLowerCase().endsWith(suffix)) {
-          final source = File(filePath);
-          final preview = File('$filePath$suffix');
-          final sourceStat = await source.stat();
-          if (sourceStat.type != FileSystemEntityType.file ||
-              sourceStat.size == 0) {
-            return false;
-          }
-          final previewStat = await preview.stat();
-          if (previewStat.size != sourceStat.size ||
-              previewStat.modified.isBefore(sourceStat.modified)) {
-            // 临时副本写完再替换，聊天和历史同时打开也只会读到完整文件。
-            final staging = await Directory('$filePath.open-').createTemp();
-            try {
-              final copy = await source.copy('${staging.path}/document$suffix');
-              await copy.rename(preview.path);
-            } finally {
-              await staging.delete(recursive: true);
-            }
-          }
-          filePath = preview.path;
-        }
-      }
-      return await FilePickerPlatform.openFile(filePath);
+      // 原生侧从文件路径提取文件名和类型，先为 UUID 或摘要缓存准备可读路径。
+      final openPath = await prepareFileForOpen(filePath, fileName);
+      if (canOpen?.call() == false) return false;
+      return await FilePickerPlatform.openFile(openPath);
     } catch (e) {
       debugPrint('FilePicker.openFile error: $e');
       return false;

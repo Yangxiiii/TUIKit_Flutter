@@ -3,7 +3,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
-import android.text.TextUtils
 import android.util.Log
 import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
@@ -12,6 +11,7 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.util.Locale
 
+/** 将文件选择和打开请求转交 Android 系统，并为外部应用授予临时读取权限。 */
 class FilePickerHandler(
     private val context: Context,
     private val methodChannel: MethodChannel
@@ -110,10 +110,8 @@ class FilePickerHandler(
                 return
             }
 
-            // Get file extension and MIME type
-            //
-            // 获取文件扩展名和 MIME 类型
-            val fileExtension = getFileExtensionFromUrl(filePath)
+            // 这里是本地路径，文件名中的 # 和 ? 都是普通字符。
+            val fileExtension = file.extension.lowercase(Locale.ROOT)
             val mimeType = if (fileExtension.isNotEmpty()) {
                 MimeTypeMap.getSingleton().getMimeTypeFromExtension(fileExtension)
             } else {
@@ -167,55 +165,6 @@ class FilePickerHandler(
             Log.e(TAG, "getUriFromPath failed: ${e.message}", e)
             null
         }
-    }
-
-    /**
-     * Get file extension from URL or file path
-     * Reference: FileUtils.kt from android_compose
-     *
-     * 从 URL 或文件路径获取文件扩展名 参考：android_compose 的 FileUtils.kt
-     */
-    private fun getFileExtensionFromUrl(url: String): String {
-        var processedUrl = url
-        if (!TextUtils.isEmpty(processedUrl)) {
-            // Remove fragment
-            //
-            // 移除片段
-            val fragment = processedUrl.lastIndexOf('#')
-            if (fragment > 0) {
-                processedUrl = processedUrl.substring(0, fragment)
-            }
-
-            // Remove query parameters
-            //
-            // 移除查询参数
-            val query = processedUrl.lastIndexOf('?')
-            if (query > 0) {
-                processedUrl = processedUrl.substring(0, query)
-            }
-
-            // Extract filename
-            //
-            // 提取文件名
-            val filenamePos = processedUrl.lastIndexOf('/')
-            val filename = if (0 <= filenamePos) {
-                processedUrl.substring(filenamePos + 1)
-            } else {
-                processedUrl
-            }
-
-            // Extract extension
-            //
-            // 提取扩展名
-            if (filename.isNotEmpty()) {
-                val dotPos = filename.lastIndexOf('.')
-                if (0 <= dotPos) {
-                    return filename.substring(dotPos + 1).lowercase(Locale.getDefault())
-                }
-            }
-        }
-
-        return ""
     }
 
     fun dispose() {

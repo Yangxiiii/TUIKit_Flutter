@@ -5,6 +5,7 @@ import '../utils/voice_message_media.dart';
 import 'package:app_ui/app_ui.dart';
 import '../utils/conversation_notice.dart';
 import '../utils/group_announcement_message.dart';
+import '../utils/message_utils.dart';
 import '../utils/oa_announcement_message.dart';
 import 'message_types/group_announcement_message_card.dart';
 import 'message_types/oa_announcement_message_card.dart';
@@ -206,12 +207,6 @@ class MessageBubble extends StatefulWidget {
   /// 宿主可替换菜单操作；为空时使用默认消息菜单。
   final MessageMenuCallbacks? menuCallbacks;
 
-  /// 定位消息时播放高亮，动画结束后由外层清除此状态。
-  final bool isHighlighted;
-
-  /// 高亮播放结束时通知列表，避免重复播放定位效果。
-  final VoidCallback? onHighlightComplete;
-
   /// 当前消息允许附加的菜单操作。
   final List<MessageCustomAction> customActions;
 
@@ -276,8 +271,6 @@ class MessageBubble extends StatefulWidget {
     required this.config,
     required this.messageListStore,
     this.menuCallbacks,
-    this.isHighlighted = false,
-    this.onHighlightComplete,
     this.customActions = const [],
     this.isInMergedDetailView = false,
     this.asrDisplayManager,
@@ -297,9 +290,8 @@ class MessageBubble extends StatefulWidget {
   State<StatefulWidget> createState() => _MessageBubbleState();
 }
 
-/// 管理消息气泡的高亮动画与菜单生命周期，并渲染对应消息类型。
-class _MessageBubbleState extends State<MessageBubble>
-    with SingleTickerProviderStateMixin {
+/// 按消息类型渲染正文并管理气泡的菜单生命周期。
+class _MessageBubbleState extends State<MessageBubble> {
   /// 回复详情已展示原消息，独立的聊天引用摘要只在其他入口渲染。
   MessageQuoteInfo? get _quoteInfo => widget.replyDetail == null
       ? widget.replyQuote ?? widget.message.quoteInfo
@@ -312,12 +304,14 @@ class _MessageBubbleState extends State<MessageBubble>
       MessageActionsScope.maybeOf(context)?.actionGuard ?? _voiceFallbackGuard;
   Object get _voiceRequestScope =>
       widget.asrDisplayManager ?? widget.messageListStore ?? this;
-  bool get _isVoiceDesign => widget.conversationID.startsWith('c2c_');
+
+  /// 单聊与群聊共用语音菜单，并使用同一套转文字状态和反馈。
+  bool get _isVoiceDesign =>
+      widget.conversationID.startsWith('c2c_') ||
+      widget.conversationID.startsWith('group_');
 
   final GlobalKey _messageKey = GlobalKey();
   SuperTooltip? tooltip;
-
-  late AnimationController _highlightAnimationController;
 
   late AppLocalizedText atomicLocal;
 
@@ -325,24 +319,6 @@ class _MessageBubbleState extends State<MessageBubble>
   void initState() {
     super.initState();
     _menuCallbacks = _resolveMenuCallbacks();
-
-    _highlightAnimationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1000),
-    );
-
-    _highlightAnimationController.addStatusListener((status) {
-      if (status == AnimationStatus.completed &&
-          widget.onHighlightComplete != null) {
-        widget.onHighlightComplete!();
-      }
-    });
-
-    if (widget.isHighlighted) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _highlightAnimationController.forward(from: 0.0);
-      });
-    }
   }
 
   @override
@@ -356,10 +332,6 @@ class _MessageBubbleState extends State<MessageBubble>
     super.didUpdateWidget(oldWidget);
     // 模式切换保留气泡状态后，菜单仍需使用当前消息和当前列表提供的业务回调。
     _menuCallbacks = _resolveMenuCallbacks();
-
-    if (widget.isHighlighted && !_highlightAnimationController.isAnimating) {
-      _highlightAnimationController.forward(from: 0.0);
-    }
   }
 
   /// 菜单回调随消息或列表模式更新；未由宿主提供时沿用SDK默认操作。
@@ -378,7 +350,6 @@ class _MessageBubbleState extends State<MessageBubble>
 
   @override
   void dispose() {
-    _highlightAnimationController.dispose();
     if (tooltip?.isOpen ?? false) {
       tooltip?.close();
     }
@@ -406,38 +377,6 @@ class _MessageBubbleState extends State<MessageBubble>
     final colorsTheme = SemanticColorScheme.of(context);
 
     Widget backgroundBuilder(Widget child) {
-      if (widget.isHighlighted) {
-        return AnimatedBuilder(
-          animation: _highlightAnimationController,
-          builder: (context, animChild) {
-            final colorAnimation = ColorTween(
-              begin: _getBubbleColor(colorsTheme),
-              end: colorsTheme.textColorWarning,
-            ).animate(CurvedAnimation(
-              parent: _highlightAnimationController,
-              curve: const Interval(0.0, 0.4, curve: Curves.easeIn),
-            ));
-            final reverseColorAnimation = ColorTween(
-              begin: colorsTheme.textColorWarning,
-              end: _getBubbleColor(colorsTheme),
-            ).animate(CurvedAnimation(
-              parent: _highlightAnimationController,
-              curve: const Interval(0.6, 1.0, curve: Curves.easeOut),
-            ));
-
-            return Container(
-              decoration: BoxDecoration(
-                color: _highlightAnimationController.value <= 0.5
-                    ? colorAnimation.value
-                    : reverseColorAnimation.value,
-                borderRadius: _getBubbleBorderRadius(),
-              ),
-              child: animChild,
-            );
-          },
-          child: child,
-        );
-      }
       return Container(
         decoration: BoxDecoration(
           color: _getBubbleColor(colorsTheme),
@@ -473,9 +412,13 @@ class _MessageBubbleState extends State<MessageBubble>
     if (widget.message.status == MessageStatus.revoked) {
       final scope = MessageRecallScope.maybeOf(context);
       if (scope != null) {
+        // 群管理员也可能撤回成员消息，群提示继续使用实际操作人和撤回原因。
+        final text = widget.message.conversationType == ConversationType.group
+            ? MessageUtil.getRevokeDisplayString(widget.message, context)
+            : chatMessageRecallText(widget.message, context: context);
         return MessageRecallNotice(
           messageId: widget.message.msgID,
-          text: chatMessageRecallText(widget.message, context: context),
+          text: text,
           editableUntil: scope.config.editableUntil(widget.message.msgID),
           onReedit: () => scope.onReedit(widget.message.msgID),
         );
@@ -526,116 +469,68 @@ class _MessageBubbleState extends State<MessageBubble>
         break;
 
       case MessageType.image:
-        messageWidget = _wrapMediaHighlight(
-          ImageMessageWidget(
-            message: widget.message,
-            conversationID: widget.conversationID,
-            isSelf: widget.isSelf,
-            maxWidth: widget.maxWidth,
-            config: widget.config,
-            onLongPress: _longPressCallback,
-            messageListStore: widget.messageListStore,
-            isInMergedDetailView: widget.isInMergedDetailView,
-            mergedMediaMessages: widget.mergedMediaMessages,
-            loadOlderMedia: widget.loadOlderMedia,
-            localOnly: widget.messageListStore == null,
-            bubbleKey: _messageKey,
-          ),
-          colorsTheme,
+        messageWidget = ImageMessageWidget(
+          message: widget.message,
+          conversationID: widget.conversationID,
+          isSelf: widget.isSelf,
+          maxWidth: widget.maxWidth,
+          config: widget.config,
+          onLongPress: _longPressCallback,
+          messageListStore: widget.messageListStore,
+          isInMergedDetailView: widget.isInMergedDetailView,
+          mergedMediaMessages: widget.mergedMediaMessages,
+          loadOlderMedia: widget.loadOlderMedia,
+          localOnly: widget.messageListStore == null,
+          bubbleKey: _messageKey,
         );
         break;
 
       case MessageType.video:
-        messageWidget = _wrapMediaHighlight(
-          VideoMessageWidget(
-            message: widget.message,
-            conversationID: widget.conversationID,
-            isSelf: widget.isSelf,
-            maxWidth: widget.maxWidth,
-            config: widget.config,
-            onLongPress: _longPressCallback,
-            messageListStore: widget.messageListStore,
-            isInMergedDetailView: widget.isInMergedDetailView,
-            mergedMediaMessages: widget.mergedMediaMessages,
-            loadOlderMedia: widget.loadOlderMedia,
-            localOnly: widget.messageListStore == null,
-            bubbleKey: _messageKey,
-          ),
-          colorsTheme,
+        messageWidget = VideoMessageWidget(
+          message: widget.message,
+          conversationID: widget.conversationID,
+          isSelf: widget.isSelf,
+          maxWidth: widget.maxWidth,
+          config: widget.config,
+          onLongPress: _longPressCallback,
+          messageListStore: widget.messageListStore,
+          isInMergedDetailView: widget.isInMergedDetailView,
+          mergedMediaMessages: widget.mergedMediaMessages,
+          loadOlderMedia: widget.loadOlderMedia,
+          localOnly: widget.messageListStore == null,
+          bubbleKey: _messageKey,
         );
         break;
 
       case MessageType.audio:
         bodyContainsReactions = true;
-        if (widget.isHighlighted) {
-          messageWidget = AnimatedBuilder(
-            animation: _highlightAnimationController,
-            builder: (context, _) {
-              return SoundMessageWidget(
-                message: widget.message,
-                conversationID: widget.conversationID,
-                asrDisplayManager: widget.asrDisplayManager,
-                reactionBar: bodyReactionBar,
-                onConvertToText: _handleConvertVoiceToText,
-                isSelf: widget.isSelf,
-                maxWidth: widget.maxWidth,
-                config: widget.config,
-                onLongPress: _longPressCallback,
-                messageListStore: widget.messageListStore,
-                isInMergedDetailView: widget.isInMergedDetailView,
-                bubbleKey: _messageKey,
-                bubbleColor: _animatedBubbleColor(colorsTheme),
-              );
-            },
-          );
-        } else {
-          messageWidget = SoundMessageWidget(
-            message: widget.message,
-            conversationID: widget.conversationID,
-            asrDisplayManager: widget.asrDisplayManager,
-            reactionBar: bodyReactionBar,
-            onConvertToText: _handleConvertVoiceToText,
-            isSelf: widget.isSelf,
-            maxWidth: widget.maxWidth,
-            config: widget.config,
-            onLongPress: _longPressCallback,
-            messageListStore: widget.messageListStore,
-            isInMergedDetailView: widget.isInMergedDetailView,
-            bubbleKey: _messageKey,
-          );
-        }
+        messageWidget = SoundMessageWidget(
+          message: widget.message,
+          conversationID: widget.conversationID,
+          asrDisplayManager: widget.asrDisplayManager,
+          reactionBar: bodyReactionBar,
+          onConvertToText: _handleConvertVoiceToText,
+          isSelf: widget.isSelf,
+          maxWidth: widget.maxWidth,
+          config: widget.config,
+          onLongPress: _longPressCallback,
+          messageListStore: widget.messageListStore,
+          isInMergedDetailView: widget.isInMergedDetailView,
+          bubbleKey: _messageKey,
+        );
         break;
 
       case MessageType.file:
-        if (widget.isHighlighted) {
-          messageWidget = AnimatedBuilder(
-            animation: _highlightAnimationController,
-            builder: (context, _) {
-              return FileMessageWidget(
-                message: widget.message,
-                isSelf: widget.isSelf,
-                maxWidth: widget.maxWidth,
-                config: widget.config,
-                onLongPress: _longPressCallback,
-                messageListStore: widget.messageListStore,
-                isInMergedDetailView: widget.isInMergedDetailView,
-                bubbleKey: _messageKey,
-                bubbleColor: _animatedBubbleColor(colorsTheme),
-              );
-            },
-          );
-        } else {
-          messageWidget = FileMessageWidget(
-            message: widget.message,
-            isSelf: widget.isSelf,
-            maxWidth: widget.maxWidth,
-            config: widget.config,
-            onLongPress: _longPressCallback,
-            messageListStore: widget.messageListStore,
-            isInMergedDetailView: widget.isInMergedDetailView,
-            bubbleKey: _messageKey,
-          );
-        }
+        messageWidget = FileMessageWidget(
+          message: widget.message,
+          isSelf: widget.isSelf,
+          maxWidth: widget.maxWidth,
+          config: widget.config,
+          onLongPress: _longPressCallback,
+          messageListStore: widget.messageListStore,
+          isInMergedDetailView: widget.isInMergedDetailView,
+          bubbleKey: _messageKey,
+        );
         break;
 
       case MessageType.tips:
@@ -647,38 +542,32 @@ class _MessageBubbleState extends State<MessageBubble>
 
       case MessageType.custom:
         if (customContent != null) {
-          // 宿主只替换正文，原气泡仍提供长按菜单与定位高亮。
-          messageWidget = _wrapMediaHighlight(
-            GestureDetector(
-              key: _messageKey,
-              onLongPress: _longPressCallback,
-              child: customContent,
-            ),
-            colorsTheme,
+          // 宿主只替换正文，原气泡继续处理长按菜单。
+          messageWidget = GestureDetector(
+            key: _messageKey,
+            onLongPress: _longPressCallback,
+            child: customContent,
           );
           break;
         }
         if (notification != null) {
-          // 通知卡复用定位高亮，详情只传业务 ID，不把点击当成业务已读。
-          messageWidget = _wrapMediaHighlight(
-            OaAnnouncementMessageCard(
-              key: _messageKey,
-              announcement: notification,
-              maxWidth: widget.maxWidth,
-              isRead: _readAnnouncementStatus(notification.id),
-              // SDK 尚无消息 ID 时沿用公告业务 ID；正式重复通知仍由 IM 消息 ID 区分。
-              detailIdentifier:
-                  'tim.assistant.detail.${Uri.encodeComponent(widget.message.msgID.isEmpty ? notification.id : widget.message.msgID)}',
-              onOpen: () {
-                final onOpen = widget.config.onOaAnnouncementTap;
-                if (onOpen != null) {
-                  onOpen(context, notification.id);
-                } else {
-                  Toast.info(context, '公告详情暂未开放');
-                }
-              },
-            ),
-            colorsTheme,
+          // 通知卡详情只传业务 ID，点击不改变业务已读状态。
+          messageWidget = OaAnnouncementMessageCard(
+            key: _messageKey,
+            announcement: notification,
+            maxWidth: widget.maxWidth,
+            isRead: _readAnnouncementStatus(notification.id),
+            // SDK 尚无消息 ID 时沿用公告业务 ID；正式重复通知仍由 IM 消息 ID 区分。
+            detailIdentifier:
+                'tim.assistant.detail.${Uri.encodeComponent(widget.message.msgID.isEmpty ? notification.id : widget.message.msgID)}',
+            onOpen: () {
+              final onOpen = widget.config.onOaAnnouncementTap;
+              if (onOpen != null) {
+                onOpen(context, notification.id);
+              } else {
+                Toast.info(context, '公告详情暂未开放');
+              }
+            },
           );
           break;
         }
@@ -735,45 +624,16 @@ class _MessageBubbleState extends State<MessageBubble>
         break;
 
       case MessageType.merged:
-        if (widget.isHighlighted) {
-          // Same pattern as audio / file: drive the bubble's background
-          // colour through the highlight animation by re-passing
-          // `_animatedBubbleColor` on every tick. MergedMessageWidget
-          // forwards this into its outer Container's decoration.color
-          // so the warning flash actually replaces the default bubble
-          // colour rather than being painted under it (which the merged
-          // bubble would have hidden).
-          //
-          // 和音频/文件同样的模式：通过在每次动画帧中重新传递`_animatedBubbleColor`来驱动气泡背景颜色的高亮动画。MergedMessageWidget 会把它传到外层 Container
-          // 的 decoration.color，这样警告闪烁实际上是替换默认气泡颜色，而不是在其下层绘制（否则合并气泡会遮挡）。
-          messageWidget = AnimatedBuilder(
-            animation: _highlightAnimationController,
-            builder: (context, _) {
-              return MergedMessageWidget(
-                message: widget.message,
-                isSelf: widget.isSelf,
-                maxWidth: widget.maxWidth,
-                config: widget.config,
-                onLongPress: _longPressCallback,
-                bubbleKey: _messageKey,
-                messageListStore: widget.messageListStore,
-                isInMergedDetailView: widget.isInMergedDetailView,
-                bubbleColor: _animatedBubbleColor(colorsTheme),
-              );
-            },
-          );
-        } else {
-          messageWidget = MergedMessageWidget(
-            message: widget.message,
-            isSelf: widget.isSelf,
-            maxWidth: widget.maxWidth,
-            config: widget.config,
-            onLongPress: _longPressCallback,
-            bubbleKey: _messageKey,
-            messageListStore: widget.messageListStore,
-            isInMergedDetailView: widget.isInMergedDetailView,
-          );
-        }
+        messageWidget = MergedMessageWidget(
+          message: widget.message,
+          isSelf: widget.isSelf,
+          maxWidth: widget.maxWidth,
+          config: widget.config,
+          onLongPress: _longPressCallback,
+          bubbleKey: _messageKey,
+          messageListStore: widget.messageListStore,
+          isInMergedDetailView: widget.isInMergedDetailView,
+        );
         break;
 
       default:
@@ -783,13 +643,16 @@ class _MessageBubbleState extends State<MessageBubble>
         messageWidget = _buildUnsupportedMessage(context);
     }
 
-    // 公告和宿主卡片可按业务身份打开；依赖 SDK 的操作在联网后恢复。
+    // 公告、宿主卡片和手机号通知可走本地路由，依赖 SDK 的正文操作在联网后恢复。
     if (widget.messageListStore == null &&
         announcement == null &&
         notification == null &&
         customContent == null &&
         const {MessageType.file, MessageType.audio, MessageType.custom}
-            .contains(widget.message.messageType)) {
+            .contains(widget.message.messageType) &&
+        !(widget.config.onPhoneViewPersonTap != null &&
+            ConversationNotice.fromMessage(widget.message)?.isPhoneView ==
+                true)) {
       messageWidget = IgnorePointer(child: messageWidget);
     }
 
@@ -822,51 +685,14 @@ class _MessageBubbleState extends State<MessageBubble>
           if (reactionBar != null) reactionBar,
         ],
       );
-      Widget bubbleContainer;
-      if (widget.isHighlighted) {
-        // Apply highlight animation to the outer bubble container
-        //
-        // 对外层气泡容器应用高亮动画。
-        bubbleContainer = AnimatedBuilder(
-          animation: _highlightAnimationController,
-          builder: (context, animChild) {
-            final colorAnimation = ColorTween(
-              begin: _getBubbleColor(colorsTheme),
-              end: colorsTheme.textColorWarning,
-            ).animate(CurvedAnimation(
-              parent: _highlightAnimationController,
-              curve: const Interval(0.0, 0.4, curve: Curves.easeIn),
-            ));
-            final reverseColorAnimation = ColorTween(
-              begin: colorsTheme.textColorWarning,
-              end: _getBubbleColor(colorsTheme),
-            ).animate(CurvedAnimation(
-              parent: _highlightAnimationController,
-              curve: const Interval(0.6, 1.0, curve: Curves.easeOut),
-            ));
-            return Container(
-              constraints: BoxConstraints(maxWidth: quoteWidth),
-              decoration: BoxDecoration(
-                color: _highlightAnimationController.value <= 0.5
-                    ? colorAnimation.value
-                    : reverseColorAnimation.value,
-                borderRadius: _getBubbleBorderRadius(),
-              ),
-              child: animChild,
-            );
-          },
-          child: columnChild,
-        );
-      } else {
-        bubbleContainer = Container(
-          constraints: BoxConstraints(maxWidth: quoteWidth),
-          decoration: BoxDecoration(
-            color: _getBubbleColor(colorsTheme),
-            borderRadius: _getBubbleBorderRadius(),
-          ),
-          child: columnChild,
-        );
-      }
+      final bubbleContainer = Container(
+        constraints: BoxConstraints(maxWidth: quoteWidth),
+        decoration: BoxDecoration(
+          color: _getBubbleColor(colorsTheme),
+          borderRadius: _getBubbleBorderRadius(),
+        ),
+        child: columnChild,
+      );
       messageWidget = GestureDetector(
         key: widget.replyQuote != null &&
                 widget.message.messageType == MessageType.text
@@ -926,90 +752,6 @@ class _MessageBubbleState extends State<MessageBubble>
       _groupAnnouncement == null &&
       widget.message.status != MessageStatus.violation &&
       CopiedChatMessage.supports(widget.message.messagePayload);
-
-  /// Compute animated bubble color for highlight effect (used by audio/file widgets)
-  ///
-  /// 计算用于高亮效果的动画气泡颜色（音频/文件控件使用）。
-  Color _animatedBubbleColor(SemanticColorScheme colorsTheme) {
-    final baseColor = _getBubbleColor(colorsTheme);
-    final highlightColor = colorsTheme.textColorWarning;
-    final t = _highlightAnimationController.value;
-    if (t <= 0.5) {
-      // 0.0 -> 0.4: ease in to highlight
-      //
-      // 0.0 -> 0.4：缓入高亮。
-      final progress = (t / 0.4).clamp(0.0, 1.0);
-      return Color.lerp(
-          baseColor, highlightColor, Curves.easeIn.transform(progress))!;
-    } else {
-      // 0.6 -> 1.0: ease out back to base
-      //
-      // 0.6 -> 1.0：缓出回到基础颜色。
-      final progress = ((t - 0.6) / 0.4).clamp(0.0, 1.0);
-      return Color.lerp(
-          highlightColor, baseColor, Curves.easeOut.transform(progress))!;
-    }
-  }
-
-  /// Wrap a media child (image / video) with a translucent highlight
-  /// overlay animation. Media payloads don't have a bubble background of
-  /// their own — the image/video fills the entire bubble area, so the
-  /// bubble-colour animation used for text / audio / file / merged is
-  /// invisible behind the media. Instead we overlay a semi-transparent
-  /// warning-coloured rectangle that fades in, holds, then fades back
-  /// out, on the same curve as the bubble-colour animation.
-  ///
-  /// The overlay is wrapped in [IgnorePointer] so it doesn't eat taps
-  /// (the underlying tap → open-image-viewer flow still works).
-  ///
-  /// 给媒体子元素（图片/视频）加一个半透明高亮覆盖动画。媒体内容本身没有气泡背景——图片/视频会填满整个气泡区域，所以用于文本/音频/文件/合并消息的气泡颜色动画在媒体背后不可见。我们改为叠加一个半透明的警告色矩形，它会淡入、保持一段时间，然后再淡出，动画曲线与气泡颜色动画一致。
-  ///
-  /// 覆盖层使用了[IgnorePointer]包装，所以不会拦截点击（底层点击 → 打开图片查看器流程仍然有效）。
-  Widget _wrapMediaHighlight(Widget child, SemanticColorScheme colorsTheme) {
-    if (!widget.isHighlighted) return child;
-    return Stack(
-      children: [
-        child,
-        Positioned.fill(
-          child: IgnorePointer(
-            child: AnimatedBuilder(
-              animation: _highlightAnimationController,
-              builder: (context, _) {
-                return Container(
-                  decoration: BoxDecoration(
-                    color: colorsTheme.textColorWarning.withValues(
-                      alpha: _mediaHighlightOverlayAlpha(
-                          _highlightAnimationController.value),
-                    ),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// Eased-in / hold / eased-out alpha curve for the media highlight
-  /// overlay. Matches the timing of the bubble-colour animation:
-  ///   t ∈ [0.0, 0.4): ease in to peak
-  ///   t ∈ [0.4, 0.6): hold at peak
-  ///   t ∈ [0.6, 1.0]: ease out to 0
-  ///
-  /// 媒体高亮覆盖层的透明度曲线为渐入/保持/渐出，时间与气泡颜色动画一致：t ∈ [0.0, 0.4)：渐入到高峰 t ∈ [0.4, 0.6)：保持高峰 t ∈ [0.6, 1.0]：渐出到0
-  double _mediaHighlightOverlayAlpha(double t) {
-    const peak = 0.4;
-    if (t <= 0.4) {
-      return Curves.easeIn.transform((t / 0.4).clamp(0.0, 1.0)) * peak;
-    }
-    if (t < 0.6) {
-      return peak;
-    }
-    return (1 - Curves.easeOut.transform(((t - 0.6) / 0.4).clamp(0.0, 1.0))) *
-        peak;
-  }
 
   /// 宿主启用编辑后使用底部操作面板，其余场景继续使用既有菜单。
   void _onOpenToolTip() {
@@ -1458,7 +1200,7 @@ class _MessageBubbleState extends State<MessageBubble>
     return items;
   }
 
-  /// 单聊语音保留独立路由和识别组，已有复制、撤回等资格不因此放宽。
+  /// 常规聊天语音面板独立展示播放方式和转文字，通用动作仍按消息资格展示。
   List<MessageMenuItem> _buildSoundMessageMenuItems() {
     final items = <MessageMenuItem>[];
     if (_isVoiceDesign) {
@@ -1538,7 +1280,7 @@ class _MessageBubbleState extends State<MessageBubble>
     return !hasAsrText || isHidden;
   }
 
-  /// 单聊识别失败按设计显示3秒纯文字提示，其他会话保留原有错误样式。
+  /// 单聊与群聊识别失败时显示三秒纯文字，保留再次识别的入口。
   void _showAsrFailure(String message) {
     if (_isVoiceDesign) {
       Toast.simple(context, message, duration: const Duration(seconds: 3));

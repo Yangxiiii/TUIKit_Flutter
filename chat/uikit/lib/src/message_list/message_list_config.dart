@@ -33,6 +33,10 @@ abstract class MessageListConfigProtocol {
   /// 宿主可渲染已识别的自定义正文；返回空值时继续用原有气泡。
   Widget? Function(BuildContext, MessageInfo, double)? get customContentBuilder;
 
+  /// 双侧布局中，匹配的卡片保留发送侧头像，省略昵称和对侧头像留白。
+  /// 发送侧头像沿用普通消息的位置和间距。
+  bool Function(MessageInfo)? get useStandaloneCardLayout;
+
   /// 宿主可在真实消息正文外观察视口，不能借此替代普通消息已读回执。
   Widget Function(BuildContext, MessageInfo, Widget)? get messageContentWrapper;
 
@@ -44,6 +48,9 @@ abstract class MessageListConfigProtocol {
 
   /// 建群与群资料变更通知中的个人名片由宿主打开。
   void Function(BuildContext, String)? get onGroupInfoOperatorTap;
+
+  /// 点击手机号查看通知的姓名时，交给宿主按载荷中的用户 ID 打开名片。
+  void Function(BuildContext context, String userId)? get onPhoneViewPersonTap;
 
   /// 宿主当前群角色是否允许显示退群与移出通知。
   bool get showGroupDepartureNotices;
@@ -63,6 +70,10 @@ abstract class MessageListConfigProtocol {
 
   /// 宿主接管群消息头像点击，目标为头像所代表的本人或其他成员。
   void Function(BuildContext context, String userId)? get onGroupSenderAvatarTap;
+
+  /// 宿主接管单聊消息头像点击，目标为头像所代表的本人或对方。
+  void Function(BuildContext context, String userId)?
+      get onDirectSenderAvatarTap;
 
   /// 宿主为消息中的单个提及成员提供行内回执指示。
   Widget? Function(MessageInfo message, String userId)?
@@ -150,6 +161,10 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
   @override
   final Widget? Function(BuildContext, MessageInfo, double)? customContentBuilder;
 
+  /// 由宿主匹配适用独立消息行的卡片正文。
+  @override
+  final bool Function(MessageInfo)? useStandaloneCardLayout;
+
   /// 仅包裹气泡正文，避免把头像、时间分组和整行空白误算为正文可见区域。
   @override
   final Widget Function(BuildContext, MessageInfo, Widget)? messageContentWrapper;
@@ -188,6 +203,11 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
   @override
   final void Function(BuildContext, String)? onGroupInfoOperatorTap;
 
+  /// 公告会话可以隐藏普通头像，手机号查看通知仍独立使用此名片入口。
+  @override
+  final void Function(BuildContext context, String userId)?
+      onPhoneViewPersonTap;
+
   @override
   final ChatForwardHandler? forwardHandler;
   @override
@@ -200,6 +220,11 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
   /// 缺省时保留 UIKit 原有的头像点击行为。
   @override
   final void Function(BuildContext context, String userId)? onGroupSenderAvatarTap;
+
+  /// 缺省时保留 UIKit 单聊头像的原有点击行为。
+  @override
+  final void Function(BuildContext context, String userId)?
+      onDirectSenderAvatarTap;
 
   /// 缺省时正文只展示提及文字，不占用行内回执空间。
   @override
@@ -377,6 +402,7 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
   const ChatMessageListConfig({
     this.messageContentWrapper,
     this.customContentBuilder,
+    this.useStandaloneCardLayout,
     this.senderNameWrapper,
     this.showGroupDepartureNotices = true,
     this.groupMemberNoticeBuilder,
@@ -385,10 +411,12 @@ class ChatMessageListConfig implements MessageListConfigProtocol {
     this.groupReadReceiptBuilder,
     this.reactionConfig,
     this.onGroupInfoOperatorTap,
+    this.onPhoneViewPersonTap,
     this.forwardHandler,
     this.localDeleteHandler,
     this.onMentionTap,
     this.onGroupSenderAvatarTap,
+    this.onDirectSenderAvatarTap,
     this.mentionReceiptBuilder,
     this.onGroupAnnouncementTap,
     this.acceptedCallAttempt,

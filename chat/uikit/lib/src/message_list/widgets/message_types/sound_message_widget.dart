@@ -55,9 +55,7 @@ class SoundMessageWidget extends StatefulWidget {
   /// 合并转发详情沿用紧凑布局，语音识别入口只在聊天窗口展示。
   final bool isInMergedDetailView;
 
-  /// Optional override for bubble background color (used for highlight animation)
-  ///
-  /// 气泡背景颜色的可选覆盖（用于高亮动画）
+  /// 可选的语音气泡底色；未提供时沿用收发方向的主题色。
   final Color? bubbleColor;
 
   const SoundMessageWidget({

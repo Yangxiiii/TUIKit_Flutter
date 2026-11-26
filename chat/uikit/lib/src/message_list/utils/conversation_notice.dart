@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:app_api/app_api_models.dart' show readNullableStringValue;
 import 'package:atomic_x_core/atomicxcore.dart';
 
 /// 统一系统通知，为聊天正文和会话摘要保留事件身份与姓名。
@@ -7,7 +8,7 @@ final class ConversationNotice {
   const ConversationNotice._(
       this.eventId, this.type, this.occurredAt, this._data);
 
-  /// 后端重试沿用同一个事件标识，按会话去重。
+  /// 按会话去重的标识，只有原始载荷或 SDK 消息 ID 可用时才设置。
   final String eventId;
 
   /// 已验证的事件类型，用于选择后端通知文案。
@@ -54,6 +55,26 @@ final class ConversationNotice {
 
   /// 邀请通知沿用成员变动样式，受众仍由该消息的投递范围决定。
   bool get isGroupInvitation => type == 'group.members_invited';
+
+  /// 手机号查看通知使用独立载荷，名片目标来自载荷中的用户 ID。
+  bool get isPhoneView => type == _viewPhoneBusinessId;
+
+  /// 返回姓名和正文片段，历史通知缺少人员 ID 时仍展示原有姓名。
+  List<({String text, String? userId})> phoneViewParts() {
+    if (!isPhoneView) return const [];
+    return [
+      (
+        text: _data['operatorName'] as String,
+        userId: _data['operatorUserId'] as String?,
+      ),
+      (text: ' 查看了 ', userId: null),
+      (
+        text: _data['targetName'] as String,
+        userId: _data['targetUserId'] as String?,
+      ),
+      (text: ' 的手机号', userId: null),
+    ];
+  }
 
   /// 欢迎语正文与摘要共用文案，聊天行只强调事件中的群名快照。
   ({String prefix, String groupName, String suffix})? get groupWelcomeParts {
@@ -122,8 +143,8 @@ final class ConversationNotice {
     );
   }
 
-  /// 后端给出的可信事件时间，保留精度以免按接收时间误合并。
-  final DateTime occurredAt;
+  /// 后端事件时间或 SDK 消息时间，仅解析手机号查看载荷时可为空。
+  final DateTime? occurredAt;
 
   /// 撤回由原消息状态展示，独立的协议记录不进入会话正文或摘要。
   bool get usesOriginalMessage => type == 'message.recalled';
@@ -133,6 +154,9 @@ final class ConversationNotice {
 
   /// 自定义元素中标识 OA 系统提示的业务字段值。
   static const businessId = 'oa_system_notice';
+
+  /// 手机号查看使用独立业务标识，载荷提供两人的用户 ID 和展示名。
+  static const _viewPhoneBusinessId = 'oa_view_phone';
 
   /// 已由 OA 建群通知替代的旧格式，聊天正文和会话摘要均不再展示。
   static const legacyGroupCreationBusinessId = 'group_create';
@@ -187,7 +211,7 @@ final class ConversationNotice {
     return (
       operatorId: (_data['operator'] as Map)['userId'] as String,
       description: _data['newDescription'] as String,
-      second: occurredAt.millisecondsSinceEpoch ~/ 1000,
+      second: occurredAt!.millisecondsSinceEpoch ~/ 1000,
     );
   }
 
@@ -222,7 +246,7 @@ final class ConversationNotice {
   }
 
   /// 过滤隐藏提示，描述变更优先展示同一事件的 IM 原生提示。
-  /// 后端重试仍保留最早收到的版本，撤回留在原位置。
+  /// 同一事件保留最早收到的版本，缺少事件标识时保留各自独立的通知。
   static List<MessageInfo> visibleMessages(List<MessageInfo> messages) {
     // 提前收集原生事件，避免 SDK 与后端副本的到达顺序影响结果。
     final nativeDescriptions =
@@ -235,14 +259,14 @@ final class ConversationNotice {
       if (notice == null ||
           (!notice.usesOriginalMessage &&
               !nativeDescriptions.contains(notice._descriptionChange) &&
-              seen.add(notice.eventId))) {
+              (notice.eventId.isEmpty || seen.add(notice.eventId)))) {
         visible.add(message);
       }
     }
     return visible.reversed.toList();
   }
 
-  /// 群聊历史和实时消息均从自定义元素正文解析。
+  /// 聊天历史和实时消息均从自定义元素正文解析，手机号查看提示补充 SDK 元数据。
   static ConversationNotice? fromMessage(MessageInfo message) {
     if (message.status == MessageStatus.revoked ||
         message.status == MessageStatus.deleted) {
@@ -250,12 +274,15 @@ final class ConversationNotice {
     }
     final payload = message.messagePayload;
     return payload is CustomMessagePayload
-        ? tryParse(payload.customData)
+        ? _tryParse(payload.customData, message)
         : null;
   }
 
   /// 只识别当前版本和字段完整的已知类型，其他数据交还通用消息渲染。
-  static ConversationNotice? tryParse(String? raw) {
+  static ConversationNotice? tryParse(String? raw) => _tryParse(raw, null);
+
+  /// 两种通知协议各自校验载荷，仅 SDK 消息可为手机号查看通知提供投递信息。
+  static ConversationNotice? _tryParse(String? raw, MessageInfo? message) {
     if (raw == null || !raw.trimLeft().startsWith('{')) return null;
     final Object? decoded;
     try {
@@ -264,11 +291,16 @@ final class ConversationNotice {
       return null;
     }
     if (decoded is! Map<String, dynamic> ||
-        decoded['businessID'] != businessId ||
         decoded['version'] is! int ||
         decoded['version'] != 1) {
       return null;
     }
+    final protocol = decoded['businessID'];
+    if (protocol == _viewPhoneBusinessId) {
+      return _parseViewPhone(decoded['payload'], message);
+    }
+    if (protocol != businessId) return null;
+
     final id = decoded['eventId'];
     final type = decoded['type'];
     final time = decoded['occurredAt'];
@@ -314,6 +346,37 @@ final class ConversationNotice {
         : null;
   }
 
+  /// 仅从载荷读取名片身份，通知顺序和唯一性仍来自 SDK 消息。
+  static ConversationNotice? _parseViewPhone(
+      Object? payload, MessageInfo? message) {
+    if (payload is! Map<String, dynamic>) return null;
+    final operatorName = payload['operatorName'];
+    final targetName = payload['targetName'];
+    if (!_nonEmpty(operatorName) || !_nonEmpty(targetName)) return null;
+    final operatorUserId = _readPhoneViewUserId(payload['operatorUserId']);
+    final targetUserId = _readPhoneViewUserId(payload['targetUserId']);
+    final messageId = message?.msgID ?? '';
+    final timestamp = message?.timestamp;
+    return ConversationNotice._(
+      messageId.isEmpty ? '' : '$_viewPhoneBusinessId:$messageId',
+      _viewPhoneBusinessId,
+      timestamp == null || timestamp <= 0
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(timestamp * 1000, isUtc: true),
+      {
+        'operatorName': operatorName,
+        'targetName': targetName,
+        // 旧通知没有人员 ID，无法定位的姓名仍保留为普通文本。
+        if (_nonEmpty(operatorUserId)) 'operatorUserId': operatorUserId,
+        if (_nonEmpty(targetUserId)) 'targetUserId': targetUserId,
+      },
+    );
+  }
+
+  /// 兼容服务端的 JSON 整数和字符串 ID，超出这两种类型的值只展示姓名。
+  static String? _readPhoneViewUserId(Object? value) =>
+      value is int || value is String ? readNullableStringValue(value) : null;
+
   static bool _nonEmpty(Object? value) =>
       value is String && value.trim().isNotEmpty;
 
@@ -356,6 +419,7 @@ final class ConversationNotice {
       'message.recalled' => '${person('operator')}撤回了一条消息',
       'message.pinned' => '${person('operator')}置顶了内容',
       'message.unpinned' => '${person('operator')}移除了置顶内容',
+      _viewPhoneBusinessId => phoneViewParts().map((part) => part.text).join(),
       'member.phone_viewed' => '${person('viewer')}查看了${person('target')}的手机号',
       'group.created' =>
         groupCreationParts(viewerId: viewerId).map((part) => part.text).join(),

@@ -7,6 +7,7 @@ import '../message_input/widget/message_edit_composer.dart';
 import '../message_list/widgets/message_action_sheet.dart';
 import '../message_list/widgets/message_actions_scope.dart';
 import '../message_list/widgets/message_overlay_avoider.dart';
+import '../message_list/widgets/message_location_widgets.dart';
 import '../message_list/widgets/message_tooltip.dart';
 import '../message_list/widgets/message_recall_scope.dart';
 import 'package:flutter/material.dart' hide IconButton;
@@ -97,7 +98,7 @@ class ChatPage extends AppBaseStatefulPage {
   /// 宿主提供的文本编辑及云端元数据能力；为空时保持原聊天行为。
   final ChatMessageEditConfig? messageEditConfig;
 
-  /// 宿主提供的单聊撤回与原设备重新编辑能力；为空时沿用UIKit原行为。
+  /// 宿主提供的撤回与原设备重新编辑能力；为空时沿用 UIKit 原行为。
   final ChatMessageRecallConfig? messageRecallConfig;
 
   /// 单聊回复沿用原引用输入、定位和消息窗口。
@@ -180,6 +181,9 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
   /// 普通输入唤起键盘或展开富文本编辑器时递增，让列表对每次操作只响应一次。
   int _scrollToLatestRevision = 0;
 
+  /// 页面操作信号覆盖导航栏、消息区和输入栏，列表只在定位后使用它。
+  final _pageInteractions = ValueNotifier(0);
+
   /// 每次连续下降最多启动一次，超时后等到归零或重新升起才允许补帧。
   bool _keyboardDismissStarted = false;
 
@@ -207,9 +211,22 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
   /// 取消或重新打开编辑时递增，旧保存结果不能关闭新的编辑会话。
   int _editRevision = 0;
 
+  /// 长按菜单是独立路由，通过此状态同步打开后发生的置顶权限变更。
+  late final _stickyActionVisibility = ValueNotifier(_canModifySticky);
+
+  /// 群聊只有宿主确认权限后才展示置顶，单聊沿用现有动作配置。
+  bool get _canModifySticky => widget.messageStickyConfig?.canModify ??
+      (widget.conversation.type != ConversationType.group);
+
   @override
   void didUpdateWidget(covariant ChatPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (_stickyActionVisibility.value != _canModifySticky) {
+      // 菜单独立于当前聊天页的构建子树，等本帧结束再通知它重绘。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _stickyActionVisibility.value = _canModifySticky;
+      });
+    }
     if (widget.historySelection != null &&
         (oldWidget.offlineMessages != null) !=
             (widget.offlineMessages != null)) {
@@ -234,13 +251,15 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _pageInteractions.dispose();
     _keyboardDismissTicker?.dispose();
     _editRevision++;
+    _stickyActionVisibility.dispose();
     _overlay.dispose();
     super.dispose();
   }
 
-  /// 底部操作路由完成布局后上报边界，消息气泡仍由原列表持有。
+  /// 根据宿主权限编排置顶动作，底部操作路由布局后上报气泡避让边界。
   void _showActions(
       MessageInfo message,
       GlobalKey bubble,
@@ -255,7 +274,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
       FocusScope.of(context).unfocus();
       final items = [...original];
       if (widget.messageStickyConfig case final sticky?) {
-        // 群内多条消息可以同时置顶，菜单按所点消息判断取消目标。
+        // 取消动作按所点消息匹配，兼容旧版本留下的置顶记录。
         final unpin = sticky.groupPinnedMessageIds.contains(message.msgID)
             ? sticky.unpinGroupMessage
             : null;
@@ -279,6 +298,8 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
       await MessageActionSheet.show(
         context,
         items: items,
+        onDismissByBackgroundDrag: _overlay.clear,
+        stickyActionVisibility: _stickyActionVisibility,
         recallExpiresAt:
             widget.messageRecallConfig == null || message.timestamp == null
                 ? null
@@ -464,7 +485,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
 
   /// 只派生当前SDK窗口的标识；目标被撤回或删除时立即结束其可保存状态。
   void _onEditWindowChanged(List<MessageInfo> messages) {
-    // 普通引用随撤回失效；单聊回复保留到提交时，以便提示具体失败原因。
+    // 普通引用随撤回失效；业务回复保留到提交时，以便提示具体失败原因。
     if (widget.messageReplyConfig == null) {
       _messageInputKey.currentState?.invalidateRecalledQuote(messages);
     }
@@ -917,6 +938,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
               config: widget.messageListConfig,
               replyConfig: widget.messageReplyConfig,
               locateMessage: _locateMessage ?? widget.message,
+              pageInteractions: _pageInteractions,
               onMessagesChanged: (messages) {
                 widget.messageStickyConfig?.onMessagesChanged(messages);
                 widget.onMessageWindowChanged?.call(messages);
@@ -1006,6 +1028,7 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
                   onLocalMessageSent:
                       widget.messageRecallConfig?.onLocalMessageSent,
                   onRichContentEditorOpened: _scrollToLatestForInput,
+                  onPlatformInput: _notifyPageInteraction,
                 ),
               ),
           ],
@@ -1054,6 +1077,15 @@ class _ChatPageState extends AppBaseStatefulPageState<ChatPage>
           Expanded(child: Divider(height: 1, color: context.appColors.outline)),
         ]),
       ));
+
+  @override
+  Widget build(BuildContext context) => MessageLocationInteraction(
+        onInteraction: _notifyPageInteraction,
+        child: super.build(context),
+      );
+
+  /// Flutter 页面手势和系统键盘输入通过同一个信号交给消息窗口。
+  void _notifyPageInteraction() => _pageInteractions.value++;
 
   @override
   Widget buildBody(BuildContext context, WidgetRef ref, Locale locale) {

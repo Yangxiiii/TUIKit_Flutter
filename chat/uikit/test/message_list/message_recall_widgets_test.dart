@@ -7,6 +7,7 @@ import 'package:tencent_chat_uikit/src/message_input/rich_content_draft.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/rich_content_message.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_action_sheet.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_recall_notice.dart';
+import 'package:tencent_chat_uikit/src/message_list/widgets/message_recall_scope.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_tooltip.dart';
 
 Widget _host(Widget body) => MaterialApp(
@@ -98,6 +99,40 @@ void main() {
     expect(find.text('“姓名(昵称)” 撤回了一条消息'), findsOneWidget);
     expect(find.text(' 重新编辑'), findsNothing);
     expect(find.byType(CircleAvatar), findsNothing);
+  });
+
+  testWidgets('群聊开启撤回后仍展示实际撤回人和原因', (tester) async {
+    await tester.pumpWidget(_host(MessageRecallScope(
+      config: ChatMessageRecallConfig(
+        canRecall: (_) => false,
+        recall: (_, __) async => null,
+        editableUntil: (_) => null,
+        prepareReedit: (_) => (draft: null, error: null),
+        onLocalMessageSent: (_) {},
+      ),
+      onRecall: (_) {},
+      onReedit: (_) {},
+      child: MessageBubble(
+        message: MessageInfo(
+          msgID: 'group-recall',
+          conversationType: ConversationType.group,
+          status: MessageStatus.revoked,
+          from: MessageSenderInfo(userID: 'sender', nickname: '原发送人'),
+          to: 'team',
+          revokerInfo: UserProfile(userID: 'admin', nickname: '群管理员'),
+          revokeReason: '群规则',
+        ),
+        conversationID: 'group_team',
+        isSelf: false,
+        maxWidth: 310,
+        config: const ChatMessageListConfig(),
+        messageListStore: null,
+      ),
+    )));
+    expect(find.textContaining('群管理员'), findsOneWidget);
+    expect(find.textContaining('群规则'), findsOneWidget);
+    expect(find.textContaining('原发送人'), findsNothing);
+    expect(find.textContaining('重新编辑'), findsNothing);
   });
 
   testWidgets('菜单只在具有回调且未到期时显示撤回，超时从分组移除', (tester) async {

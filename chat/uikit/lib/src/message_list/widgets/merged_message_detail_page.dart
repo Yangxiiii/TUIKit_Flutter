@@ -7,6 +7,8 @@ import 'package:tencent_chat_uikit/src/message_list/message_list_config.dart';
 import 'package:tencent_chat_uikit/src/message_list/utils/message_utils.dart';
 import 'package:tencent_chat_uikit/src/message_list/widgets/message_item.dart';
 import 'package:tencent_chat_uikit/src/third_party/scrollable_positioned_list/scrollable_positioned_list.dart';
+import '../utils/message_location_highlight.dart';
+import 'message_location_widgets.dart';
 
 /// 统一展示已发送合并记录和待转发记录，只允许内容预览与包内引用定位。
 class MergedMessageDetailPage extends StatefulWidget {
@@ -70,8 +72,10 @@ class _MergedMessageDetailPageState extends State<MergedMessageDetailPage> {
   final ItemPositionsListener _itemPositionsListener =
       ItemPositionsListener.create();
 
-  /// 当前引用目标的高亮标识，动画结束后清空。
-  String? _highlightedMessageId;
+  /// 包内定位的倒计时独立于外层聊天，只有预览内交互才启动。
+  late final _locationHighlight = MessageLocationHighlight(() {
+    if (mounted) setState(() {});
+  });
 
   /// 复用来源消息布局与媒体能力；只读详情不提供发送、长按菜单或回执操作。
   ChatMessageListConfig get _config => ChatMessageListConfig(
@@ -108,6 +112,12 @@ class _MergedMessageDetailPageState extends State<MergedMessageDetailPage> {
   void initState() {
     super.initState();
     if (widget.message != null) _loadMergedMessagePayloads();
+  }
+
+  @override
+  void dispose() {
+    _locationHighlight.clear();
+    super.dispose();
   }
 
   /// 显式下载或重试同一原包，失败保留错误态，不能显示为成功的空记录。
@@ -167,7 +177,7 @@ class _MergedMessageDetailPageState extends State<MergedMessageDetailPage> {
       _itemScrollController.jumpTo(index: targetIndex, alignment: 0);
     }
     setState(() {
-      _highlightedMessageId = _mergedMessages[targetIndex].msgID;
+      _locationHighlight.show(_mergedMessages[targetIndex].msgID);
     });
   }
 
@@ -190,7 +200,7 @@ class _MergedMessageDetailPageState extends State<MergedMessageDetailPage> {
     // 高度由同一组件管理，两个入口及嵌套预览都只预留一次系统安全区。
     final media = MediaQueryData.fromView(View.of(context));
 
-    return SizedBox(
+    final preview = SizedBox(
       height: media.size.height - media.padding.top - media.padding.bottom - 12,
       child: Scaffold(
         // 记录组件已预留系统安全区，内层不再增加顶部安全区占位。
@@ -228,6 +238,10 @@ class _MergedMessageDetailPageState extends State<MergedMessageDetailPage> {
         body: _buildBody(colors),
       ),
     );
+    return MessageLocationInteraction(
+      onInteraction: _locationHighlight.onUserInteraction,
+      child: preview,
+    );
   }
 
   Widget _buildBody(SemanticColorScheme colors) {
@@ -249,26 +263,22 @@ class _MergedMessageDetailPageState extends State<MergedMessageDetailPage> {
     final screenWidth = MediaQuery.of(context).size.width;
     final maxWidth = screenWidth - 32;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: ScrollablePositionedList.builder(
-        padding: const EdgeInsets.only(top: 16, bottom: 8),
-        itemScrollController: _itemScrollController,
-        itemPositionsListener: _itemPositionsListener,
-        itemCount: _mergedMessages.length,
-        addRepaintBoundaries: true,
-        addAutomaticKeepAlives: true,
-        addSemanticIndexes: false,
-        itemBuilder: (context, index) => _recordItem(index, colors, maxWidth),
-      ),
+    return ScrollablePositionedList.builder(
+      padding: const EdgeInsets.only(top: 16, bottom: 8),
+      itemScrollController: _itemScrollController,
+      itemPositionsListener: _itemPositionsListener,
+      itemCount: _mergedMessages.length,
+      addRepaintBoundaries: true,
+      addAutomaticKeepAlives: true,
+      addSemanticIndexes: false,
+      itemBuilder: (context, index) => _recordItem(index, colors, maxWidth),
     );
   }
 
   /// 包内时间组和气泡使用同一列表项，引用定位仍保持原消息索引。
   Widget _recordItem(int index, SemanticColorScheme colors, double maxWidth) {
     final message = _mergedMessages[index];
-    final isHighlighted =
-        _highlightedMessageId != null && message.msgID == _highlightedMessageId;
+    final isHighlighted = _locationHighlight.shows(message.msgID);
     final previous = index == 0 ? null : _mergedMessages[index - 1];
     final timestamp = message.timestamp ?? 0;
     final showTime = _config.isShowTimeMessage &&
@@ -289,7 +299,7 @@ class _MergedMessageDetailPageState extends State<MergedMessageDetailPage> {
         child: Column(children: [
           if (showTime && timestamp > 0)
             Padding(
-                padding: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                 child: Center(
                     child: Text(
                         MessageUtil.formatMessageTime(timestamp, context),
@@ -304,13 +314,7 @@ class _MergedMessageDetailPageState extends State<MergedMessageDetailPage> {
             maxWidth: maxWidth,
             messageListStore: _mergedMessageStore,
             isHighlighted: isHighlighted,
-            onHighlightComplete: () {
-              if (_highlightedMessageId == message.msgID && mounted) {
-                setState(() {
-                  _highlightedMessageId = null;
-                });
-              }
-            },
+            horizontalPadding: 16,
             onQuotePreviewTap: _onQuotePreviewTap,
             config: _config,
             isInMergedDetailView: true,

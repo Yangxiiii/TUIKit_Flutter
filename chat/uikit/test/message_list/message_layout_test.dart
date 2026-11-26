@@ -625,7 +625,7 @@ void main() {
   }
 
   for (final sameId in [true, false]) {
-    testWidgets('HTTP搜索${sameId ? '相同ID' : '不同ID'}定位挂载后高亮一次并恢复',
+    testWidgets('HTTP搜索${sameId ? '相同ID' : '不同ID'}定位后持续高亮，操作一秒后清除',
         (tester) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1;
@@ -648,11 +648,16 @@ void main() {
         from: MessageSenderInfo(userID: 'history_visual'),
         conversationType: ConversationType.c2c,
       );
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
+      final screen = GlobalKey();
+      await tester.pumpWidget(RepaintBoundary(
+        key: screen,
+        child: MaterialApp(
+          home: Scaffold(
             body: Column(children: [
-          MessageList(conversationID: 'c2c_visual', locateMessage: target),
-        ])),
+              MessageList(conversationID: 'c2c_visual', locateMessage: target),
+            ]),
+          ),
+        ),
       ));
       await tester.pump(const Duration(milliseconds: 200));
       gate.complete(V2TimValueCallback(code: 0, desc: '', data: [
@@ -674,11 +679,48 @@ void main() {
               position.itemLeadingEdge >= 0 &&
               position.itemLeadingEdge < 1),
           isTrue);
-      await tester.pump(const Duration(milliseconds: 500));
+      final background = find.descendant(
+        of: row,
+        matching: find.byWidgetPredicate((widget) =>
+            widget is ColoredBox && widget.color == const Color(0xFFFFF5D5)),
+      );
+      final rowRect = tester.getRect(row);
+      expect(tester.getRect(background),
+          Rect.fromLTRB(0, rowRect.top - 4, 390, rowRect.bottom + 4));
+      if (sameId) {
+        final boundary =
+            tester.renderObject<RenderRepaintBoundary>(find.byKey(screen));
+        final marginPixels = await tester.runAsync(() async {
+          final image = await boundary.toImage();
+          try {
+            final rgba =
+                (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+            return [
+              rgba.getUint32((image.width * (rowRect.top - 2).floor()) * 4),
+              rgba.getUint32(
+                  (image.width * (rowRect.bottom + 1).floor() + 389) * 4),
+            ];
+          } finally {
+            image.dispose();
+          }
+        });
+        expect(marginPixels, [0xFFF5D5FF, 0xFFF5D5FF]);
+      }
+      await tester.pump(const Duration(seconds: 5));
       expect(tester.widget<MessageItem>(row).isHighlighted, isTrue);
-      await tester.pump(const Duration(milliseconds: 600));
-      await tester.pump();
+      final margin = Offset(4, tester.getCenter(row).dy);
+      if (sameId) {
+        await tester.tapAt(margin);
+      } else {
+        await tester.dragFrom(margin, const Offset(0, -30));
+      }
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tapAt(Offset(4, tester.getCenter(row).dy));
+      await tester.pump(const Duration(milliseconds: 499));
+      expect(tester.widget<MessageItem>(row).isHighlighted, isTrue);
+      await tester.pump(const Duration(milliseconds: 1));
       expect(tester.widget<MessageItem>(row).isHighlighted, isFalse);
+      expect(background, findsNothing);
       sdk.messages.listener!.onRecvMessageModified(
         _Message('search-9', timestampOverride: stamp + 9),
       );
@@ -698,17 +740,17 @@ void main() {
     addTearDown(MessageList.clearViewportSnapshots);
     final target = ValueNotifier<MessageInfo?>(null);
     addTearDown(target.dispose);
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: Column(children: [
-          ValueListenableBuilder(
-            valueListenable: target,
-            builder: (_, message, __) => MessageList(
-              conversationID: 'c2c_visual',
-              locateMessage: message,
-            ),
+    await tester.pumpWidget(ProviderScope(
+      child: MaterialApp(
+        home: ValueListenableBuilder(
+          valueListenable: target,
+          builder: (_, message, __) => ChatPage(
+            conversation: ConversationInfo(
+                conversationID: 'c2c_visual', type: ConversationType.c2c),
+            displayName: '联系人',
+            message: message,
           ),
-        ]),
+        ),
       ),
     ));
     await tester.pumpAndSettle();
@@ -734,7 +776,35 @@ void main() {
         widget is MessageItem && widget.message.msgID == 'search-9');
     expect(row, findsOneWidget);
     expect(tester.widget<MessageItem>(row).isHighlighted, isTrue);
+    await tester.tap(find.text('联系人'));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tap(find.bySemanticsIdentifier('tim.input.text'));
     await tester.pumpAndSettle();
+    expect(tester.widget<MessageItem>(row).isHighlighted, isTrue);
+
+    // 新目标替换旧目标后，旧倒计时不能清除这次高亮。
+    target.value = ChatUtil.convertToUIMessage(
+        _Message('search-8', timestampOverride: stamp + 8));
+    await tester.pumpAndSettle();
+    final nextRow = find.byWidgetPredicate((widget) =>
+        widget is MessageItem && widget.message.msgID == 'search-8');
+    expect(tester.widget<MessageItem>(row).isHighlighted, isFalse);
+    expect(tester.widget<MessageItem>(nextRow).isHighlighted, isTrue);
+    await tester.pump(const Duration(seconds: 3));
+    expect(tester.widget<MessageItem>(nextRow).isHighlighted, isTrue);
+
+    expect(find.byKey(const Key('message_input_text_field')), findsOneWidget);
+    tester.testTextInput.enterText('测试输入');
+    await tester.pump(const Duration(seconds: 1));
+    expect(tester.widget<MessageItem>(nextRow).isHighlighted, isFalse);
+
+    target.value = ChatUtil.convertToUIMessage(
+        _Message('search-8', timestampOverride: stamp + 8));
+    await tester.pumpAndSettle();
+    expect(tester.widget<MessageItem>(nextRow).isHighlighted, isTrue);
+    await tester.tap(find.text('联系人'));
+    await tester.pump(const Duration(seconds: 1));
+    expect(tester.widget<MessageItem>(nextRow).isHighlighted, isFalse);
   });
 
   for (final reason in ['重复候选', '缺少序列号', '发送者不匹配']) {
@@ -1599,10 +1669,16 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  final deleteConversation = ValueVariant({
+    ConversationType.c2c,
+    ConversationType.group,
+  });
   testWidgets('仅成功消息可删除，二次确认取消零调用且删除成功通知宿主', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final original = TencentImSDKPlugin.v2TIMManager;
     addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    final type = deleteConversation.currentValue!;
+    final isGroup = type == ConversationType.group;
     final deleted = <String>[];
     Finder control(String id) => find.byWidgetPredicate(
         (w) => w is Semantics && w.properties.identifier == id);
@@ -1619,7 +1695,10 @@ void main() {
 
       final sdk = _Sdk('/single');
       sdk.messages.chronologicalHistory = [
-        _Message('target', statusOverride: status, isSelfOverride: true)
+        _Message('target',
+            statusOverride: status,
+            isSelfOverride: true,
+            groupId: isGroup ? 'visual' : null)
       ];
       TencentImSDKPlugin.v2TIMManager = sdk;
       MessageList.clearViewportSnapshots();
@@ -1629,7 +1708,8 @@ void main() {
         builder: AppDialog.init(),
         home: ChatPage(
             conversation: ConversationInfo(
-                conversationID: 'c2c_visual', type: ConversationType.c2c),
+                conversationID: isGroup ? 'group_visual' : 'c2c_visual',
+                type: type),
             enableSuccessfulDelete: true,
             messageListConfig:
                 const ChatMessageListConfig(isSupportDelete: false),
@@ -1670,7 +1750,7 @@ void main() {
       await settle();
     }
     expect(tester.takeException(), isNull);
-  });
+  }, variant: deleteConversation);
 
   testWidgets('失败图标打开精确重发确认，取消不重试，确认恢复原上传任务', (tester) async {
     SharedPreferences.setMockInitialValues({});
@@ -2182,7 +2262,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('群聊已置顶的旧消息长按显示取消置顶并提交该消息', (tester) async {
+  testWidgets('群聊仅有权限时显示取消置顶并提交对应消息', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final original = TencentImSDKPlugin.v2TIMManager;
     final sdk = _Sdk('/sticky-menu');
@@ -2191,12 +2271,13 @@ void main() {
     addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
     MessageList.clearViewportSnapshots();
     final unpinned = <String>[];
-    await tester.pumpWidget(ProviderScope(
+    Widget host(bool canModify) => ProviderScope(
       child: MaterialApp(
         home: ChatPage(
           conversation: ConversationInfo(
               conversationID: 'group_visual', type: ConversationType.group),
           messageStickyConfig: ChatMessageStickyConfig(
+            canModify: canModify,
             pin: (_) async => throw StateError('已置顶消息不得重复提交置顶'),
             groupPinnedMessageIds: const {'older', 'latest'},
             unpinGroupMessage: (message) async {
@@ -2209,9 +2290,24 @@ void main() {
           ),
         ),
       ),
-    ));
+    );
+    await tester.pumpWidget(host(false));
     await tester.pumpAndSettle();
     await tester.longPress(find.byType(TextMessageWidget));
+    await tester.pumpAndSettle();
+    expect(find.text('置顶消息'), findsNothing);
+    expect(find.text('取消置顶消息'), findsNothing);
+    expect(find.bySemanticsIdentifier('tim.message.action.top'), findsNothing);
+    expect(unpinned, isEmpty);
+
+    // 菜单已经打开，授权和收回权限时都应同步更新这一行。
+    await tester.pumpWidget(host(true));
+    await tester.pumpAndSettle();
+    expect(find.text('取消置顶消息'), findsOneWidget);
+    await tester.pumpWidget(host(false));
+    await tester.pumpAndSettle();
+    expect(find.text('取消置顶消息'), findsNothing);
+    await tester.pumpWidget(host(true));
     await tester.pumpAndSettle();
     expect(find.text('置顶消息'), findsNothing);
     await tester.tap(find.text('取消置顶消息'));
@@ -2509,6 +2605,76 @@ void main() {
     expect(tester.getRect(bubble).bottom, closeTo(originalBottom, .01));
   });
 
+  testWidgets('消息菜单随列表滑动收起，同一次手势继续滚动', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    SharedPreferences.setMockInitialValues({});
+    final original = TencentImSDKPlugin.v2TIMManager;
+    final sdk = _Sdk('/layout');
+    sdk.messages.chronologicalHistory = List.generate(
+      25,
+      (index) => _Message('swipe-${index + 1}',
+          timestampOverride: 1700000000 + index),
+    );
+    TencentImSDKPlugin.v2TIMManager = sdk;
+    addTearDown(() => TencentImSDKPlugin.v2TIMManager = original);
+    var settingsOpened = 0;
+    await tester.pumpWidget(ProviderScope(
+      child: MaterialApp(
+        home: ChatPage(
+          conversation: ConversationInfo(
+              conversationID: 'c2c_menu_swipe', type: ConversationType.c2c),
+          messageListConfig: ChatMessageListConfig(
+            isShowTimeMessage: false,
+            forwardHandler: (_, __) async => false,
+          ),
+          onOpenSettings: () async {
+            settingsOpened++;
+            return null;
+          },
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final bubble = find.bySemanticsIdentifier('tim.chat.message.swipe-25');
+    final settings = tester.getCenter(
+        find.bySemanticsIdentifier('tim.chat.settings'));
+    final list = find.byType(ScrollablePositionedList);
+    final scroll = tester.state<ScrollableState>(
+        find.descendant(of: list, matching: find.byType(Scrollable)).first);
+    final sheet = find.byType(MessageActionSheet);
+
+    await tester.longPress(bubble);
+    await tester.pumpAndSettle();
+    expect(sheet, findsOneWidget);
+    expect(find.bySemanticsIdentifier('tim.message.action.dismiss'),
+        findsOneWidget);
+    await tester.tapAt(settings);
+    await tester.pumpAndSettle();
+    expect(sheet, findsNothing);
+    expect(settingsOpened, 0);
+
+    await tester.longPress(bubble);
+    await tester.pumpAndSettle();
+    final route = ModalRoute.of(tester.element(sheet));
+    final before = scroll.position.pixels;
+    final gesture = await tester.startGesture(
+        tester.getRect(sheet).topCenter - const Offset(0, 40));
+    await gesture.moveBy(const Offset(0, 30));
+    await tester.pumpAndSettle();
+    // 手指仍按住时收起面板；此时离开路由会取消列表正在处理的手势。
+    expect(route?.animation?.status, AnimationStatus.dismissed);
+    await gesture.moveBy(const Offset(0, 120));
+    await tester.pump();
+    expect(scroll.position.pixels, greaterThan(before + 80));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(sheet, findsNothing);
+    expect(find.byType(ChatPage), findsOneWidget);
+  });
+
   testWidgets('长按和松手只打开操作面板，点击多选才进入多选', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final original = TencentImSDKPlugin.v2TIMManager;
@@ -2760,24 +2926,22 @@ void main() {
 
     final star = find.bySemanticsIdentifier('tim.star.locate');
     await tester.tap(star);
-    await tester.pump();
+    await tester.pumpAndSettle();
+    // 等定位稳定后再模拟其他设备连续发送，静置时仍停留在目标。
+    await tester.pump(const Duration(seconds: 3));
+    final matched = find.byWidgetPredicate((widget) =>
+        widget is MessageItem && widget.message.msgID == 'history-14');
+    final targetBottomBeforeArrival = tester.getBottomLeft(matched).dy;
     for (final sequence in [21, 22, 23]) {
       sdk.messages.listener!
           .onRecvNewMessage(_Message('new-$sequence', isSelfOverride: true));
     }
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    final matched = find.byWidgetPredicate((widget) =>
-        widget is MessageItem && widget.message.msgID == 'history-14');
     expect(matched.hitTestable(), findsOneWidget);
     expect(tester.widget<MessageItem>(matched).isHighlighted, isTrue);
-    final list = find.byType(ScrollablePositionedList);
-    final listBounds = tester.getRect(list);
-    final bottomPadding =
-        tester.widget<ScrollablePositionedList>(list).padding?.bottom ?? 0;
     final targetBottom = tester.getBottomLeft(matched).dy;
-    expect(listBounds.bottom - targetBottom,
-        closeTo(listBounds.height * .3 + bottomPadding, 2));
+    expect(targetBottom, closeTo(targetBottomBeforeArrival, 1));
     expect(targetBottom, lessThan(tester.getTopLeft(star).dy));
     expect(
       tester

@@ -86,7 +86,8 @@ class ChatMessageRecallConfig {
         : now.difference(DateTime.fromMillisecondsSinceEpoch(timestamp * 1000));
     return message.msgID.isNotEmpty &&
         message.isSentBySelf &&
-        message.conversationType == ConversationType.c2c &&
+        (message.conversationType == ConversationType.c2c ||
+            message.conversationType == ConversationType.group) &&
         message.status == MessageStatus.sendSuccess &&
         supported &&
         age != null &&
