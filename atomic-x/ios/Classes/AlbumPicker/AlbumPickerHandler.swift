@@ -243,17 +243,25 @@ class AlbumPickerHandler: NSObject {
         }
     }
 
+    /// 确认和导出事件共用 Flutter 相册结果格式，视频时长统一使用毫秒。
     fileprivate func buildMediaDataDict(albumMedia: AlbumMedia) -> [String: Any] {
         let mediaPath = albumMedia.mediaPath ?? ""
         let mediaTypeInt = (albumMedia.mediaType == .video) ? 1 : 0
         let fileExtension = mediaPath.isEmpty ? "" : (mediaPath as NSString).pathExtension.lowercased()
 
+        // 确认阶段可能还没有本地文件，导出后再回传沙盒文件大小。
         var fileSize: Int64 = 0
         if !mediaPath.isEmpty,
            let attributes = try? FileManager.default.attributesOfItem(atPath: mediaPath),
            let size = attributes[.size] as? Int64 {
             fileSize = size
         }
+
+        // 相册素材优先保留 PhotoKit 的小数秒，相机素材沿用原生相册返回的秒数。
+        let durationSeconds = albumMedia.asset?.duration ?? Double(albumMedia.duration)
+        let durationMs = albumMedia.mediaType == .video && durationSeconds > 0
+            ? (Int(exactly: (durationSeconds * 1000).rounded()) ?? 0)
+            : 0
 
         var dict: [String: Any] = [
             "id": Int(albumMedia.id),
@@ -262,7 +270,7 @@ class AlbumPickerHandler: NSObject {
             "mediaPath": mediaPath,
             "fileExtension": fileExtension,
             "fileSize": fileSize,
-            "duration": Int(albumMedia.duration),
+            "duration": durationMs,
         ]
         if let thumbnail = albumMedia.videoThumbnailPath {
             dict["videoThumbnailPath"] = thumbnail

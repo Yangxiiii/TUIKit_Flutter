@@ -70,6 +70,8 @@ class AlbumMedia {
   final String fileExtension;
   final int fileSize;
   final String? videoThumbnailPath;
+
+  /// 视频时长，单位为毫秒；图片或时长未知时为 0。
   final int duration;
 
   /// 发送原件或平台直接复制原件时为真，未知时由导出结果决定上传通道。

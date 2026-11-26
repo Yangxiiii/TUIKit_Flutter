@@ -15,7 +15,13 @@ import { ComponentContent, PromptAction, window } from '@kit.ArkUI';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { AlbumPickMode } from './AlbumPickerHelper';
 import { AlbumPickerOutput, AlbumPickerSelection } from './AlbumPickerOutput';
-import { AlbumPickerView } from './AlbumPickerView';
+import { ALBUM_PICKER_BACKGROUND, AlbumPickerView } from './AlbumPickerView';
+
+/// 主窗口实测的系统栏空间，统一使用 vp 数字，供相册布局和提示偏移复用。
+interface AlbumPickerInsets {
+  top: number;
+  bottom: number;
+}
 
 interface AlbumPickerDialogOptions {
   /// 媒体范围同时限制网格和相册列表。
@@ -27,7 +33,7 @@ interface AlbumPickerDialogOptions {
   /// 宿主传入的选中色，缺省时由相册采用默认值。
   primaryColor: string | undefined;
   /// 主窗口沉浸布局的系统栏避让尺寸，单位为 vp。
-  systemInsets: Padding;
+  systemInsets: AlbumPickerInsets;
   /// 导出完成后关闭相册并移交沙盒文件。
   onConfirm: (selection: AlbumPickerSelection[]) => void;
   /// 关闭相册并释放 Dart 选择会话。
@@ -43,10 +49,16 @@ function buildAlbumPicker(options: AlbumPickerDialogOptions) {
       maxCount: options.maxCount,
       showsCameraItem: options.showsCameraItem,
       primaryColor: options.primaryColor ?? '#0370ED',
+      toastBottomInset: options.systemInsets.bottom,
       onConfirm: options.onConfirm,
       onCancel: options.onCancel,
     })
-  }.width('100%').height('100%').padding(options.systemInsets)
+  }
+  .width('100%')
+  .height('100%')
+  .padding(options.systemInsets)
+  .backgroundColor(ALBUM_PICKER_BACKGROUND)
+  .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 }
 
 interface AlbumPickerSession {
@@ -54,10 +66,14 @@ interface AlbumPickerSession {
   id: string;
   prompt: PromptAction;
   content: ComponentContent<AlbumPickerDialogOptions>;
+  /// 等待相册系统栏样式生效，再在会话结束时恢复宿主原来的样式。
+  restoreSystemBars: () => Promise<void>;
   /// Dart 请求原件资料时才在媒体事件中附带文件名和大小。
   includeSourceMetadata: boolean;
   /// 关闭过程中拒绝同一窗口重复打开或重复确认。
   closing: boolean;
+  /// 弹层消失和关闭失败都可能通知退出，系统栏恢复期间只处理一次。
+  finishing?: boolean;
   /// 仅在确认后暂存导出结果，弹层退出后才交给调用方。
   selection?: AlbumPickerSelection[];
 }
@@ -177,6 +193,7 @@ export default class AlbumPicker implements MethodCallHandler, StreamHandler {
         id: sessionId,
         prompt,
         content,
+        restoreSystemBars: this.applyPickerSystemBars(hostWindow),
         includeSourceMetadata: call.argument('includeSourceMetadata') === true,
         closing: false,
       };
@@ -187,15 +204,44 @@ export default class AlbumPicker implements MethodCallHandler, StreamHandler {
         alignment: DialogAlignment.Center,
         autoCancel: false,
         maskColor: Color.Transparent,
-        onDidDisappear: () => this.finishPicker(picker),
+        onDidDisappear: () => { void this.finishPicker(picker); },
       });
     } catch (_) {
       console.error(`${AlbumPicker.TAG} 无法打开相册`);
       if (session !== undefined) {
-        this.finishPicker(session, false);
+        void this.finishPicker(session, false);
       } else {
         this.emitCancel(sessionId);
       }
+    }
+  }
+
+  /// 相册覆在 Flutter 路由上，保存宿主系统栏配置，退出后交还给该路由。
+  private applyPickerSystemBars(hostWindow: window.Window): () => Promise<void> {
+    try {
+      // 状态栏和三键导航使用同一底色，手势区由相册根节点的安全区背景覆盖。
+      const previous = hostWindow.getWindowSystemBarProperties();
+      const applied = hostWindow.setWindowSystemBarProperties({
+        statusBarColor: ALBUM_PICKER_BACKGROUND,
+        statusBarContentColor: '#FFFFFF',
+        navigationBarColor: ALBUM_PICKER_BACKGROUND,
+        navigationBarContentColor: '#FFFFFF',
+      }).catch(() => {
+        console.warn(`${AlbumPicker.TAG} 无法设置相册系统栏`);
+      });
+      // 用户可能在设置调用完成前关掉相册，按设置、恢复的顺序写回。
+      return async () => {
+        try {
+          await applied;
+          await hostWindow.setWindowSystemBarProperties(previous);
+        } catch (_) {
+          // 宿主窗口已退出时系统栏由下一窗口接管。
+          console.warn(`${AlbumPicker.TAG} 无法恢复宿主系统栏`);
+        }
+      };
+    } catch (_) {
+      console.warn(`${AlbumPicker.TAG} 无法读取宿主系统栏`);
+      return async () => {};
     }
   }
 
@@ -212,17 +258,21 @@ export default class AlbumPicker implements MethodCallHandler, StreamHandler {
     session.selection = selection;
     void session.prompt.closeCustomDialog(session.content).catch(() => {
       console.error(`${AlbumPicker.TAG} 无法关闭相册`);
-      this.finishPicker(session, false);
+      void this.finishPicker(session, false);
     });
   }
 
   /// 释放原生组件后结束会话，确认和处理事件按 Dart 创建与替换占位的顺序送达。
-  private finishPicker(session: AlbumPickerSession, deliver: boolean = true): void {
-    if (this.activePicker !== session) {
+  private async finishPicker(session: AlbumPickerSession, deliver: boolean = true): Promise<void> {
+    if (this.activePicker !== session || session.finishing) {
       return;
     }
-    this.activePicker = null;
+    session.finishing = true;
+    session.closing = true;
     session.content.dispose();
+    // 保留会话所有权直到系统栏恢复，下一次打开才能快照到宿主的原始配置。
+    await session.restoreSystemBars();
+    this.activePicker = null;
     const selection = session.selection;
     if (selection === undefined || selection.length === 0 || this.eventSink === null || !deliver) {
       if (selection !== undefined) {

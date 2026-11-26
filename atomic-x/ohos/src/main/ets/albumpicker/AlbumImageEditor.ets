@@ -38,12 +38,14 @@ function albumEditorButton() {
 /// 承载相册里的裁剪与涂鸦交互，确认只生成图片副本，由相册接管文件。
 @Component
 export struct AlbumImageEditor {
-  /// 本次编辑的沙盒路径或已勾选的图库 URI，挂载期间保持不变。
+  /// 本次编辑的沙盒路径或已授权的图库 URI，挂载期间保持不变。
   @Prop sourcePath: string = '';
   /// 关闭编辑页并返回相册预览。
   onCancel: () => void = () => {};
   /// 接收保存成功的沙盒 PNG 绝对路径。
   onSave: (path: string) => void = () => {};
+  /// 编辑失败仍留在当前图像，提示由相册的公共浮层展示。
+  onToast: (message: string) => void = () => {};
 
   /// 涂鸦工具选中时显示调色板，并将单指拖动交给画笔或橡皮擦。
   @State private drawing: boolean = false;
@@ -83,7 +85,7 @@ export struct AlbumImageEditor {
     }
   }
 
-  /// 优先读取选中项授权的文件，有效位图只在当前编辑页存活时使用。
+  /// 读取授权的图库文件或编辑稿，位图只在当前编辑页存活时使用。
   private async load(): Promise<void> {
     let bitmap: image.PixelMap | undefined;
     try {
@@ -180,7 +182,7 @@ export struct AlbumImageEditor {
         edit.strokes, cacheDir, edit.turns);
     } catch (_) {
       if (this.active) {
-        this.getUIContext().getPromptAction().showToast({ message: '保存失败，请重试' });
+        this.onToast('保存失败，请重试');
       }
       return;
     } finally {
